@@ -1,0 +1,67 @@
+import { ChevronDown, Radio } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+
+import { formatMarketPrice } from '../../../features/market/tradingModels'
+import type { TradingMarket, TradingQuote } from '../../../features/market/tradingModels'
+import styles from './SymbolHeader.module.css'
+
+type Props = {
+  market: TradingMarket
+  quote: TradingQuote
+  onOpenMarkets: () => void
+  onOpenQuote: () => void
+}
+
+export function SymbolHeader({ market, quote, onOpenMarkets, onOpenQuote }: Props) {
+  const { t } = useTranslation()
+  const directionClass = quote.changePercent >= 0 ? styles.positive : styles.negative
+
+  return (
+    <header className={styles.header}>
+      <button type="button" className={styles.symbolButton} onClick={onOpenMarkets}>
+        <span>
+          <strong>{market.symbol}</strong>
+          <small>{market.name}</small>
+        </span>
+        <ChevronDown size={16} />
+      </button>
+
+      <div className={styles.modeStrip} aria-label={t('trading.tradingMode')}>
+        <span>{t('trading.spot')}</span>
+        <span>{t('trading.cash')}</span>
+      </div>
+
+      <dl className={styles.metrics}>
+        <div>
+          <dt>{t('markets.last')}</dt>
+          <dd className={directionClass}>{formatMarketPrice(market.symbol, quote.mid)}</dd>
+        </div>
+        <div>
+          <dt>{t('markets.change24h')}</dt>
+          <dd className={directionClass}>{quote.changePercent.toFixed(2)}%</dd>
+        </div>
+        <div>
+          <dt>{t('markets.high24h')}</dt>
+          <dd>{formatMarketPrice(market.symbol, quote.high24h)}</dd>
+        </div>
+        <div>
+          <dt>{t('markets.low24h')}</dt>
+          <dd>{formatMarketPrice(market.symbol, quote.low24h)}</dd>
+        </div>
+        <div>
+          <dt>{t('markets.volume24h')}</dt>
+          <dd>{quote.volume}</dd>
+        </div>
+        <div>
+          <dt>{t('markets.estimatedValue')}</dt>
+          <dd>{formatMarketPrice(market.symbol, quote.mid)}</dd>
+        </div>
+      </dl>
+
+      <button type="button" className={styles.quoteButton} onClick={onOpenQuote}>
+        <Radio size={15} />
+        {t('trading.quote')}
+      </button>
+    </header>
+  )
+}

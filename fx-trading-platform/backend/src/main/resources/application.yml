@@ -1,0 +1,97 @@
+server:
+  port: 8080
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
+
+admin:
+  bootstrap:
+    enabled: ${ADMIN_BOOTSTRAP_ENABLED:false}
+    email: ${ADMIN_BOOTSTRAP_EMAIL:}
+    password: ${ADMIN_BOOTSTRAP_PASSWORD:}
+
+spring:
+  application:
+    name: fx-platform-backend
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/fx_platform}
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:password}
+    driver-class-name: org.postgresql.Driver
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:change_me_to_long_random_secret_at_least_32_chars}
+    access-token-expire-minutes: ${JWT_ACCESS_EXPIRE_MINUTES:30}
+    refresh-token-expire-days: ${JWT_REFRESH_EXPIRE_DAYS:7}
+
+massive:
+  api-key: ${MASSIVE_API_KEY:}
+  rest-base-url: ${MASSIVE_REST_BASE_URL:https://api.massive.com}
+  websocket-forex-url: ${MASSIVE_WS_FOREX_URL:wss://socket.massive.com/forex}
+  quote-stale-ms: ${MARKET_QUOTE_STALE_MS:3000}
+  write-quotes-to-db: ${MARKET_WRITE_QUOTES_TO_DB:false}
+  flat-files:
+    access-key-id: ${MASSIVE_S3_ACCESS_KEY_ID:}
+    secret-access-key: ${MASSIVE_S3_SECRET_ACCESS_KEY:}
+    endpoint: ${MASSIVE_S3_ENDPOINT:https://files.massive.com}
+    bucket: ${MASSIVE_S3_BUCKET:flatfiles}
+
+market:
+  demo-quotes:
+    enabled: ${MARKET_DEMO_QUOTES_ENABLED:false}
+  provider-symbol-cache-ttl-ms: ${MARKET_PROVIDER_SYMBOL_CACHE_TTL_MS:300000}
+  provider-snapshot-cache-ttl-ms: ${MARKET_PROVIDER_SNAPSHOT_CACHE_TTL_MS:15000}
+  quote-broadcast-enabled: ${MARKET_QUOTE_BROADCAST_ENABLED:false}
+  quote-broadcast-ms: ${MARKET_QUOTE_BROADCAST_MS:1000}
+  quote-broadcast-symbols: ${MARKET_QUOTE_BROADCAST_SYMBOLS:}
+  test-data:
+    enabled: ${MARKET_TEST_DATA_ENABLED:false}
+    realtime-ms: ${MARKET_TEST_DATA_REALTIME_MS:1000}
+    symbols: ${MARKET_TEST_DATA_SYMBOLS:}
+
+execution:
+  mode: ${EXECUTION_MODE:broker}
+
+trading:
+  default-demo-balance: ${DEFAULT_DEMO_BALANCE:10000}
+  default-account-currency: ${DEFAULT_ACCOUNT_CURRENCY:USD}
+  default-leverage: ${DEFAULT_LEVERAGE:100}
+  margin-call-level: ${MARGIN_CALL_LEVEL:100}
+  stop-out-level: ${STOP_OUT_LEVEL:50}
+  pending-order-execution-enabled: ${TRADING_PENDING_ORDER_EXECUTION_ENABLED:false}
+  protective-order-execution-enabled: ${TRADING_PROTECTIVE_ORDER_EXECUTION_ENABLED:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    default-enum-type-handler: org.apache.ibatis.type.EnumTypeHandler
+  global-config:
+    db-config:
+      id-type: input
+
+knife4j:
+  enable: true

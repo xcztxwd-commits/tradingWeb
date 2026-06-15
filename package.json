@@ -65,7 +65,11 @@
     "docs:build": "pnpm build-umd:prod && pnpm -F=docs build",
     "docs:preview": "pnpm -F=docs preview",
     "docs:deploy": "pnpm docs:build && gh-pages -d website",
-    "debug": "vite --host 0.0.0.0 debug"
+    "debug": "vite --host 0.0.0.0 debug",
+    "fx:web:dev": "npm --prefix fx-trading-platform --workspace apps/web run dev -- --open /trading",
+    "fx:web:test": "npm --prefix fx-trading-platform run web:test",
+    "fx:web:build": "npm --prefix fx-trading-platform run web:build",
+    "fx:web:check": "pnpm run fx:web:test && pnpm run fx:web:build"
   },
   "packageManager": "pnpm@10.4.1",
   "devDependencies": {
@@ -105,6 +109,7 @@
     "shiki": "^2.4.2",
     "tslib": "^2.8.1",
     "typescript": "^5.8.3",
+    "vite": "7.3.1",
     "vitepress": "2.0.0-alpha.17"
   },
   "pnpm": {

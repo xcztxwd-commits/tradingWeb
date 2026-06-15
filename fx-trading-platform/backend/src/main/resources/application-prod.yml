@@ -1,0 +1,12 @@
+market:
+  demo-quotes:
+    enabled: ${MARKET_DEMO_QUOTES_ENABLED:false}
+  test-data:
+    enabled: ${MARKET_TEST_DATA_ENABLED:false}
+
+execution:
+  mode: ${EXECUTION_MODE:broker}
+
+logging:
+  level:
+    com.fxplatform: INFO

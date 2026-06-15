@@ -1,0 +1,182 @@
+.header {
+  min-height: 58px;
+  display: grid;
+  grid-template-columns: minmax(190px, 250px) auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--trading-border);
+  border-radius: 8px;
+  background: var(--trading-surface);
+  padding: 0 14px;
+}
+
+.symbolButton,
+.quoteButton {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    transform 120ms ease;
+}
+
+.symbolButton {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.symbolButton:hover,
+.symbolButton:focus-visible,
+.quoteButton:hover,
+.quoteButton:focus-visible {
+  border-color: var(--trading-accent-border);
+  background: var(--trading-surface-3);
+}
+
+.symbolButton:focus-visible,
+.quoteButton:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
+}
+
+.symbolButton:active,
+.quoteButton:active {
+  transform: scale(0.98);
+}
+
+.symbolButton strong {
+  display: block;
+  color: var(--trading-text-strong);
+  font-size: 19px;
+  line-height: 23px;
+}
+
+.symbolButton small {
+  display: block;
+  color: var(--trading-subtle);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modeStrip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.modeStrip span {
+  min-height: 22px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--trading-border-strong);
+  border-radius: 5px;
+  color: var(--trading-muted);
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 800;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(76px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.metrics div {
+  min-width: 0;
+}
+
+.metrics dt {
+  color: var(--trading-subtle);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.metrics dd {
+  margin: 2px 0 0;
+  color: var(--trading-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.positive {
+  color: var(--trading-buy-strong) !important;
+}
+
+.negative {
+  color: var(--trading-sell-strong) !important;
+}
+
+.quoteButton {
+  min-height: 34px;
+  display: none;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--trading-border-strong);
+  border-radius: 6px;
+  color: var(--trading-text);
+  padding: 0 10px;
+}
+
+@media (max-width: 1180px) {
+  .header {
+    grid-template-columns: minmax(180px, 220px) 1fr;
+  }
+
+  .modeStrip {
+    display: none;
+  }
+
+  .metrics {
+    grid-template-columns: repeat(3, minmax(76px, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .header {
+    grid-template-columns: 1fr auto;
+    min-height: 58px;
+  }
+
+  .metrics {
+    display: none;
+  }
+
+  .modeStrip {
+    display: none;
+  }
+
+  .symbolButton strong {
+    font-size: 17px;
+  }
+
+  .quoteButton {
+    display: inline-flex;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .symbolButton,
+  .quoteButton,
+  .modeStrip span {
+    transition: none;
+  }
+}

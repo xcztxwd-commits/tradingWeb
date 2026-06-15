@@ -1,0 +1,36 @@
+package com.fxplatform.trading.service;
+import cn.hutool.core.date.DateUtil;
+
+import com.fxplatform.trading.entity.OrderEntity;
+import com.fxplatform.trading.enums.OrderStatus;
+import java.time.Instant;
+import org.springframework.stereotype.Component;
+
+/**
+ * OrderEntityFactory 是交易模块的业务服务。
+ */
+@Component
+public class OrderEntityFactory {
+
+  public OrderEntity createReceived(OrderCommand command) {
+    OrderEntity order = new OrderEntity();
+    order.setUserId(command.userId());
+    order.setAccountId(command.accountId());
+    order.setSymbol(command.symbol());
+    order.setSide(command.side());
+    order.setOrderType(command.orderType());
+    order.setStatus(OrderStatus.RECEIVED);
+    order.setLots(command.quantity());
+    order.setRequestedPrice(command.price());
+    order.setClientOrderId(command.clientOrderId());
+    order.setQuantity(command.quantity());
+    order.setPrice(command.price());
+    order.setStopLoss(command.stopLoss());
+    order.setTakeProfit(command.takeProfit());
+    order.setLeverage(command.leverage());
+    // 新旧客户端都以 clientOrderId 作为业务幂等键，idempotencyKey 继续兼容历史唯一约束。
+    order.setIdempotencyKey(command.idempotencyKey());
+    order.setCreatedAt(DateUtil.date().toInstant());
+    return order;
+  }
+}

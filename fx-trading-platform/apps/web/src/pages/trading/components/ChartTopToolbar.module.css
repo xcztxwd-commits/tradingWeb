@@ -1,0 +1,467 @@
+.toolbar {
+  --chart-bg: var(--trading-surface-2, #050505);
+  --panel-bg: var(--trading-surface, #151515);
+  --panel-bg-light: var(--trading-surface-3, #1f1f1f);
+  --border-color: var(--trading-border, #2b2b2b);
+  --text-primary: var(--trading-text-strong, #f2f2f2);
+  --text-secondary: var(--trading-muted, #999);
+  --green: var(--trading-buy, #16c784);
+  --red: var(--trading-sell, #ea3943);
+  --accent: var(--trading-accent, #ffffff);
+
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--chart-bg);
+}
+
+.toolbarScroller {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: visible;
+  scrollbar-width: none;
+}
+
+.toolbarScroller::-webkit-scrollbar {
+  display: none;
+}
+
+.toolbarActions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 28px;
+}
+
+.fullscreenButton {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease,
+    transform 120ms ease;
+}
+
+.fullscreenButton:hover,
+.fullscreenButton:focus-visible {
+  border-color: var(--trading-border-strong, #333);
+  background: var(--panel-bg-light);
+  color: var(--text-primary);
+}
+
+.fullscreenButton:focus-visible {
+  outline: 2px solid var(--trading-accent-border, rgba(255, 255, 255, 0.36));
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--trading-accent-soft, rgba(255, 255, 255, 0.1));
+}
+
+.fullscreenButton:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.group {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.group button,
+.dropdownActions button,
+.shortcutTip button {
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 120ms ease;
+}
+
+.group button {
+  min-width: 36px;
+  padding: 0 8px;
+}
+
+.group button:hover,
+.dropdownActions button:hover,
+.shortcutTip button:hover,
+.selectLabel:hover {
+  border-color: var(--trading-border-strong, #333);
+  background: var(--panel-bg-light);
+  color: var(--text-primary);
+}
+
+.group button:focus-visible,
+.dropdownActions button:focus-visible,
+.shortcutTip button:focus-visible,
+.intervalGrid button:focus-visible {
+  outline: 2px solid var(--trading-accent-border, rgba(255, 255, 255, 0.36));
+  outline-offset: 2px;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--trading-accent-soft, rgba(255, 255, 255, 0.1));
+  color: var(--text-primary);
+}
+
+.group button:active,
+.dropdownActions button:active,
+.shortcutTip button:active {
+  transform: translateY(1px) scale(0.98);
+}
+
+.group .active,
+.intervalGrid .active {
+  border-color: var(--accent);
+  background: var(--trading-accent-soft, rgba(255, 255, 255, 0.09));
+  color: var(--accent);
+}
+
+.dropdownWrap {
+  position: relative;
+  z-index: 8;
+}
+
+.dropdownWrap > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.iconTextButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.countBadge {
+  min-width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--trading-accent-text, #050505);
+  padding: 0 5px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.selectLabel {
+  flex: 0 0 auto;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-primary);
+  padding: 0 6px;
+  white-space: nowrap;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.selectLabel:focus-within {
+  border-color: var(--accent);
+  background: var(--panel-bg-light);
+  box-shadow: 0 0 0 3px var(--trading-accent-soft, rgba(255, 255, 255, 0.1));
+}
+
+.selectLabel select {
+  min-height: 26px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.selectLabel option {
+  background: var(--panel-bg);
+  color: var(--text-primary);
+}
+
+.groupLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.intervalDropdown {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 7px);
+  left: 0;
+  width: min(404px, calc(100vw - 28px));
+  max-height: min(80vh, 520px);
+  display: grid;
+  gap: 14px;
+  overflow-y: auto;
+  border: 1px solid var(--trading-border-strong, #333);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--text-primary);
+  padding: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
+}
+
+.intervalDropdown,
+.indicatorDropdown {
+  transform-origin: top left;
+  animation: toolbarDropdownIn 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.indicatorDropdown {
+  position: absolute;
+  z-index: 55;
+  top: calc(100% + 7px);
+  left: 0;
+  width: min(420px, calc(100vw - 28px));
+  max-height: min(74vh, 520px);
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  overflow-y: auto;
+  border: 1px solid var(--trading-border-strong, #333);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--text-primary);
+  padding: 12px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
+}
+
+.indicatorMenuGroup {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.indicatorMenuGroup > span {
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.indicatorMenuItem {
+  min-width: 0;
+  min-height: 28px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  border-radius: 4px;
+  color: var(--text-primary);
+  padding: 0 5px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.indicatorMenuItem:hover,
+.indicatorMenuItem:focus-within {
+  background: var(--panel-bg-light);
+}
+
+.indicatorMenuItem input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
+.shortcutTip {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: start;
+  border-radius: 6px;
+  background: var(--trading-surface-3, #303030);
+  padding: 12px;
+}
+
+.shortcutTip strong,
+.shortcutTip span {
+  display: block;
+}
+
+.shortcutTip strong {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.shortcutTip span {
+  margin-top: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 19px;
+}
+
+.shortcutTip button {
+  min-width: 24px;
+  min-height: 24px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+
+.dropdownHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dropdownActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dropdownActions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+}
+
+.dropdownActions button[aria-disabled='true'] {
+  cursor: default;
+}
+
+.intervalGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(58px, 1fr));
+  gap: 8px;
+}
+
+.intervalGrid button {
+  min-height: 30px;
+  border: 1px solid var(--trading-border-strong, #3a3a3a);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    transform 120ms ease;
+}
+
+.intervalGrid button:hover {
+  border-color: var(--accent);
+  background: var(--panel-bg-light);
+}
+
+.intervalGrid button:active {
+  transform: scale(0.98);
+}
+
+@keyframes toolbarDropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 760px) {
+  .toolbar {
+    padding: 0 8px;
+  }
+
+  .toolbarScroller {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+
+  .toolbarActions {
+    margin-right: 0;
+  }
+
+  .intervalDropdown {
+    position: fixed;
+    top: 108px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+
+  .intervalGrid {
+    grid-template-columns: repeat(3, minmax(74px, 1fr));
+  }
+
+  .indicatorDropdown {
+    position: fixed;
+    top: 108px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group button,
+  .dropdownActions button,
+  .shortcutTip button,
+  .intervalGrid button,
+  .fullscreenButton,
+  .selectLabel {
+    transition: none;
+  }
+
+  .intervalDropdown,
+  .indicatorDropdown {
+    animation: none;
+  }
+}

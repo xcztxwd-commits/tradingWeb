@@ -1,0 +1,39 @@
+package com.fxplatform.account.repository;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fxplatform.account.entity.TradingAccountEntity;
+import com.fxplatform.common.mybatis.FxBaseMapper;
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
+
+/**
+ * TradingAccountRepository 通过 MyBatis-Plus 访问交易账户表。
+ */
+public interface TradingAccountRepository extends FxBaseMapper<TradingAccountEntity> {
+
+  /** 按用户查询账户列表，供前台账户页和后台账户页复用。 */
+  default List<TradingAccountEntity> findByUserId(UUID userId) {
+    return selectList(new LambdaQueryWrapper<TradingAccountEntity>()
+        .eq(TradingAccountEntity::getUserId, userId));
+  }
+
+  /** 按账户 ID 与用户 ID 查询，防止用户越权读取或操作他人账户。 */
+  default Optional<TradingAccountEntity> findByIdAndUserId(UUID id, UUID userId) {
+    return Optional.ofNullable(selectOne(new LambdaQueryWrapper<TradingAccountEntity>()
+        .eq(TradingAccountEntity::getId, id)
+        .eq(TradingAccountEntity::getUserId, userId)));
+  }
+
+  @Update("""
+      UPDATE core.trading_accounts
+      SET used_margin = COALESCE(used_margin, 0) + #{amount},
+          free_margin = COALESCE(equity, balance, 0) - (COALESCE(used_margin, 0) + #{amount})
+      WHERE id = #{accountId}
+        AND COALESCE(free_margin, COALESCE(equity, balance, 0) - COALESCE(used_margin, 0)) >= #{amount}
+      """)
+  int reserveMarginIfAvailable(@Param("accountId") UUID accountId, @Param("amount") BigDecimal amount);
+}

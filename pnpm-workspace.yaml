@@ -1,0 +1,3 @@
+packages:
+  - docs
+  - '!fx-trading-platform/**'

@@ -1,0 +1,85 @@
+.panel {
+  border: 1px solid rgb(234 236 239 / 0.08);
+  border-radius: 8px;
+  background: #1e2329;
+  overflow: hidden;
+}
+
+.header {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 13px;
+  border-bottom: 1px solid rgb(234 236 239 / 0.06);
+}
+
+.header h2 {
+  margin: 0;
+  color: #eef2f7;
+  font-size: 14px;
+}
+
+.header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #687483;
+  font-size: 12px;
+}
+
+.mid {
+  display: grid;
+  gap: 4px;
+  padding: 16px 13px 14px;
+  border-bottom: 1px solid rgb(234 236 239 / 0.06);
+}
+
+.mid span,
+.quoteGrid span {
+  color: #687483;
+  font-size: 11px;
+}
+
+.mid strong {
+  font-size: 25px;
+  line-height: 30px;
+}
+
+.mid small {
+  color: #87919f;
+  font-size: 12px;
+}
+
+.quoteGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.quoteGrid div {
+  min-height: 58px;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 0 13px;
+  border-right: 1px solid rgb(234 236 239 / 0.06);
+  border-bottom: 1px solid rgb(234 236 239 / 0.06);
+}
+
+.quoteGrid div:nth-child(2n) {
+  border-right: 0;
+}
+
+.quoteGrid strong {
+  color: #dce3ec;
+  font-size: 13px;
+}
+
+.positive {
+  color: #26a69a !important;
+}
+
+.negative {
+  color: #ef5350 !important;
+}

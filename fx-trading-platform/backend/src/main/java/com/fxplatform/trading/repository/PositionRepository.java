@@ -1,0 +1,48 @@
+package com.fxplatform.trading.repository;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.fxplatform.common.mybatis.FxBaseMapper;
+import com.fxplatform.trading.entity.PositionEntity;
+import com.fxplatform.trading.enums.PositionStatus;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * PositionRepository 通过 MyBatis-Plus 访问持仓。
+ */
+public interface PositionRepository extends FxBaseMapper<PositionEntity> {
+
+  /** 按账户和状态倒序查询持仓。 */
+  default List<PositionEntity> findByAccountIdAndStatusOrderByOpenedAtDesc(UUID accountId, PositionStatus status) {
+    return selectList(new LambdaQueryWrapper<PositionEntity>()
+        .eq(PositionEntity::getAccountId, accountId)
+        .eq(PositionEntity::getStatus, status)
+        .orderByDesc(PositionEntity::getOpenedAt));
+  }
+
+  /** 按状态查询持仓，供止盈止损调度和后台统计使用。 */
+  default List<PositionEntity> findByStatus(PositionStatus status) {
+    return selectList(new LambdaQueryWrapper<PositionEntity>()
+        .eq(PositionEntity::getStatus, status));
+  }
+
+  default long countByStatus(PositionStatus status) {
+    return selectCount(new LambdaQueryWrapper<PositionEntity>()
+        .eq(PositionEntity::getStatus, status));
+  }
+
+  /** 按 OPEN 状态条件平仓，保证重复触发不会重复结算保证金和 PnL。 */
+  default int closeIfOpen(PositionEntity position) {
+    return update(null, new LambdaUpdateWrapper<PositionEntity>()
+        .eq(PositionEntity::getId, position.getId())
+        .eq(PositionEntity::getAccountId, position.getAccountId())
+        .eq(PositionEntity::getStatus, PositionStatus.OPEN)
+        .set(PositionEntity::getCurrentPrice, position.getCurrentPrice())
+        .set(PositionEntity::getFloatingPnl, position.getFloatingPnl())
+        .set(PositionEntity::getRealizedPnl, position.getRealizedPnl())
+        .set(PositionEntity::getMarginHeld, position.getMarginHeld())
+        .set(PositionEntity::getStatus, PositionStatus.CLOSED)
+        .set(PositionEntity::getClosedAt, position.getClosedAt()));
+  }
+}

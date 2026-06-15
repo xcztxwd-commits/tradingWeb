@@ -6,6 +6,35 @@
 /docs/.vitepress/cache
 /docs/node_modules
 
+/fx-trading-platform/.env
+/fx-trading-platform/node_modules
+/fx-trading-platform/apps/*/node_modules
+/fx-trading-platform/apps/*/dist
+/fx-trading-platform/apps/*/*.tsbuildinfo
+/fx-trading-platform/backend/target
+/fx-trading-platform/backend/.idea
+/fx-trading-platform/runtime
+
+/.codex-artifacts
+/.superpowers
+/fx-trading-platform/.codex-artifacts
+/fx-trading-platform/.codex-runlogs
+/fx-trading-platform/artifacts
+/fx-trading-platform/test-results
+/fx-trading-platform/*.log
+/fx-trading-platform/*.err.log
+/fx-trading-platform/*.out.log
+/fx-trading-platform/apps/*/.artifacts
+/fx-trading-platform/apps/*/qa-artifacts
+/fx-trading-platform/apps/*/*.log
+/fx-trading-platform/apps/*/*.err.log
+/fx-trading-platform/apps/*/*.out.log
+/fx-trading-platform/backend/logs
+/fx-trading-platform/backend/*.log
+/fx-trading-platform/backend/*.err.log
+/fx-trading-platform/backend/*.out.log
+/fx-trading-platform/backend/*.pid
+
 .npmrc
 
 .DS_Store

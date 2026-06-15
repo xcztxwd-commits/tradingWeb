@@ -1,0 +1,6 @@
+.panel {
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  display: block;
+}

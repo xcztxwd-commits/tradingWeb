@@ -1,0 +1,164 @@
+.chartPanel {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 34px minmax(0, 1fr);
+  background: var(--trading-surface-2);
+}
+
+.canvasHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--trading-border-soft);
+  color: var(--trading-subtle);
+  font-size: 12px;
+}
+
+.canvasHeader strong {
+  color: var(--trading-accent);
+  font-size: 13px;
+}
+
+.klineCanvas {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+}
+
+.canvasWrap {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.emptyState {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  color: var(--trading-subtle);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--trading-surface-2) 72%, transparent);
+}
+
+.overlayEditToolbar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  z-index: 13;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: min(calc(100% - 84px), 620px);
+  min-height: 32px;
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(252, 253, 255, 0.96);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.26);
+  color: #30343a;
+  transform: translateX(-50%);
+}
+
+.toolbarGrip {
+  color: #a0a7b2;
+  cursor: grab;
+  flex: 0 0 auto;
+}
+
+.toolbarDivider {
+  width: 1px;
+  height: 20px;
+  background: #dde2e8;
+  flex: 0 0 auto;
+}
+
+.colorSwatches,
+.lineWidthGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.colorSwatch {
+  width: 17px;
+  height: 17px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #c2c9d1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.colorSwatchActive {
+  box-shadow: 0 0 0 2px #111827;
+}
+
+.lineWidthButton,
+.iconButton {
+  width: 25px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: #343a42;
+  cursor: pointer;
+  padding: 0;
+}
+
+.lineWidthButton:hover,
+.lineWidthButton:focus-visible,
+.iconButton:hover,
+.iconButton:focus-visible {
+  border-color: #c7ced8;
+  background: #eef2f6;
+}
+
+.lineWidthButtonActive {
+  border-color: #f2b84b;
+  background: #fff7e6;
+}
+
+.lineWidthPreview {
+  width: 15px;
+  min-height: 1px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.lineSizeLabel {
+  min-width: 24px;
+  color: #606a76;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.lockButtonActive {
+  color: #f2b84b;
+  background: #fff7e6;
+}
+
+@media (max-width: 760px) {
+  .chartPanel {
+    grid-template-rows: 32px minmax(0, 1fr);
+  }
+
+  .overlayEditToolbar {
+    left: 8px;
+    max-width: calc(100% - 16px);
+    overflow-x: auto;
+    transform: none;
+  }
+}

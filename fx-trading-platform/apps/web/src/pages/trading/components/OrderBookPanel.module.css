@@ -1,0 +1,58 @@
+.panel {
+  border: 1px solid rgb(234 236 239 / 0.08);
+  border-radius: 8px;
+  background: #1e2329;
+  overflow: hidden;
+}
+
+.header {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  padding: 0 13px;
+  border-bottom: 1px solid rgb(234 236 239 / 0.06);
+}
+
+.header h2 {
+  margin: 0;
+  color: #eef2f7;
+  font-size: 14px;
+}
+
+.header span {
+  color: #687483;
+  font-size: 11px;
+}
+
+.rows {
+  display: grid;
+  padding: 8px 0;
+}
+
+.row {
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 13px;
+  color: #87919f;
+  font-size: 12px;
+}
+
+.row:hover {
+  background: rgb(234 236 239 / 0.045);
+}
+
+.row strong {
+  color: #dce3ec;
+  font-weight: 700;
+}
+
+.ask {
+  color: #ef5350;
+}
+
+.bid {
+  color: #26a69a;
+}

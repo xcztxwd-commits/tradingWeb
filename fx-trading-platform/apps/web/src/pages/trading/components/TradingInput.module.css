@@ -1,0 +1,80 @@
+.field {
+  display: grid;
+  gap: 7px;
+  color: #7f8794;
+  font-size: 12px;
+}
+
+.label {
+  display: flex;
+  justify-content: space-between;
+  min-height: 15px;
+  line-height: 15px;
+}
+
+.control {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #242b36;
+  border-radius: 6px;
+  background: #111821;
+  color: #e7edf4;
+  padding: 0 11px;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.control:hover {
+  border-color: #3a4656;
+  background: #141d28;
+}
+
+.field:focus-within .control {
+  border-color: #f2b84b;
+  box-shadow: 0 0 0 1px rgba(242, 184, 75, 0.18);
+}
+
+.control input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f5f8fb;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+}
+
+.control input::placeholder {
+  color: #485260;
+}
+
+.affix {
+  color: #6f7886;
+  white-space: nowrap;
+}
+
+.invalid .control {
+  border-color: #ed6a5e;
+}
+
+.error {
+  color: #ed6a5e;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.disabled {
+  opacity: 0.58;
+}
+
+.disabled .control,
+.disabled .control:hover {
+  border-color: #222832;
+  background: #0d131b;
+}

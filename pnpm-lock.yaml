@@ -119,9 +119,14 @@ importers:
       typescript:
         specifier: ^5.8.3
         version: 5.8.3
+      vite:
+        specifier: 7.3.1
+        version: 7.3.1(@types/node@20.19.41)(jiti@2.4.2)(lightningcss@1.32.0)(terser@5.39.0)
       vitepress:
         specifier: 2.0.0-alpha.17
         version: 2.0.0-alpha.17(@types/node@20.19.41)(jiti@2.4.2)(lightningcss@1.32.0)(postcss@8.5.14)(terser@5.39.0)(typescript@5.8.3)
+
+  docs: {}
 
 packages:
 

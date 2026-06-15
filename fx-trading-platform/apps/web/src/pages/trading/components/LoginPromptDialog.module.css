@@ -1,0 +1,218 @@
+.layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(rgba(3, 7, 12, 0.74), rgba(3, 7, 12, 0.52)),
+    radial-gradient(circle at 50% 24%, rgba(242, 184, 75, 0.14), transparent 32%);
+  padding: 20px;
+  animation: loginPromptLayerIn 150ms ease-out;
+}
+
+.dialog {
+  position: relative;
+  width: min(440px, 100%);
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--trading-border-strong, #283341);
+  background:
+    linear-gradient(180deg, rgba(21, 29, 40, 0.98), rgba(9, 14, 20, 0.98)),
+    var(--trading-surface, #0d1219);
+  color: var(--trading-text, #dce3ec);
+  padding: 28px;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.62);
+  transform-origin: center;
+  animation: loginPromptIn 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.closeButton {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--trading-muted, #8a94a3);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    transform 120ms ease;
+}
+
+.closeButton:hover,
+.closeButton:focus-visible {
+  border-color: var(--trading-border-strong, #283341);
+  background: var(--trading-surface-3, #111923);
+  color: var(--trading-text-strong, #f6f8fb);
+}
+
+.closeButton:active {
+  transform: scale(0.94);
+}
+
+.icon {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--trading-accent-border, rgba(242, 184, 75, 0.42));
+  background: var(--trading-accent-soft, rgba(242, 184, 75, 0.12));
+  color: var(--trading-accent, #f2b84b);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--trading-buy, #20b26b);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.dialog h2 {
+  margin: 0;
+  color: var(--trading-heading, #eef2f7);
+  font-size: 24px;
+  line-height: 1.22;
+}
+
+.summary {
+  margin: 0;
+  color: var(--trading-muted, #8a94a3);
+  font-size: 14px;
+  line-height: 1.68;
+}
+
+.featureGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.featureGrid span {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--trading-border, #1d2530);
+  background: var(--trading-surface-2, #090e14);
+  color: var(--trading-text, #dce3ec);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.error {
+  margin: 0;
+  border: 1px solid rgba(240, 82, 103, 0.42);
+  background: rgba(240, 82, 103, 0.12);
+  color: #fecdd3;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.primaryButton,
+.secondaryButton {
+  min-height: 44px;
+  border: 1px solid transparent;
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease,
+    color 150ms ease,
+    transform 120ms ease;
+}
+
+.primaryButton {
+  background: var(--trading-accent, #f2b84b);
+  color: var(--trading-accent-text, #15100a);
+}
+
+.secondaryButton {
+  border-color: var(--trading-border-strong, #283341);
+  background: var(--trading-surface-2, #090e14);
+  color: var(--trading-text-strong, #f6f8fb);
+}
+
+.primaryButton:hover,
+.primaryButton:focus-visible {
+  box-shadow: 0 0 0 3px var(--trading-accent-soft, rgba(242, 184, 75, 0.12));
+}
+
+.secondaryButton:hover,
+.secondaryButton:focus-visible {
+  border-color: var(--trading-accent-border, rgba(242, 184, 75, 0.42));
+  background: var(--trading-surface-3, #111923);
+}
+
+.closeButton:focus-visible,
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible {
+  outline: 2px solid var(--trading-accent-border, rgba(242, 184, 75, 0.42));
+  outline-offset: 2px;
+}
+
+.primaryButton:active,
+.secondaryButton:active {
+  transform: scale(0.985);
+}
+
+@keyframes loginPromptLayerIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes loginPromptIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 520px) {
+  .dialog {
+    padding: 24px;
+  }
+
+  .featureGrid,
+  .actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layer,
+  .dialog {
+    animation: none;
+  }
+
+  .closeButton,
+  .primaryButton,
+  .secondaryButton {
+    transition: none;
+  }
+}

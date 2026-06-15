@@ -1,17 +1,20 @@
 import { execFile } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { promisify } from 'node:util'
 
 import { version } from './config.js'
 import { failure, start, success } from './logger.js'
 
 const execFileAsync = promisify(execFile)
+const require = createRequire(import.meta.url)
 const startTime = Date.now()
 const output = 'dist/index.d.ts'
 
 start(`Building klinecharts@${version} declaration bundle...`)
 
 try {
-  const { stdout, stderr } = await execFileAsync('dts-bundle-generator', [
+  const { stdout, stderr } = await execFileAsync(process.execPath, [
+    require.resolve('dts-bundle-generator/dist/bin/dts-bundle-generator.js'),
     '--no-banner',
     'true',
     '--fail-on-class',

@@ -1,0 +1,1592 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FX Trader UI/UX Pro Max Prototype 2026-06-13</title>
+    <style>
+      :root {
+        --bg: #e5e7eb;
+        --ink: #0f172a;
+        --muted: #64748b;
+        --line: #cbd5e1;
+        --panel: #ffffff;
+        --panel-soft: #f8fafc;
+        --terminal: #0f172a;
+        --terminal-2: #111827;
+        --terminal-3: #1e293b;
+        --terminal-line: #334155;
+        --terminal-text: #f8fafc;
+        --terminal-muted: #94a3b8;
+        --primary: #f59e0b;
+        --primary-2: #fbbf24;
+        --green: #22c55e;
+        --red: #ef4444;
+        --blue: #2563eb;
+        --shadow: 0 18px 50px rgba(15, 23, 42, 0.16);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background:
+          linear-gradient(90deg, rgba(148, 163, 184, 0.2) 1px, transparent 1px),
+          linear-gradient(rgba(148, 163, 184, 0.2) 1px, transparent 1px), var(--bg);
+        background-size: 32px 32px;
+        color: var(--ink);
+      }
+
+      .prototype-board {
+        width: min(1720px, calc(100vw - 48px));
+        margin: 0 auto;
+        padding: 32px 0 48px;
+      }
+
+      .board-header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 24px;
+      }
+
+      .board-title {
+        margin: 0;
+        font-size: 30px;
+        line-height: 1.2;
+        letter-spacing: 0;
+      }
+
+      .board-meta {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 8px;
+        max-width: 760px;
+      }
+
+      .legend span {
+        border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.72);
+        border-radius: 8px;
+        padding: 7px 10px;
+        font-size: 12px;
+        color: #334155;
+      }
+
+      .artboard {
+        margin: 0 0 32px;
+        border: 1px solid rgba(148, 163, 184, 0.8);
+        border-radius: 8px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .artboard-caption {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 48px;
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--line);
+        background: #f8fafc;
+        color: #334155;
+      }
+
+      .artboard-caption strong {
+        font-size: 14px;
+      }
+
+      .artboard-caption span {
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .desktop-frame {
+        min-height: 860px;
+        background: #f8fafc;
+      }
+
+      .mobile-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(360px, 430px));
+        gap: 24px;
+        justify-content: center;
+        align-items: start;
+        padding: 28px;
+        background: #dbe3ef;
+      }
+
+      .phone-frame {
+        width: 390px;
+        min-height: 844px;
+        margin: 0 auto;
+        border: 10px solid #0f172a;
+        border-radius: 32px;
+        background: #f8fafc;
+        overflow: hidden;
+        box-shadow: 0 20px 50px rgba(15, 23, 42, 0.28);
+      }
+
+      .terminal-screen {
+        background: var(--terminal);
+        color: var(--terminal-text);
+      }
+
+      .top-nav {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        min-height: 64px;
+        padding: 0 32px;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+        background: rgba(15, 23, 42, 0.96);
+        color: #ffffff;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 138px;
+        font-weight: 800;
+        letter-spacing: 0;
+      }
+
+      .brand-mark {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 8px;
+        background: var(--primary);
+        color: #0f172a;
+        font-weight: 900;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex: 1;
+        min-width: 0;
+      }
+
+      .nav-links a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        border-radius: 8px;
+        padding: 0 12px;
+        color: #cbd5e1;
+        font-size: 14px;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .nav-links a.active,
+      .nav-links a:hover {
+        color: #0f172a;
+        background: var(--primary);
+      }
+
+      .nav-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .button,
+      .ghost-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        border-radius: 8px;
+        padding: 0 14px;
+        border: 1px solid transparent;
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      .button {
+        background: var(--primary);
+        color: #111827;
+      }
+
+      .ghost-button {
+        border-color: rgba(203, 213, 225, 0.35);
+        color: #e2e8f0;
+        background: rgba(15, 23, 42, 0.45);
+      }
+
+      .home-hero {
+        display: grid;
+        grid-template-columns: minmax(0, 0.88fr) minmax(540px, 1.12fr);
+        gap: 34px;
+        padding: 54px 48px 32px;
+        background:
+          radial-gradient(circle at 82% 18%, rgba(245, 158, 11, 0.18), transparent 32%),
+          linear-gradient(180deg, #111827 0%, #0f172a 100%);
+        color: #ffffff;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        min-height: 32px;
+        border: 1px solid rgba(245, 158, 11, 0.46);
+        border-radius: 8px;
+        padding: 0 10px;
+        color: #fcd34d;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+
+      .home-copy h2 {
+        max-width: 660px;
+        margin: 18px 0 16px;
+        font-size: 48px;
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .nowrap {
+        white-space: nowrap;
+      }
+
+      .home-copy p {
+        max-width: 600px;
+        margin: 0;
+        color: #cbd5e1;
+        font-size: 16px;
+        line-height: 1.75;
+      }
+
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 26px;
+      }
+
+      .ticker-strip {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 32px;
+      }
+
+      .ticker-card {
+        min-height: 82px;
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        border-radius: 8px;
+        padding: 12px;
+        background: rgba(15, 23, 42, 0.6);
+      }
+
+      .ticker-card b,
+      .market-row b,
+      .asset-number,
+      .price-text,
+      .mono {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", ui-monospace, monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .ticker-card small {
+        display: block;
+        color: #94a3b8;
+        margin-bottom: 8px;
+      }
+
+      .up {
+        color: var(--green);
+      }
+
+      .down {
+        color: var(--red);
+      }
+
+      .terminal-preview {
+        display: grid;
+        grid-template-columns: 1fr 260px;
+        gap: 12px;
+        align-self: stretch;
+        min-height: 450px;
+        border: 1px solid rgba(148, 163, 184, 0.32);
+        border-radius: 8px;
+        padding: 14px;
+        background: rgba(2, 6, 23, 0.72);
+      }
+
+      .preview-main,
+      .preview-side,
+      .terminal-card {
+        border: 1px solid var(--terminal-line);
+        border-radius: 8px;
+        background: #111827;
+      }
+
+      .preview-main {
+        display: grid;
+        grid-template-rows: 52px 1fr 112px;
+        overflow: hidden;
+      }
+
+      .preview-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--terminal-line);
+      }
+
+      .chart-area {
+        position: relative;
+        min-height: 230px;
+        padding: 20px;
+        background:
+          linear-gradient(90deg, rgba(51, 65, 85, 0.55) 1px, transparent 1px),
+          linear-gradient(rgba(51, 65, 85, 0.55) 1px, transparent 1px);
+        background-size: 56px 42px;
+      }
+
+      .chart-line {
+        position: absolute;
+        left: 28px;
+        right: 28px;
+        top: 38%;
+        height: 90px;
+        clip-path: polygon(0 68%, 12% 48%, 24% 58%, 38% 28%, 52% 44%, 66% 18%, 80% 34%, 100% 8%, 100% 100%, 0 100%);
+        background: linear-gradient(180deg, rgba(34, 197, 94, 0.42), rgba(34, 197, 94, 0));
+        border-top: 3px solid var(--green);
+      }
+
+      .candles {
+        position: absolute;
+        inset: 56px 34px 50px;
+        display: flex;
+        align-items: end;
+        gap: 12px;
+      }
+
+      .candle {
+        width: 10px;
+        min-height: 30px;
+        border-radius: 3px;
+        background: var(--green);
+      }
+
+      .candle.red {
+        background: var(--red);
+      }
+
+      .mini-panels {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        padding: 12px;
+        border-top: 1px solid var(--terminal-line);
+      }
+
+      .mini-panels div,
+      .metric-box {
+        border: 1px solid var(--terminal-line);
+        border-radius: 8px;
+        padding: 10px;
+        background: rgba(15, 23, 42, 0.7);
+      }
+
+      .preview-side {
+        display: grid;
+        grid-template-rows: auto auto 1fr;
+        gap: 12px;
+        padding: 12px;
+      }
+
+      .order-form {
+        display: grid;
+        gap: 10px;
+      }
+
+      .segmented {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+        min-height: 44px;
+        padding: 4px;
+        border-radius: 8px;
+        background: #020617;
+      }
+
+      .segmented span {
+        display: grid;
+        place-items: center;
+        border-radius: 6px;
+        color: #cbd5e1;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .segmented span.active-buy {
+        background: rgba(34, 197, 94, 0.18);
+        color: var(--green);
+      }
+
+      .segmented span.active-sell {
+        background: rgba(239, 68, 68, 0.16);
+        color: var(--red);
+      }
+
+      .input-like {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 44px;
+        border: 1px solid var(--terminal-line);
+        border-radius: 8px;
+        padding: 0 10px;
+        color: #e2e8f0;
+        background: #0f172a;
+      }
+
+      .buy-button {
+        min-height: 44px;
+        border: 0;
+        border-radius: 8px;
+        background: var(--green);
+        color: #052e16;
+        font-weight: 900;
+      }
+
+      .feature-band {
+        display: grid;
+        grid-template-columns: 0.8fr 1.2fr;
+        gap: 30px;
+        padding: 30px 48px 46px;
+        background: #f8fafc;
+      }
+
+      .section-title h3 {
+        margin: 0 0 10px;
+        font-size: 26px;
+        letter-spacing: 0;
+      }
+
+      .section-title p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .feature-card,
+      .account-card,
+      .setting-card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .feature-card {
+        min-height: 118px;
+        padding: 14px;
+      }
+
+      .feature-icon {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        margin-bottom: 12px;
+        border-radius: 8px;
+        background: #fff7ed;
+        color: #92400e;
+        font-weight: 900;
+      }
+
+      .feature-card h4,
+      .account-card h4,
+      .setting-card h4 {
+        margin: 0 0 8px;
+        font-size: 14px;
+      }
+
+      .feature-card p,
+      .account-card p,
+      .setting-card p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .phone-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 58px;
+        padding: 0 16px;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+      }
+
+      .phone-top .brand {
+        min-width: 0;
+        gap: 8px;
+      }
+
+      .phone-top .brand-mark {
+        width: 30px;
+        height: 30px;
+      }
+
+      .mobile-home {
+        min-height: 824px;
+        padding-bottom: 74px;
+        background: #f8fafc;
+      }
+
+      .mobile-hero {
+        padding: 22px 16px 16px;
+        background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
+        color: #ffffff;
+      }
+
+      .mobile-hero h2 {
+        margin: 14px 0 12px;
+        font-size: 30px;
+        line-height: 1.16;
+        letter-spacing: 0;
+      }
+
+      .mobile-hero p {
+        margin: 0;
+        color: #cbd5e1;
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .mobile-cta {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .mobile-tickers {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        padding: 14px 16px;
+      }
+
+      .mobile-tickers .ticker-card {
+        min-height: 78px;
+        background: #111827;
+        color: #ffffff;
+      }
+
+      .mobile-feature-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        padding: 0 16px 16px;
+      }
+
+      .mobile-feature-grid .feature-card {
+        min-height: 112px;
+      }
+
+      .bottom-nav {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        min-height: 66px;
+        border-top: 1px solid rgba(148, 163, 184, 0.4);
+        background: rgba(255, 255, 255, 0.98);
+      }
+
+      .phone-frame .bottom-nav {
+        position: sticky;
+        bottom: 0;
+      }
+
+      .bottom-nav a {
+        display: grid;
+        place-items: center;
+        gap: 4px;
+        min-height: 60px;
+        color: #64748b;
+        text-decoration: none;
+        font-size: 11px;
+      }
+
+      .bottom-nav a::before {
+        content: "";
+        width: 22px;
+        height: 22px;
+        border: 2px solid currentColor;
+        border-radius: 7px;
+      }
+
+      .bottom-nav a.active {
+        color: #b45309;
+        font-weight: 800;
+      }
+
+      .terminal-layout {
+        display: grid;
+        grid-template-columns: 252px minmax(0, 1fr) 336px;
+        grid-template-rows: 64px minmax(500px, 1fr) 196px;
+        min-height: 860px;
+        background: var(--terminal);
+        color: var(--terminal-text);
+      }
+
+      .terminal-layout .top-nav {
+        grid-column: 1 / -1;
+      }
+
+      .market-sidebar {
+        border-right: 1px solid var(--terminal-line);
+        background: #111827;
+      }
+
+      .panel-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 52px;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--terminal-line);
+        color: #e2e8f0;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .search-box {
+        margin: 12px;
+        min-height: 44px;
+        border: 1px solid var(--terminal-line);
+        border-radius: 8px;
+        padding: 0 12px;
+        display: flex;
+        align-items: center;
+        color: var(--terminal-muted);
+        background: #0f172a;
+      }
+
+      .market-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 8px;
+        min-height: 56px;
+        padding: 9px 14px;
+        border-bottom: 1px solid rgba(51, 65, 85, 0.65);
+      }
+
+      .market-row.active {
+        background: rgba(245, 158, 11, 0.12);
+        border-left: 3px solid var(--primary);
+        padding-left: 11px;
+      }
+
+      .market-row small,
+      .terminal-muted {
+        color: var(--terminal-muted);
+      }
+
+      .chart-workspace {
+        display: grid;
+        grid-template-rows: 72px minmax(0, 1fr);
+        min-width: 0;
+      }
+
+      .symbol-header {
+        display: grid;
+        grid-template-columns: 1.2fr repeat(4, 1fr);
+        gap: 16px;
+        align-items: center;
+        padding: 0 20px;
+        border-bottom: 1px solid var(--terminal-line);
+        background: #111827;
+      }
+
+      .symbol-header h3 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .symbol-stat span {
+        display: block;
+        color: var(--terminal-muted);
+        font-size: 11px;
+        margin-bottom: 4px;
+      }
+
+      .chart-full {
+        position: relative;
+        min-height: 520px;
+        background:
+          linear-gradient(90deg, rgba(51, 65, 85, 0.58) 1px, transparent 1px),
+          linear-gradient(rgba(51, 65, 85, 0.58) 1px, transparent 1px), #0f172a;
+        background-size: 72px 48px;
+      }
+
+      .timeframe-bar {
+        position: absolute;
+        top: 16px;
+        left: 20px;
+        display: flex;
+        gap: 6px;
+      }
+
+      .timeframe-bar span {
+        display: grid;
+        place-items: center;
+        min-width: 44px;
+        min-height: 32px;
+        border: 1px solid var(--terminal-line);
+        border-radius: 8px;
+        color: #cbd5e1;
+        font-size: 12px;
+      }
+
+      .timeframe-bar span.active {
+        color: #111827;
+        background: var(--primary);
+        border-color: var(--primary);
+        font-weight: 900;
+      }
+
+      .chart-price-axis {
+        position: absolute;
+        top: 84px;
+        right: 18px;
+        display: grid;
+        gap: 28px;
+        color: var(--terminal-muted);
+        font-size: 11px;
+        text-align: right;
+      }
+
+      .big-candles {
+        position: absolute;
+        left: 44px;
+        right: 80px;
+        bottom: 92px;
+        height: 300px;
+        display: flex;
+        align-items: end;
+        gap: 16px;
+      }
+
+      .big-candles .candle {
+        width: 13px;
+        box-shadow: 0 -34px 0 -5px currentColor;
+      }
+
+      .volume-bars {
+        position: absolute;
+        left: 44px;
+        right: 80px;
+        bottom: 24px;
+        height: 48px;
+        display: flex;
+        align-items: end;
+        gap: 16px;
+        opacity: 0.72;
+      }
+
+      .volume-bars span {
+        width: 13px;
+        background: #475569;
+        border-radius: 3px 3px 0 0;
+      }
+
+      .trade-sidebar {
+        border-left: 1px solid var(--terminal-line);
+        background: #111827;
+        display: grid;
+        grid-template-rows: 1fr 1fr;
+      }
+
+      .book-list,
+      .trade-list {
+        padding: 10px 14px;
+        display: grid;
+        gap: 6px;
+      }
+
+      .book-line {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+        min-height: 24px;
+        font-family: "SFMono-Regular", Consolas, ui-monospace, monospace;
+        font-size: 12px;
+      }
+
+      .terminal-bottom {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) 336px;
+        border-top: 1px solid var(--terminal-line);
+        background: #111827;
+      }
+
+      .position-table {
+        padding: 12px 16px;
+      }
+
+      .table-head,
+      .table-row {
+        display: grid;
+        grid-template-columns: 1.1fr 0.8fr 0.8fr 0.8fr 0.8fr 1fr;
+        gap: 12px;
+        align-items: center;
+        min-height: 36px;
+        font-size: 12px;
+      }
+
+      .table-head {
+        color: var(--terminal-muted);
+        border-bottom: 1px solid var(--terminal-line);
+      }
+
+      .order-ticket {
+        padding: 12px;
+        border-left: 1px solid var(--terminal-line);
+      }
+
+      .phone-terminal {
+        min-height: 824px;
+        padding-bottom: 66px;
+        background: var(--terminal);
+        color: var(--terminal-text);
+      }
+
+      .phone-terminal .phone-top {
+        background: #111827;
+        border-bottom-color: var(--terminal-line);
+      }
+
+      .mobile-symbol {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--terminal-line);
+      }
+
+      .mobile-symbol h3 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+
+      .quote-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .quote-box {
+        min-height: 56px;
+        border: 1px solid var(--terminal-line);
+        border-radius: 8px;
+        padding: 8px;
+        background: #111827;
+      }
+
+      .quote-box span {
+        display: block;
+        color: var(--terminal-muted);
+        font-size: 10px;
+        margin-bottom: 6px;
+      }
+
+      .mobile-chart {
+        position: relative;
+        height: 330px;
+        margin: 12px 12px 0;
+        border: 1px solid var(--terminal-line);
+        border-radius: 8px;
+        overflow: hidden;
+        background:
+          linear-gradient(90deg, rgba(51, 65, 85, 0.58) 1px, transparent 1px),
+          linear-gradient(rgba(51, 65, 85, 0.58) 1px, transparent 1px), #0f172a;
+        background-size: 44px 42px;
+      }
+
+      .mobile-chart .big-candles {
+        left: 20px;
+        right: 20px;
+        bottom: 72px;
+        height: 190px;
+        gap: 10px;
+      }
+
+      .mobile-chart .big-candles .candle {
+        width: 9px;
+      }
+
+      .mobile-order-sheet {
+        margin: 12px;
+        border: 1px solid var(--terminal-line);
+        border-radius: 8px;
+        padding: 12px;
+        background: #111827;
+      }
+
+      .quick-actions {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .quick-actions button {
+        min-height: 44px;
+        border: 1px solid var(--terminal-line);
+        border-radius: 8px;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-weight: 800;
+      }
+
+      .account-layout {
+        display: grid;
+        grid-template-columns: 252px minmax(0, 1fr);
+        min-height: 820px;
+        background: #f8fafc;
+      }
+
+      .account-sidebar {
+        border-right: 1px solid var(--line);
+        background: #ffffff;
+      }
+
+      .account-sidebar .brand {
+        min-height: 64px;
+        padding: 0 20px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .account-nav {
+        display: grid;
+        gap: 4px;
+        padding: 12px;
+      }
+
+      .account-nav a {
+        display: flex;
+        align-items: center;
+        min-height: 44px;
+        border-radius: 8px;
+        padding: 0 12px;
+        color: #334155;
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .account-nav a.active {
+        background: #fff7ed;
+        color: #92400e;
+      }
+
+      .account-main {
+        display: grid;
+        grid-template-rows: 64px auto;
+        min-width: 0;
+      }
+
+      .account-topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 28px;
+        border-bottom: 1px solid var(--line);
+        background: #ffffff;
+      }
+
+      .account-content {
+        padding: 24px 28px 32px;
+      }
+
+      .asset-summary {
+        display: grid;
+        grid-template-columns: 1.2fr repeat(3, 1fr);
+        gap: 14px;
+        margin-bottom: 20px;
+      }
+
+      .asset-card {
+        min-height: 132px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+        background: #ffffff;
+      }
+
+      .asset-card span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .asset-number {
+        margin-top: 10px;
+        font-size: 28px;
+        font-weight: 900;
+      }
+
+      .account-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .account-card {
+        min-height: 168px;
+        padding: 16px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        border-radius: 8px;
+        padding: 0 9px;
+        margin-bottom: 14px;
+        color: #166534;
+        background: #dcfce7;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .setting-list {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-top: 20px;
+      }
+
+      .setting-card {
+        min-height: 88px;
+        padding: 14px;
+      }
+
+      @media (max-width: 1200px) {
+        .home-hero {
+          grid-template-columns: 1fr;
+        }
+
+        .terminal-preview {
+          min-height: 420px;
+        }
+
+        .feature-band,
+        .asset-summary,
+        .account-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 940px) {
+        .prototype-board {
+          width: min(100vw - 20px, 760px);
+          padding-top: 16px;
+        }
+
+        .board-header {
+          display: block;
+        }
+
+        .legend {
+          justify-content: flex-start;
+          margin-top: 14px;
+        }
+
+        .desktop-frame {
+          overflow-x: auto;
+        }
+
+        .desktop-frame > * {
+          min-width: 1180px;
+        }
+
+        .mobile-row {
+          grid-template-columns: 1fr;
+          padding: 16px;
+        }
+      }
+
+      @media (max-width: 460px) {
+        .prototype-board {
+          width: 100%;
+          padding: 0;
+        }
+
+        .artboard {
+          border-radius: 0;
+          border-left: 0;
+          border-right: 0;
+          margin-bottom: 20px;
+        }
+
+        .artboard-caption {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .mobile-row {
+          padding: 10px 0;
+        }
+
+        .phone-frame {
+          width: 390px;
+          max-width: calc(100vw - 20px);
+        }
+      }
+
+      body[data-view] {
+        background: #dbe3ef;
+      }
+
+      body[data-view] .prototype-board {
+        width: calc(100vw - 32px);
+        padding: 16px 0;
+      }
+
+      body[data-view] .board-header {
+        display: none;
+      }
+
+      body[data-view] .artboard {
+        display: none;
+        margin: 0;
+      }
+
+      body[data-view="home"] .home-prototype,
+      body[data-view="mobile"] .mobile-prototype,
+      body[data-view="terminal"] .terminal-prototype,
+      body[data-view="account"] .account-prototype {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="prototype-board">
+      <header class="board-header">
+        <div>
+          <h1 class="board-title">FX Trader 产品原型图板</h1>
+          <p class="board-meta">ui-ux-pro-max / 2026-06-13 / 用户交易端信息架构与关键页面视觉原型</p>
+        </div>
+        <div class="legend" aria-label="原型约束">
+          <span>用户端取消后台入口</span>
+          <span>新增官方首页</span>
+          <span>桌面顶部一行主导航</span>
+          <span>移动底部 5 个主入口</span>
+          <span>44px 触控目标</span>
+          <span>专业交易暗色终端</span>
+        </div>
+      </header>
+
+      <section class="artboard home-prototype" aria-labelledby="desktop-home-title">
+        <div class="artboard-caption">
+          <strong id="desktop-home-title">画板 01 / 桌面官方首页</strong>
+          <span>目标：用户进站先看到平台定位、行情入口与完整功能导航，不再直接跳交易终端。</span>
+        </div>
+        <div class="desktop-frame">
+          <nav class="top-nav" aria-label="桌面主导航">
+            <div class="brand"><span class="brand-mark">FX</span><span>FX Trader</span></div>
+            <div class="nav-links">
+              <a class="active" href="#">首页</a>
+              <a href="#">概览</a>
+              <a href="#">终端</a>
+              <a href="#">行情</a>
+              <a href="#">订单</a>
+              <a href="#">持仓</a>
+              <a href="#">资金</a>
+              <a href="#">安全</a>
+              <a href="#">设置</a>
+            </div>
+            <div class="nav-actions">
+              <a class="ghost-button" href="#">登录</a>
+              <a class="button" href="#">进入终端</a>
+            </div>
+          </nav>
+          <div class="home-hero">
+            <div class="home-copy">
+              <span class="eyebrow">官方交易主页</span>
+              <h2>专业交易终端与<span class="nowrap">账户工作台</span></h2>
+              <p>
+                首页承接品牌、行情、注册登录和核心功能分流。交易用户可以从顶部一行看到概览、行情、订单、持仓、资金、安全与设置，不需要重新寻找入口。
+              </p>
+              <div class="hero-actions">
+                <a class="button" href="#">开始交易</a>
+                <a class="ghost-button" href="#">查看行情</a>
+              </div>
+              <div class="ticker-strip" aria-label="核心行情">
+                <div class="ticker-card"><small>EUR/USD</small><b>1.08214</b><div class="up">+0.42%</div></div>
+                <div class="ticker-card"><small>GBP/USD</small><b>1.27486</b><div class="down">-0.18%</div></div>
+                <div class="ticker-card"><small>USD/JPY</small><b>157.306</b><div class="up">+0.27%</div></div>
+                <div class="ticker-card"><small>XAU/USD</small><b>2,341.18</b><div class="up">+0.64%</div></div>
+              </div>
+            </div>
+            <div class="terminal-preview" aria-label="交易终端预览">
+              <div class="preview-main">
+                <div class="preview-bar">
+                  <strong>BTC/USDT</strong>
+                  <span class="price-text up">68,421.50 +2.16%</span>
+                </div>
+                <div class="chart-area">
+                  <div class="chart-line"></div>
+                  <div class="candles">
+                    <span class="candle" style="height:58px"></span>
+                    <span class="candle red" style="height:42px"></span>
+                    <span class="candle" style="height:72px"></span>
+                    <span class="candle" style="height:96px"></span>
+                    <span class="candle red" style="height:60px"></span>
+                    <span class="candle" style="height:118px"></span>
+                    <span class="candle" style="height:88px"></span>
+                    <span class="candle red" style="height:52px"></span>
+                    <span class="candle" style="height:132px"></span>
+                    <span class="candle" style="height:108px"></span>
+                    <span class="candle red" style="height:76px"></span>
+                    <span class="candle" style="height:142px"></span>
+                  </div>
+                </div>
+                <div class="mini-panels">
+                  <div><small class="terminal-muted">保证金</small><br /><b class="mono">12,840.00</b></div>
+                  <div><small class="terminal-muted">持仓盈亏</small><br /><b class="mono up">+428.16</b></div>
+                  <div><small class="terminal-muted">风险率</small><br /><b class="mono">42%</b></div>
+                </div>
+              </div>
+              <aside class="preview-side">
+                <div class="segmented"><span class="active-buy">买入</span><span>卖出</span></div>
+                <div class="order-form">
+                  <div class="input-like"><span>价格</span><b class="mono">68,421.50</b></div>
+                  <div class="input-like"><span>数量</span><b class="mono">0.10 BTC</b></div>
+                  <button class="buy-button">买入 BTC</button>
+                </div>
+                <div class="metric-box">
+                  <small class="terminal-muted">账户安全</small>
+                  <p>2FA 已启用<br />提现白名单已开启<br />设备风控正常</p>
+                </div>
+              </aside>
+            </div>
+          </div>
+          <div class="feature-band">
+            <div class="section-title">
+              <h3>用户端主功能一屏可见</h3>
+              <p>后台管理不再进入用户端导航。首页与顶部导航承担清晰分流，移动端用底部主入口和“我的”聚合低频功能。</p>
+            </div>
+            <div class="feature-grid">
+              <div class="feature-card"><div class="feature-icon">01</div><h4>概览</h4><p>资产、风险、行情和交易摘要。</p></div>
+              <div class="feature-card"><div class="feature-icon">02</div><h4>行情</h4><p>自选、涨跌幅、深度和品种筛选。</p></div>
+              <div class="feature-card"><div class="feature-icon">03</div><h4>订单</h4><p>当前委托、历史订单和成交记录。</p></div>
+              <div class="feature-card"><div class="feature-icon">04</div><h4>持仓</h4><p>仓位、保证金、止盈止损和风险率。</p></div>
+              <div class="feature-card"><div class="feature-icon">05</div><h4>资金</h4><p>充值、提现、划转和流水。</p></div>
+              <div class="feature-card"><div class="feature-icon">06</div><h4>安全</h4><p>2FA、设备、密码和提现白名单。</p></div>
+              <div class="feature-card"><div class="feature-icon">07</div><h4>设置</h4><p>偏好、语言、主题和通知。</p></div>
+              <div class="feature-card"><div class="feature-icon">08</div><h4>我的</h4><p>移动端账户入口与低频功能聚合。</p></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="artboard mobile-prototype" aria-labelledby="mobile-home-title">
+        <div class="artboard-caption">
+          <strong id="mobile-home-title">画板 02 / 移动官方首页与移动交易入口</strong>
+          <span>目标：手机端不塞满顶部导航，底部保留 5 个最高频入口，其余进入“我的”。</span>
+        </div>
+        <div class="mobile-row">
+          <div class="phone-frame">
+            <div class="mobile-home">
+              <div class="phone-top">
+                <div class="brand"><span class="brand-mark">FX</span><span>FX Trader</span></div>
+                <a class="button" href="#">登录</a>
+              </div>
+              <div class="mobile-hero">
+                <span class="eyebrow">官方主页</span>
+                <h2>行情、交易与账户入口清晰可达</h2>
+                <p>手机首屏先呈现品牌、行情和主要操作，减少进入后再寻找功能的成本。</p>
+                <div class="mobile-cta">
+                  <a class="button" href="#">进入终端</a>
+                  <a class="ghost-button" href="#">看行情</a>
+                </div>
+              </div>
+              <div class="mobile-tickers">
+                <div class="ticker-card"><small>BTC/USDT</small><b>68,421.50</b><div class="up">+2.16%</div></div>
+                <div class="ticker-card"><small>ETH/USDT</small><b>3,562.80</b><div class="down">-0.34%</div></div>
+              </div>
+              <div class="mobile-feature-grid">
+                <div class="feature-card"><div class="feature-icon">M1</div><h4>概览</h4><p>资产、风险和今日表现。</p></div>
+                <div class="feature-card"><div class="feature-icon">M2</div><h4>行情</h4><p>自选、榜单和搜索。</p></div>
+                <div class="feature-card"><div class="feature-icon">M3</div><h4>订单</h4><p>委托、历史与成交。</p></div>
+                <div class="feature-card"><div class="feature-icon">M4</div><h4>我的</h4><p>资金、安全、设置聚合。</p></div>
+              </div>
+              <nav class="bottom-nav" aria-label="移动首页底部导航">
+                <a class="active" href="#">首页</a>
+                <a href="#">终端</a>
+                <a href="#">行情</a>
+                <a href="#">订单</a>
+                <a href="#">我的</a>
+              </nav>
+            </div>
+          </div>
+
+          <div class="phone-frame">
+            <div class="phone-terminal">
+              <div class="phone-top">
+                <div class="brand"><span class="brand-mark">FX</span><span>终端</span></div>
+                <a class="ghost-button" href="#">搜索</a>
+              </div>
+              <div class="mobile-symbol">
+                <h3>BTC/USDT <span class="price-text up">68,421.50</span></h3>
+                <div class="quote-grid">
+                  <div class="quote-box"><span>24h 高</span><b class="mono">69,180</b></div>
+                  <div class="quote-box"><span>24h 低</span><b class="mono">66,920</b></div>
+                  <div class="quote-box"><span>涨跌</span><b class="mono up">+2.16%</b></div>
+                </div>
+              </div>
+              <div class="mobile-chart">
+                <div class="timeframe-bar">
+                  <span>1m</span><span class="active">15m</span><span>1h</span><span>1d</span>
+                </div>
+                <div class="big-candles">
+                  <span class="candle" style="height:86px"></span>
+                  <span class="candle red" style="height:52px"></span>
+                  <span class="candle" style="height:116px"></span>
+                  <span class="candle" style="height:74px"></span>
+                  <span class="candle red" style="height:96px"></span>
+                  <span class="candle" style="height:142px"></span>
+                  <span class="candle" style="height:126px"></span>
+                  <span class="candle red" style="height:68px"></span>
+                  <span class="candle" style="height:156px"></span>
+                  <span class="candle" style="height:132px"></span>
+                </div>
+              </div>
+              <div class="mobile-order-sheet">
+                <div class="segmented"><span class="active-buy">买入</span><span>卖出</span></div>
+                <div class="quick-actions">
+                  <button>限价</button>
+                  <button>市价</button>
+                  <button>止盈止损</button>
+                </div>
+              </div>
+              <nav class="bottom-nav" aria-label="移动交易底部导航">
+                <a href="#">首页</a>
+                <a class="active" href="#">终端</a>
+                <a href="#">行情</a>
+                <a href="#">订单</a>
+                <a href="#">我的</a>
+              </nav>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="artboard terminal-prototype" aria-labelledby="desktop-terminal-title">
+        <div class="artboard-caption">
+          <strong id="desktop-terminal-title">画板 03 / 桌面交易终端</strong>
+          <span>目标：专业交易界面保留高信息密度，顶部仍能一行回到各个用户功能域。</span>
+        </div>
+        <div class="desktop-frame terminal-screen">
+          <div class="terminal-layout">
+            <nav class="top-nav" aria-label="交易终端主导航">
+              <div class="brand"><span class="brand-mark">FX</span><span>FX Trader</span></div>
+              <div class="nav-links">
+                <a href="#">首页</a>
+                <a href="#">概览</a>
+                <a class="active" href="#">终端</a>
+                <a href="#">行情</a>
+                <a href="#">订单</a>
+                <a href="#">持仓</a>
+                <a href="#">资金</a>
+                <a href="#">安全</a>
+                <a href="#">设置</a>
+              </div>
+              <div class="nav-actions">
+                <a class="ghost-button" href="#">简体中文</a>
+                <a class="button" href="#">账户</a>
+              </div>
+            </nav>
+            <aside class="market-sidebar">
+              <div class="panel-title">市场 <span>自选</span></div>
+              <div class="search-box">搜索品种 / Symbol</div>
+              <div class="market-row active"><div><b>BTC/USDT</b><br /><small>Bitcoin</small></div><b class="up">+2.16%</b></div>
+              <div class="market-row"><div><b>ETH/USDT</b><br /><small>Ethereum</small></div><b class="down">-0.34%</b></div>
+              <div class="market-row"><div><b>EUR/USD</b><br /><small>Forex</small></div><b class="up">+0.42%</b></div>
+              <div class="market-row"><div><b>XAU/USD</b><br /><small>Gold</small></div><b class="up">+0.64%</b></div>
+              <div class="market-row"><div><b>GBP/USD</b><br /><small>Forex</small></div><b class="down">-0.18%</b></div>
+            </aside>
+            <section class="chart-workspace">
+              <div class="symbol-header">
+                <div>
+                  <h3>BTC/USDT 永续</h3>
+                  <span class="terminal-muted">Binance Futures / Cross 10x</span>
+                </div>
+                <div class="symbol-stat"><span>最新价</span><b class="mono up">68,421.50</b></div>
+                <div class="symbol-stat"><span>24h 涨跌</span><b class="mono up">+2.16%</b></div>
+                <div class="symbol-stat"><span>成交量</span><b class="mono">2.84B</b></div>
+                <div class="symbol-stat"><span>资金费率</span><b class="mono">0.0100%</b></div>
+              </div>
+              <div class="chart-full">
+                <div class="timeframe-bar">
+                  <span>1m</span><span>5m</span><span class="active">15m</span><span>1h</span><span>4h</span><span>1d</span>
+                </div>
+                <div class="chart-price-axis">
+                  <span>69,200</span><span>68,800</span><span>68,400</span><span>68,000</span><span>67,600</span>
+                </div>
+                <div class="big-candles">
+                  <span class="candle" style="height:100px"></span>
+                  <span class="candle red" style="height:78px"></span>
+                  <span class="candle" style="height:142px"></span>
+                  <span class="candle" style="height:116px"></span>
+                  <span class="candle red" style="height:92px"></span>
+                  <span class="candle" style="height:174px"></span>
+                  <span class="candle" style="height:132px"></span>
+                  <span class="candle red" style="height:118px"></span>
+                  <span class="candle" style="height:196px"></span>
+                  <span class="candle" style="height:226px"></span>
+                  <span class="candle red" style="height:148px"></span>
+                  <span class="candle" style="height:250px"></span>
+                  <span class="candle" style="height:214px"></span>
+                  <span class="candle red" style="height:168px"></span>
+                  <span class="candle" style="height:278px"></span>
+                </div>
+                <div class="volume-bars">
+                  <span style="height:22px"></span><span style="height:34px"></span><span style="height:18px"></span>
+                  <span style="height:41px"></span><span style="height:28px"></span><span style="height:46px"></span>
+                  <span style="height:32px"></span><span style="height:26px"></span><span style="height:48px"></span>
+                  <span style="height:36px"></span><span style="height:20px"></span><span style="height:42px"></span>
+                  <span style="height:31px"></span><span style="height:27px"></span><span style="height:44px"></span>
+                </div>
+              </div>
+            </section>
+            <aside class="trade-sidebar">
+              <section>
+                <div class="panel-title">盘口 <span class="mono">Spread 0.50</span></div>
+                <div class="book-list">
+                  <div class="book-line down"><span>68,426.0</span><span>0.420</span><span>28.7K</span></div>
+                  <div class="book-line down"><span>68,425.5</span><span>1.204</span><span>82.3K</span></div>
+                  <div class="book-line down"><span>68,425.0</span><span>0.680</span><span>46.5K</span></div>
+                  <div class="book-line up"><span>68,424.5</span><span>1.880</span><span>128.6K</span></div>
+                  <div class="book-line up"><span>68,424.0</span><span>0.760</span><span>52.0K</span></div>
+                  <div class="book-line up"><span>68,423.5</span><span>2.120</span><span>145.0K</span></div>
+                </div>
+              </section>
+              <section>
+                <div class="panel-title">下单 <span>限价</span></div>
+                <div class="order-form" style="padding:12px">
+                  <div class="segmented"><span class="active-buy">买入</span><span>卖出</span></div>
+                  <div class="input-like"><span>价格</span><b class="mono">68,421.50</b></div>
+                  <div class="input-like"><span>数量</span><b class="mono">0.100 BTC</b></div>
+                  <div class="input-like"><span>可用</span><b class="mono">12,840 USDT</b></div>
+                  <button class="buy-button">提交买单</button>
+                </div>
+              </section>
+            </aside>
+            <div class="terminal-bottom">
+              <section class="position-table">
+                <div class="panel-title" style="border:0; padding:0 0 10px">持仓 / 当前委托</div>
+                <div class="table-head"><span>品种</span><span>方向</span><span>数量</span><span>开仓价</span><span>标记价</span><span>未实现盈亏</span></div>
+                <div class="table-row"><b>BTC/USDT</b><span class="up">Long</span><span>0.42</span><span>67,820.0</span><span>68,421.5</span><b class="up">+252.63</b></div>
+                <div class="table-row"><b>ETH/USDT</b><span class="down">Short</span><span>2.80</span><span>3,612.4</span><span>3,562.8</span><b class="up">+138.88</b></div>
+              </section>
+              <aside class="order-ticket">
+                <div class="metric-box"><small class="terminal-muted">账户权益</small><br /><b class="mono">16,428.92 USDT</b></div>
+                <div class="metric-box" style="margin-top:10px"><small class="terminal-muted">风险率</small><br /><b class="mono">42%</b></div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="artboard account-prototype" aria-labelledby="account-title">
+        <div class="artboard-caption">
+          <strong id="account-title">画板 04 / 账户与我的工作台</strong>
+          <span>目标：资金、安全、设置等低频但关键的功能有稳定入口，移动端通过“我的”聚合。</span>
+        </div>
+        <div class="desktop-frame">
+          <div class="account-layout">
+            <aside class="account-sidebar">
+              <div class="brand"><span class="brand-mark">FX</span><span>FX Trader</span></div>
+              <nav class="account-nav" aria-label="账户侧边导航">
+                <a class="active" href="#">账户概览</a>
+                <a href="#">订单</a>
+                <a href="#">持仓</a>
+                <a href="#">资金</a>
+                <a href="#">安全</a>
+                <a href="#">设置</a>
+                <a href="#">帮助中心</a>
+              </nav>
+            </aside>
+            <main class="account-main">
+              <div class="account-topbar">
+                <strong>我的工作台</strong>
+                <div class="nav-actions">
+                  <a class="ghost-button" style="color:#334155; border-color:#cbd5e1; background:#ffffff" href="#">切换明暗</a>
+                  <a class="button" href="#">进入终端</a>
+                </div>
+              </div>
+              <div class="account-content">
+                <div class="asset-summary">
+                  <div class="asset-card">
+                    <span>账户总权益</span>
+                    <div class="asset-number">16,428.92</div>
+                    <small class="up">今日 +428.16 USDT</small>
+                  </div>
+                  <div class="asset-card"><span>可用余额</span><div class="asset-number">12,840.00</div><small>USDT</small></div>
+                  <div class="asset-card"><span>保证金占用</span><div class="asset-number">3,228.64</div><small>Cross margin</small></div>
+                  <div class="asset-card"><span>风险率</span><div class="asset-number">42%</div><small>正常</small></div>
+                </div>
+                <div class="account-grid">
+                  <div class="account-card"><span class="status-pill">正常</span><h4>订单</h4><p>当前委托 4 笔，今日成交 18 笔，支持快速撤单与筛选。</p></div>
+                  <div class="account-card"><span class="status-pill">持仓中</span><h4>持仓</h4><p>2 个活跃仓位，止盈止损与保证金状态集中展示。</p></div>
+                  <div class="account-card"><span class="status-pill">已验证</span><h4>资金</h4><p>充值、提现、划转和账单流水独立呈现，避免和交易终端混杂。</p></div>
+                  <div class="account-card"><span class="status-pill">已开启</span><h4>安全</h4><p>2FA、设备管理、密码、提现白名单和风控提醒。</p></div>
+                </div>
+                <div class="setting-list">
+                  <div class="setting-card"><h4>交易偏好</h4><p>默认杠杆、订单确认、滑点保护、K 线周期。</p></div>
+                  <div class="setting-card"><h4>通知设置</h4><p>成交、爆仓预警、资金变动和登录提醒。</p></div>
+                  <div class="setting-card"><h4>身份与合规</h4><p>KYC 状态、地区限制和账户等级。</p></div>
+                  <div class="setting-card"><h4>帮助与客服</h4><p>帮助中心、工单、公告和服务状态。</p></div>
+                </div>
+              </div>
+            </main>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script>
+      const view = new URLSearchParams(window.location.search).get("view");
+      if (view) {
+        document.body.dataset.view = view;
+      }
+    </script>
+  </body>
+</html>

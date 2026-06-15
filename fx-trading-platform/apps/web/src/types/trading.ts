@@ -1,0 +1,127 @@
+export type SymbolItem = {
+  symbol: string
+  displayName: string
+  assetClass: string
+  baseCurrency: string
+  quoteCurrency: string
+  minLot: string
+  maxLot: string
+  leverage: number
+  enabled: boolean
+  provider?: string | null
+  providerSymbol?: string | null
+  tradable?: boolean | null
+}
+
+export type Quote = {
+  type: 'quote'
+  symbol: string
+  bid: string
+  ask: string
+  mid: string
+  spread: string
+  source: string
+  timestamp: number
+}
+
+export type Candle = {
+  timestamp: number
+  open: string
+  high: string
+  low: string
+  close: string
+  volume: string
+}
+
+export type Amount = string | number
+
+export type AccountSummary = {
+  id: string
+  accountType: string
+  baseCurrency: string
+  balance: Amount
+  equity: Amount
+  usedMargin: Amount
+  freeMargin: Amount
+  marginLevel: Amount | null
+  leverage: number
+  status: string
+}
+
+export type OrderPayload = {
+  accountId: string
+  symbol: string
+  side: 'BUY' | 'SELL'
+  orderType: 'MARKET' | 'LIMIT' | 'STOP'
+  quantity: string
+  price?: string
+  clientOrderId: string
+  lots: string
+  requestedPrice?: string
+  stopLoss?: string
+  takeProfit?: string
+  idempotencyKey: string
+  leverage?: number
+}
+
+export type UpdateOrderPayload = {
+  quantity?: string
+  price?: string
+  stopLoss?: string
+  takeProfit?: string
+}
+
+export type UpdatePositionProtectionPayload = {
+  stopLoss?: string
+  takeProfit?: string
+}
+
+export type OrderEventResponse = {
+  id: string
+  orderId: string
+  eventType: string
+  fromStatus: string | null
+  toStatus: string
+  reasonCode: string | null
+  message: string | null
+  createdAt: string
+}
+
+export type LedgerEntry = {
+  id: string
+  accountId: string
+  entryType: string
+  amount: Amount
+  balanceAfter: Amount
+  currency: string
+  referenceType: string | null
+  referenceId: string | null
+  description: string | null
+  createdAt: string | null
+}
+
+export type FundOrder = {
+  id: string
+  userId: string
+  accountId: string
+  orderType: 'RECHARGE' | 'WITHDRAWAL' | string
+  amount: Amount
+  currency: string
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | string
+  paymentMethodId: string | null
+  note: string | null
+  reviewReason: string | null
+  reviewedBy: string | null
+  reviewedAt: string | null
+  fundOperationId: string | null
+  createdAt: string | null
+}
+
+export type FundOrderPayload = {
+  accountId: string
+  orderType: 'RECHARGE' | 'WITHDRAWAL'
+  amount: string
+  currency: string
+  paymentMethodId?: string | null
+  note?: string
+}

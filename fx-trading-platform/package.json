@@ -1,0 +1,27 @@
+{
+  "name": "fx-trading-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify:architecture": "node scripts/verify-architecture.mjs",
+    "smoke:backend": "node scripts/smoke-backend.mjs",
+    "smoke:admin": "node scripts/smoke-admin.mjs",
+    "smoke:real-trading-loop": "node scripts/smoke-real-trading-loop.mjs",
+    "smoke:user-core-pages": "node scripts/smoke-user-core-pages.mjs",
+    "smoke:trading-login-gate": "node scripts/smoke-trading-login-gate.mjs",
+    "smoke:visual-qa": "node scripts/smoke-visual-qa.mjs",
+    "web:smoke:trading": "node scripts/smoke-trading-login-gate.mjs",
+    "web:dev": "npm --workspace apps/web run dev",
+    "web:test": "npm --workspace apps/web run test",
+    "web:build": "npm --workspace apps/web run build",
+    "web:bundle-budget": "npm run web:build && node scripts/check-web-bundle-budget.mjs",
+    "audit:large-files": "node scripts/audit-large-files.mjs",
+    "admin:dev": "npm --workspace apps/admin run dev",
+    "admin:build": "npm --workspace apps/admin run build"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

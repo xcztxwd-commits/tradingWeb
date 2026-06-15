@@ -1,0 +1,70 @@
+package com.fxplatform.common.security;
+
+import com.fxplatform.auth.repository.UserRepository;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+/**
+ * JwtAuthenticationFilter 是通用基础设施模块的安全认证组件。
+ */
+@Component
+@RequiredArgsConstructor
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+  public static final String INVALID_BEARER_TOKEN_ATTRIBUTE =
+      "com.fxplatform.common.security.INVALID_BEARER_TOKEN";
+
+  private final JwtService jwtService;
+  private final UserRepository userRepository;
+
+  /**
+//   * 处理 doFilterInternal 安全认证逻辑。
+   */
+  @Override
+  protected void doFilterInternal(
+      HttpServletRequest request,
+      HttpServletResponse response,
+      FilterChain filterChain
+  ) throws ServletException, IOException {
+    String authorization = request.getHeader("Authorization");
+    if (authorization != null && authorization.startsWith("Bearer ")) {
+      if (!authenticate(request, authorization.substring(7))) {
+        request.setAttribute(INVALID_BEARER_TOKEN_ATTRIBUTE, true);
+      }
+    }
+    filterChain.doFilter(request, response);
+  }
+
+  /**
+   * 处理 authenticate 安全认证逻辑。
+   */
+  private boolean authenticate(HttpServletRequest request, String token) {
+    if (SecurityContextHolder.getContext().getAuthentication() != null) {
+      return true;
+    }
+    UUID userId;
+    try {
+      userId = jwtService.parseUserId(token);
+    } catch (RuntimeException ex) {
+      return false;
+    }
+    return userRepository.findById(userId).map(user -> {
+      UserPrincipal principal = UserPrincipal.from(user);
+      UsernamePasswordAuthenticationToken authentication =
+          new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
+      authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+      SecurityContextHolder.getContext().setAuthentication(authentication);
+      return true;
+    }).orElse(false);
+  }
+}

@@ -1,0 +1,21 @@
+spring:
+  task:
+    scheduling:
+      enabled: false
+
+admin:
+  bootstrap:
+    enabled: false
+
+market:
+  demo-quotes:
+    enabled: false
+  test-data:
+    enabled: false
+
+execution:
+  mode: broker
+
+trading:
+  pending-order-execution-enabled: false
+  protective-order-execution-enabled: false

@@ -1,0 +1,18 @@
+admin:
+  bootstrap:
+    enabled: ${ADMIN_BOOTSTRAP_ENABLED:true}
+    email: ${ADMIN_BOOTSTRAP_EMAIL:admin-smoke@example.com}
+    password: ${ADMIN_BOOTSTRAP_PASSWORD:Password123!}
+
+market:
+  demo-quotes:
+    enabled: ${MARKET_DEMO_QUOTES_ENABLED:true}
+  test-data:
+    enabled: ${MARKET_TEST_DATA_ENABLED:true}
+
+execution:
+  mode: ${EXECUTION_MODE:demo}
+
+logging:
+  level:
+    com.fxplatform: DEBUG

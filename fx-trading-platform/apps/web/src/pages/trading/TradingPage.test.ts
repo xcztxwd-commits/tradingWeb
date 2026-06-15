@@ -1,0 +1,205 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { describe, it } from 'node:test'
+
+const currentDir = dirname(fileURLToPath(import.meta.url))
+const projectRoot = join(currentDir, '..', '..', '..', '..', '..')
+const source = readFileSync(join(currentDir, 'TradingPage.tsx'), 'utf8')
+const sourceLines = source.split(/\r?\n/)
+const desktopSource = readFileSync(join(currentDir, 'components', 'TradingDesktopView.tsx'), 'utf8')
+const mobileSource = readFileSync(join(currentDir, 'components', 'TradingMobileView.tsx'), 'utf8')
+const settingsDialogSource = readFileSync(join(currentDir, 'components', 'TradingSettingsDialog.tsx'), 'utf8')
+const marketSelectionSource = readFileSync(join(currentDir, 'tradingPageMarketSelection.ts'), 'utf8')
+const sessionStatusSource = readFileSync(join(currentDir, 'tradingPageSessionStatus.ts'), 'utf8')
+const viewModelsSource = readFileSync(join(currentDir, 'tradingPageViewModels.ts'), 'utf8')
+const chartSettingsSource = readFileSync(join(currentDir, 'useTradingChartSettings.ts'), 'utf8')
+const styles = readFileSync(join(currentDir, 'TradingPage.module.css'), 'utf8')
+const layoutStyles = styles.slice(styles.indexOf('.layout {'), styles.indexOf('.desktopTerminal {'))
+const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8'))
+const tradingSmokeSource = readFileSync(join(projectRoot, 'scripts', 'smoke-trading-login-gate.mjs'), 'utf8')
+
+describe('TradingPage terminal viewport', () => {
+  it('uses a long-page terminal shell instead of pinning the desktop workspace to one viewport', () => {
+    assert.match(styles, /\.page\s*{[\s\S]*min-height:\s*100vh[\s\S]*margin:\s*0[\s\S]*padding:\s*0[\s\S]*background:\s*var\(--trading-page-bg\)/)
+    assert.doesNotMatch(layoutStyles, /\n\s+height:\s*calc\(100vh - 16px\)/)
+    assert.match(layoutStyles, /min-height:\s*calc\(100vh - 16px\)/)
+    assert.match(styles, /--trading-page-bg:\s*#0b0e11/)
+    assert.match(styles, /\.terminalTicker/)
+    assert.match(styles, /\.binanceGrid/)
+  })
+
+  it('allows the terminal page and desktop layout to extend vertically in the browser document', () => {
+    assert.match(styles, /\.page\s*{[\s\S]*overflow-x:\s*hidden;[\s\S]*overflow-y:\s*auto;/)
+    assert.match(styles, /\.desktopTerminal\s*{[\s\S]*align-items:\s*start;/)
+    assert.doesNotMatch(styles, /\.leftRail\s*{[\s\S]*position:\s*sticky;/)
+  })
+
+  it('passes the watchlist and symbol header into the same draggable workspace as the trading panels', () => {
+    assert.match(desktopSource, /watchlist=\{[\s\S]*<MarketSidebar/)
+    assert.match(desktopSource, /header=\{[\s\S]*<SymbolHeader/)
+    assert.match(desktopSource, /<TradingWorkspace[\s\S]*watchlist=\{[\s\S]*header=\{[\s\S]*chart=\{/)
+    assert.doesNotMatch(desktopSource, /className=\{styles\.leftRail\}/)
+  })
+
+  it('passes a slash-separated mobile chart title to the workspace', () => {
+    assert.match(source, /chartTitle:\s*formatTradingChartTitle\(selectedMarket,\s*t\)/)
+    assert.match(desktopSource, /chartTitle=\{chartTitle\}/)
+    assert.match(marketSelectionSource, /function formatTradingChartTitle\(market: TradingMarket,\s*t: Translate = defaultTranslate\)/)
+    assert.match(marketSelectionSource, /\$\{market\.base\}\/\$\{market\.quote\} \$\{t\('chart\.titleSuffix'\)\}/)
+  })
+
+  it('wires the TradePanel to the real trading session submit path', () => {
+    assert.match(desktopSource, /trade=\{[\s\S]*<TradePanel[\s\S]*symbol=\{symbol\}/)
+    assert.match(source, /<MobileOrderSheet[\s\S]*<TradePanel[\s\S]*compact[\s\S]*symbol=\{selectedSymbol\}/)
+    assert.match(source, /accountId=\{accountId\}/)
+    assert.match(source, /balances=\{balances\}/)
+    assert.match(source, /sessionReady=\{sessionReady\}/)
+    assert.match(source, /sessionMode=\{tradePanelSessionMode\}/)
+    assert.match(source, /sessionError=\{sessionError\}/)
+    assert.doesNotMatch(desktopSource, /orderError=\{lastOrderError\}/)
+    assert.match(desktopSource, /onSubmitOrder=\{submitOrder\}/)
+    assert.match(desktopSource, /onRetrySession=\{onRetrySession\}/)
+  })
+
+  it('wires clicked order book and recent trade prices into the limit order form', () => {
+    assert.match(source, /tradePricePrefill/)
+    assert.match(source, /handleSelectPrice/)
+    assert.match(source, /setTradePricePrefill\(\{ id: Date\.now\(\), price \}\)/)
+    assert.match(desktopSource, /onSelectPrice=\{onSelectPrice\}/)
+    assert.match(desktopSource, /pricePrefill=\{tradePricePrefill\}/)
+    assert.match(source, /<MobileDrawer[\s\S]*title="Quote"[\s\S]*onSelectPrice=\{handleSelectPrice\}/)
+    assert.match(source, /pricePrefill=\{tradePricePrefill\}/)
+  })
+
+  it('keeps TradingPage as an orchestration shell with extracted views', () => {
+    assert.match(source, /<TradingDesktopView/)
+    assert.match(source, /<TradingMobileView/)
+    assert.match(source, /<TradingSettingsDialog/)
+    assert.doesNotMatch(source, /<TradingWorkspace[\s\S]*<ChartWorkspace[\s\S]*<TradePanel[\s\S]*<BottomAccountPanel/)
+  })
+
+  it('wires the bottom account panel to real trading session data', () => {
+    assert.match(desktopSource, /bottom=\{[\s\S]*<BottomAccountPanel/)
+    assert.match(mobileSource, /accountPanel=\{[\s\S]*<BottomAccountPanel/)
+    assert.match(desktopSource, /account=\{accountPanel\.account\}/)
+    assert.match(desktopSource, /orders=\{accountPanel\.orders\}/)
+    assert.match(desktopSource, /positions=\{accountPanel\.positions\}/)
+    assert.match(desktopSource, /ledgerEntries=\{accountPanel\.ledgerEntries\}/)
+    assert.match(desktopSource, /currentSymbol=\{symbol\}/)
+    assert.match(mobileSource, /currentSymbol=\{symbol\}/)
+    assert.match(desktopSource, /onClosePosition=\{accountPanel\.onClosePosition\}/)
+  })
+
+  it('selects the initial trading symbol from the markets query parameter', () => {
+    assert.match(source, /useSearchParams/)
+    assert.match(source, /const querySymbol = searchParams\.get\('symbol'\)/)
+    assert.match(source, /normalizeTradingSymbol\(querySymbol\) \?\? initialTradingSymbol/)
+    assert.match(source, /setSelectedSymbol\(normalizedQuerySymbol\)/)
+  })
+
+  it('keeps first-paint terminal regions in loading state until the session resolves', () => {
+    assert.match(source, /const terminalLoading = sessionMode === 'loading'/)
+    assert.doesNotMatch(source, /mobileTerminalFallback|正在连接交易终端|Connecting trading terminal/)
+    assert.match(desktopSource, /market=\{[\s\S]*<RightTradingPanel[\s\S]*loading=\{terminalLoading\}/)
+    assert.match(desktopSource, /bottom=\{[\s\S]*<BottomAccountPanel[\s\S]*loading=\{accountPanel\.loading\}/)
+    assert.match(source, /<MobileDrawer[\s\S]*title="Quote"[\s\S]*<RightTradingPanel[\s\S]*loading=\{terminalLoading\}/)
+  })
+
+  it('limits realtime quote subscriptions instead of subscribing every visible market', () => {
+    assert.match(source, /getRealtimeQuoteMarkets/)
+    assert.match(source, /const quoteMarkets = useMemo/)
+    assert.match(source, /useTradingQuoteMap\(quoteMarkets,\s*token\)/)
+    assert.doesNotMatch(source, /useTradingQuoteMap\(visibleMarkets,\s*token\)/)
+  })
+
+  it('exposes a trading settings dialog with the global theme switcher', () => {
+    assert.match(desktopSource, /aria-label=\{t\('trading\.openTradingSettings'\)\}/)
+    assert.match(source, /<TradingSettingsDialog[\s\S]*layoutControls=\{workspaceLayoutControls\}/)
+    assert.match(settingsDialogSource, /role="dialog"[\s\S]*aria-modal="true"[\s\S]*aria-label=\{t\('trading\.tradingSettings'\)\}/)
+    assert.match(settingsDialogSource, /<ThemeSwitcher \/>/)
+    assert.doesNotMatch(source, /saveTradingThemeMode\(nextMode\)/)
+  })
+
+  it('moves workspace layout presets into the trading settings dialog', () => {
+    assert.match(source, /useResizableLayout\(\)/)
+    assert.match(source, /workspaceLayoutControls/)
+    assert.match(desktopSource, /layoutControls=\{workspaceLayoutControls\}/)
+    assert.match(settingsDialogSource, /trading\.workspaceLayout/)
+    assert.match(settingsDialogSource, /layoutControls\.applyPreset\('default'\)/)
+    assert.match(settingsDialogSource, /layoutControls\.applyPreset\('chart-focus'\)/)
+    assert.match(settingsDialogSource, /layoutControls\.applyPreset\('order-focus'\)/)
+    assert.match(settingsDialogSource, /layoutControls\.resetLayout/)
+    assert.doesNotMatch(desktopSource, /sessionTelemetry/)
+  })
+
+  it('keeps guest watch mode non-blocking until a trade action asks for login', () => {
+    assert.match(source, /LoginPromptDialog/)
+    assert.match(source, /loginPromptRequested/)
+    assert.match(source, /pendingTradeOpen/)
+    assert.match(source, /sessionMode === 'loading'[\s\S]*setPendingTradeOpen\(true\)/)
+    assert.match(source, /if \(!pendingTradeOpen \|\| sessionMode === 'loading'\) return/)
+    assert.match(source, /setLoginPromptRequested\(true\)/)
+    assert.match(source, /open=\{loginRequired && loginPromptRequested\}/)
+    assert.match(source, /handleLoginRedirect/)
+    assert.match(source, /navigate\(`\/login\?redirect=\$\{encodeURIComponent\('\/trading'\)\}`\)/)
+    assert.match(source, /onClose=\{\(\) => setLoginPromptRequested\(false\)\}/)
+    assert.match(source, /loginRequired=\{loginRequired\}/)
+    assert.match(source, /onLoginRequired=\{handleTradeLoginRequired\}/)
+    assert.doesNotMatch(source, /loginRequired && !loginPromptDismissed/)
+    assert.doesNotMatch(source, /onLoginRequired=\{handleLoginRedirect\}/)
+  })
+
+  it('exposes a reusable trading smoke command with mobile Trade click coverage', () => {
+    assert.equal(packageJson.scripts['web:smoke:trading'], 'node scripts/smoke-trading-login-gate.mjs')
+    assert.match(tradingSmokeSource, /await verifyMobileTradeAction\(/)
+    assert.match(tradingSmokeSource, /launchChrome\(\{ windowSize: '390,844' \}\)/)
+    assert.match(tradingSmokeSource, /Emulation\.setDeviceMetricsOverride/)
+    assert.match(tradingSmokeSource, /mobile Trade action opens login prompt/)
+    assert.match(tradingSmokeSource, /mobile Trade action opens order sheet/)
+    assert.match(tradingSmokeSource, /button\.textContent\?\.trim\(\) === 'Trade'/)
+  })
+
+  it('keeps session status models for compact panel and mobile surfaces without a desktop telemetry row', () => {
+    assert.match(source, /sessionAuthStatus/)
+    assert.match(source, /getTradingSessionStatusLabel\(sessionMode, sessionAuthStatus,\s*t\)/)
+    assert.match(source, /getTradingSessionStatusText\(\{ sessionMode, sessionAuthStatus, sessionError, loginRequired,\s*t \}\)/)
+    assert.doesNotMatch(source, /const showSessionRetry = sessionMode === 'error' \|\| sessionAuthStatus === 'invalid_token'/)
+    assert.match(sessionStatusSource, /case 'guest':[\s\S]*trading\.publicMarketMode/)
+    assert.match(sessionStatusSource, /case 'valid_token':[\s\S]*trading\.accountLinkConnected/)
+    assert.match(sessionStatusSource, /case 'invalid_token':[\s\S]*trading\.loginExpired/)
+    assert.match(sessionStatusSource, /trading\.loginExpiredRetry/)
+    assert.doesNotMatch(desktopSource, /className=\{styles\.sessionTelemetry\}/)
+    assert.doesNotMatch(styles, /\.sessionTelemetry/)
+  })
+
+  it('does not keep an offline-preview session mode in the terminal UI state text', () => {
+    assert.doesNotMatch(source, /offline-preview/)
+    assert.doesNotMatch(source, /本地预览模式可用/)
+  })
+
+  it('uses global design-system themes while keeping the chart API on dark or light mode', () => {
+    assert.match(source, /useTheme/)
+    assert.match(source, /useTradingChartSettings\(\s*selectedSymbol,\s*currentTheme\.colorScheme\s*\)/)
+    assert.match(chartSettingsSource, /chartThemeMode:\s*colorScheme === 'light' \? 'light' : 'dark'/)
+    assert.match(desktopSource, /themeMode=\{chartThemeMode\}/)
+    assert.match(mobileSource, /themeMode=\{chartThemeMode\}/)
+    assert.doesNotMatch(source, /data-theme=\{themeMode\}/)
+    assert.doesNotMatch(styles, /\.page\[data-theme='light'\]\s*{[\s\S]*--trading-page-bg:/)
+    assert.match(styles, /--trading-chart-grid-horizontal:/)
+  })
+
+  it('does not use local mock chart history for forex markets', () => {
+    assert.match(viewModelsSource, /function shouldAllowChartMockFallback\(market: TradingMarket\)/)
+    assert.match(viewModelsSource, /return !market\.provider && market\.category !== 'fx'/)
+    assert.match(desktopSource, /allowMockFallback=\{shouldAllowChartMockFallback\(market\)\}/)
+    assert.match(mobileSource, /allowMockFallback=\{shouldAllowChartMockFallback\(market\)\}/)
+    assert.doesNotMatch(desktopSource, /allowMockFallback=\{!market\.provider\}/)
+    assert.doesNotMatch(mobileSource, /allowMockFallback=\{!market\.provider\}/)
+  })
+
+  it('keeps TradingPage below the orchestration size budget', () => {
+    assert.ok(sourceLines.length <= 330, `TradingPage.tsx has ${sourceLines.length} lines`)
+  })
+})
