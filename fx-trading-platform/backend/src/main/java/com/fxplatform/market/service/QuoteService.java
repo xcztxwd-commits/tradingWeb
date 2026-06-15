@@ -6,16 +6,11 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.market.SymbolNormalizer;
-import com.fxplatform.market.adapter.MarketDataProvider;
 import com.fxplatform.market.dto.MarketStatusResponse;
 import com.fxplatform.market.dto.QuoteResponse;
-import com.fxplatform.market.entity.SymbolEntity;
-import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.market.provider.MarketDataRouter;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.Instant;
-import java.util.Locale;
-import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -28,8 +23,7 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class QuoteService {
 
-  private final SymbolRepository symbolRepository;
-  private final MarketDataProvider marketDataProvider;
+  private final MarketDataRouter marketDataRouter;
   private final StringRedisTemplate redisTemplate;
   private final ObjectMapper objectMapper;
 
@@ -41,32 +35,25 @@ public class QuoteService {
 
   public QuoteResponse latestQuote(String symbol) {
     String normalizedSymbol = SymbolNormalizer.normalize(symbol);
-    Optional<SymbolEntity> symbolEntity = symbolRepository.findBySymbol(normalizedSymbol);
-    String providerSymbol = symbolEntity
-        .map(SymbolEntity::getProviderSymbol)
-        .orElseGet(() -> defaultForexProviderSymbol(normalizedSymbol));
 
     QuoteResponse cached = readCached(normalizedSymbol);
     if (cached != null && canUseCachedForDisplay(cached)) {
       return cached;
     }
 
-    QuoteResponse quote = fetchLatest(normalizedSymbol, providerSymbol);
+    QuoteResponse quote = fetchLatest(normalizedSymbol);
     cache(quote);
     return quote;
   }
 
   public QuoteResponse freshQuote(String symbol) {
     String normalizedSymbol = SymbolNormalizer.normalize(symbol);
-    SymbolEntity symbolEntity = symbolRepository.findBySymbol(normalizedSymbol)
-        .orElseThrow(() -> new BusinessException("SYMBOL_NOT_FOUND", "Symbol not found"));
-
     QuoteResponse cached = readCached(normalizedSymbol);
     if (cached != null && !isStale(cached)) {
       return cached;
     }
 
-    QuoteResponse quote = fetchLatest(normalizedSymbol, symbolEntity.getProviderSymbol());
+    QuoteResponse quote = fetchLatest(normalizedSymbol);
     if (isStale(quote)) {
       throw new BusinessException("QUOTE_STALE", "Quote is stale");
     }
@@ -83,12 +70,15 @@ public class QuoteService {
 
   public MarketStatusResponse status() {
     return new MarketStatusResponse(
-        marketDataProvider.isConfigured(),
+        true,
         true,
         quoteStaleMs,
-        marketDataProvider.isConfigured()
-            ? "MASSIVE_CONFIGURED"
-            : demoQuotesEnabled ? "USING_DEMO_QUOTES" : "QUOTE_PROVIDER_REQUIRED");
+        "PROVIDER_ROUTING_ENABLED",
+        demoQuotesEnabled,
+        "provider-router",
+        "configured-by-admin",
+        null,
+        "Providers are resolved by admin-managed symbol bindings");
   }
 
   private QuoteResponse readCached(String symbol) {
@@ -103,15 +93,15 @@ public class QuoteService {
     }
   }
 
-  private QuoteResponse fetchLatest(String symbol, String providerSymbol) {
-    return marketDataProvider.fetchLatestQuote(symbol, providerSymbol)
-        .or(() -> marketDataProvider.fetchIndicativeQuote(symbol, providerSymbol, Instant.now()))
-        .orElseGet(() -> {
-          if (!demoQuotesEnabled) {
-            throw new BusinessException("QUOTE_PROVIDER_UNAVAILABLE", "Quote provider unavailable");
-          }
-          return mockQuote(symbol);
-        });
+  private QuoteResponse fetchLatest(String symbol) {
+    try {
+      return marketDataRouter.latestQuote(symbol);
+    } catch (BusinessException ex) {
+      if (!demoQuotesEnabled || !"MARKET_PROVIDER_UNAVAILABLE".equals(ex.getCode())) {
+        throw ex;
+      }
+      return mockQuote(symbol);
+    }
   }
 
   private boolean isStale(QuoteResponse quote) {
@@ -124,7 +114,7 @@ public class QuoteService {
       return demoQuotesEnabled && !isStale(quote);
     }
     if (isProviderBackedSource(quote.source())) {
-      return true;
+      return !isStale(quote);
     }
     return !isStale(quote);
   }
@@ -152,13 +142,6 @@ public class QuoteService {
 
   private String key(String symbol) {
     return "quote:" + symbol;
-  }
-
-  private String defaultForexProviderSymbol(String normalizedSymbol) {
-    if (normalizedSymbol.length() != 6 || !marketDataProvider.isConfigured()) {
-      throw new BusinessException("SYMBOL_NOT_FOUND", "Symbol not found");
-    }
-    return "C:" + normalizedSymbol.toUpperCase(Locale.ROOT);
   }
 
 }

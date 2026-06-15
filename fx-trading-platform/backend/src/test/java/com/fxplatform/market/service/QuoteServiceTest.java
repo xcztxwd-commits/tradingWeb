@@ -4,17 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fxplatform.common.exception.BusinessException;
-import com.fxplatform.market.adapter.MarketDataProvider;
 import com.fxplatform.market.dto.QuoteResponse;
-import com.fxplatform.market.entity.SymbolEntity;
-import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.market.provider.MarketDataRouter;
 import java.math.BigDecimal;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -27,10 +23,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 class QuoteServiceTest {
 
   @Mock
-  private SymbolRepository symbolRepository;
-
-  @Mock
-  private MarketDataProvider marketDataProvider;
+  private MarketDataRouter marketDataRouter;
 
   @Mock
   private StringRedisTemplate redisTemplate;
@@ -41,85 +34,111 @@ class QuoteServiceTest {
   private final ObjectMapper objectMapper = new ObjectMapper();
 
   @Test
-  void latestQuoteNormalizesCommonSymbolSeparators() {
-    SymbolEntity symbol = new SymbolEntity();
-    symbol.setSymbol("EURUSD");
-    symbol.setProviderSymbol("C:EURUSD");
+  void latestQuoteNormalizesCommonSymbolSeparatorsBeforeRouting() {
+    QuoteResponse providerQuote = new QuoteResponse(
+        "quote",
+        "EURUSD",
+        new BigDecimal("1.1"),
+        new BigDecimal("1.2"),
+        new BigDecimal("1.15"),
+        new BigDecimal("0.1"),
+        "massive-quote",
+        System.currentTimeMillis() + 60000);
 
-    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(symbol));
     when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     when(valueOperations.get("quote:EURUSD")).thenReturn(null);
-    when(marketDataProvider.fetchLatestQuote("EURUSD", "C:EURUSD")).thenReturn(Optional.empty());
-    when(marketDataProvider.fetchIndicativeQuote(org.mockito.ArgumentMatchers.eq("EURUSD"), org.mockito.ArgumentMatchers.eq("C:EURUSD"), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.empty());
+    when(marketDataRouter.latestQuote("EURUSD")).thenReturn(providerQuote);
 
-    QuoteService service = new QuoteService(symbolRepository, marketDataProvider, redisTemplate, objectMapper);
-    ReflectionTestUtils.setField(service, "demoQuotesEnabled", true);
+    QuoteService service = service(false);
 
     QuoteResponse quote = service.latestQuote("eur-usd");
 
-    assertThat(quote.symbol()).isEqualTo("EURUSD");
-    assertThat(quote.bid()).isPositive();
-    assertThat(quote.ask()).isGreaterThan(quote.bid());
-    verify(symbolRepository).findBySymbol("EURUSD");
-    verify(marketDataProvider).fetchLatestQuote("EURUSD", "C:EURUSD");
+    assertThat(quote).isSameAs(providerQuote);
+    verify(marketDataRouter).latestQuote("EURUSD");
+    verify(valueOperations).set(org.mockito.ArgumentMatchers.eq("quote:EURUSD"), anyString());
+  }
+
+  @Test
+  void latestQuoteUsesFreshCachedExternalProviderQuoteForMarketDisplay() throws Exception {
+    QuoteResponse cachedProviderQuote = new QuoteResponse(
+        "quote",
+        "EURUSD",
+        new BigDecimal("1.1"),
+        new BigDecimal("1.2"),
+        new BigDecimal("1.15"),
+        new BigDecimal("0.1"),
+        "massive-aggregate",
+        System.currentTimeMillis());
+
+    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+    when(valueOperations.get("quote:EURUSD")).thenReturn(objectMapper.writeValueAsString(cachedProviderQuote));
+
+    QuoteService service = service(false);
+    ReflectionTestUtils.setField(service, "quoteStaleMs", 600_000);
+
+    QuoteResponse quote = service.latestQuote("EURUSD");
+
+    assertThat(quote).isEqualTo(cachedProviderQuote);
+  }
+
+  @Test
+  void latestQuoteRefreshesStaleCachedExternalProviderQuoteForMarketDisplay() throws Exception {
+    QuoteResponse cachedProviderQuote = quote("EURUSD", "massive-aggregate");
+    QuoteResponse providerQuote = new QuoteResponse(
+        "quote",
+        "EURUSD",
+        new BigDecimal("1.2"),
+        new BigDecimal("1.3"),
+        new BigDecimal("1.25"),
+        new BigDecimal("0.1"),
+        "massive-aggregate",
+        System.currentTimeMillis());
+
+    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+    when(valueOperations.get("quote:EURUSD")).thenReturn(objectMapper.writeValueAsString(cachedProviderQuote));
+    when(marketDataRouter.latestQuote("EURUSD")).thenReturn(providerQuote);
+
+    QuoteService service = service(false);
+    ReflectionTestUtils.setField(service, "quoteStaleMs", 100);
+
+    QuoteResponse quote = service.latestQuote("EURUSD");
+
+    assertThat(quote).isSameAs(providerQuote);
+    verify(marketDataRouter).latestQuote("EURUSD");
+    verify(valueOperations).set(org.mockito.ArgumentMatchers.eq("quote:EURUSD"), anyString());
   }
 
   @Test
   void latestQuoteRejectsDemoFallbackWhenDisabled() {
-    SymbolEntity symbol = new SymbolEntity();
-    symbol.setSymbol("EURUSD");
-    symbol.setProviderSymbol("C:EURUSD");
-
-    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(symbol));
     when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     when(valueOperations.get("quote:EURUSD")).thenReturn(null);
-    when(marketDataProvider.fetchLatestQuote("EURUSD", "C:EURUSD")).thenReturn(Optional.empty());
-    when(marketDataProvider.fetchIndicativeQuote(org.mockito.ArgumentMatchers.eq("EURUSD"), org.mockito.ArgumentMatchers.eq("C:EURUSD"), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.empty());
+    when(marketDataRouter.latestQuote("EURUSD"))
+        .thenThrow(new BusinessException("MARKET_PROVIDER_UNAVAILABLE", "Market data provider unavailable"));
 
-    QuoteService service = new QuoteService(symbolRepository, marketDataProvider, redisTemplate, objectMapper);
-    ReflectionTestUtils.setField(service, "demoQuotesEnabled", false);
+    QuoteService service = service(false);
 
     assertThatThrownBy(() -> service.latestQuote("EURUSD"))
-        .isInstanceOf(BusinessException.class)
-        .hasMessageContaining("Quote provider unavailable");
+        .isInstanceOfSatisfying(BusinessException.class, ex ->
+            assertThat(ex.getCode()).isEqualTo("MARKET_PROVIDER_UNAVAILABLE"));
   }
 
   @Test
-  void latestQuoteCanReadProviderForexPairWithoutLocalTradeConfig() {
-    QuoteResponse providerQuote = new QuoteResponse(
-        "quote",
-        "USDCHF",
-        new BigDecimal("0.80418"),
-        new BigDecimal("0.80422"),
-        new BigDecimal("0.80420"),
-        new BigDecimal("0.00004"),
-        "massive-aggregate",
-        1781222400000L
-    );
-
-    when(symbolRepository.findBySymbol("USDCHF")).thenReturn(Optional.empty());
-    when(marketDataProvider.isConfigured()).thenReturn(true);
+  void latestQuoteUsesDemoOnlyWhenExplicitlyEnabled() {
     when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-    when(valueOperations.get("quote:USDCHF")).thenReturn(null);
-    when(marketDataProvider.fetchLatestQuote("USDCHF", "C:USDCHF")).thenReturn(Optional.empty());
-    when(marketDataProvider.fetchIndicativeQuote(org.mockito.ArgumentMatchers.eq("USDCHF"), org.mockito.ArgumentMatchers.eq("C:USDCHF"), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.of(providerQuote));
+    when(valueOperations.get("quote:EURUSD")).thenReturn(null);
+    when(marketDataRouter.latestQuote("EURUSD"))
+        .thenThrow(new BusinessException("MARKET_PROVIDER_UNAVAILABLE", "Market data provider unavailable"));
 
-    QuoteService service = new QuoteService(symbolRepository, marketDataProvider, redisTemplate, objectMapper);
-    ReflectionTestUtils.setField(service, "demoQuotesEnabled", false);
+    QuoteService service = service(true);
 
-    QuoteResponse quote = service.latestQuote("usd-chf");
+    QuoteResponse quote = service.latestQuote("EURUSD");
 
-    assertThat(quote).isEqualTo(providerQuote);
+    assertThat(quote.symbol()).isEqualTo("EURUSD");
+    assertThat(quote.source()).isEqualTo("demo");
   }
 
   @Test
   void freshQuoteRefreshesStaleCachedQuoteBeforeTrading() throws Exception {
-    SymbolEntity symbol = new SymbolEntity();
-    symbol.setSymbol("EURUSD");
-    symbol.setProviderSymbol("C:EURUSD");
     QuoteResponse stale = new QuoteResponse(
         "quote",
         "EURUSD",
@@ -128,135 +147,57 @@ class QuoteServiceTest {
         new BigDecimal("1.08320"),
         new BigDecimal("0.00004"),
         "cache",
-        System.currentTimeMillis() - 5000
-    );
+        System.currentTimeMillis() - 5000);
+    QuoteResponse providerQuote = new QuoteResponse(
+        "quote",
+        "EURUSD",
+        new BigDecimal("1.1"),
+        new BigDecimal("1.2"),
+        new BigDecimal("1.15"),
+        new BigDecimal("0.1"),
+        "massive-quote",
+        System.currentTimeMillis() + 60000);
 
-    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(symbol));
     when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     when(valueOperations.get("quote:EURUSD")).thenReturn(objectMapper.writeValueAsString(stale));
-    when(marketDataProvider.fetchLatestQuote("EURUSD", "C:EURUSD")).thenReturn(Optional.empty());
-    when(marketDataProvider.fetchIndicativeQuote(org.mockito.ArgumentMatchers.eq("EURUSD"), org.mockito.ArgumentMatchers.eq("C:EURUSD"), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.empty());
+    when(marketDataRouter.latestQuote("EURUSD")).thenReturn(providerQuote);
 
-    QuoteService service = new QuoteService(symbolRepository, marketDataProvider, redisTemplate, objectMapper);
+    QuoteService service = service(false);
     ReflectionTestUtils.setField(service, "quoteStaleMs", 100);
-    ReflectionTestUtils.setField(service, "demoQuotesEnabled", true);
 
     QuoteResponse quote = service.freshQuote("EURUSD");
 
-    assertThat(quote.source()).isEqualTo("demo");
-    assertThat(quote.timestamp()).isGreaterThan(stale.timestamp());
-    verify(marketDataProvider).fetchLatestQuote("EURUSD", "C:EURUSD");
+    assertThat(quote).isSameAs(providerQuote);
   }
 
   @Test
-  void latestQuoteRefreshesStaleCachedDemoQuoteForMarketDisplay() throws Exception {
-    SymbolEntity symbol = new SymbolEntity();
-    symbol.setSymbol("EURUSD");
-    symbol.setProviderSymbol("C:EURUSD");
-    QuoteResponse stale = new QuoteResponse(
-        "quote",
-        "EURUSD",
-        new BigDecimal("1.08191"),
-        new BigDecimal("1.08195"),
-        new BigDecimal("1.08193"),
-        new BigDecimal("0.00004"),
-        "demo-realtime",
-        System.currentTimeMillis() - 5000
-    );
-    QuoteResponse providerQuote = new QuoteResponse(
-        "quote",
-        "EURUSD",
-        new BigDecimal("1.15653"),
-        new BigDecimal("1.15657"),
-        new BigDecimal("1.15655"),
-        new BigDecimal("0.00004"),
-        "massive-aggregate",
-        1781297940000L,
-        new BigDecimal("-0.117324"),
-        new BigDecimal("1.15800"),
-        new BigDecimal("1.15500"),
-        new BigDecimal("30176")
-    );
+  void statusReportsProviderRoutingMode() {
+    QuoteService service = service(false);
+    ReflectionTestUtils.setField(service, "quoteStaleMs", 2500);
 
-    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(symbol));
-    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-    when(valueOperations.get("quote:EURUSD")).thenReturn(objectMapper.writeValueAsString(stale));
-    when(marketDataProvider.fetchLatestQuote("EURUSD", "C:EURUSD")).thenReturn(Optional.empty());
-    when(marketDataProvider.fetchIndicativeQuote(org.mockito.ArgumentMatchers.eq("EURUSD"), org.mockito.ArgumentMatchers.eq("C:EURUSD"), org.mockito.ArgumentMatchers.any()))
-        .thenReturn(Optional.of(providerQuote));
+    var status = service.status();
 
-    QuoteService service = new QuoteService(symbolRepository, marketDataProvider, redisTemplate, objectMapper);
-    ReflectionTestUtils.setField(service, "quoteStaleMs", 100);
-    ReflectionTestUtils.setField(service, "demoQuotesEnabled", false);
-
-    QuoteResponse quote = service.latestQuote("EURUSD");
-
-    assertThat(quote).isEqualTo(providerQuote);
-    verify(marketDataProvider).fetchLatestQuote("EURUSD", "C:EURUSD");
+    assertThat(status.status()).isEqualTo("PROVIDER_ROUTING_ENABLED");
+    assertThat(status.demoQuotesEnabled()).isFalse();
+    assertThat(status.sourceMode()).isEqualTo("provider-router");
+    assertThat(status.providerStatus()).isEqualTo("configured-by-admin");
   }
 
-  @Test
-  void latestQuoteUsesCachedExternalProviderQuoteForMarketDisplayWhenMarketIsClosed() throws Exception {
-    SymbolEntity symbol = new SymbolEntity();
-    symbol.setSymbol("EURUSD");
-    symbol.setProviderSymbol("C:EURUSD");
-    QuoteResponse cachedProviderQuote = new QuoteResponse(
-        "quote",
-        "EURUSD",
-        new BigDecimal("1.15653"),
-        new BigDecimal("1.15657"),
-        new BigDecimal("1.15655"),
-        new BigDecimal("0.00004"),
-        "massive-aggregate",
-        1781297940000L,
-        new BigDecimal("-0.117324"),
-        new BigDecimal("1.15800"),
-        new BigDecimal("1.15500"),
-        new BigDecimal("30176")
-    );
-
-    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(symbol));
-    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-    when(valueOperations.get("quote:EURUSD")).thenReturn(objectMapper.writeValueAsString(cachedProviderQuote));
-
-    QuoteService service = new QuoteService(symbolRepository, marketDataProvider, redisTemplate, objectMapper);
-    ReflectionTestUtils.setField(service, "quoteStaleMs", 100);
-    ReflectionTestUtils.setField(service, "demoQuotesEnabled", false);
-
-    QuoteResponse quote = service.latestQuote("EURUSD");
-
-    assertThat(quote).isEqualTo(cachedProviderQuote);
-    verifyNoInteractions(marketDataProvider);
+  private QuoteService service(boolean demoEnabled) {
+    QuoteService service = new QuoteService(marketDataRouter, redisTemplate, objectMapper);
+    ReflectionTestUtils.setField(service, "demoQuotesEnabled", demoEnabled);
+    return service;
   }
 
-  @Test
-  void latestQuoteCachesFetchedProviderQuoteForMarketDisplay() throws Exception {
-    SymbolEntity symbol = new SymbolEntity();
-    symbol.setSymbol("EURUSD");
-    symbol.setProviderSymbol("C:EURUSD");
-    QuoteResponse providerQuote = new QuoteResponse(
+  private QuoteResponse quote(String symbol, String source) {
+    return new QuoteResponse(
         "quote",
-        "EURUSD",
-        new BigDecimal("1.15653"),
-        new BigDecimal("1.15657"),
-        new BigDecimal("1.15655"),
-        new BigDecimal("0.00004"),
-        "massive-aggregate",
-        1781297940000L
-    );
-
-    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(symbol));
-    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
-    when(valueOperations.get("quote:EURUSD")).thenReturn(null);
-    when(marketDataProvider.fetchLatestQuote("EURUSD", "C:EURUSD")).thenReturn(Optional.of(providerQuote));
-
-    QuoteService service = new QuoteService(symbolRepository, marketDataProvider, redisTemplate, objectMapper);
-    ReflectionTestUtils.setField(service, "demoQuotesEnabled", false);
-
-    QuoteResponse quote = service.latestQuote("EURUSD");
-
-    assertThat(quote).isEqualTo(providerQuote);
-    verify(valueOperations).set(org.mockito.ArgumentMatchers.eq("quote:EURUSD"), anyString());
+        symbol,
+        new BigDecimal("1.1"),
+        new BigDecimal("1.2"),
+        new BigDecimal("1.15"),
+        new BigDecimal("0.1"),
+        source,
+        1781462400000L);
   }
 }

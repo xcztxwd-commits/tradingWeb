@@ -1,13 +1,11 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 
-import { defaultThemeId, getTradingTheme, isTradingThemeId, type TradingTheme, type TradingThemeId, type TradingThemeTokens } from './themes'
-
-export const themeStorageKey = 'fx-ui-theme'
+import { defaultThemeId, getTradingTheme, type TradingTheme, type TradingThemeId, type TradingThemeTokens } from './themes'
 
 type ThemeContextValue = {
-  themeId: TradingThemeId
   currentTheme: TradingTheme
   setThemeId: (themeId: TradingThemeId) => void
+  toggleTheme: () => void
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
@@ -35,24 +33,7 @@ const tokenCssVariableNames: Record<keyof TradingThemeTokens, string> = {
   orderBookAskBg: '--theme-order-book-ask-bg'
 }
 
-export function loadThemeId(): TradingThemeId {
-  if (typeof window === 'undefined') return defaultThemeId
-
-  try {
-    const storedThemeId = window.localStorage.getItem(themeStorageKey)
-    return isTradingThemeId(storedThemeId) ? storedThemeId : defaultThemeId
-  } catch {
-    return defaultThemeId
-  }
-}
-
-export function saveThemeId(themeId: TradingThemeId) {
-  try {
-    window.localStorage.setItem(themeStorageKey, themeId)
-  } catch {
-    // Theme changes must keep working in restricted storage contexts.
-  }
-}
+const themeStorageKey = 'fx-trading-theme-mode'
 
 export function applyThemeToDocument(theme: TradingTheme) {
   if (typeof document === 'undefined') return
@@ -66,22 +47,51 @@ export function applyThemeToDocument(theme: TradingTheme) {
   }
 }
 
+function loadStoredThemeId(): TradingThemeId {
+  if (typeof window === 'undefined') return defaultThemeId
+
+  try {
+    const storedThemeId = window.localStorage.getItem(themeStorageKey)
+    return storedThemeId === 'minimal-white' ? storedThemeId : defaultThemeId
+  } catch {
+    return defaultThemeId
+  }
+}
+
+function saveThemeId(themeId: TradingThemeId) {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(themeStorageKey, themeId)
+  } catch {
+    // Theme persistence is optional; document tokens still update for this session.
+  }
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [themeId, setThemeIdState] = useState<TradingThemeId>(() => loadThemeId())
+  const [themeId, setThemeIdState] = useState<TradingThemeId>(() => loadStoredThemeId())
   const currentTheme = useMemo(() => getTradingTheme(themeId), [themeId])
 
   useEffect(() => {
     applyThemeToDocument(currentTheme)
-    saveThemeId(themeId)
-  }, [currentTheme, themeId])
+  }, [currentTheme])
+
+  const setThemeId = useCallback((nextThemeId: TradingThemeId) => {
+    setThemeIdState(nextThemeId)
+    saveThemeId(nextThemeId)
+  }, [])
+
+  const toggleTheme = useCallback(() => {
+    setThemeId(currentTheme.colorScheme === 'light' ? defaultThemeId : 'minimal-white')
+  }, [currentTheme.colorScheme, setThemeId])
 
   const value = useMemo<ThemeContextValue>(
     () => ({
-      themeId,
       currentTheme,
-      setThemeId: setThemeIdState
+      setThemeId,
+      toggleTheme
     }),
-    [currentTheme, themeId]
+    [currentTheme, setThemeId, toggleTheme]
   )
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>

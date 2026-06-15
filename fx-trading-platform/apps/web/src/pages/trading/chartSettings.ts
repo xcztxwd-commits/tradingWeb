@@ -4,6 +4,16 @@ export type ChartType = 'candle' | 'bar' | 'hlc' | 'line'
 export type LineType = 'solid' | 'dashed'
 export type GridLineMode = 'none' | 'horizontal' | 'vertical' | 'both'
 export type DrawingMagnetMode = 'none' | 'weak' | 'strong'
+export type PriceScaleMode = 'normal' | 'percentage' | 'logarithm'
+export type ChartTooltipStyle = 'standard' | 'compact' | 'hidden'
+export type ChartTimezone =
+  | 'local'
+  | 'UTC'
+  | 'Asia/Shanghai'
+  | 'Asia/Singapore'
+  | 'Asia/Tokyo'
+  | 'Europe/London'
+  | 'America/New_York'
 export type DrawingTool =
   | 'cursor'
   | 'segment'
@@ -167,6 +177,8 @@ export type IndicatorApplyPlan = {
 
 export type ChartSettings = {
   interval: TradingPeriod
+  favoriteIntervals: TradingPeriod[]
+  timezone: ChartTimezone
   chartType: ChartType
   candleStyle: {
     useCustomColors: boolean
@@ -178,10 +190,18 @@ export type ChartSettings = {
     downWickColor: string
   }
   axisSettings: {
+    priceScaleMode: PriceScaleMode
     countdown: boolean
     depth: boolean
     priceChangePercent: boolean
     latestPrice: boolean
+    highPriceMark: boolean
+    lowPriceMark: boolean
+    highLowPriceMarks: boolean
+    tooltipStyle: ChartTooltipStyle
+    indicatorLastValue: boolean
+    invertedCoordinate: boolean
+    barSpace: number
     latestPriceLineType: LineType
     latestPriceColor: string
   }
@@ -203,21 +223,17 @@ export type ChartSettings = {
     activeTool: DrawingTool
     magnetMode: DrawingMagnetMode
   }
+  shortcutSettings: {
+    intervalShortcuts: boolean
+    drawingShortcuts: boolean
+    fullscreenShortcut: boolean
+  }
 }
 
 const chartSettingsStoragePrefix = 'fx-trading-platform:chart-settings:v1:'
+const defaultFavoriteIntervals: TradingPeriod[] = ['15m', '1h', '1d']
 const movingAveragePeriods = [5, 10, 20, 30, 60, 120]
 const movingAverageColors = ['#ffab2e', '#e83e78', '#4dd0e1', '#f4511e', '#ab47bc', '#66bb6a']
-
-export const quickChartIntervals: ChartIntervalOption[] = [
-  { value: '1s', label: 'chart.intervals.1s' },
-  { value: '1m', label: 'chart.intervals.1m' },
-  { value: '5m', label: 'chart.intervals.5m' },
-  { value: '15m', label: 'chart.intervals.15m' },
-  { value: '1h', label: 'chart.intervals.1h' },
-  { value: '4h', label: 'chart.intervals.4h' },
-  { value: '1d', label: 'chart.intervals.1d' }
-]
 
 export const allChartIntervals: ChartIntervalOption[] = [
   { value: 'time', label: 'chart.intervals.time' },
@@ -241,11 +257,41 @@ export const allChartIntervals: ChartIntervalOption[] = [
   { value: '3M', label: 'chart.intervals.3M' }
 ]
 
+export function quickChartIntervals(settings?: Pick<ChartSettings, 'favoriteIntervals'>): ChartIntervalOption[] {
+  const favorites = normalizeFavoriteIntervals(settings?.favoriteIntervals, defaultFavoriteIntervals)
+  return favorites
+    .map((interval) => allChartIntervals.find((item) => item.value === interval))
+    .filter((item): item is ChartIntervalOption => Boolean(item))
+}
+
+export function toggleFavoriteInterval(favoriteIntervals: TradingPeriod[], interval: TradingPeriod): TradingPeriod[] {
+  const favorites = normalizeFavoriteIntervals(favoriteIntervals, defaultFavoriteIntervals)
+  if (!favorites.includes(interval)) return [...favorites, interval]
+  if (favorites.length <= 1) return favorites
+  return favorites.filter((item) => item !== interval)
+}
+
 export const chartTypeOptions: Array<{ value: ChartType; label: string }> = [
   { value: 'candle', label: 'chart.types.candle' },
   { value: 'bar', label: 'chart.types.bar' },
   { value: 'hlc', label: 'chart.types.hlc' },
   { value: 'line', label: 'chart.types.line' }
+]
+
+export const priceScaleModeOptions: Array<{ value: PriceScaleMode; label: string }> = [
+  { value: 'normal', label: 'chart.priceScaleModes.normal' },
+  { value: 'percentage', label: 'chart.priceScaleModes.percentage' },
+  { value: 'logarithm', label: 'chart.priceScaleModes.logarithm' }
+]
+
+export const chartTimezoneOptions: Array<{ value: ChartTimezone; label: string }> = [
+  { value: 'local', label: 'chart.timezones.local' },
+  { value: 'UTC', label: 'chart.timezones.utc' },
+  { value: 'Asia/Shanghai', label: 'chart.timezones.shanghai' },
+  { value: 'Asia/Singapore', label: 'chart.timezones.singapore' },
+  { value: 'Asia/Tokyo', label: 'chart.timezones.tokyo' },
+  { value: 'Europe/London', label: 'chart.timezones.london' },
+  { value: 'America/New_York', label: 'chart.timezones.newYork' }
 ]
 
 export const drawingToolOptions: DrawingToolOption[] = [
@@ -400,6 +446,8 @@ export const defaultIndicatorSettings: IndicatorSettings = {
 
 export const defaultChartSettings: ChartSettings = {
   interval: '1m',
+  favoriteIntervals: [...defaultFavoriteIntervals],
+  timezone: 'local',
   chartType: 'candle',
   candleStyle: {
     useCustomColors: false,
@@ -411,10 +459,18 @@ export const defaultChartSettings: ChartSettings = {
     downWickColor: '#ea3943'
   },
   axisSettings: {
+    priceScaleMode: 'normal',
     countdown: true,
     depth: true,
     priceChangePercent: true,
     latestPrice: true,
+    highPriceMark: true,
+    lowPriceMark: true,
+    highLowPriceMarks: true,
+    tooltipStyle: 'standard',
+    indicatorLastValue: false,
+    invertedCoordinate: false,
+    barSpace: 8,
     latestPriceLineType: 'dashed',
     latestPriceColor: '#16c784'
   },
@@ -435,6 +491,11 @@ export const defaultChartSettings: ChartSettings = {
   drawingToolSettings: {
     activeTool: 'cursor',
     magnetMode: 'none'
+  },
+  shortcutSettings: {
+    intervalShortcuts: true,
+    drawingShortcuts: true,
+    fullscreenShortcut: true
   }
 }
 
@@ -476,6 +537,107 @@ export function getChartTypeStyles(chartType: ChartType) {
           { offset: 1, color: 'rgba(242, 184, 75, 0.16)' }
         ]
       }
+    }
+  }
+}
+
+export function getChartVisualStyles(settings: Pick<ChartSettings, 'chartType' | 'candleStyle' | 'axisSettings' | 'layoutSettings'>) {
+  const gridLines = settings.layoutSettings.gridLines
+  const gridVisible = gridLines !== 'none'
+  const chartTypeStyles = getChartTypeStyles(settings.chartType)
+  const customCandleColors = settings.candleStyle.useCustomColors
+    ? {
+        upColor: settings.candleStyle.upColor,
+        downColor: settings.candleStyle.downColor,
+        upBorderColor: settings.candleStyle.upBorderColor,
+        downBorderColor: settings.candleStyle.downBorderColor,
+        upWickColor: settings.candleStyle.upWickColor,
+        downWickColor: settings.candleStyle.downWickColor
+      }
+    : {}
+
+  return {
+    grid: {
+      show: gridVisible,
+      horizontal: {
+        show: gridLines === 'horizontal' || gridLines === 'both'
+      },
+      vertical: {
+        show: gridLines === 'vertical' || gridLines === 'both'
+      }
+    },
+    candle: {
+      ...chartTypeStyles.candle,
+      bar: customCandleColors,
+      priceMark: {
+        show: settings.axisSettings.latestPrice || settings.axisSettings.highPriceMark || settings.axisSettings.lowPriceMark,
+        high: {
+          show: settings.axisSettings.highPriceMark
+        },
+        low: {
+          show: settings.axisSettings.lowPriceMark
+        },
+        last: {
+          show: settings.axisSettings.latestPrice,
+          upColor: settings.axisSettings.latestPriceColor,
+          downColor: settings.axisSettings.latestPriceColor,
+          noChangeColor: settings.axisSettings.latestPriceColor,
+          line: {
+            show: settings.axisSettings.latestPrice,
+            style: settings.axisSettings.latestPriceLineType
+          }
+        }
+      },
+      tooltip: getChartTooltipStyles(settings.axisSettings.tooltipStyle)
+    },
+    crosshair: {
+      show: settings.layoutSettings.crosshair.enabled,
+      horizontal: {
+        line: {
+          show: settings.layoutSettings.crosshair.enabled,
+          color: settings.layoutSettings.crosshair.color,
+          style: settings.layoutSettings.crosshair.lineType
+        },
+        text: {
+          show: settings.layoutSettings.crosshair.enabled
+        }
+      },
+      vertical: {
+        line: {
+          show: settings.layoutSettings.crosshair.enabled,
+          color: settings.layoutSettings.crosshair.color,
+          style: settings.layoutSettings.crosshair.lineType
+        },
+        text: {
+          show: settings.layoutSettings.crosshair.enabled
+        }
+      }
+    }
+  }
+}
+
+function getChartTooltipStyles(style: ChartTooltipStyle) {
+  if (style === 'hidden') {
+    return {
+      showRule: 'none'
+    }
+  }
+
+  if (style === 'compact') {
+    return {
+      showRule: 'follow_cross',
+      showType: 'rect',
+      title: {
+        show: false
+      }
+    }
+  }
+
+  return {
+    showRule: 'follow_cross',
+    showType: 'standard',
+    title: {
+      show: true
     }
   }
 }
@@ -528,8 +690,14 @@ export function buildIndicatorApplyPlan(settings: IndicatorSettings): IndicatorA
   }
 }
 
-export function getIntervalByShortcutKey(key: string, intervals = quickChartIntervals): TradingPeriod | null {
+export function getIntervalByShortcutKey(
+  key: string,
+  intervalsOrSettings: ChartIntervalOption[] | Pick<ChartSettings, 'favoriteIntervals'> = defaultChartSettings
+): TradingPeriod | null {
   if (!/^[1-9]$/.test(key)) return null
+  const intervals = Array.isArray(intervalsOrSettings)
+    ? intervalsOrSettings
+    : quickChartIntervals(intervalsOrSettings)
   return intervals[Number(key) - 1]?.value ?? null
 }
 
@@ -577,18 +745,58 @@ function normalizeChartSettings(value: unknown): ChartSettings {
 
   const settings = cloneSettings(defaultChartSettings)
   settings.interval = isTradingPeriod(value.interval) ? value.interval : settings.interval
+  settings.favoriteIntervals = normalizeFavoriteIntervals(value.favoriteIntervals, settings.favoriteIntervals)
+  settings.timezone = isChartTimezone(value.timezone) ? value.timezone : settings.timezone
   settings.chartType = isChartType(value.chartType) ? value.chartType : settings.chartType
 
   if (isRecord(value.candleStyle)) {
     settings.candleStyle = { ...settings.candleStyle, ...value.candleStyle }
   }
   if (isRecord(value.axisSettings)) {
-    settings.axisSettings = { ...settings.axisSettings, ...value.axisSettings }
+    const highLowPriceMarks = typeof value.axisSettings.highLowPriceMarks === 'boolean'
+      ? value.axisSettings.highLowPriceMarks
+      : undefined
+    const highPriceMark = typeof value.axisSettings.highPriceMark === 'boolean'
+      ? value.axisSettings.highPriceMark
+      : highLowPriceMarks ?? settings.axisSettings.highPriceMark
+    const lowPriceMark = typeof value.axisSettings.lowPriceMark === 'boolean'
+      ? value.axisSettings.lowPriceMark
+      : highLowPriceMarks ?? settings.axisSettings.lowPriceMark
+
+    settings.axisSettings = {
+      ...settings.axisSettings,
+      ...value.axisSettings,
+      countdown: typeof value.axisSettings.countdown === 'boolean'
+        ? value.axisSettings.countdown
+        : settings.axisSettings.countdown,
+      latestPrice: typeof value.axisSettings.latestPrice === 'boolean'
+        ? value.axisSettings.latestPrice
+        : settings.axisSettings.latestPrice,
+      priceScaleMode: isPriceScaleMode(value.axisSettings.priceScaleMode)
+        ? value.axisSettings.priceScaleMode
+        : settings.axisSettings.priceScaleMode,
+      highPriceMark,
+      lowPriceMark,
+      highLowPriceMarks: highLowPriceMarks ?? (highPriceMark && lowPriceMark),
+      tooltipStyle: isChartTooltipStyle(value.axisSettings.tooltipStyle)
+        ? value.axisSettings.tooltipStyle
+        : settings.axisSettings.tooltipStyle,
+      indicatorLastValue: typeof value.axisSettings.indicatorLastValue === 'boolean'
+        ? value.axisSettings.indicatorLastValue
+        : settings.axisSettings.indicatorLastValue,
+      invertedCoordinate: typeof value.axisSettings.invertedCoordinate === 'boolean'
+        ? value.axisSettings.invertedCoordinate
+        : settings.axisSettings.invertedCoordinate,
+      barSpace: normalizeBarSpace(value.axisSettings.barSpace, settings.axisSettings.barSpace)
+    }
   }
   if (isRecord(value.layoutSettings)) {
     settings.layoutSettings = {
       ...settings.layoutSettings,
       ...value.layoutSettings,
+      gridLines: isGridLineMode(value.layoutSettings.gridLines)
+        ? value.layoutSettings.gridLines
+        : settings.layoutSettings.gridLines,
       background: isRecord(value.layoutSettings.background)
         ? { ...settings.layoutSettings.background, ...value.layoutSettings.background }
         : settings.layoutSettings.background,
@@ -605,6 +813,19 @@ function normalizeChartSettings(value: unknown): ChartSettings {
         ? value.drawingToolSettings.activeTool
         : settings.drawingToolSettings.activeTool,
       magnetMode: normalizeMagnetMode(value.drawingToolSettings)
+    }
+  }
+  if (isRecord(value.shortcutSettings)) {
+    settings.shortcutSettings = {
+      intervalShortcuts: typeof value.shortcutSettings.intervalShortcuts === 'boolean'
+        ? value.shortcutSettings.intervalShortcuts
+        : settings.shortcutSettings.intervalShortcuts,
+      drawingShortcuts: typeof value.shortcutSettings.drawingShortcuts === 'boolean'
+        ? value.shortcutSettings.drawingShortcuts
+        : settings.shortcutSettings.drawingShortcuts,
+      fullscreenShortcut: typeof value.shortcutSettings.fullscreenShortcut === 'boolean'
+        ? value.shortcutSettings.fullscreenShortcut
+        : settings.shortcutSettings.fullscreenShortcut
     }
   }
 
@@ -862,6 +1083,19 @@ function normalizePercent(value: unknown, fallback: number) {
   return Number.isFinite(numberValue) ? Math.max(0, Math.min(100, numberValue)) : fallback
 }
 
+function normalizeBarSpace(value: unknown, fallback: number) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue) || numberValue <= 0) return fallback
+  return Math.max(3, Math.min(30, Math.round(numberValue)))
+}
+
+function normalizeFavoriteIntervals(value: unknown, fallback: TradingPeriod[]): TradingPeriod[] {
+  if (!Array.isArray(value)) return [...fallback]
+
+  const favorites = value.filter((item): item is TradingPeriod => isTradingPeriod(item))
+  return Array.from(new Set(favorites))
+}
+
 function getDrawingToolGroupItems(values: DrawingTool[]): DrawingToolOption[] {
   return values
     .map((value) => drawingToolOptions.find((item) => item.value === value))
@@ -900,6 +1134,22 @@ function isTradingPeriod(value: unknown): value is TradingPeriod {
 
 function isChartType(value: unknown): value is ChartType {
   return value === 'candle' || value === 'bar' || value === 'hlc' || value === 'line'
+}
+
+function isPriceScaleMode(value: unknown): value is PriceScaleMode {
+  return value === 'normal' || value === 'percentage' || value === 'logarithm'
+}
+
+function isGridLineMode(value: unknown): value is GridLineMode {
+  return value === 'none' || value === 'horizontal' || value === 'vertical' || value === 'both'
+}
+
+function isChartTooltipStyle(value: unknown): value is ChartTooltipStyle {
+  return value === 'standard' || value === 'compact' || value === 'hidden'
+}
+
+function isChartTimezone(value: unknown): value is ChartTimezone {
+  return chartTimezoneOptions.some((item) => item.value === value)
 }
 
 function isDrawingTool(value: unknown): value is DrawingTool {

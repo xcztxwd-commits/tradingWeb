@@ -11,15 +11,22 @@ import type {
   TradingSplitDirection
 } from '../../stores/layoutStore'
 import type { AccountSummary, LedgerEntry, OrderPayload } from '../../types/trading'
+import type { TradingMarketDataStatusView } from './tradingPageMarketDataStatus'
 
 export type ChartThemeMode = 'dark' | 'light'
 
 export type TradingChartCallbacks = {
+  onChartSettingsChange: (settings: ChartSettings) => void
+  onResetChartSettings: () => void
   onChartTypeChange: (chartType: ChartType) => void
+  onHighLowPriceMarksChange: (enabled: boolean) => void
+  onPriceScaleModeChange: (priceScaleMode: ChartSettings['axisSettings']['priceScaleMode']) => void
+  onTooltipStyleChange: (style: ChartSettings['axisSettings']['tooltipStyle']) => void
   onDrawingMagnetModeChange: (magnetMode: DrawingMagnetMode) => void
   onDrawingToolChange: (activeTool: DrawingTool) => void
   onIndicatorSettingsChange: (indicatorSettings: IndicatorSettings) => void
   onIndicatorToggle: (indicator: string) => void
+  onFavoriteIntervalToggle: (interval: TradingPeriod) => void
   onPeriodChange: (interval: TradingPeriod) => void
 }
 
@@ -58,14 +65,16 @@ export type TradingTerminalViewProps = {
   loginRequired: boolean
   market: TradingMarket
   markets: TradingMarket[]
+  favorites: Set<string>
+  marketDataStatusView: TradingMarketDataStatusView
   onLoginRequired: () => void
   onOpenMarkets: () => void
   onOpenQuote: () => void
-  onOpenSettings: () => void
   onOpenTrade: () => void
   onSelectPrice: (price: number) => void
   onRetrySession: () => Promise<void> | void
   onSelectSymbol: (symbol: string) => void
+  onFavorite: (symbol: string) => void
   quote: TradingQuote
   quotes: Record<string, TradingQuote>
   sessionError?: string | null
@@ -82,12 +91,6 @@ export type TradingTerminalViewProps = {
   token: string | null
   tradePanelSessionMode: TradingSessionMode
   workspaceLayoutControls: TradingWorkspaceLayoutControls
-}
-
-export type TradingSettingsDialogProps = {
-  layoutControls: TradingWorkspaceLayoutControls
-  open: boolean
-  onClose: () => void
 }
 
 export function shouldAllowChartMockFallback(market: TradingMarket) {

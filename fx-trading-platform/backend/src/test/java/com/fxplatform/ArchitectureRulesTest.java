@@ -199,6 +199,18 @@ class ArchitectureRulesTest {
   }
 
   @Test
+  void cryptoSymbolMigrationSeedsBinanceSolAndXrpExtensionSlots() throws Exception {
+    String migration = Files.readString(Path.of("src/main/resources/db/migration/V27__crypto_symbol_provider_seed.sql"));
+
+    assertThat(migration).contains("'BTCUSDT'");
+    assertThat(migration).contains("'ETHUSDT'");
+    assertThat(migration).contains("'SOLUSDT'");
+    assertThat(migration).contains("'XRPUSDT'");
+    assertThat(migration).contains("'binance'");
+    assertThat(migration).contains("'CRYPTO'");
+  }
+
+  @Test
   void adminApiDoesNotExposeUserEntityWithPasswordHash() throws Exception {
     String adminController = Files.readString(Path.of("src/main/java/com/fxplatform/admin/controller/AdminController.java"));
 

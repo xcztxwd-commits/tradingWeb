@@ -6,9 +6,13 @@ import { describe, it } from 'node:test'
 
 import {
   buildMarketCandlesPath,
+  buildMarketFavoritePath,
+  buildMarketFavoritesPath,
   buildMarketOrderBookPath,
   buildMarketRecentTradesPath,
+  buildMarketStatusPath,
   buildMarketSymbolsPath,
+  createTradingMarketPlaceholder,
   mapOrderBookToMarketData,
   mapQuoteToTradingQuote,
   mapRecentTradesToMarketData,
@@ -31,10 +35,21 @@ describe('trading market API adapters', () => {
   it('uses current backend endpoints instead of removed market ticker and candle paths', () => {
     assert.deepEqual(Object.values(tradingMarketEndpoints), [
       '/api/market/symbols',
+      '/api/market/favorites',
+      '/api/market/status',
       '/api/chart/candles',
       '/api/market/order-book',
       '/api/market/trades'
     ])
+  })
+
+  it('exposes the backend market status endpoint for the trading page', () => {
+    assert.equal(buildMarketStatusPath(), '/api/market/status')
+  })
+
+  it('exposes the authenticated user favorite endpoints for shared watchlists', () => {
+    assert.equal(buildMarketFavoritesPath(), '/api/market/favorites')
+    assert.equal(buildMarketFavoritePath('btcusdt'), '/api/market/favorites/BTCUSDT')
   })
 
   it('builds chart candle requests with timeframe, from, and to parameters', () => {
@@ -43,6 +58,15 @@ describe('trading market API adapters', () => {
     assert.equal(
       path,
       '/api/chart/candles?symbol=EURUSD&timeframe=5m&from=2026-06-05T23%3A45%3A00.000Z&to=2026-06-06T00%3A00%3A00.000Z'
+    )
+  })
+
+  it('builds older chart candle windows from an explicit end timestamp', () => {
+    const path = buildMarketCandlesPath('EURUSD', '1m', 1_780_000_000_000, 2)
+
+    assert.equal(
+      path,
+      '/api/chart/candles?symbol=EURUSD&timeframe=1m&from=2026-05-28T20%3A24%3A40.000Z&to=2026-05-28T20%3A26%3A40.000Z'
     )
   })
 
@@ -118,6 +142,50 @@ describe('trading market API adapters', () => {
     assert.equal(market.source, 'massive')
     assert.equal(market.providerSymbol, 'C:USDJPY')
     assert.equal(market.tradable, false)
+  })
+
+  it('preserves Binance icon URLs from backend crypto symbols', () => {
+    const iconUrl = 'https://bin.bnbstatic.com/image/admin_mgs_image_upload/20201110/btc.png'
+    const market = mapSymbolToTradingMarket({
+      symbol: 'BTCUSDT',
+      displayName: 'Bitcoin / Tether',
+      assetClass: 'CRYPTO',
+      baseCurrency: 'BTC',
+      quoteCurrency: 'USDT',
+      enabled: true,
+      provider: 'binance',
+      providerSymbol: 'BTCUSDT',
+      iconUrl
+    })
+
+    assert.equal(market.iconUrl, iconUrl)
+    assert.equal(market.category, 'crypto')
+  })
+
+  it('preserves runtime market data capabilities from backend symbols', () => {
+    const market = mapSymbolToTradingMarket({
+      symbol: 'EURUSD',
+      displayName: 'Euro / US Dollar',
+      assetClass: 'FOREX',
+      baseCurrency: 'EUR',
+      quoteCurrency: 'USD',
+      enabled: true,
+      quoteEnabled: false,
+      chartEnabled: true,
+      orderBookEnabled: false
+    })
+
+    assert.equal(market.quoteEnabled, false)
+    assert.equal(market.chartEnabled, true)
+    assert.equal(market.orderBookEnabled, false)
+  })
+
+  it('does not request realtime data for forex placeholders before backend capabilities load', () => {
+    const market = createTradingMarketPlaceholder('EURUSD')
+
+    assert.equal(market.quoteEnabled, false)
+    assert.equal(market.chartEnabled, false)
+    assert.equal(market.orderBookEnabled, false)
   })
 
   it('maps backend symbol quote metrics for full market list rows', () => {

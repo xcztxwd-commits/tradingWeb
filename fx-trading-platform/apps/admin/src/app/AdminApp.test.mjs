@@ -70,6 +70,15 @@ describe('admin app routing shell', () => {
     assert.match(appSource, /<Route path="\/legacy\/finance\/ledger" element=\{<LedgerPage \/>\} \/>/)
   })
 
+  it('declares custom market data source routes for provider configuration', () => {
+    assert.match(appSource, /import \{ DataProvidersPage \} from '..\/pages\/DataProvidersPage'/)
+    assert.match(appSource, /import \{ ProviderInstrumentsPage \} from '..\/pages\/ProviderInstrumentsPage'/)
+    assert.match(appSource, /import \{ SymbolDataBindingsPage \} from '..\/pages\/SymbolDataBindingsPage'/)
+    assert.match(appSource, /<Route path="\/products\/data-providers" element=\{<DataProvidersPage \/>\} \/>/)
+    assert.match(appSource, /<Route path="\/products\/provider-instruments" element=\{<ProviderInstrumentsPage \/>\} \/>/)
+    assert.match(appSource, /<Route path="\/products\/symbol-bindings" element=\{<SymbolDataBindingsPage \/>\} \/>/)
+  })
+
   it('uses grouped NavLink navigation, breadcrumb and tabs in a shared admin layout', () => {
     assert.match(layoutSource, /import \{ NavLink, Outlet, useNavigate \} from 'react-router-dom'/)
     assert.match(layoutSource, /adminMenuGroups/)

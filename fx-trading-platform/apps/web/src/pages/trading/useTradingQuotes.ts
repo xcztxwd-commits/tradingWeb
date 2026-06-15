@@ -7,9 +7,14 @@ import {
 import type { BackendQuote } from '../../features/market/tradingMarketAdapters'
 import { fetchMarketQuote } from '../../features/market/tradingMarketApi'
 import type { TradingMarket, TradingQuote } from '../../features/market/tradingModels'
+import { toTradingMarketDataError, type TradingMarketDataError } from './tradingPageMarketDataStatus'
 import { reconcileQuoteMap } from './tradingQuoteMap'
 
-export function useTradingQuoteMap(markets: TradingMarket[], token: string | null) {
+export function useTradingQuoteMap(
+  markets: TradingMarket[],
+  token: string | null,
+  onQuoteStatus?: (symbol: string, error: TradingMarketDataError | null) => void
+) {
   const symbolKey = useMemo(() => markets.map((market) => market.symbol).join('|'), [markets])
   const [quotes, setQuotes] = useState<Record<string, TradingQuote>>(() => reconcileQuoteMap(markets))
 
@@ -25,13 +30,17 @@ export function useTradingQuoteMap(markets: TradingMarket[], token: string | nul
 
     const applyQuote = (quote: TradingQuote) => {
       if (!active) return
+      onQuoteStatus?.(quote.symbol, null)
       setQuotes((current) => ({ ...current, [quote.symbol]: quote }))
     }
 
     markets.forEach((market) => {
-      void fetchMarketQuote(market.symbol).then(applyQuote).catch(() => undefined)
+      void fetchMarketQuote(market.symbol).then(applyQuote).catch((error: unknown) => {
+        if (active) onQuoteStatus?.(market.symbol, toTradingMarketDataError(error))
+      })
       releases.push(
         subscribeQuote(market.symbol, token, (quote) => {
+          onQuoteStatus?.((quote as BackendQuote).symbol, null)
           setQuotes((current) => {
             const nextQuote = mapQuoteToTradingQuote(quote as BackendQuote, current[market.symbol])
             return { ...current, [market.symbol]: nextQuote }
@@ -44,7 +53,7 @@ export function useTradingQuoteMap(markets: TradingMarket[], token: string | nul
       active = false
       releases.forEach((release) => release())
     }
-  }, [symbolKey, markets, token])
+  }, [onQuoteStatus, symbolKey, markets, token])
 
   return quotes
 }

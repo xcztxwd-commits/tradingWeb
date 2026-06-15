@@ -96,7 +96,26 @@
   --loading-accent: var(--theme-primary);
 }
 
-:root[data-color-scheme='light'] {
-  --trading-accent-text: #ffffff;
-  --trading-shadow-lg: 0 18px 48px rgba(15, 23, 42, 0.18);
+:root[data-theme='minimal-white'] {
+  --theme-background: #f6f8fb;
+  --theme-surface: #ffffff;
+  --theme-surface-elevated: #f9fafc;
+  --theme-border: #e2e7ef;
+  --theme-text-primary: #111827;
+  --theme-text-secondary: #475569;
+  --theme-text-muted: #475569;
+  --theme-primary: #111827;
+  --theme-primary-hover: #0f172a;
+  --theme-accent: #111827;
+  --theme-success: #047857;
+  --theme-buy: #047857;
+  --theme-danger: #be123c;
+  --theme-sell: #be123c;
+  --theme-warning: #9a6a00;
+  --theme-chart-grid: #e8edf4;
+  --theme-chart-candle-up: #047857;
+  --theme-chart-candle-down: #be123c;
+  --theme-order-book-bid-bg: rgba(7, 135, 90, 0.08);
+  --theme-order-book-ask-bg: rgba(212, 61, 86, 0.08);
+  --trading-shadow-lg: 0 18px 42px rgba(15, 23, 42, 0.08);
 }

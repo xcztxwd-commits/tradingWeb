@@ -19,10 +19,10 @@ export type SessionStatus = {
 
 export type SessionAuthStatus = SessionStatus['status']
 
-export function register(email: string, password: string) {
+export function register(identifier: string, password: string, channel: 'email' | 'phone' = 'email') {
   return apiPost<AuthResponse>('/api/auth/register', {
-    email,
-    phone: null,
+    email: channel === 'email' ? identifier : null,
+    phone: channel === 'phone' ? identifier : null,
     password
   })
 }

@@ -5,6 +5,7 @@ import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.market.entity.SymbolEntity;
 import java.util.List;
 import java.util.Optional;
+import java.util.Locale;
 
 /**
  * SymbolRepository 通过 MyBatis-Plus 访问交易品种。
@@ -21,6 +22,27 @@ public interface SymbolRepository extends FxBaseMapper<SymbolEntity> {
   default List<SymbolEntity> findByEnabledTrueOrderBySymbolAsc() {
     return selectList(new LambdaQueryWrapper<SymbolEntity>()
         .eq(SymbolEntity::getEnabled, true)
+        .orderByAsc(SymbolEntity::getSymbol));
+  }
+
+  default List<SymbolEntity> findVisibleSymbols(String assetClass) {
+    LambdaQueryWrapper<SymbolEntity> query = new LambdaQueryWrapper<SymbolEntity>()
+        .eq(SymbolEntity::getEnabled, true)
+        .eq(SymbolEntity::getDisplayEnabled, true)
+        .orderByAsc(SymbolEntity::getDisplayOrder)
+        .orderByAsc(SymbolEntity::getSymbol);
+    if (assetClass != null && !assetClass.isBlank()) {
+      query.eq(SymbolEntity::getAssetClass, assetClass.trim().toUpperCase(Locale.ROOT));
+    }
+    return selectList(query);
+  }
+
+  default List<SymbolEntity> findQuoteBroadcastSymbols() {
+    return selectList(new LambdaQueryWrapper<SymbolEntity>()
+        .eq(SymbolEntity::getEnabled, true)
+        .eq(SymbolEntity::getDisplayEnabled, true)
+        .eq(SymbolEntity::getQuoteEnabled, true)
+        .orderByAsc(SymbolEntity::getDisplayOrder)
         .orderByAsc(SymbolEntity::getSymbol));
   }
 }

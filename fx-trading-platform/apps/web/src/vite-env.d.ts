@@ -8,9 +8,26 @@ declare module 'klinecharts' {
     low: number
     close: number
     volume?: number
+    turnover?: number
   }
 
   type KLinePeriod = { type: 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'; span: number }
+  type DataLoadType = 'init' | 'forward' | 'backward' | 'update'
+  type DataLoadMore = boolean | { backward?: boolean; forward?: boolean }
+  type ActionType = 'onZoom' | 'onScroll' | 'onVisibleRangeChange' | 'onCandleTooltipFeatureClick' | 'onIndicatorTooltipFeatureClick' | 'onCrosshairFeatureClick' | 'onCrosshairChange' | 'onCandleBarClick' | 'onPaneDrag'
+  type ActionCallback = (data?: unknown) => void
+  type VisibleRange = { readonly from: number; readonly to: number; readonly realFrom: number; readonly realTo: number }
+  type FormatDateParams = {
+    dateTimeFormat: Intl.DateTimeFormat
+    timestamp: number
+    template: string
+    type: 'tooltip' | 'crosshair' | 'xAxis'
+  }
+  type Formatter = {
+    formatDate: (params: FormatDateParams) => string
+    formatBigNumber: (value: string | number) => string
+    formatExtendText: (params: { type: 'last_price'; data: KLineData; index: number }) => string
+  }
   type IndicatorFigure = { key: string; title: string; type: string }
   type IndicatorTemplate<D = unknown, C = unknown> = {
     name: string
@@ -30,6 +47,7 @@ declare module 'klinecharts' {
   }
   type OverlayCoordinate = { x: number; y: number }
   type OverlayBounding = { width: number; height: number }
+  type OverlayPoint = { timestamp?: number; dataIndex?: number; value?: number }
   type OverlayFigure = {
     type: string
     attrs: unknown
@@ -53,6 +71,7 @@ declare module 'klinecharts' {
     mode?: OverlayMode
     modeSensitivity?: number
     extendData?: unknown
+    points?: OverlayPoint[]
     visible?: boolean
     styles?: Record<string, unknown>
     onDrawEnd?: (event: unknown) => void
@@ -83,6 +102,13 @@ declare module 'klinecharts' {
     setSymbol: (symbol: { ticker: string; name?: string; pricePrecision?: number; volumePrecision?: number }) => void
     setPeriod: (period: KLinePeriod) => void
     setStyles: (styles: string | Record<string, unknown>) => void
+    setFormatter: (formatter: Partial<Formatter>) => void
+    setLocale: (locale: string) => void
+    setTimezone: (timezone: string) => void
+    setThousandsSeparator: (thousandsSeparator: { sign?: string; format?: (value: string | number) => string }) => void
+    setDecimalFold: (decimalFold: { threshold?: number; format?: (value: string | number) => string }) => void
+    setBarSpace: (space: number) => void
+    getVisibleRange: () => VisibleRange
     createIndicator: (
       indicator: string | IndicatorCreate,
       options?: { isStack?: boolean; pane?: { id?: string; height?: number; minHeight?: number; order?: number } }
@@ -93,8 +119,21 @@ declare module 'klinecharts' {
     overrideOverlay: (override: OverlayFilter & { visible?: boolean; lock?: boolean; styles?: Record<string, unknown> }) => boolean
     getOverlays: (filter?: OverlayFilter) => unknown[]
     removeOverlay: (filter?: OverlayFilter) => boolean
+    overrideYAxis: (override: { name?: 'normal' | 'percentage' | 'logarithm'; id?: string; paneId?: string }) => void
+    scrollToRealTime: (animationDuration?: number) => void
+    scrollToTimestamp: (timestamp: number, animationDuration?: number) => void
+    zoomAtTimestamp: (scale: number, timestamp: number, animationDuration?: number) => void
+    subscribeAction: (type: ActionType, callback: ActionCallback) => void
+    unsubscribeAction: (type: ActionType, callback?: ActionCallback) => void
+    getConvertPictureUrl: (includeOverlay?: boolean, type?: 'png' | 'jpeg' | 'bmp', backgroundColor?: string) => string
     setDataLoader: (loader: {
-      getBars: (params: { callback: (data: KLineData[], more?: boolean) => void }) => void
+      getBars: (params: {
+        type: DataLoadType
+        timestamp: number | null
+        symbol: { ticker: string; name?: string; pricePrecision?: number; volumePrecision?: number }
+        period: KLinePeriod
+        callback: (data: KLineData[], more?: DataLoadMore) => void
+      }) => void
       subscribeBar?: (params: { callback: (data: KLineData) => void }) => void
       unsubscribeBar?: () => void
     }) => void

@@ -1,18 +1,25 @@
 package com.fxplatform.market.controller;
 
 import com.fxplatform.common.response.ApiResponse;
+import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.market.dto.MarketDepthResponse;
 import com.fxplatform.market.dto.MarketStatusResponse;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
 import com.fxplatform.market.dto.SymbolResponse;
-import com.fxplatform.market.service.MarketTestDataService;
+import com.fxplatform.market.dto.UserFavoriteSymbolRequest;
+import com.fxplatform.market.provider.MarketDataRouter;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.market.service.SymbolService;
+import com.fxplatform.market.service.UserFavoriteSymbolService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,7 +34,8 @@ public class MarketController {
 
   private final SymbolService symbolService;
   private final QuoteService quoteService;
-  private final MarketTestDataService marketTestDataService;
+  private final MarketDataRouter marketDataRouter;
+  private final UserFavoriteSymbolService userFavoriteSymbolService;
 
   /**
    * 处理 symbols 查询接口请求。
@@ -35,7 +43,7 @@ public class MarketController {
   @GetMapping("/symbols")
   public ApiResponse<List<SymbolResponse>> symbols(
       @RequestParam(required = false) String assetClass,
-      @RequestParam(defaultValue = "1000") int limit
+      @RequestParam(defaultValue = "2000") int limit
   ) {
     return ApiResponse.success(symbolService.enabledSymbols(assetClass, limit));
   }
@@ -53,7 +61,7 @@ public class MarketController {
    */
   @GetMapping("/order-book/{symbol}")
   public ApiResponse<MarketDepthResponse> orderBook(@PathVariable String symbol) {
-    return ApiResponse.success(marketTestDataService.orderBook(symbol));
+    return ApiResponse.success(marketDataRouter.orderBook(symbol));
   }
 
   /**
@@ -64,7 +72,7 @@ public class MarketController {
       @PathVariable String symbol,
       @RequestParam(defaultValue = "40") int limit
   ) {
-    return ApiResponse.success(marketTestDataService.recentTrades(symbol, limit));
+    return ApiResponse.success(marketDataRouter.recentTrades(symbol, limit));
   }
 
   /**
@@ -73,5 +81,25 @@ public class MarketController {
   @GetMapping("/status")
   public ApiResponse<MarketStatusResponse> status() {
     return ApiResponse.success(quoteService.status());
+  }
+
+  @GetMapping("/favorites")
+  public ApiResponse<List<String>> favoriteSymbols(@AuthenticationPrincipal UserPrincipal principal) {
+    if (principal == null) {
+      return ApiResponse.success(List.of());
+    }
+    return ApiResponse.success(userFavoriteSymbolService.favoriteSymbols(principal.id()));
+  }
+
+  @PutMapping("/favorites/{symbol}")
+  public ApiResponse<List<String>> setFavorite(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @PathVariable String symbol,
+      @RequestBody UserFavoriteSymbolRequest request
+  ) {
+    if (principal == null) {
+      throw new BusinessException("AUTH_REQUIRED", "Authentication required");
+    }
+    return ApiResponse.success(userFavoriteSymbolService.setFavorite(principal.id(), symbol, request.favorite()));
   }
 }

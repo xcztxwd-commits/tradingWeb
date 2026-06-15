@@ -4,9 +4,10 @@ import cn.hutool.core.util.StrUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fxplatform.chart.dto.CandleResponse;
-import com.fxplatform.market.adapter.MarketDataProvider;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.SymbolResponse;
+import com.fxplatform.market.provider.MarketDataCapability;
+import com.fxplatform.market.provider.MarketDataProviderAdapter;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -32,7 +34,7 @@ import org.springframework.stereotype.Component;
  * MassiveRestClient is the market module external data provider.
  */
 @Component
-public class MassiveRestClient implements MarketDataProvider {
+public class MassiveRestClient implements MarketDataProviderAdapter {
 
   private static final BigDecimal DEFAULT_MIN_LOT = new BigDecimal("0.01");
   private static final BigDecimal DEFAULT_MAX_LOT = new BigDecimal("100");
@@ -60,6 +62,25 @@ public class MassiveRestClient implements MarketDataProvider {
         .connectTimeout(Duration.ofSeconds(5))
         .build();
     this.objectMapper = new ObjectMapper();
+  }
+
+  @Override
+  public String code() {
+    return "massive";
+  }
+
+  @Override
+  public Set<MarketDataCapability> capabilities() {
+    return Set.of(
+        MarketDataCapability.SYMBOLS,
+        MarketDataCapability.QUOTE,
+        MarketDataCapability.SNAPSHOT,
+        MarketDataCapability.CANDLES);
+  }
+
+  @Override
+  public boolean configured() {
+    return isConfigured();
   }
 
   @Override

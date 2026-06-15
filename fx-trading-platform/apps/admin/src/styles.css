@@ -735,6 +735,104 @@ td button:active,
   border-color: #bfdbfe;
 }
 
+.admin-config-form {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 16px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-lg);
+  background: var(--admin-surface);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.admin-config-form h3 {
+  margin: 0;
+  color: var(--admin-heading);
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.admin-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.admin-form-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--admin-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.admin-form-grid input,
+.admin-form-grid select,
+.admin-form-grid textarea {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: var(--admin-radius);
+  padding: 8px 10px;
+  color: var(--admin-text);
+  background: #ffffff;
+}
+
+.admin-form-grid textarea {
+  resize: vertical;
+}
+
+.admin-field-wide {
+  grid-column: 1 / -1;
+}
+
+.admin-field-hint {
+  color: var(--admin-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.admin-checkbox-field {
+  align-content: end;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  min-height: 60px;
+  color: var(--admin-text);
+}
+
+.admin-checkbox-field input {
+  min-height: 18px;
+  padding: 0;
+}
+
+.admin-action-row,
+.admin-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-action-row button,
+.admin-inline-actions button,
+.admin-table button {
+  min-height: 34px;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: var(--admin-radius);
+  padding: 7px 10px;
+  color: var(--admin-heading);
+  background: #ffffff;
+}
+
+.admin-action-row button[type='submit'],
+.admin-inline-actions button:first-child {
+  color: #ffffff;
+  border-color: var(--admin-primary);
+  background: var(--admin-primary);
+}
+
 .feature-table,
 .admin-table {
   min-width: 0;

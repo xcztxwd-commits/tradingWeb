@@ -36,7 +36,10 @@ export const adminMenuGroups: AdminMenuGroup[] = [
     items: [
       { to: '/products/list', label: '产品列表', icon: 'list', pageKey: 'products' },
       { to: '/products/categories', label: '产品分类', icon: 'box', pageKey: 'product-categories' },
-      { to: '/products/price-schedules', label: '涨跌设置', icon: 'chart', pageKey: 'price-schedules' }
+      { to: '/products/price-schedules', label: '涨跌设置', icon: 'chart', pageKey: 'price-schedules' },
+      { to: '/products/data-providers', label: '行情数据源', icon: 'server' },
+      { to: '/products/provider-instruments', label: '数据源品种', icon: 'database' },
+      { to: '/products/symbol-bindings', label: '品种源绑定', icon: 'link' }
     ]
   },
   {

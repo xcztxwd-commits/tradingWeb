@@ -10,14 +10,19 @@ import {
   drawingToolGroups,
   drawingToolOptions,
   drawingToolToOverlayName,
+  chartTimezoneOptions,
   indicatorConfigOptions,
   getDrawingShortcutAction,
   getChartSettingsStorageKey,
+  getChartVisualStyles,
   getIntervalByShortcutKey,
   loadChartSettings,
+  quickChartIntervals,
+  priceScaleModeOptions,
   saveChartSettings,
   shouldIgnoreDrawingShortcut,
   shouldIgnoreIntervalShortcut,
+  toggleFavoriteInterval,
   updateIndicatorEnabled
 } from './chartSettings.ts'
 
@@ -67,6 +72,156 @@ describe('chart settings', () => {
     assert.equal(loadChartSettings('EURUSD', storage).interval, '1m')
   })
 
+  it('persists and validates KLineCharts price scale modes', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(
+      getChartSettingsStorageKey('BTCUSDT'),
+      JSON.stringify({
+        axisSettings: {
+          priceScaleMode: 'percentage'
+        }
+      })
+    )
+    storage.setItem(
+      getChartSettingsStorageKey('ETHUSDT'),
+      JSON.stringify({
+        axisSettings: {
+          priceScaleMode: 'invalid'
+        }
+      })
+    )
+
+    assert.deepEqual(priceScaleModeOptions.map((item) => item.value), ['normal', 'percentage', 'logarithm'])
+    assert.equal(loadChartSettings('BTCUSDT', storage).axisSettings.priceScaleMode, 'percentage')
+    assert.equal(loadChartSettings('ETHUSDT', storage).axisSettings.priceScaleMode, 'normal')
+  })
+
+  it('persists chart dialog display toggles and validates timezones', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(
+      getChartSettingsStorageKey('BTCUSDT'),
+      JSON.stringify({
+        timezone: 'Asia/Tokyo',
+        axisSettings: {
+          latestPrice: false,
+          highPriceMark: false,
+          lowPriceMark: true,
+          countdown: false
+        },
+        layoutSettings: {
+          gridLines: 'none'
+        }
+      })
+    )
+    storage.setItem(
+      getChartSettingsStorageKey('ETHUSDT'),
+      JSON.stringify({
+        timezone: 'Mars/Base',
+        layoutSettings: {
+          gridLines: 'diagonal'
+        }
+      })
+    )
+
+    assert.deepEqual(chartTimezoneOptions.map((item) => item.value), [
+      'local',
+      'UTC',
+      'Asia/Shanghai',
+      'Asia/Singapore',
+      'Asia/Tokyo',
+      'Europe/London',
+      'America/New_York'
+    ])
+
+    const loaded = loadChartSettings('BTCUSDT', storage)
+    assert.equal(loaded.timezone, 'Asia/Tokyo')
+    assert.equal(loaded.axisSettings.latestPrice, false)
+    assert.equal(loaded.axisSettings.highPriceMark, false)
+    assert.equal(loaded.axisSettings.lowPriceMark, true)
+    assert.equal(loaded.axisSettings.countdown, false)
+    assert.equal(loaded.layoutSettings.gridLines, 'none')
+
+    const fallback = loadChartSettings('ETHUSDT', storage)
+    assert.equal(fallback.timezone, defaultChartSettings.timezone)
+    assert.equal(fallback.layoutSettings.gridLines, defaultChartSettings.layoutSettings.gridLines)
+  })
+
+  it('persists chart visual controls for marks, tooltip, zoom, and shortcuts', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(
+      getChartSettingsStorageKey('BTCUSDT'),
+      JSON.stringify({
+        axisSettings: {
+          highPriceMark: false,
+          lowPriceMark: false,
+          tooltipStyle: 'compact',
+          barSpace: 14
+        },
+        shortcutSettings: {
+          intervalShortcuts: false,
+          drawingShortcuts: true,
+          fullscreenShortcut: false
+        }
+      })
+    )
+    storage.setItem(
+      getChartSettingsStorageKey('ETHUSDT'),
+      JSON.stringify({
+        axisSettings: {
+          tooltipStyle: 'unknown',
+          barSpace: -4
+        },
+        shortcutSettings: {
+          intervalShortcuts: 'nope'
+        }
+      })
+    )
+
+    const loaded = loadChartSettings('BTCUSDT', storage)
+    assert.equal(loaded.axisSettings.highPriceMark, false)
+    assert.equal(loaded.axisSettings.lowPriceMark, false)
+    assert.equal(loaded.axisSettings.tooltipStyle, 'compact')
+    assert.equal(loaded.axisSettings.barSpace, 14)
+    assert.equal(loaded.shortcutSettings.intervalShortcuts, false)
+    assert.equal(loaded.shortcutSettings.drawingShortcuts, true)
+    assert.equal(loaded.shortcutSettings.fullscreenShortcut, false)
+
+    const fallback = loadChartSettings('ETHUSDT', storage)
+    assert.equal(fallback.axisSettings.tooltipStyle, defaultChartSettings.axisSettings.tooltipStyle)
+    assert.equal(fallback.axisSettings.barSpace, defaultChartSettings.axisSettings.barSpace)
+    assert.equal(fallback.shortcutSettings.intervalShortcuts, defaultChartSettings.shortcutSettings.intervalShortcuts)
+  })
+
+  it('defaults interval shortcuts to starred 15m, 1h, and 1d periods', () => {
+    assert.deepEqual(defaultChartSettings.favoriteIntervals, ['15m', '1h', '1d'])
+    assert.deepEqual(quickChartIntervals(defaultChartSettings).map((item) => item.value), ['15m', '1h', '1d'])
+    assert.equal(getIntervalByShortcutKey('1', defaultChartSettings), '15m')
+    assert.equal(getIntervalByShortcutKey('2', defaultChartSettings), '1h')
+    assert.equal(getIntervalByShortcutKey('3', defaultChartSettings), '1d')
+    assert.equal(getIntervalByShortcutKey('4', defaultChartSettings), null)
+  })
+
+  it('persists starred interval shortcuts and removes invalid stored periods', () => {
+    const storage = new MemoryStorage()
+    storage.setItem(
+      getChartSettingsStorageKey('BTCUSDT'),
+      JSON.stringify({
+        favoriteIntervals: ['1s', 'bad', '30m', '1s', '3M']
+      })
+    )
+
+    const loaded = loadChartSettings('BTCUSDT', storage)
+
+    assert.deepEqual(loaded.favoriteIntervals, ['1s', '30m', '3M'])
+    assert.deepEqual(quickChartIntervals(loaded).map((item) => item.value), ['1s', '30m', '3M'])
+  })
+
+  it('keeps at least one starred interval selected', () => {
+    assert.deepEqual(toggleFavoriteInterval(['15m'], '15m'), ['15m'])
+    assert.deepEqual(toggleFavoriteInterval(['15m', '1h'], '15m'), ['1h'])
+    assert.deepEqual(toggleFavoriteInterval(['15m'], '30m'), ['15m', '30m'])
+  })
+
   it('falls back to defaults for invalid stored JSON', () => {
     const storage = new MemoryStorage()
     storage.setItem(getChartSettingsStorageKey('EURUSD'), '{bad-json')
@@ -79,6 +234,87 @@ describe('chart settings', () => {
     assert.equal(chartTypeToCandleType('bar'), 'ohlc')
     assert.equal(chartTypeToCandleType('hlc'), 'ohlc')
     assert.equal(chartTypeToCandleType('line'), 'area')
+  })
+
+  it('builds KLineCharts visual styles from persisted chart settings', () => {
+    const styles = getChartVisualStyles({
+      ...defaultChartSettings,
+      chartType: 'bar',
+      candleStyle: {
+        ...defaultChartSettings.candleStyle,
+        useCustomColors: true,
+        upColor: '#00ff88',
+        downColor: '#ff3355',
+        upBorderColor: '#00cc66',
+        downBorderColor: '#cc2244',
+        upWickColor: '#33ffaa',
+        downWickColor: '#ff6680'
+      },
+      axisSettings: {
+        ...defaultChartSettings.axisSettings,
+        latestPrice: false,
+        highPriceMark: true,
+        lowPriceMark: true,
+        latestPriceColor: '#fcd535',
+        latestPriceLineType: 'solid'
+      },
+      layoutSettings: {
+        ...defaultChartSettings.layoutSettings,
+        gridLines: 'horizontal',
+        crosshair: {
+          enabled: false,
+          color: '#f0b90b',
+          lineType: 'solid'
+        }
+      }
+    })
+
+    assert.equal(styles.candle.type, 'ohlc')
+    assert.equal(styles.candle.bar.upColor, '#00ff88')
+    assert.equal(styles.candle.bar.downBorderColor, '#cc2244')
+    assert.equal(styles.candle.priceMark.last.show, false)
+    assert.equal(styles.candle.priceMark.show, true)
+    assert.equal(styles.candle.priceMark.high.show, true)
+    assert.equal(styles.candle.priceMark.low.show, true)
+    assert.equal(styles.candle.priceMark.last.line.style, 'solid')
+    assert.equal(styles.candle.priceMark.last.upColor, '#fcd535')
+    assert.equal(styles.candle.tooltip.showRule, 'follow_cross')
+    assert.equal(styles.candle.tooltip.showType, 'standard')
+    assert.equal(styles.grid.show, true)
+    assert.equal(styles.grid.horizontal.show, true)
+    assert.equal(styles.grid.vertical.show, false)
+    assert.equal(styles.crosshair.show, false)
+    assert.equal(styles.crosshair.horizontal.line.color, '#f0b90b')
+  })
+
+  it('maps high-low marks and tooltip style settings into KLineCharts visual styles', () => {
+    const compact = getChartVisualStyles({
+      ...defaultChartSettings,
+      axisSettings: {
+        ...defaultChartSettings.axisSettings,
+        latestPrice: false,
+        highPriceMark: false,
+        lowPriceMark: false,
+        tooltipStyle: 'compact'
+      }
+    })
+
+    assert.equal(compact.candle.priceMark.show, false)
+    assert.equal(compact.candle.priceMark.high.show, false)
+    assert.equal(compact.candle.priceMark.low.show, false)
+    assert.equal(compact.candle.tooltip.showRule, 'follow_cross')
+    assert.equal(compact.candle.tooltip.showType, 'rect')
+    assert.equal(compact.candle.tooltip.title.show, false)
+
+    const hidden = getChartVisualStyles({
+      ...defaultChartSettings,
+      axisSettings: {
+        ...defaultChartSettings.axisSettings,
+        tooltipStyle: 'hidden'
+      }
+    })
+
+    assert.equal(hidden.candle.tooltip.showRule, 'none')
   })
 
   it('exposes only KLineCharts-backed drawing tools', () => {
@@ -220,10 +456,10 @@ describe('chart settings', () => {
   })
 
   it('maps numeric shortcuts to the visible quick intervals', () => {
-    assert.equal(getIntervalByShortcutKey('1'), '1s')
-    assert.equal(getIntervalByShortcutKey('4'), '15m')
-    assert.equal(getIntervalByShortcutKey('7'), '1d')
-    assert.equal(getIntervalByShortcutKey('9'), null)
+    assert.equal(getIntervalByShortcutKey('1'), '15m')
+    assert.equal(getIntervalByShortcutKey('2'), '1h')
+    assert.equal(getIntervalByShortcutKey('3'), '1d')
+    assert.equal(getIntervalByShortcutKey('4'), null)
   })
 
   it('ignores numeric shortcuts while text entry or a popup is active', () => {

@@ -4,7 +4,7 @@ import styles from '../HomePage.module.css'
 
 type AnimatedCounterProps = {
   value: number
-  label: string
+  label?: string
 }
 
 export function AnimatedCounter({ value, label }: AnimatedCounterProps) {
@@ -19,7 +19,7 @@ export function AnimatedCounter({ value, label }: AnimatedCounterProps) {
   return (
     <div className={ticking ? styles.counterTick : undefined}>
       <strong>{value.toLocaleString('en-US')}</strong>
-      <span>{label}</span>
+      {label ? <span>{label}</span> : null}
     </div>
   )
 }

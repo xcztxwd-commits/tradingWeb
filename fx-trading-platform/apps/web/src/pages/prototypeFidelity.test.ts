@@ -69,9 +69,9 @@ describe('HTML export fidelity baseline', () => {
     assert.match(zhLocale, /entryTitle:\s*'账户入口'/)
   })
 
-  it('keeps the Binance-like black-gold structure without importing exported scripts', () => {
-    assert.match(styles, /--bn-bg:\s*#181a20/)
-    assert.match(styles, /--color-BtnBg:\s*#fcd535/)
+  it('keeps the Binance-like structure without importing exported scripts', () => {
+    assert.match(styles, /--bn-bg:\s*var\(--theme-background\)/)
+    assert.match(styles, /--color-BtnBg:\s*var\(--theme-primary-hover\)/)
     assert.match(styles, /\.market-summary-grid/)
     assert.match(styles, /\.market-table/)
     assert.match(styles, /\.account-sidebar/)
@@ -81,7 +81,7 @@ describe('HTML export fidelity baseline', () => {
     assert.doesNotMatch([homeSources, marketsSource, authSource, accountSource].join('\n'), /gtm\.js|captcha\.min\.js|common-widget|bnbstatic/)
   })
 
-  it('uses the reference BinanceNova font and dark Binance palette across the core web CSS', () => {
+  it('uses the reference BinanceNova font and theme palette across the core web CSS', () => {
     const coreCss = [styles, themeStyles, homeStyles, authStyles, tradingStyles].join('\n')
 
     for (const weight of ['Regular', 'Medium', 'SemiBold', 'Bold']) {
@@ -115,6 +115,16 @@ describe('HTML export fidelity baseline', () => {
       '--theme-danger: #f6465d',
       '--theme-sell: #f6465d',
       '--theme-chart-grid: #333b47'
+    ]) {
+      assert.match(themeStyles, new RegExp(escapeRegExp(token)))
+    }
+
+    for (const token of [
+      '--theme-background: #f6f8fb',
+      '--theme-surface: #ffffff',
+      '--theme-text-primary: #111827',
+      '--theme-primary: #111827',
+      '--theme-chart-grid: #e8edf4'
     ]) {
       assert.match(themeStyles, new RegExp(escapeRegExp(token)))
     }

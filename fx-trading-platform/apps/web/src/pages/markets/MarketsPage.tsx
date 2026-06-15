@@ -1,22 +1,35 @@
-import { ChevronDown, Search, Star } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, LayoutGrid, List, Search, Star } from 'lucide-react'
+import { useEffect, useMemo, useState, type PointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { resolveTradingPath, writeLastTradingSymbol, type TradingCategory } from '../../app/hooks/useLastTradingSymbol'
 import { AssetMark } from '../../components/asset/AssetMark'
 import { SelectField, type SelectFieldOption } from '../../components/SelectField'
 import { ApiErrorState, LoadingState } from '../../components/user-page/PageState'
-import { formatApiError } from '../../components/user-page/userPageModels'
+import { formatApiError, paginateRows } from '../../components/user-page/userPageModels'
+import {
+  fetchBinanceFuturesDashboard,
+  fetchBinanceMarketOverview,
+  type BinanceFuturesChartPanelModel,
+  type BinanceFuturesChartSeries,
+  type BinanceFuturesDashboard,
+  type BinanceFuturesPeriod,
+  type BinanceMarketOverview
+} from '../../features/market/binanceMarketData'
 import { mockTradingMarkets } from '../../features/market/mockTradingData'
+import { hydrateMarketFavorites } from '../../features/market/marketFavorites'
 import { mergeTradingQuoteIntoMarket } from '../../features/market/tradingMarketAdapters'
 import { fetchMarketQuote, fetchMarketSymbols } from '../../features/market/tradingMarketApi'
 import { formatMarketPrice } from '../../features/market/tradingModels'
 import type { TradingMarket, TradingQuote } from '../../features/market/tradingModels'
+import { useMarketFavorites } from '../../features/market/useMarketFavorites'
 import { subscribeQuote } from '../../services/marketStream'
 import type { Quote } from '../../types/trading'
 
 type MarketPageTab = 'overview' | 'trading-data' | 'ai-picks' | 'token-unlocks'
 type TradingDataTab = 'rankings' | 'usdt-contracts' | 'coin-contracts' | 'options'
+type FuturesViewMode = 'list' | 'card'
+type FuturesPeriodTab = BinanceFuturesPeriod
 type MarketUniverseTab = 'favorites' | 'forex' | 'crypto' | 'spot' | 'contract'
 type MarketZoneTab =
   | 'all'
@@ -34,8 +47,8 @@ type MarketZoneTab =
 type SortKey = 'symbol' | 'price' | 'change' | 'volume' | 'marketCap'
 type SortDirection = 'asc' | 'desc'
 
-const favoriteStorageKey = 'fx-trading-market-favorites'
 const marketQuoteHydrationLimit = 40
+const marketOverviewPageSize = 20
 
 const marketPageTabs: Array<{ value: MarketPageTab; label: string }> = [
   { value: 'overview', label: '总览' },
@@ -49,6 +62,18 @@ const tradingDataTabs: Array<{ value: TradingDataTab; label: string }> = [
   { value: 'usdt-contracts', label: 'U本位合约' },
   { value: 'coin-contracts', label: '币本位合约' },
   { value: 'options', label: '期权' }
+]
+
+const futuresPeriodTabs: Array<{ value: FuturesPeriodTab; label: string }> = [
+  { value: '5m', label: '5分' },
+  { value: '15m', label: '15分' },
+  { value: '30m', label: '30分' },
+  { value: '1h', label: '1时' },
+  { value: '2h', label: '2时' },
+  { value: '4h', label: '4时' },
+  { value: '6h', label: '6时' },
+  { value: '12h', label: '12时' },
+  { value: '1d', label: '1天' }
 ]
 
 const marketUniverseTabs: Array<{ value: MarketUniverseTab; label: string }> = [
@@ -73,6 +98,7 @@ const marketZoneTabs: Array<{ value: MarketZoneTab; label: string; badge?: strin
   { value: 'launchpool', label: 'Launchpool', badge: 'New' },
   { value: 'defi', label: 'DeFi' }
 ]
+const forexMarketZoneTabs = marketZoneTabs.filter((tab) => tab.value === 'all')
 
 const marketColumns: Array<{ key: SortKey | 'action'; label: string; sortable?: boolean }> = [
   { key: 'symbol', label: '名称', sortable: true },
@@ -94,19 +120,21 @@ const marketSortOptions: Array<SelectFieldOption<SortKey>> = [
 export function MarketsPage() {
   const navigate = useNavigate()
   const [markets, setMarkets] = useState<TradingMarket[]>(mockTradingMarkets)
-  const [favorites, setFavorites] = useState<Set<string>>(() => loadFavoriteSymbols())
+  const [binanceOverview, setBinanceOverview] = useState<BinanceMarketOverview | null>(null)
+  const { favorites, toggleFavorite } = useMarketFavorites()
   const [query, setQuery] = useState('')
   const [pageTab, setPageTab] = useState<MarketPageTab>('trading-data')
   const [universeTab, setUniverseTab] = useState<MarketUniverseTab>('crypto')
   const [zoneTab, setZoneTab] = useState<MarketZoneTab>('all')
   const [sortKey, setSortKey] = useState<SortKey>('volume')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const [marketPage, setMarketPage] = useState(1)
   const [loading, setLoading] = useState(false)
   const [apiError, setApiError] = useState<ReturnType<typeof formatApiError> | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
   const hydratedMarkets = useMemo(
-    () => markets.map((market) => ({ ...market, favorite: favorites.has(market.symbol) || market.favorite })),
+    () => hydrateMarketFavorites(markets, favorites),
     [favorites, markets]
   )
   const visibleMarkets = useMemo(
@@ -116,8 +144,13 @@ export function MarketsPage() {
       ),
     [hydratedMarkets, query, sortDirection, sortKey, universeTab, zoneTab]
   )
-  const summaryDeck = useMemo(() => buildSummaryDeck(hydratedMarkets), [hydratedMarkets])
+  const activeMarketZoneTabs = universeTab === 'forex' ? forexMarketZoneTabs : marketZoneTabs
+  const summaryDeck = useMemo(() => buildSummaryDeck(hydratedMarkets, binanceOverview), [binanceOverview, hydratedMarkets])
   const rankings = useMemo(() => buildRankings(hydratedMarkets), [hydratedMarkets])
+  const pagedMarkets = useMemo(
+    () => paginateRows(visibleMarkets, marketPage, marketOverviewPageSize),
+    [marketPage, visibleMarkets]
+  )
   const visibleSymbolKey = useMemo(
     () => visibleMarkets.filter(canHydrateMarketQuote).slice(0, marketQuoteHydrationLimit).map((market) => market.symbol).join('|'),
     [visibleMarkets]
@@ -126,23 +159,32 @@ export function MarketsPage() {
   useEffect(() => {
     let active = true
     setLoading(true)
-    fetchMarketSymbols()
-      .then(async (symbols) => {
-        const initialMarkets = symbols.length > 0 ? symbols : mockTradingMarkets
-        if (active) {
-          setMarkets(initialMarkets)
-          setApiError(null)
-        }
-        const quotedMarkets = await Promise.all(
-          initialMarkets.filter(canHydrateMarketQuote).slice(0, marketQuoteHydrationLimit).map((market) => loadQuotedMarket(market))
-        )
-        if (active && quotedMarkets.length > 0) {
-          setMarkets((current) => mergeQuotedMarkets(current, quotedMarkets))
-        }
-      })
+    async function loadMarkets() {
+      const [symbolsResult, binanceOverviewResult] = await Promise.allSettled([fetchMarketSymbols(), fetchBinanceMarketOverview()])
+      const symbols = symbolsResult.status === 'fulfilled' ? symbolsResult.value : []
+      const nextBinanceOverview = binanceOverviewResult.status === 'fulfilled' ? binanceOverviewResult.value : null
+      const initialMarkets = mergeBinanceOverviewMarkets(symbols, nextBinanceOverview?.markets ?? [])
+      const nextMarkets = initialMarkets.length > 0 ? initialMarkets : mockTradingMarkets
+
+      if (active) {
+        setBinanceOverview(nextBinanceOverview)
+        setMarkets(nextMarkets)
+        setApiError(symbolsResult.status === 'rejected' && binanceOverviewResult.status === 'rejected' ? formatApiError(symbolsResult.reason) : null)
+      }
+
+      const quotedMarkets = await Promise.all(
+        nextMarkets.filter(canHydrateMarketQuote).slice(0, marketQuoteHydrationLimit).map((market) => loadQuotedMarket(market))
+      )
+      if (active && quotedMarkets.length > 0) {
+        setMarkets((current) => mergeQuotedMarkets(current, quotedMarkets))
+      }
+    }
+
+    loadMarkets()
       .catch((error) => {
         if (active) {
           setMarkets(mockTradingMarkets)
+          setBinanceOverview(null)
           setApiError(formatApiError(error))
         }
       })
@@ -155,8 +197,8 @@ export function MarketsPage() {
   }, [reloadKey])
 
   useEffect(() => {
-    saveFavoriteSymbols(favorites)
-  }, [favorites])
+    setMarketPage(1)
+  }, [query, sortDirection, sortKey, universeTab, zoneTab])
 
   useEffect(() => {
     if (!visibleSymbolKey) return
@@ -201,19 +243,14 @@ export function MarketsPage() {
             />
           ) : null}
 
+          <MarketOverviewMetrics overview={binanceOverview} />
           <MarketSummaryDeck deck={summaryDeck} onOpen={onOpenMarket} />
 
           <MarketFilters
-            query={query}
-            sortKey={sortKey}
             universeTab={universeTab}
             zoneTab={zoneTab}
-            onQuery={setQuery}
-            onSort={(nextKey) => {
-              setSortKey(nextKey)
-              setSortDirection(nextKey === 'symbol' ? 'asc' : 'desc')
-            }}
-            onUniverseTab={setUniverseTab}
+            zoneTabs={activeMarketZoneTabs}
+            onUniverseTab={handleUniverseTab}
             onZoneTab={setZoneTab}
           />
 
@@ -223,10 +260,23 @@ export function MarketsPage() {
                 <h2 id="market-table-title">市值排名前列的代币</h2>
                 <p>桌面显示完整表格，移动端保留名称、价格、24h 涨跌、市值和成交量摘要。</p>
               </div>
-              <span>{visibleMarkets.length} 个市场</span>
+              <div className="market-table-section__actions">
+                <MarketToolbar
+                  query={query}
+                  sortKey={sortKey}
+                  onQuery={setQuery}
+                  onSort={(nextKey) => {
+                    setSortKey(nextKey)
+                    setSortDirection(nextKey === 'symbol' ? 'asc' : 'desc')
+                  }}
+                />
+                <span className="market-table-section__count">
+                  {pagedMarkets.total} 个市场 · 每页 {pagedMarkets.pageSize} 条
+                </span>
+              </div>
             </div>
             <MarketTable
-              markets={visibleMarkets}
+              markets={pagedMarkets.items}
               favorites={favorites}
               sortKey={sortKey}
               sortDirection={sortDirection}
@@ -234,7 +284,30 @@ export function MarketsPage() {
               onOpen={onOpenMarket}
               onSort={toggleTableSort}
             />
-            <MarketMobileList markets={visibleMarkets} favorites={favorites} onFavorite={toggleFavorite} onOpen={onOpenMarket} />
+            <MarketMobileList markets={pagedMarkets.items} favorites={favorites} onFavorite={toggleFavorite} onOpen={onOpenMarket} />
+            <div className="table-pagination" aria-label="行情分页">
+              <span>
+                共 {pagedMarkets.total} 个市场 · 第 {pagedMarkets.page}/{pagedMarkets.totalPages} 页
+              </span>
+              <div>
+                <button
+                  type="button"
+                  className="table-action table-action--secondary"
+                  disabled={pagedMarkets.page <= 1}
+                  onClick={() => setMarketPage((value) => value - 1)}
+                >
+                  上一页
+                </button>
+                <button
+                  type="button"
+                  className="table-action table-action--secondary"
+                  disabled={pagedMarkets.page >= pagedMarkets.totalPages}
+                  onClick={() => setMarketPage((value) => value + 1)}
+                >
+                  下一页
+                </button>
+              </div>
+            </div>
           </section>
         </>
       ) : null}
@@ -255,15 +328,6 @@ export function MarketsPage() {
     </section>
   )
 
-  function toggleFavorite(symbol: string) {
-    setFavorites((current) => {
-      const next = new Set(current)
-      if (next.has(symbol)) next.delete(symbol)
-      else next.add(symbol)
-      return next
-    })
-  }
-
   function toggleTableSort(nextKey: SortKey) {
     setSortKey((currentKey) => {
       if (currentKey !== nextKey) {
@@ -273,6 +337,11 @@ export function MarketsPage() {
       setSortDirection((currentDirection) => (currentDirection === 'asc' ? 'desc' : 'asc'))
       return currentKey
     })
+  }
+
+  function handleUniverseTab(nextTab: MarketUniverseTab) {
+    setUniverseTab(nextTab)
+    if (nextTab === 'forex') setZoneTab('all')
   }
 
   function onOpenMarket(market: TradingMarket) {
@@ -289,6 +358,33 @@ function MarketSummaryDeck({ deck, onOpen }: { deck: SummaryGroup[]; onOpen: (ma
     <div className="market-summary-grid market-rank-grid" aria-label="行情摘要">
       {deck.map((group) => (
         <SummaryCard key={group.title} group={group} onOpen={onOpen} />
+      ))}
+    </div>
+  )
+}
+
+function MarketOverviewMetrics({ overview }: { overview: BinanceMarketOverview | null }) {
+  if (!overview) return null
+  const fearGreed = overview.metrics.fearGreed
+  const cards = [
+    { label: '总市值', value: `$${compactNumber(overview.metrics.marketCap)}`, detail: 'Binance 产品流通量估算' },
+    { label: '24h 成交额', value: `$${compactNumber(overview.metrics.volume24h)}`, detail: 'USDT 市场实时汇总' },
+    {
+      label: 'Fear & Greed',
+      value: fearGreed ? `${fearGreed.value}` : '--',
+      detail: fearGreed ? fearGreed.label : '等待指数更新'
+    },
+    { label: 'Hot Tokens', value: `${overview.hotTokens.length}`, detail: '按 Binance 24h 成交额排序' }
+  ]
+
+  return (
+    <div className="market-overview-metrics" aria-label="Binance market overview">
+      {cards.map((card) => (
+        <article key={card.label}>
+          <span>{card.label}</span>
+          <strong>{card.value}</strong>
+          <small>{card.detail}</small>
+        </article>
       ))}
     </div>
   )
@@ -320,7 +416,7 @@ function SummaryCard({ group, onOpen }: { group: SummaryGroup; onOpen: (market: 
 function RankingPreviewCard({ market, onOpen }: { market: TradingMarket; onOpen: (market: TradingMarket) => void }) {
   return (
     <button type="button" className="market-preview-row" onClick={() => onOpen(market)}>
-      <AssetMark symbol={market.symbol} category={market.category} size="sm" />
+      <AssetMark symbol={market.symbol} category={market.category} iconUrl={market.iconUrl} size="sm" />
       <span>
         <strong>{market.base}</strong>
         <small>{formatMarketPrice(market.symbol, market.last)}</small>
@@ -333,21 +429,15 @@ function RankingPreviewCard({ market, onOpen }: { market: TradingMarket; onOpen:
 }
 
 function MarketFilters({
-  query,
-  sortKey,
   universeTab,
   zoneTab,
-  onQuery,
-  onSort,
+  zoneTabs,
   onUniverseTab,
   onZoneTab
 }: {
-  query: string
-  sortKey: SortKey
   universeTab: MarketUniverseTab
   zoneTab: MarketZoneTab
-  onQuery: (query: string) => void
-  onSort: (key: SortKey) => void
+  zoneTabs: typeof marketZoneTabs
   onUniverseTab: (tab: MarketUniverseTab) => void
   onZoneTab: (tab: MarketZoneTab) => void
 }) {
@@ -361,23 +451,38 @@ function MarketFilters({
         ))}
       </div>
       <div className="market-zone-tabs" role="tablist" aria-label="板块">
-        {marketZoneTabs.map((tab) => (
+        {zoneTabs.map((tab) => (
           <button key={tab.value} type="button" aria-selected={zoneTab === tab.value} onClick={() => onZoneTab(tab.value)}>
             {tab.label}
             {tab.badge ? <span>{tab.badge}</span> : null}
           </button>
         ))}
       </div>
-      <div className="market-shell__toolbar" aria-label="行情搜索和排序">
-        <label className="market-search-field">
-          <Search size={15} aria-hidden="true" />
-          <span>搜索</span>
-          <input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="BTCUSDT" />
-        </label>
-        <div className="market-sort-field">
-          <span id="market-sort-label">排序</span>
-          <SelectField labelledBy="market-sort-label" value={sortKey} options={marketSortOptions} onChange={onSort} />
-        </div>
+    </div>
+  )
+}
+
+function MarketToolbar({
+  query,
+  sortKey,
+  onQuery,
+  onSort
+}: {
+  query: string
+  sortKey: SortKey
+  onQuery: (query: string) => void
+  onSort: (key: SortKey) => void
+}) {
+  return (
+    <div className="market-shell__toolbar" aria-label="行情搜索和排序">
+      <label className="market-search-field">
+        <Search size={15} aria-hidden="true" />
+        <span>搜索</span>
+        <input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="BTCUSDT" />
+      </label>
+      <div className="market-sort-field">
+        <span id="market-sort-label">排序</span>
+        <SelectField labelledBy="market-sort-label" value={sortKey} options={marketSortOptions} onChange={onSort} />
       </div>
     </div>
   )
@@ -424,7 +529,7 @@ function MarketTable({
             <tr key={market.symbol} onClick={() => onOpen(market)}>
               <td>
                 <FavoriteButton active={favorites.has(market.symbol) || market.favorite} symbol={market.symbol} onFavorite={onFavorite} />
-                <AssetMark symbol={market.symbol} category={market.category} size="sm" />
+                <AssetMark symbol={market.symbol} category={market.category} iconUrl={market.iconUrl} size="sm" />
                 <span>
                   <strong>{market.symbol}</strong>
                   <small>{market.name}</small>
@@ -472,7 +577,7 @@ function MarketMobileList({
       {markets.map((market) => (
         <article key={market.symbol} className="market-mobile-row">
           <button type="button" className="market-mobile-row__body" onClick={() => onOpen(market)}>
-            <AssetMark symbol={market.symbol} category={market.category} size="md" />
+            <AssetMark symbol={market.symbol} category={market.category} iconUrl={market.iconUrl} size="md" />
             <span>
               <strong>{market.symbol}</strong>
               <small>
@@ -520,6 +625,32 @@ function FavoriteButton({
 
 function TradingDataDashboard({ rankings, onOpen }: { rankings: RankingGroup[]; onOpen: (market: TradingMarket) => void }) {
   const [activeTab, setActiveTab] = useState<TradingDataTab>('rankings')
+  const [viewMode, setViewMode] = useState<FuturesViewMode>('list')
+  const [period, setPeriod] = useState<FuturesPeriodTab>('5m')
+  const [dashboard, setDashboard] = useState<BinanceFuturesDashboard | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const futuresChartPanels = dashboard?.panels ?? []
+  const referenceMarket = dashboard?.referenceMarket
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError(null)
+    fetchBinanceFuturesDashboard('BTCUSDT', period)
+      .then((nextDashboard) => {
+        if (active) setDashboard(nextDashboard)
+      })
+      .catch(() => {
+        if (active) setError('Binance perpetual trading-data 暂时不可用')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [period])
 
   return (
     <div className="market-data-view" aria-label="交易数据">
@@ -531,16 +662,70 @@ function TradingDataDashboard({ rankings, onOpen }: { rankings: RankingGroup[]; 
             aria-selected={activeTab === tab.value}
             onClick={() => setActiveTab(tab.value)}
           >
-            {tab.label}
+          {tab.label}
           </button>
         ))}
       </div>
 
-      <div className="market-data-dashboard market-ranking-preview-grid" aria-label={activeTab === 'rankings' ? '排行榜' : '合约榜单'}>
-        {rankings.map((group) => (
-          <RankingCard key={group.title} group={group} onOpen={onOpen} />
-        ))}
-      </div>
+      {activeTab === 'rankings' ? (
+        <div className="market-data-dashboard market-ranking-preview-grid" aria-label="排行榜">
+          {rankings.map((group) => (
+            <RankingCard key={group.title} group={group} onOpen={onOpen} />
+          ))}
+        </div>
+      ) : null}
+
+      {activeTab === 'usdt-contracts' ? (
+        <section className="futures-data-pane" aria-label="U本位合约交易数据">
+          <div className="futures-data-toolbar">
+            <button type="button" className="futures-symbol-select" aria-label="选择合约">
+              <span className="futures-symbol-label">
+                <strong>{referenceMarket?.symbol ?? 'BTCUSDT'}</strong>
+                <span>永续</span>
+              </span>
+              <ChevronDown size={15} aria-hidden="true" />
+            </button>
+
+            <div className="futures-view-toggle" aria-label="图表视图模式">
+              <button type="button" aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')}>
+                <List size={14} aria-hidden="true" />
+                List View
+              </button>
+              <button type="button" aria-pressed={viewMode === 'card'} onClick={() => setViewMode('card')}>
+                <LayoutGrid size={14} aria-hidden="true" />
+                Card View
+              </button>
+            </div>
+
+            <div className="futures-period-tabs" role="tablist" aria-label="合约数据周期">
+              {futuresPeriodTabs.map((tab) => (
+                <button
+                  key={tab.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={period === tab.value}
+                  onClick={() => setPeriod(tab.value)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+              <ChevronDown className="futures-period-chevron" size={14} aria-hidden="true" />
+            </div>
+
+            <button type="button" className="futures-trade-cta" disabled={!referenceMarket} onClick={() => referenceMarket && onOpen(referenceMarket)}>
+              去合约交易
+            </button>
+          </div>
+
+          {loading ? <LoadingState message="正在同步 Binance perpetual trading-data" /> : null}
+          {error ? <p className="market-live-note">{error}</p> : null}
+          <div className={`futures-chart-board futures-chart-board--${viewMode}`} aria-label={`${period} 合约交易数据图表`}>
+            {futuresChartPanels.map((panel) => (
+              <FuturesChartPanel key={panel.title} panel={panel} />
+            ))}
+          </div>
+        </section>
+      ) : null}
     </div>
   )
 }
@@ -565,7 +750,7 @@ function RankingCard({ group, onOpen }: { group: RankingGroup; onOpen: (market: 
       </div>
       <ol className="market-rank-list">
         {group.markets.map((market, index) => (
-          <li key={`${group.title}-${market.symbol}`}>
+          <li key={`${group.title}-${market.symbol}-${index}`}>
             <button type="button" onClick={() => onOpen(market)}>
               <span className="market-rank-index">{index + 1}</span>
               <span className="market-rank-symbol">
@@ -581,6 +766,131 @@ function RankingCard({ group, onOpen }: { group: RankingGroup; onOpen: (market: 
         ))}
       </ol>
     </section>
+  )
+}
+
+function FuturesChartPanel({ panel }: { panel: FuturesChartPanelModel }) {
+  const [hoverIndex, setHoverIndex] = useState(panel.labels.length - 1)
+  const activeIndex = Math.min(Math.max(hoverIndex, 0), panel.labels.length - 1)
+  const tooltipX = chartPointX(activeIndex, panel.labels.length)
+  const axisLabels = panel.labels.length > 18 ? panel.labels.filter((_, index) => index % 3 === 0 || index === panel.labels.length - 1) : panel.labels
+  const leftAxisLabels = panel.leftAxisLabels ?? buildChartAxisLabels(panel.series[0])
+  const rightAxisLabels = panel.rightAxisLabels ?? (panel.series.length > 1 && panel.series[0]?.type === 'bar' ? buildChartAxisLabels(panel.series[1]) : [])
+
+  function handlePointerMove(event: PointerEvent<SVGSVGElement>) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 1
+    const nextIndex = Math.round(Math.min(Math.max(ratio, 0), 1) * (panel.labels.length - 1))
+    setHoverIndex(nextIndex)
+  }
+
+  return (
+    <article className={`futures-chart-card${panel.switchLabels ? ' futures-chart-card--tall' : ''}`}>
+      <div className="futures-chart-card__head">
+        <div>
+          <h2>{panel.title}</h2>
+          {panel.subtitle ? <p>{panel.subtitle}</p> : null}
+        </div>
+        {panel.switchLabels ? (
+          <div className="futures-chart-card__switch" aria-label={`${panel.title} 指标`}>
+            {panel.switchLabels.map((label, index) => (
+              <button key={label} type="button" aria-pressed={index === 0}>
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="futures-chart-stage">
+        <div className="futures-chart-yaxis futures-chart-yaxis--left" aria-hidden="true">
+          {leftAxisLabels.map((label, index) => (
+            <span key={`${panel.title}-left-${index}-${label}`}>{label}</span>
+          ))}
+        </div>
+
+        {rightAxisLabels.length > 0 ? (
+          <div className="futures-chart-yaxis futures-chart-yaxis--right" aria-hidden="true">
+            {rightAxisLabels.map((label, index) => (
+              <span key={`${panel.title}-right-${index}-${label}`}>{label}</span>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="futures-chart-legend" aria-hidden="true">
+          {panel.series.map((series) => (
+            <span key={series.label} style={{ color: series.color }}>
+              <i style={{ background: series.color }} />
+              {series.label}
+            </span>
+          ))}
+        </div>
+
+        <svg
+          className="futures-chart-svg"
+          viewBox="0 0 100 64"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={`${panel.title} 趋势图`}
+          onPointerMove={handlePointerMove}
+          onPointerLeave={() => setHoverIndex(panel.labels.length - 1)}
+        >
+          <g className="futures-chart-grid" aria-hidden="true">
+            {futuresChartGridLines.map((y) => (
+              <line key={y} x1={futuresChartXStart} x2={futuresChartXEnd} y1={y} y2={y} />
+            ))}
+          </g>
+          {panel.series.map((series, seriesIndex) =>
+            series.type === 'bar' ? (
+              <g key={series.label} className="futures-chart-bars">
+                {series.values.map((value, index) => {
+                  const rect = barRect(series.values, value, index, panel.labels.length, seriesIndex, panel.series.length)
+                  return <rect key={`${series.label}-${index}`} x={rect.x} y={rect.y} width={rect.width} height={rect.height} fill={series.color} />
+                })}
+              </g>
+            ) : (
+              <g key={series.label}>
+                {series.type === 'area' ? <path className="futures-chart-area" d={areaPath(series.values)} fill={series.color} /> : null}
+                <path className="futures-chart-line" d={linePath(series.values)} stroke={series.color} />
+                {series.values.map((_, index) => {
+                  const point = linePoint(series.values, index)
+                  return <circle key={`${series.label}-marker-${index}`} className="futures-chart-marker" cx={point.x} cy={point.y} r="0.55" fill="#181a20" stroke={series.color} />
+                })}
+              </g>
+            )
+          )}
+          <line className="futures-chart-crosshair" x1={tooltipX} x2={tooltipX} y1="8" y2="56" />
+          {panel.series.map((series) =>
+            series.type === 'bar' ? null : (
+              <circle
+                key={`${series.label}-dot`}
+                className="futures-chart-dot"
+                cx={tooltipX}
+                cy={linePoint(series.values, activeIndex).y}
+                r="1.35"
+                fill={series.color}
+              />
+            )
+          )}
+        </svg>
+
+        <div className="futures-chart-axis" aria-hidden="true" style={{ gridTemplateColumns: `repeat(${axisLabels.length}, minmax(0, 1fr))` }}>
+          {axisLabels.map((label, index) => (
+            <span key={`${panel.title}-${index}-${label}`}>{label}</span>
+          ))}
+        </div>
+
+        <div className="futures-chart-tooltip" style={{ left: `${tooltipX}%` }}>
+          <strong>{panel.labels[activeIndex]}</strong>
+          {panel.series.map((series) => (
+            <span key={series.label}>
+              <i style={{ background: series.color }} />
+              {series.label}: {formatFuturesValue(series.values[activeIndex], series)}
+            </span>
+          ))}
+        </div>
+      </div>
+    </article>
   )
 }
 
@@ -612,16 +922,24 @@ type RankingMarket = TradingMarket & {
   changeLabel: string
 }
 
-function buildSummaryDeck(markets: TradingMarket[]): SummaryGroup[] {
+type FuturesChartPanelModel = BinanceFuturesChartPanelModel & {
+  leftAxisLabels?: string[]
+  rightAxisLabels?: string[]
+}
+type FuturesChartSeries = BinanceFuturesChartSeries
+
+function buildSummaryDeck(markets: TradingMarket[], overview: BinanceMarketOverview | null): SummaryGroup[] {
   const byVolume = [...markets].sort((left, right) => turnover(right) - turnover(left))
+  const byMarketCap = [...markets].sort((left, right) => marketCap(right) - marketCap(left))
   const byGain = [...markets].sort((left, right) => right.changePercent - left.changePercent)
   const newest = [...markets].reverse()
+  const hotTokens = overview?.hotTokens.length ? overview.hotTokens : byVolume
 
   return [
-    { key: 'hot', title: '热门', description: '成交和关注最活跃', markets: takeThree(byVolume) },
+    { key: 'hot', title: '热门 Hot Tokens', description: 'Binance 24h 成交额最活跃', markets: takeThree(hotTokens) },
     { key: 'new', title: '新币榜', description: '近期加入观察', markets: takeThree(newest) },
     { key: 'gainers', title: '领涨榜', description: '24h 涨幅靠前', markets: takeThree(byGain) },
-    { key: 'volume', title: '成交榜', description: '24h 成交额靠前', markets: takeThree(byVolume.slice(1).length ? byVolume.slice(1) : byVolume) }
+    { key: 'market-cap', title: '市值榜', description: 'Binance 流通量实时估算', markets: takeThree(byMarketCap) }
   ]
 }
 
@@ -673,6 +991,22 @@ function buildRankings(_markets: TradingMarket[]): RankingGroup[] {
         rankingMarket('POND', '$0.00161', -8.52),
         rankingMarket('NIGHT', '$0.03123', -7.9),
         rankingMarket('ROBO', '$0.02054', -6.21)
+      ]
+    },
+    {
+      title: '成交榜',
+      description: '24h 成交额靠前',
+      markets: [
+        rankingMarket('BTC', '$64,259.44', 0.13),
+        rankingMarket('ETH', '$1,665.29', -0.84),
+        rankingMarket('BNB', '$611.30', 0.44),
+        rankingMarket('SOL', '$67.59', -0.49),
+        rankingMarket('DOGE', '$0.0863', -2.01),
+        rankingMarket('XRP', '$0.5204', 1.34),
+        rankingMarket('ADA', '$0.3736', -0.73),
+        rankingMarket('SUI', '$2.54', 3.21),
+        rankingMarket('LINK', '$13.22', -1.19),
+        rankingMarket('WLD', '$0.4953', -1.1)
       ]
     }
   ]
@@ -742,6 +1076,8 @@ function getMarketUniverse(market: TradingMarket): Exclude<MarketUniverseTab, 'f
 
 function matchesZone(market: TradingMarket, zone: MarketZoneTab) {
   if (zone === 'all') return true
+  if (zone === 'solana') return market.symbol === 'SOLUSDT'
+  if (zone === 'payments') return market.symbol === 'XRPUSDT'
   if (zone === 'metals') return market.category === 'metals'
   if (zone === 'indices') return market.category === 'indices'
   return true
@@ -761,8 +1097,32 @@ async function loadQuotedMarket(market: TradingMarket) {
   }
 }
 
+function mergeBinanceOverviewMarkets(providerMarkets: TradingMarket[], binanceMarkets: TradingMarket[]) {
+  const merged = new Map<string, TradingMarket>()
+  binanceMarkets.forEach((market) => merged.set(market.symbol, market))
+  providerMarkets.forEach((market) => {
+    const liveMarket = merged.get(market.symbol)
+    if (!liveMarket) {
+      merged.set(market.symbol, market)
+      return
+    }
+    merged.set(market.symbol, {
+      ...liveMarket,
+      favorite: market.favorite,
+      tradable: market.tradable,
+      quoteEnabled: market.quoteEnabled,
+      chartEnabled: market.chartEnabled,
+      orderBookEnabled: market.orderBookEnabled,
+      minLot: market.minLot,
+      pricePrecision: market.pricePrecision,
+      quantityPrecision: market.quantityPrecision
+    })
+  })
+  return Array.from(merged.values())
+}
+
 function canHydrateMarketQuote(market: TradingMarket) {
-  return market.tradable !== false && (market.category === 'fx' || market.provider === 'massive')
+  return market.source !== 'binance-market-overview' && market.tradable !== false && market.quoteEnabled !== false && (market.category === 'fx' || market.provider === 'massive' || market.provider === 'binance')
 }
 
 function applyQuote(market: TradingMarket, quote: TradingQuote): TradingMarket {
@@ -800,9 +1160,7 @@ function formatMarketCap(market: TradingMarket) {
 
 function marketCap(market: TradingMarket) {
   if (typeof market.marketCap === 'number' && market.marketCap > 0) return market.marketCap
-  const override = estimatedMarketCaps[market.symbol]
-  if (override) return override
-  return turnover(market) * 8
+  return 0
 }
 
 function turnover(market: TradingMarket) {
@@ -828,14 +1186,71 @@ function compactNumber(value: number) {
   return value.toFixed(2)
 }
 
-const estimatedMarketCaps: Record<string, number> = {
-  BTCUSDT: 1_320_000_000_000,
-  ETHUSDT: 410_000_000_000,
-  BNBUSDT: 86_000_000_000,
-  XRPUSDT: 65_000_000_000,
-  SOLUSDT: 74_000_000_000,
-  XAUUSD: 15_800_000_000_000,
-  US100: 22_400_000_000_000
+const futuresChartXStart = 6
+const futuresChartXEnd = 95
+const futuresChartXSpan = futuresChartXEnd - futuresChartXStart
+const futuresChartGridLines = [4, 30, 56]
+
+function chartPointX(index: number, length: number) {
+  return length > 1 ? futuresChartXStart + index * (futuresChartXSpan / (length - 1)) : 50
+}
+
+function buildChartAxisLabels(series?: FuturesChartSeries) {
+  if (!series?.values.length) return []
+  const min = Math.min(...series.values)
+  const max = Math.max(...series.values)
+  const middle = min + (max - min) / 2
+  return [max, middle, min].map((value) => formatFuturesAxisValue(value, series))
+}
+
+function formatFuturesAxisValue(value: number, series: FuturesChartSeries) {
+  const precision = series.precision ?? (Math.abs(value) >= 100 ? 0 : 2)
+  const core = series.compact ? compactNumber(value) : value.toLocaleString('en-US', { maximumFractionDigits: precision, minimumFractionDigits: precision })
+  return `${series.prefix ?? ''}${core}${series.suffix ?? ''}`
+}
+
+function linePath(values: number[]) {
+  return values.map((_, index) => {
+    const point = linePoint(values, index)
+    return `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`
+  }).join(' ')
+}
+
+function areaPath(values: number[]) {
+  const first = linePoint(values, 0)
+  const last = linePoint(values, values.length - 1)
+  return `${linePath(values)} L ${last.x.toFixed(2)} 56 L ${first.x.toFixed(2)} 56 Z`
+}
+
+function linePoint(values: number[], index: number) {
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const range = max - min || 1
+  const value = values[index] ?? values[values.length - 1] ?? min
+  const ratio = (value - min) / range
+  const x = chartPointX(index, values.length)
+  const y = 54 - ratio * 42
+  return { x, y }
+}
+
+function barRect(values: number[], value: number, index: number, labelCount: number, seriesIndex: number, seriesCount: number) {
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const includesNegative = min < 0
+  const base = includesNegative ? 0 : min
+  const range = includesNegative ? Math.max(Math.abs(min), Math.abs(max), 1) : Math.max(max - min, 1)
+  const groupWidth = futuresChartXSpan / Math.max(labelCount, 1)
+  const barWidth = Math.max(1.2, groupWidth / Math.max(seriesCount + 0.8, 1))
+  const height = Math.max(1.4, (Math.abs(value - base) / range) * 42)
+  const x = futuresChartXStart + 0.5 + index * groupWidth + seriesIndex * barWidth
+  const y = 56 - height
+  return { x, y, width: barWidth * 0.72, height }
+}
+
+function formatFuturesValue(value: number, series: FuturesChartSeries) {
+  const precision = series.precision ?? (Math.abs(value) >= 100 ? 0 : 2)
+  const core = series.compact ? compactNumber(value) : value.toLocaleString('en-US', { maximumFractionDigits: precision, minimumFractionDigits: precision })
+  return `${series.prefix ?? ''}${core}${series.suffix ?? ''}`
 }
 
 function takeThree(markets: TradingMarket[]) {
@@ -844,20 +1259,4 @@ function takeThree(markets: TradingMarket[]) {
 
 function toAriaSort(direction: SortDirection) {
   return direction === 'asc' ? 'ascending' : 'descending'
-}
-
-function loadFavoriteSymbols() {
-  if (typeof window === 'undefined') return new Set<string>()
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(favoriteStorageKey) ?? '[]')
-    if (!Array.isArray(parsed)) return new Set<string>()
-    return new Set(parsed.filter((symbol): symbol is string => typeof symbol === 'string' && symbol.length > 0))
-  } catch {
-    return new Set<string>()
-  }
-}
-
-function saveFavoriteSymbols(favorites: Set<string>) {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(favoriteStorageKey, JSON.stringify(Array.from(favorites)))
 }

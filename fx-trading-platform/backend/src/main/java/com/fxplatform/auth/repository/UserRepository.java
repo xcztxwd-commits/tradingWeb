@@ -16,9 +16,21 @@ public interface UserRepository extends FxBaseMapper<UserEntity> {
         .eq(UserEntity::getEmail, email)));
   }
 
+  default Optional<UserEntity> findByEmailOrPhone(String identifier) {
+    return Optional.ofNullable(selectOne(new LambdaQueryWrapper<UserEntity>()
+        .eq(UserEntity::getEmail, identifier)
+        .or()
+        .eq(UserEntity::getPhone, identifier)));
+  }
+
   /** 判断邮箱是否已存在，注册时用于唯一性校验。 */
   default boolean existsByEmail(String email) {
     return selectCount(new LambdaQueryWrapper<UserEntity>()
         .eq(UserEntity::getEmail, email)) > 0;
+  }
+
+  default boolean existsByPhone(String phone) {
+    return selectCount(new LambdaQueryWrapper<UserEntity>()
+        .eq(UserEntity::getPhone, phone)) > 0;
   }
 }

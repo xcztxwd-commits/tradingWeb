@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react'
 import { getHomeCounters, type HomeCounters } from '../../../services/homeApi'
 
 const fallbackCounters: HomeCounters = {
-  users: 321320363,
+  users: 321443508,
   activeTraders: 18420,
-  dailyTrades: 726340
+  dailyTrades: 726340,
+  metricCards: []
 }
 
 export function useHomeCounters() {
@@ -17,7 +18,12 @@ export function useHomeCounters() {
     const loadCounters = () => {
       getHomeCounters()
         .then((nextCounters) => {
-          if (active) setCounters(nextCounters)
+          if (active) {
+            setCounters({
+              ...nextCounters,
+              metricCards: Array.isArray(nextCounters.metricCards) ? nextCounters.metricCards : []
+            })
+          }
         })
         .catch(() => {
           if (active) setCounters((current) => current)

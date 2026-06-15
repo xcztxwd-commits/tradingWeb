@@ -10,13 +10,20 @@ import type {
   ContentArticleRow,
   ContentMessageRow,
   DashboardSummary,
+  DataProviderPayload,
+  DataProviderRow,
   DictionaryRow,
   LedgerRow,
   MarketStatus,
   OrderRow,
   PaymentMethodRow,
   PositionRow,
+  ProviderInstrumentRow,
+  ProviderSyncResponse,
   RiskConfigRow,
+  SymbolDisplayPayload,
+  SymbolProviderBindingPayload,
+  SymbolProviderBindingRow,
   SymbolRow,
   SystemSettingRow,
   TradeRow
@@ -189,6 +196,81 @@ export function getSymbolsPage(token: string, page = 0, size = 50) {
 
 export function getMarketStatus(token: string) {
   return apiGet<MarketStatus>('/api/admin/market/status', token)
+}
+
+export function getDataProviders(token: string) {
+  return apiGet<DataProviderRow[]>('/api/admin/market/data-providers', token)
+}
+
+export function createDataProvider(token: string, payload: DataProviderPayload) {
+  return apiPost<DataProviderRow>('/api/admin/market/data-providers', payload, token)
+}
+
+export function updateDataProvider(token: string, providerId: string, payload: DataProviderPayload) {
+  return apiPut<DataProviderRow>(
+    `/api/admin/market/data-providers/${encodeURIComponent(providerId)}`,
+    payload,
+    token
+  )
+}
+
+export function testDataProvider(token: string, providerId: string) {
+  return apiPost<DataProviderRow>(
+    `/api/admin/market/data-providers/${encodeURIComponent(providerId)}/test`,
+    {},
+    token
+  )
+}
+
+export function syncProviderInstruments(token: string, providerId: string) {
+  return apiPost<ProviderSyncResponse>(
+    `/api/admin/market/data-providers/${encodeURIComponent(providerId)}/sync-instruments`,
+    {},
+    token
+  )
+}
+
+export function getProviderInstruments(token: string, providerId: string) {
+  return apiGet<ProviderInstrumentRow[]>(
+    `/api/admin/market/data-providers/${encodeURIComponent(providerId)}/instruments`,
+    token
+  )
+}
+
+export function getSymbolProviderBindings(token: string, symbolId: string) {
+  return apiGet<SymbolProviderBindingRow[]>(
+    `/api/admin/market/symbols/${encodeURIComponent(symbolId)}/provider-bindings`,
+    token
+  )
+}
+
+export function createSymbolProviderBinding(
+  token: string,
+  symbolId: string,
+  payload: SymbolProviderBindingPayload
+) {
+  return apiPost<SymbolProviderBindingRow>(
+    `/api/admin/market/symbols/${encodeURIComponent(symbolId)}/provider-bindings`,
+    payload,
+    token
+  )
+}
+
+export function updateSymbolProviderBinding(
+  token: string,
+  symbolId: string,
+  bindingId: string,
+  payload: SymbolProviderBindingPayload
+) {
+  return apiPut<SymbolProviderBindingRow>(
+    `/api/admin/market/symbols/${encodeURIComponent(symbolId)}/provider-bindings/${encodeURIComponent(bindingId)}`,
+    payload,
+    token
+  )
+}
+
+export function updateSymbolDisplay(token: string, symbolId: string, payload: SymbolDisplayPayload) {
+  return apiPut<SymbolRow>(`/api/admin/market/symbols/${encodeURIComponent(symbolId)}/display`, payload, token)
 }
 
 export function getRiskConfigs(token: string) {

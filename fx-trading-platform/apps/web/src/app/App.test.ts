@@ -56,6 +56,11 @@ describe('prototype-driven app shell and routes', () => {
     assert.match(appShellSource, /authenticatedNavItems/)
     assert.match(appShellSource, /TradingNavMenu/)
     assert.match(appShellSource, /AccountUserMenu/)
+    assert.match(appShellSource, /useTheme/)
+    assert.match(appShellSource, /const \{ currentTheme,\s*toggleTheme \} = useTheme\(\)/)
+    assert.match(appShellSource, /className="app-topbar__icon app-topbar__theme"/)
+    assert.match(appShellSource, /aria-pressed=\{currentTheme\.colorScheme === 'light'\}/)
+    assert.match(appShellSource, /onClick=\{toggleTheme\}/)
     assert.match(appShellSource, /to="\/login"/)
     assert.match(appShellSource, /to="\/register"/)
     assert.match(navigationSource, /export const guestNavItems/)
@@ -63,11 +68,70 @@ describe('prototype-driven app shell and routes', () => {
     assert.doesNotMatch(getArraySource(navigationSource, 'guestNavItems'), /\/wallet|\/orders|\/positions|\/security|\/settings/)
   })
 
-  it('keeps desktop IA focused on home, markets, trading, wallet and account', () => {
+  it('uses the same desktop topbar on home and markets', () => {
+    assert.match(appShellSource, /<Link className="app-brand" to="\/" aria-label="FX Trader 首页">/)
+    assert.doesNotMatch(appShellSource, /isMarketsRoute/)
+    assert.doesNotMatch(appShellSource, /MarketsReferenceNav|MarketsReferenceActions/)
+    assert.doesNotMatch(appShellSource, /app-topbar--reference|app-brand--reference/)
+    assert.doesNotMatch(styles, /\.app-topbar--reference|\.app-brand--reference|\.market-reference-/)
+  })
+
+  it('removes the desktop home button while keeping logo and mobile home navigation', () => {
+    const guestNavSource = getArraySource(navigationSource, 'guestNavItems')
+    const authNavSource = getArraySource(navigationSource, 'authenticatedNavItems')
+    const mobileNavSource = getArraySource(navigationSource, 'mobileNavItems')
+
+    assert.doesNotMatch(guestNavSource, /to:\s*'\/'/)
+    assert.doesNotMatch(authNavSource, /to:\s*'\/'/)
+    assert.match(appShellSource, /<Link className="app-brand" to="\/" aria-label="FX Trader 首页">/)
+    assert.match(mobileNavSource, /to:\s*'\/'/)
+  })
+
+  it('keeps the home trading dropdown wired to category routes', () => {
+    const tradingNavSource = readFileSync(join(currentDir, 'components', 'TradingNavMenu.tsx'), 'utf8')
+    const topbarNavRule = getCssRule(styles, '.app-topbar__nav')
+
+    assert.match(tradingNavSource, /resolveTradingPath/)
+    assert.match(tradingNavSource, /onClick=\{\(\) => openCategory\(item\.category\)\}/)
+    assert.match(tradingNavSource, /role="menuitem"/)
+    assert.match(tradingNavSource, /category:\s*'crypto'/)
+    assert.match(tradingNavSource, /category:\s*'forex'/)
+    assert.match(tradingNavSource, /category:\s*'contract'/)
+    assert.match(tradingNavSource, /onClick=\{\(\) => setOpen\(true\)\}/)
+    assert.match(tradingNavSource, /onPointerEnter=\{\(event\) => \{[\s\S]*event\.pointerType !== 'touch'[\s\S]*setOpen\(true\)/)
+    assert.match(tradingNavSource, /onPointerLeave=\{\(event\) => \{[\s\S]*event\.pointerType !== 'touch'[\s\S]*setOpen\(false\)/)
+    assert.doesNotMatch(tradingNavSource, /setOpen\(\(current\) => !current\)/)
+    assert.doesNotMatch(tradingNavSource, /onFocus=\{\(\) => setOpen\(true\)\}/)
+    assert.match(tradingNavSource, /event\.key === 'ArrowDown'/)
+    assert.match(topbarNavRule, /overflow:\s*visible/)
+    assert.doesNotMatch(topbarNavRule, /overflow-x:\s*auto/)
+    assert.doesNotMatch(styles, /\.app-topbar__nav::-webkit-scrollbar/)
+  })
+
+  it('bridges the hover gap between the trading trigger and dropdown panel', () => {
+    const bridgeRule = getCssRule(styles, '.trading-nav-menu:hover::after')
+
+    assert.match(styles, /\.trading-nav-menu__panel,\s*\.account-user-menu__panel\s*{[\s\S]*top:\s*calc\(100% \+ 10px\)/)
+    assert.match(bridgeRule, /content:\s*''/)
+    assert.match(bridgeRule, /top:\s*100%/)
+    assert.match(bridgeRule, /height:\s*10px/)
+  })
+
+  it('keeps the account user menu open on click instead of focus-toggling closed', () => {
+    const accountMenuSource = readFileSync(join(currentDir, 'components', 'AccountUserMenu.tsx'), 'utf8')
+
+    assert.match(accountMenuSource, /aria-label="个人中心"/)
+    assert.match(accountMenuSource, /onClick=\{\(\) => setOpen\(true\)\}/)
+    assert.doesNotMatch(accountMenuSource, /setOpen\(\(current\) => !current\)/)
+    assert.doesNotMatch(accountMenuSource, /onFocus=\{\(\) => setOpen\(true\)\}/)
+    assert.match(accountMenuSource, /if \(event\.key === 'Escape'\) setOpen\(false\)/)
+  })
+
+  it('keeps desktop IA focused on markets, trading, wallet and account', () => {
     const guestNavSource = getArraySource(navigationSource, 'guestNavItems')
     const authNavSource = getArraySource(navigationSource, 'authenticatedNavItems')
 
-    for (const route of ['/', '/markets']) {
+    for (const route of ['/markets']) {
       assert.match(guestNavSource, new RegExp(`to:\\s*'${escapeRegExp(route)}'`))
       assert.match(authNavSource, new RegExp(`to:\\s*'${escapeRegExp(route)}'`))
     }
@@ -91,18 +155,18 @@ describe('prototype-driven app shell and routes', () => {
 
   it('uses Binance-like shell tokens with safe-area mobile tabs', () => {
     assert.match(styles, /--app-top-nav-height:\s*64px/)
-    assert.match(styles, /--bn-bg:\s*#181a20/)
-    assert.match(styles, /--bn-terminal-bg:\s*#0b0e11/)
-    assert.match(styles, /--bn-surface:\s*#202630/)
-    assert.match(styles, /--bn-surface-2:\s*#29313d/)
-    assert.match(styles, /--bn-line:\s*#333b47/)
-    assert.match(styles, /--bn-text:\s*#eaecef/)
-    assert.match(styles, /--bn-muted:\s*#929aa5/)
-    assert.match(styles, /--color-PrimaryYellow:\s*#f0b90b/)
-    assert.match(styles, /--color-BtnBg:\s*#fcd535/)
-    assert.match(styles, /--color-BasicBg:\s*#ffffff/)
-    assert.match(styles, /--color-Buy:\s*#2ebd85/)
-    assert.match(styles, /--color-Sell:\s*#f6465d/)
+    assert.match(styles, /--bn-bg:\s*var\(--theme-background\)/)
+    assert.match(styles, /--bn-terminal-bg:\s*var\(--theme-background\)/)
+    assert.match(styles, /--bn-surface:\s*var\(--theme-surface\)/)
+    assert.match(styles, /--bn-surface-2:\s*color-mix\(in srgb,\s*var\(--theme-surface\) 82%,\s*var\(--theme-background\)\)/)
+    assert.match(styles, /--bn-line:\s*var\(--theme-border\)/)
+    assert.match(styles, /--bn-text:\s*var\(--theme-text-primary\)/)
+    assert.match(styles, /--bn-muted:\s*var\(--theme-text-muted\)/)
+    assert.match(styles, /--color-PrimaryYellow:\s*var\(--theme-primary\)/)
+    assert.match(styles, /--color-BtnBg:\s*var\(--theme-primary-hover\)/)
+    assert.match(styles, /--color-BasicBg:\s*var\(--theme-surface\)/)
+    assert.match(styles, /--color-Buy:\s*var\(--theme-buy\)/)
+    assert.match(styles, /--color-Sell:\s*var\(--theme-sell\)/)
     assert.match(styles, /font-family:\s*BinanceNova,\s*Arial/)
     assert.doesNotMatch(styles, /\bInter\b/)
     assert.match(styles, /\.app-shell\s*{[\s\S]*background:\s*var\(--bn-bg\)/)
@@ -140,6 +204,14 @@ function getArraySource(sourceText: string, name: string) {
   assert.notEqual(start, -1, `${name} should be exported`)
   const nextExport = sourceText.indexOf('\nexport const ', start + 1)
   return sourceText.slice(start, nextExport === -1 ? sourceText.length : nextExport)
+}
+
+function getCssRule(sourceText: string, selector: string) {
+  const start = sourceText.indexOf(`${selector} {`)
+  assert.notEqual(start, -1, `${selector} should exist`)
+  const end = sourceText.indexOf('\n}', start)
+  assert.notEqual(end, -1, `${selector} should close`)
+  return sourceText.slice(start, end + 2)
 }
 
 function escapeRegExp(value: string) {

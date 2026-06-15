@@ -1,14 +1,15 @@
-import { ChevronDown, List, MoreVertical, PanelRight, ShoppingBag, SlidersHorizontal } from 'lucide-react'
+import { ChevronDown, List, PanelRight, ShoppingBag } from 'lucide-react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { TerminalIconButton } from '../../../design-system/components/TerminalIconButton'
 import { formatMarketPrice } from '../../../features/market/tradingModels'
 import type { TradingMarket, TradingQuote } from '../../../features/market/tradingModels'
+import type { TradingMarketDataStatusView } from '../tradingPageMarketDataStatus'
 import styles from './MobileTradingTerminal.module.css'
 
 export type MobileTradingTerminalProps = {
   market: TradingMarket
+  marketDataStatusView: TradingMarketDataStatusView
   quote: TradingQuote
   sessionStatusLabel: string
   sessionStatusText: string
@@ -17,11 +18,11 @@ export type MobileTradingTerminalProps = {
   onOpenMarkets: () => void
   onOpenQuote: () => void
   onOpenTrade: () => void
-  onOpenSettings: () => void
 }
 
 export function MobileTradingTerminal({
   market,
+  marketDataStatusView,
   quote,
   sessionStatusLabel,
   sessionStatusText,
@@ -29,8 +30,7 @@ export function MobileTradingTerminal({
   accountPanel,
   onOpenMarkets,
   onOpenQuote,
-  onOpenTrade,
-  onOpenSettings
+  onOpenTrade
 }: MobileTradingTerminalProps) {
   const { t } = useTranslation()
   const positive = quote.changePercent >= 0
@@ -62,8 +62,6 @@ export function MobileTradingTerminal({
           <strong className={directionClassName}>{formatMarketPrice(market.symbol, quote.mid)}</strong>
           <span className={directionClassName}>{positive ? '+' : ''}{quote.changePercent.toFixed(2)}%</span>
         </div>
-        <TerminalIconButton icon={<SlidersHorizontal size={18} aria-hidden="true" />} label={t('nav.settings')} onClick={onOpenSettings} />
-        <TerminalIconButton icon={<MoreVertical size={18} aria-hidden="true" />} label={t('trading.moreSettings')} onClick={onOpenSettings} />
       </header>
 
       <dl className={styles.metricStrip} aria-label={t('trading.marketSummary24h')}>
@@ -84,6 +82,11 @@ export function MobileTradingTerminal({
       <div className={styles.sessionStrip} aria-live="polite">
         <strong>{sessionStatusLabel}</strong>
         <span>{sessionStatusText}</span>
+      </div>
+
+      <div className={styles.marketDataStrip} data-tone={marketDataStatusView.tone} aria-live="polite">
+        <strong>{marketDataStatusView.label}</strong>
+        <span>{marketDataStatusView.detail}</span>
       </div>
 
       <section className={styles.orderSurface} aria-label={t('trading.trade')}>

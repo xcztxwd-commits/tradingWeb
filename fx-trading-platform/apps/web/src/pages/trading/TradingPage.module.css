@@ -1,31 +1,31 @@
 .page {
-  --trading-page-bg: #0b0e11;
-  --trading-surface: #1e2329;
-  --trading-surface-2: #202630;
-  --trading-surface-3: #29313d;
-  --trading-surface-raised: #202630;
-  --trading-field-bg: #181a20;
-  --trading-border: rgb(234 236 239 / 0.08);
-  --trading-border-soft: rgb(234 236 239 / 0.06);
-  --trading-border-strong: rgb(234 236 239 / 0.14);
-  --trading-text: #929aa5;
-  --trading-text-strong: #eaecef;
-  --trading-heading: #eaecef;
-  --trading-muted: #707a8a;
-  --trading-subtle: #929aa5;
-  --trading-faint: #5e6673;
-  --trading-accent: #fcd535;
-  --trading-accent-soft: rgb(252 213 53 / 0.1);
-  --trading-accent-border: rgb(252 213 53 / 0.32);
-  --trading-accent-text: #181a20;
-  --trading-buy: #2ebd85;
-  --trading-buy-strong: #2ebd85;
-  --trading-sell: #f6465d;
-  --trading-sell-strong: #f6465d;
-  --trading-depth-ask: rgb(246 70 93 / 0.12);
-  --trading-depth-bid: rgb(46 189 133 / 0.12);
-  --trading-chart-grid-horizontal: rgb(67 76 90 / 0.45);
-  --trading-chart-grid-vertical: rgb(67 76 90 / 0.32);
+  --trading-page-bg: var(--theme-background);
+  --trading-surface: var(--theme-surface);
+  --trading-surface-2: color-mix(in srgb, var(--theme-surface) 84%, var(--theme-background));
+  --trading-surface-3: var(--theme-surface-elevated);
+  --trading-surface-raised: var(--theme-surface-elevated);
+  --trading-field-bg: color-mix(in srgb, var(--theme-surface-elevated) 74%, var(--theme-background));
+  --trading-border: var(--theme-border);
+  --trading-border-soft: color-mix(in srgb, var(--theme-border) 58%, transparent);
+  --trading-border-strong: color-mix(in srgb, var(--theme-border) 74%, var(--theme-text-muted));
+  --trading-text: var(--theme-text-secondary);
+  --trading-text-strong: var(--theme-text-primary);
+  --trading-heading: var(--theme-text-primary);
+  --trading-muted: var(--theme-text-muted);
+  --trading-subtle: color-mix(in srgb, var(--theme-text-muted) 76%, var(--theme-background));
+  --trading-faint: color-mix(in srgb, var(--theme-text-muted) 52%, var(--theme-background));
+  --trading-accent: var(--theme-primary);
+  --trading-accent-soft: color-mix(in srgb, var(--theme-primary) 14%, transparent);
+  --trading-accent-border: color-mix(in srgb, var(--theme-primary) 42%, transparent);
+  --trading-accent-text: var(--theme-background);
+  --trading-buy: var(--theme-buy);
+  --trading-buy-strong: var(--theme-chart-candle-up);
+  --trading-sell: var(--theme-sell);
+  --trading-sell-strong: var(--theme-chart-candle-down);
+  --trading-depth-ask: var(--theme-order-book-ask-bg);
+  --trading-depth-bid: var(--theme-order-book-bid-bg);
+  --trading-chart-grid-horizontal: var(--theme-chart-grid);
+  --trading-chart-grid-vertical: color-mix(in srgb, var(--theme-chart-grid) 72%, var(--theme-background));
   position: relative;
   min-height: 100vh;
   margin: 0;
@@ -38,6 +38,13 @@
   transition:
     background-color 180ms ease,
     color 180ms ease;
+}
+
+:global(:root[data-theme='minimal-white']) .page {
+  --trading-muted: #475569;
+  --trading-subtle: #475569;
+  --trading-faint: #64748b;
+  --trading-accent-text: #ffffff;
 }
 
 .layout {
@@ -78,6 +85,46 @@
   font-style: normal;
 }
 
+.marketDataStatus {
+  min-width: 180px;
+  max-width: 420px;
+  display: inline-grid;
+  gap: 1px;
+  margin-left: auto;
+  color: var(--trading-text);
+  line-height: 14px;
+}
+
+.marketDataStatus b,
+.marketDataStatus small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marketDataStatus b {
+  color: var(--trading-text-strong);
+  font-size: 11px;
+}
+
+.marketDataStatus small {
+  color: var(--trading-muted);
+  font-size: 10px;
+}
+
+.marketDataStatus[data-tone='live'] b {
+  color: var(--trading-buy-strong);
+}
+
+.marketDataStatus[data-tone='demo'] b {
+  color: var(--trading-accent);
+}
+
+.marketDataStatus[data-tone='error'] b {
+  color: var(--trading-sell-strong);
+}
+
 .binanceGrid {
   min-width: 0;
   min-height: 0;
@@ -111,6 +158,13 @@
   color: #ff707e;
 }
 
+:global(:root[data-theme='minimal-white']) .page :global(.trade-panel__session-error),
+:global(:root[data-theme='minimal-white']) .page :global(.trade-panel__notice) {
+  border-color: color-mix(in srgb, var(--trading-sell) 28%, transparent);
+  background: color-mix(in srgb, var(--trading-sell) 10%, var(--trading-surface));
+  color: var(--trading-sell);
+}
+
 .mobileTerminal {
   display: none;
 }
@@ -130,212 +184,8 @@
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 42px;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
-}
-
-.settingsButton {
-  width: 42px;
-  min-height: 42px;
-  align-self: stretch;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid var(--trading-border);
-  border-radius: 8px;
-  background: var(--trading-surface);
-  color: var(--trading-muted);
-  cursor: pointer;
-  transition:
-    background-color 150ms ease,
-    border-color 150ms ease,
-    color 150ms ease,
-    box-shadow 150ms ease,
-    transform 120ms ease;
-}
-
-.settingsButton:hover,
-.settingsButton:focus-visible {
-  border-color: var(--trading-accent-border);
-  background: var(--trading-surface-3);
-  color: var(--trading-text-strong);
-}
-
-.settingsButton:focus-visible {
-  outline: 2px solid var(--trading-accent-border);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--trading-accent-soft);
-}
-
-.settingsButton:active {
-  transform: scale(0.96);
-}
-
-.settingsLayer {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-  display: grid;
-  align-items: start;
-  justify-items: end;
-  background: color-mix(in srgb, var(--theme-background) 64%, transparent);
-  padding: 24px;
-  animation: settingsLayerIn 160ms ease-out;
-}
-
-.settingsDialog {
-  width: min(360px, calc(100vw - 32px));
-  overflow: hidden;
-  border: 1px solid var(--trading-border);
-  border-radius: 8px;
-  background: var(--trading-surface);
-  color: var(--trading-text);
-  box-shadow: var(--trading-shadow-lg);
-  transform-origin: top right;
-  animation: settingsDialogIn 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.settingsHeader,
-.settingsRow {
-  min-height: 58px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 0 16px;
-}
-
-.settingsHeader {
-  border-bottom: 1px solid var(--trading-border-soft);
-}
-
-.settingsHeader h2 {
-  margin: 0;
-  color: var(--trading-heading);
-  font-size: 16px;
-  line-height: 22px;
-}
-
-.settingsHeader button {
-  width: 34px;
-  height: 34px;
-  display: inline-grid;
-  place-items: center;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--trading-muted);
-  cursor: pointer;
-  transition:
-    background-color 150ms ease,
-    color 150ms ease,
-    box-shadow 150ms ease,
-    transform 120ms ease;
-}
-
-.settingsHeader button:hover,
-.settingsHeader button:focus-visible {
-  background: var(--trading-surface-3);
-  color: var(--trading-text-strong);
-}
-
-.settingsHeader button:focus-visible {
-  outline: 2px solid var(--trading-accent-border);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--trading-accent-soft);
-}
-
-.settingsHeader button:active {
-  transform: scale(0.94);
-}
-
-.settingsRow {
-  border-bottom: 1px solid var(--trading-border-soft);
-}
-
-.settingsRow span {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-
-.settingsRow strong {
-  color: var(--trading-text-strong);
-  font-size: 13px;
-}
-
-.settingsRow small {
-  color: var(--trading-muted);
-  font-size: 11px;
-}
-
-.settingsSection {
-  display: grid;
-  gap: 10px;
-  padding: 14px 16px 16px;
-  border-bottom: 1px solid var(--trading-border-soft);
-}
-
-.settingsSection strong {
-  color: var(--trading-text-strong);
-  font-size: 13px;
-}
-
-.layoutPresetGroup {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.layoutPresetButton,
-.layoutResetButton {
-  min-height: 34px;
-  border: 1px solid var(--trading-border-strong);
-  border-radius: 6px;
-  background: var(--trading-surface-2);
-  color: var(--trading-text);
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease,
-    color 150ms ease,
-    transform 120ms ease;
-}
-
-.layoutPresetButton:hover,
-.layoutPresetButton:focus-visible,
-.layoutResetButton:hover,
-.layoutResetButton:focus-visible {
-  border-color: var(--trading-accent-border);
-  background: var(--trading-surface-3);
-  color: var(--trading-text-strong);
-}
-
-.layoutPresetButton:focus-visible,
-.layoutResetButton:focus-visible {
-  outline: 2px solid var(--trading-accent-border);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--trading-accent-soft);
-}
-
-.layoutPresetButton:active,
-.layoutResetButton:active {
-  transform: scale(0.97);
-}
-
-.activeLayoutPresetButton {
-  border-color: var(--trading-accent-border);
-  background: var(--trading-accent);
-  color: var(--trading-accent-text);
-}
-
-.layoutResetButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
 }
 
 .mobileActionBar {
@@ -377,26 +227,7 @@
   }
 
   .headerRow {
-    grid-template-columns: minmax(0, 1fr) 38px;
-    gap: 8px;
-  }
-
-  .settingsButton {
-    width: 38px;
-    min-height: 38px;
-    border-radius: 7px;
-  }
-
-  .settingsLayer {
-    align-items: end;
-    justify-items: stretch;
-    padding: var(--space-2);
-  }
-
-  .settingsDialog {
-    width: 100%;
-    border-radius: var(--radius-4) var(--radius-4) var(--radius-0) var(--radius-0);
-    transform-origin: bottom center;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .mobileActionBar {
@@ -429,35 +260,7 @@
   }
 }
 
-@keyframes settingsLayerIn {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes settingsDialogIn {
-  from {
-    opacity: 0;
-    transform: translateY(-8px) scale(0.98);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .settingsButton,
-  .settingsLayer,
-  .settingsDialog,
-  .settingsHeader button,
-  .layoutPresetButton,
-  .layoutResetButton,
   .mobileActionBar button {
     transition: none;
     animation: none;

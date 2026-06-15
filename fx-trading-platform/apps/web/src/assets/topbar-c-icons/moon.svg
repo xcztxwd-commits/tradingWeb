@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="月亮">
+  <title>月亮</title>
+  <g fill="none" stroke="#FFFFFF" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+
+    <path d="M686 218 C598 244 535 322 535 420 C535 557 646 668 783 668 C808 668 833 664 856 656 C801 770 685 848 550 848 C364 848 214 698 214 512 C214 326 364 176 550 176 C600 176 647 186 690 206 C687 210 686 214 686 218 Z"/>
+
+  </g>
+</svg>

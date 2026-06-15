@@ -6,6 +6,7 @@ import { AccountsPage } from '../pages/AccountsPage'
 import { ArticlesPage } from '../pages/ArticlesPage'
 import { AuditLogsPage } from '../pages/AuditLogsPage'
 import { DashboardPage } from '../pages/DashboardPage'
+import { DataProvidersPage } from '../pages/DataProvidersPage'
 import { DictionariesPage } from '../pages/DictionariesPage'
 import { FeatureCrudPage } from '../pages/FeatureCrudPage'
 import { LedgerPage } from '../pages/LedgerPage'
@@ -15,8 +16,10 @@ import { MessagesPage } from '../pages/MessagesPage'
 import { OrdersPage } from '../pages/OrdersPage'
 import { PaymentMethodsPage } from '../pages/PaymentMethodsPage'
 import { PositionsPage } from '../pages/PositionsPage'
+import { ProviderInstrumentsPage } from '../pages/ProviderInstrumentsPage'
 import { RiskPage } from '../pages/RiskPage'
 import { SettingsPage } from '../pages/SettingsPage'
+import { SymbolDataBindingsPage } from '../pages/SymbolDataBindingsPage'
 import { SymbolsPage } from '../pages/SymbolsPage'
 import { TradesPage } from '../pages/TradesPage'
 import { UsersPage } from '../pages/UsersPage'
@@ -39,6 +42,9 @@ export function AdminApp() {
           <Route path="/products/list" element={<FeatureCrudPage pageKey="products" />} />
           <Route path="/products/categories" element={<FeatureCrudPage pageKey="product-categories" />} />
           <Route path="/products/price-schedules" element={<FeatureCrudPage pageKey="price-schedules" />} />
+          <Route path="/products/data-providers" element={<DataProvidersPage />} />
+          <Route path="/products/provider-instruments" element={<ProviderInstrumentsPage />} />
+          <Route path="/products/symbol-bindings" element={<SymbolDataBindingsPage />} />
 
           <Route path="/finance/ledger" element={<FeatureCrudPage pageKey="finance-ledger" />} />
           <Route path="/finance/recharge-orders" element={<FeatureCrudPage pageKey="recharge-orders" />} />

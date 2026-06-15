@@ -1,32 +1,48 @@
 import { Apple, ArrowRight, QrCode, Smartphone } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
+import type { HomeMetricCard } from '../../../services/homeApi'
 import styles from '../HomePage.module.css'
 import { AnimatedCounter } from './AnimatedCounter'
 
 type HomeHeroGuestProps = {
   users: number
+  metricCards: HomeMetricCard[]
 }
 
-export function HomeHeroGuest({ users }: HomeHeroGuestProps) {
+export function HomeHeroGuest({ users, metricCards }: HomeHeroGuestProps) {
   return (
     <section className={styles.heroCopy} aria-labelledby="home-hero-title">
       <h1 id="home-hero-title" className={styles.heroTitle}>
-        <span className={styles.heroNumber}>{users.toLocaleString('en-US')}</span>
+        <span className={styles.heroNumber}>
+          <AnimatedCounter value={users} />
+        </span>
         <span>用户的共同选择</span>
       </h1>
 
       <div className={styles.metricGrid} aria-label="平台指标">
-        <div>
-          <strong>No.1</strong>
-          <span>客户资产</span>
-          <small>$132,602,379,204</small>
-        </div>
-        <div>
-          <strong>No.1</strong>
-          <span>24H 交易量</span>
-          <small>$28,601,502,458</small>
-        </div>
+        {metricCards.map((card) => (
+          <article key={card.slot} className={styles.promoCard} tabIndex={0}>
+            <div className={styles.promoCardInner}>
+              <div className={`${styles.promoCardFace} ${styles.promoCardFront}`}>
+                <span className={styles.laurelLeft} aria-hidden="true" />
+                <div>
+                  <strong className={styles.promoRank}>{card.frontRank}</strong>
+                  <span className={styles.promoLabel}>{card.frontLabel}</span>
+                </div>
+                <span className={styles.laurelRight} aria-hidden="true" />
+              </div>
+              <div className={`${styles.promoCardFace} ${styles.promoCardBack}`}>
+                <span className={styles.laurelLeft} aria-hidden="true" />
+                <div>
+                  <strong className={styles.promoBackTitle}>{card.backTitle}</strong>
+                  <small className={styles.promoValue}>{card.backValue}</small>
+                </div>
+                <span className={styles.laurelRight} aria-hidden="true" />
+              </div>
+            </div>
+          </article>
+        ))}
       </div>
 
       <form className={styles.signupPanel} aria-label="注册入口">

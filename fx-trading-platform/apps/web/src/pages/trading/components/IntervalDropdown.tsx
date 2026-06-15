@@ -1,4 +1,4 @@
-import { Keyboard, Pencil, Plus, X } from 'lucide-react'
+import { Star } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -9,12 +9,21 @@ import styles from './ChartTopToolbar.module.css'
 
 type Props = {
   activeInterval: TradingPeriod
+  favoriteIntervals: TradingPeriod[]
   open: boolean
   onClose: () => void
+  onFavoriteIntervalToggle: (interval: TradingPeriod) => void
   onSelect: (interval: TradingPeriod) => void
 }
 
-export function IntervalDropdown({ activeInterval, open, onClose, onSelect }: Props) {
+export function IntervalDropdown({
+  activeInterval,
+  favoriteIntervals,
+  open,
+  onClose,
+  onFavoriteIntervalToggle,
+  onSelect
+}: Props) {
   const { t } = useTranslation()
   const rootRef = useRef<HTMLDivElement | null>(null)
 
@@ -52,42 +61,40 @@ export function IntervalDropdown({ activeInterval, open, onClose, onSelect }: Pr
       role="dialog"
       aria-label={t('trading.intervalSelect')}
     >
-      <div className={styles.shortcutTip}>
-        <Keyboard size={15} />
-        <div>
-          <strong>{t('trading.intervalHelpTitle')}</strong>
-          <span>{t('trading.intervalHelpDescription')}</span>
-        </div>
-        <button type="button" aria-label={t('trading.closeIntervalHelp')} onClick={onClose}>
-          <X size={15} />
-        </button>
-      </div>
-
       <div className={styles.dropdownHeader}>
         <span>{t('trading.intervalSelect')}</span>
-        <div className={styles.dropdownActions}>
-          <button type="button" aria-disabled="true">
-            <Plus size={14} />
-            {t('trading.customInterval')}
-          </button>
-          <button type="button" aria-disabled="true">
-            <Pencil size={14} />
-            {t('common.edit')}
-          </button>
-        </div>
       </div>
 
       <div className={styles.intervalGrid}>
-        {allChartIntervals.map((item) => (
-          <button
-            key={item.value}
-            type="button"
-            className={item.value === activeInterval ? styles.active : ''}
-            onClick={() => selectInterval(item)}
-          >
-            {t(item.label)}
-          </button>
-        ))}
+        {allChartIntervals.map((item) => {
+          const favorite = favoriteIntervals.includes(item.value)
+          const lockedFavorite = favorite && favoriteIntervals.length <= 1
+          return (
+            <div key={item.value} className={styles.intervalOption}>
+              <button
+                type="button"
+                className={item.value === activeInterval ? styles.active : ''}
+                onClick={() => selectInterval(item)}
+              >
+                {t(item.label)}
+              </button>
+              <button
+                type="button"
+                className={`${styles.intervalStar} ${favorite ? styles.intervalStarActive : ''}`}
+                aria-label={t(favorite ? 'trading.removeFavoriteInterval' : 'trading.addFavoriteInterval', {
+                  interval: t(item.label)
+                })}
+                aria-pressed={favorite}
+                disabled={lockedFavorite}
+                onClick={() => {
+                  if (!lockedFavorite) onFavoriteIntervalToggle(item.value)
+                }}
+              >
+                <Star size={13} fill={favorite ? 'currentColor' : 'none'} />
+              </button>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

@@ -1,7 +1,7 @@
 .field {
   display: grid;
   gap: 7px;
-  color: #7f8794;
+  color: var(--trading-muted);
   font-size: 12px;
 }
 
@@ -17,10 +17,10 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #242b36;
+  border: 1px solid var(--trading-border);
   border-radius: 6px;
-  background: #111821;
-  color: #e7edf4;
+  background: var(--trading-field-bg);
+  color: var(--trading-text-strong);
   padding: 0 11px;
   transition:
     border-color 160ms ease,
@@ -29,13 +29,13 @@
 }
 
 .control:hover {
-  border-color: #3a4656;
-  background: #141d28;
+  border-color: var(--trading-border-strong);
+  background: var(--trading-surface-raised);
 }
 
 .field:focus-within .control {
-  border-color: #f2b84b;
-  box-shadow: 0 0 0 1px rgba(242, 184, 75, 0.18);
+  border-color: var(--trading-accent-border);
+  box-shadow: 0 0 0 1px var(--trading-accent-soft);
 }
 
 .control input {
@@ -44,27 +44,27 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: #f5f8fb;
+  color: var(--trading-text-strong);
   font-size: 13px;
   line-height: 1;
   padding: 0;
 }
 
 .control input::placeholder {
-  color: #485260;
+  color: var(--trading-faint);
 }
 
 .affix {
-  color: #6f7886;
+  color: var(--trading-muted);
   white-space: nowrap;
 }
 
 .invalid .control {
-  border-color: #ed6a5e;
+  border-color: var(--trading-sell);
 }
 
 .error {
-  color: #ed6a5e;
+  color: var(--trading-sell);
   font-size: 11px;
   line-height: 14px;
 }
@@ -75,6 +75,6 @@
 
 .disabled .control,
 .disabled .control:hover {
-  border-color: #222832;
-  background: #0d131b;
+  border-color: var(--trading-border-soft);
+  background: var(--trading-page-bg);
 }

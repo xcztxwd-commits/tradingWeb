@@ -45,14 +45,22 @@ export function TradingNavMenu() {
   }
 
   return (
-    <div className="trading-nav-menu" ref={menuRef} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+    <div
+      className="trading-nav-menu"
+      ref={menuRef}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== 'touch') setOpen(true)
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType !== 'touch') setOpen(false)
+      }}
+    >
       <button
         type="button"
         className={`app-topbar__link trading-nav-menu__trigger${open ? ' active' : ''}`}
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
         onKeyDown={(event) => {
           if (event.key === 'ArrowDown') {
             event.preventDefault()

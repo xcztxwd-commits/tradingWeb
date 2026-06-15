@@ -56,7 +56,8 @@ function createTrade(quote: TradingQuote): TradeItem {
 function getTickSize(quote: TradingQuote) {
   if (quote.spread > 0) return roundTick(quote.spread / 4)
   if (quote.symbol.endsWith('JPY')) return 0.001
-  if (quote.symbol.includes('BTC') || quote.symbol.includes('ETH')) return 0.1
+  if (quote.symbol.includes('XRP')) return 0.0001
+  if (quote.symbol.endsWith('USDT')) return 0.1
   return 0.00001
 }
 
@@ -64,6 +65,7 @@ function inferFallbackSpread(symbol: string, last: number) {
   if (symbol.endsWith('JPY')) return 0.01
   if (symbol.includes('BTC')) return Math.max(1, last * 0.00006)
   if (symbol.includes('ETH')) return Math.max(0.1, last * 0.00008)
+  if (symbol.endsWith('USDT')) return Math.max(0.001, last * 0.00008)
   return 0.00004
 }
 

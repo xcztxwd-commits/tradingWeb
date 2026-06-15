@@ -107,6 +107,36 @@ export const mockTradingMarkets: TradingMarket[] = [
     source: 'markets.sources.mock'
   },
   {
+    symbol: 'SOLUSDT',
+    base: 'SOL',
+    quote: 'USDT',
+    name: 'Solana / Tether',
+    category: 'crypto',
+    favorite: false,
+    last: 152.12,
+    changePercent: 3.25,
+    volume: '1.82M',
+    high24h: 155,
+    low24h: 147.5,
+    spread: 0.01,
+    source: 'markets.sources.mock'
+  },
+  {
+    symbol: 'XRPUSDT',
+    base: 'XRP',
+    quote: 'USDT',
+    name: 'XRP / Tether',
+    category: 'crypto',
+    favorite: false,
+    last: 2.481,
+    changePercent: -1.13,
+    volume: '89.23M',
+    high24h: 2.56,
+    low24h: 2.41,
+    spread: 0.002,
+    source: 'markets.sources.mock'
+  },
+  {
     symbol: 'US100',
     base: 'US100',
     quote: 'USD',

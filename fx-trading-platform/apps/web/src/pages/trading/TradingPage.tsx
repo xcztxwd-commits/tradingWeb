@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { formatTradingChartTitle, initialTradingSymbol, mergeWithMockMarkets, normalizeTradingSymbol } from './tradingPageMarketSelection'
 import { getTradingSessionStatusLabel, getTradingSessionStatusText } from './tradingPageSessionStatus'
 import type { TradingTerminalViewProps } from './tradingPageViewModels'
+import { useTradingMarketDataStatus } from './useTradingMarketDataStatus'
 import { useMobileTerminalViewport } from './useMobileTerminalViewport'
 import { useTradingChartSettings } from './useTradingChartSettings'
 import { useResizableLayout } from '../../hooks/useResizableLayout'
@@ -14,12 +15,13 @@ import { LoginPromptDialog } from './components/LoginPromptDialog'
 import { RightTradingPanel } from './components/RightTradingPanel'
 import { TradingDesktopView } from './components/TradingDesktopView'
 import { TradingMobileView } from './components/TradingMobileView'
-import { TradingSettingsDialog } from './components/TradingSettingsDialog'
 import { mockTradingMarkets } from '../../features/market/mockTradingData'
+import { hydrateMarketFavorites } from '../../features/market/marketFavorites'
 import { createTradingMarketPlaceholder, createTradingQuoteFromMarket } from '../../features/market/tradingMarketAdapters'
 import { fetchMarketSymbols } from '../../features/market/tradingMarketApi'
 import { getPricePrecision, getRealtimeQuoteMarkets } from '../../features/market/tradingModels'
 import type { TradingMarket } from '../../features/market/tradingModels'
+import { useMarketFavorites } from '../../features/market/useMarketFavorites'
 import { useTradingQuoteMap } from './useTradingQuotes'
 import { TradePanel } from '../../features/trading/components/TradePanel'
 import { deriveTradingBalances } from '../../features/trading-session/tradingSession'
@@ -37,11 +39,10 @@ export function TradingPage() {
   const queryCategory = normalizeTradingCategory(searchParams.get('category'))
   const { currentTheme } = useTheme()
   const [selectedSymbol, setSelectedSymbol] = useState(normalizeTradingSymbol(querySymbol) ?? initialTradingSymbol)
-  const [markets, setMarkets] = useState<TradingMarket[]>(mockTradingMarkets)
+  const [markets, setMarkets] = useState<TradingMarket[]>([])
   const [marketDrawerOpen, setMarketDrawerOpen] = useState(false)
   const [quoteDrawerOpen, setQuoteDrawerOpen] = useState(false)
   const [orderSheetOpen, setOrderSheetOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [workspaceResetSignal, setWorkspaceResetSignal] = useState(0)
   const [loginPromptRequested, setLoginPromptRequested] = useState(false)
   const [pendingTradeOpen, setPendingTradeOpen] = useState(false)
@@ -63,19 +64,22 @@ export function TradingPage() {
     submitOrder,
     closePosition
   } = useTradingSession()
+  const { favorites: favoriteSymbols, toggleFavorite } = useMarketFavorites(token)
   const { layout, activePreset, applyPreset, beginSplitResize, resizeByDelta, endResize, movePanel, resetLayout } = useResizableLayout()
-
+  const { getStatusView, handleQuoteStatus } = useTradingMarketDataStatus()
+  const favoriteHydratedMarkets = useMemo(() => hydrateMarketFavorites(markets, favoriteSymbols), [favoriteSymbols, markets])
   const selectedMarket = useMemo(
-    () => markets.find((market) => market.symbol === selectedSymbol) ?? createTradingMarketPlaceholder(selectedSymbol),
-    [markets, selectedSymbol]
+    () => favoriteHydratedMarkets.find((market) => market.symbol === selectedSymbol) ?? createTradingMarketPlaceholder(selectedSymbol),
+    [favoriteHydratedMarkets, selectedSymbol]
   )
-  const visibleMarkets = useMemo(() => (markets.length > 0 ? markets : [selectedMarket]), [markets, selectedMarket])
+  const visibleMarkets = useMemo(() => (favoriteHydratedMarkets.length > 0 ? favoriteHydratedMarkets : [selectedMarket]), [favoriteHydratedMarkets, selectedMarket])
   const quoteMarkets = useMemo(
     () => getRealtimeQuoteMarkets(visibleMarkets, selectedSymbol),
     [selectedSymbol, visibleMarkets]
   )
-  const quotes = useTradingQuoteMap(quoteMarkets, token)
+  const quotes = useTradingQuoteMap(quoteMarkets, token, handleQuoteStatus)
   const selectedQuote = quotes[selectedSymbol] ?? createTradingQuoteFromMarket(selectedMarket)
+  const marketDataStatusView = getStatusView(selectedSymbol, selectedQuote.source)
   const { chartCallbacks, chartSettings, chartThemeMode, indicators } = useTradingChartSettings(
     selectedSymbol,
     currentTheme.colorScheme
@@ -93,7 +97,6 @@ export function TradingPage() {
   const tradePricePrecision = selectedMarket.pricePrecision ?? getPricePrecision(selectedMarket.symbol)
   const tradeQuantityPrecision =
     selectedMarket.quantityPrecision ?? getQuantityPrecision(tradeMinOrderAmount, selectedMarket.symbol)
-
   useEffect(() => {
     setTradePricePrefill(null)
   }, [selectedSymbol])
@@ -125,19 +128,6 @@ export function TradingPage() {
       active = false
     }
   }, [querySymbol])
-
-  useEffect(() => {
-    if (!settingsOpen) return
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSettingsOpen(false)
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [settingsOpen])
 
   useEffect(() => {
     if (!loginRequired) setLoginPromptRequested(false)
@@ -234,15 +224,17 @@ export function TradingPage() {
     indicators,
     loginRequired,
     market: selectedMarket,
+    favorites: favoriteSymbols,
+    marketDataStatusView: marketDataStatusView,
     markets: visibleMarkets,
     onLoginRequired: handleTradeLoginRequired,
     onOpenMarkets: () => setMarketDrawerOpen(true),
     onOpenQuote: () => setQuoteDrawerOpen(true),
-    onOpenSettings: () => setSettingsOpen(true),
     onOpenTrade: handleOpenTrade,
     onSelectPrice: handleSelectPrice,
     onRetrySession: retrySession,
     onSelectSymbol: selectSymbol,
+    onFavorite: toggleFavorite,
     quote: selectedQuote,
     quotes,
     sessionError,
@@ -264,11 +256,9 @@ export function TradingPage() {
   return (
     <div className={styles.page}>
       {!isMobileTerminal ? <TradingDesktopView {...viewProps} /> : null}
-
       {isMobileTerminal ? <TradingMobileView {...viewProps} /> : null}
-
       <MobileDrawer open={marketDrawerOpen} side="left" title="Markets" onClose={() => setMarketDrawerOpen(false)}>
-        <MarketSidebar markets={visibleMarkets} quotes={quotes} selectedSymbol={selectedSymbol} onSelect={selectSymbol} />
+        <MarketSidebar markets={visibleMarkets} quotes={quotes} favorites={favoriteSymbols} selectedSymbol={selectedSymbol} onSelect={selectSymbol} onFavorite={toggleFavorite} />
       </MobileDrawer>
 
       <MobileDrawer open={quoteDrawerOpen} side="right" title="Quote" onClose={() => setQuoteDrawerOpen(false)}>
@@ -308,8 +298,6 @@ export function TradingPage() {
         onLogin={handleLoginRedirect}
         onRetry={() => void retrySession()}
       />
-
-      <TradingSettingsDialog layoutControls={workspaceLayoutControls} open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

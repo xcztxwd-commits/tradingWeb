@@ -124,6 +124,78 @@ class MassiveRestClientTest {
   }
 
   @Test
+  void fetchSymbolsFollowsMassiveNextUrlUntilRequestedLimit() throws IOException {
+    AtomicInteger calls = new AtomicInteger();
+    List<String> queries = new ArrayList<>();
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.createContext("/v3/reference/tickers", exchange -> {
+      int call = calls.incrementAndGet();
+      queries.add(exchange.getRequestURI().getQuery());
+      int port = server.getAddress().getPort();
+      String response = call == 1
+          ? """
+          {
+            "status": "OK",
+            "results": [
+              {
+                "ticker": "C:AEDAUD",
+                "name": "UAE Dirham / Australian Dollar",
+                "market": "fx",
+                "active": true,
+                "base_currency_symbol": "AED",
+                "currency_symbol": "AUD"
+              }
+            ],
+            "next_url": "http://127.0.0.1:%d/v3/reference/tickers?cursor=page-2"
+          }
+          """.formatted(port)
+          : """
+          {
+            "status": "OK",
+            "results": [
+              {
+                "ticker": "C:AEDBHD",
+                "name": "UAE Dirham / Bahraini Dinar",
+                "market": "fx",
+                "active": true,
+                "base_currency_symbol": "AED",
+                "currency_symbol": "BHD"
+              },
+              {
+                "ticker": "C:AEDCAD",
+                "name": "UAE Dirham / Canadian Dollar",
+                "market": "fx",
+                "active": true,
+                "base_currency_symbol": "AED",
+                "currency_symbol": "CAD"
+              }
+            ]
+          }
+          """;
+      byte[] body = response.getBytes(StandardCharsets.UTF_8);
+      exchange.getResponseHeaders().set("Content-Type", "application/json");
+      exchange.sendResponseHeaders(200, body.length);
+      exchange.getResponseBody().write(body);
+      exchange.close();
+    });
+    server.start();
+    try {
+      MassiveRestClient client = new MassiveRestClient("test-key", "http://127.0.0.1:" + server.getAddress().getPort());
+
+      List<SymbolResponse> symbols = client.fetchSymbols("FOREX", 3);
+
+      assertThat(symbols).extracting(SymbolResponse::symbol).containsExactly("AEDAUD", "AEDBHD", "AEDCAD");
+      assertThat(calls.get()).isEqualTo(2);
+      assertThat(queries).containsExactly("market=fx&active=true&limit=3", "cursor=page-2");
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
   void fetchMarketSnapshotsMapsForexFullMarketSnapshotResponse() throws IOException {
     AtomicReference<String> authorization = new AtomicReference<>();
     HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);

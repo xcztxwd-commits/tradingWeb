@@ -9,6 +9,7 @@ import {
   makeMockCandles,
   toKLinePeriod
 } from './tradingModels.ts'
+import { mockTradingMarkets } from './mockTradingData.ts'
 
 describe('trading page models', () => {
   it('maps terminal periods to KLineCharts periods', () => {
@@ -50,6 +51,13 @@ describe('trading page models', () => {
     assert.ok(candles.every((item) => item.low <= Math.min(item.open, item.close)))
   })
 
+  it('keeps mainstream crypto extension slots in the local market fallback list', () => {
+    assert.deepEqual(
+      mockTradingMarkets.filter((market) => market.category === 'crypto').map((market) => market.symbol),
+      ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT']
+    )
+  })
+
   it('filters markets by category, query and favorites', () => {
     const markets = [
       { symbol: 'EURUSD', base: 'EUR', quote: 'USD', name: 'Euro / US Dollar', category: 'fx', favorite: true },
@@ -74,6 +82,20 @@ describe('trading page models', () => {
     assert.deepEqual(
       getRealtimeQuoteMarkets(markets, 'SYM9USD', 4).map((market) => market.symbol),
       ['SYM0USD', 'SYM1USD', 'SYM2USD', 'SYM3USD', 'SYM8USD', 'SYM9USD']
+    )
+  })
+
+  it('skips markets whose runtime quote capability is disabled', () => {
+    const markets = [
+      { symbol: 'EURUSD', base: 'EUR', quote: 'USD', name: 'Euro / US Dollar', category: 'fx' as const, favorite: false, quoteEnabled: false },
+      { symbol: 'BTCUSDT', base: 'BTC', quote: 'USDT', name: 'Bitcoin / Tether', category: 'crypto' as const, favorite: false, quoteEnabled: true },
+      { symbol: 'ETHUSDT', base: 'ETH', quote: 'USDT', name: 'Ethereum / Tether', category: 'crypto' as const, favorite: true, quoteEnabled: true },
+      { symbol: 'XAUUSD', base: 'XAU', quote: 'USD', name: 'Gold / US Dollar', category: 'metals' as const, favorite: true, quoteEnabled: false }
+    ]
+
+    assert.deepEqual(
+      getRealtimeQuoteMarkets(markets, 'EURUSD', 4).map((market) => market.symbol),
+      ['BTCUSDT', 'ETHUSDT']
     )
   })
 

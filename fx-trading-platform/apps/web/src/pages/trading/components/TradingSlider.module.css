@@ -22,14 +22,14 @@
 }
 
 .trackWrap::before {
-  background: #242b36;
+  background: var(--trading-border);
 }
 
 .fill {
   right: auto;
   width: 100%;
   transform-origin: left center;
-  background: #f2b84b;
+  background: var(--trading-accent);
   transition: transform 140ms ease;
 }
 
@@ -48,10 +48,10 @@
   appearance: none;
   width: 15px;
   height: 15px;
-  border: 2px solid #f2b84b;
+  border: 2px solid var(--trading-accent);
   border-radius: 50%;
-  background: #0b0f16;
-  box-shadow: 0 0 0 3px rgba(242, 184, 75, 0.16);
+  background: var(--trading-page-bg);
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
   transition:
     transform 120ms ease,
     box-shadow 120ms ease;
@@ -59,7 +59,7 @@
 
 .trackWrap input:active::-webkit-slider-thumb {
   transform: scale(1.1);
-  box-shadow: 0 0 0 5px rgba(242, 184, 75, 0.18);
+  box-shadow: 0 0 0 5px var(--trading-accent-soft);
 }
 
 .steps {
@@ -70,10 +70,10 @@
 
 .steps button {
   min-height: 24px;
-  border: 1px solid #242b36;
+  border: 1px solid var(--trading-border);
   border-radius: 5px;
-  background: #111821;
-  color: #727d8a;
+  background: var(--trading-field-bg);
+  color: var(--trading-muted);
   font-size: 11px;
   cursor: pointer;
   transition:
@@ -84,8 +84,8 @@
 }
 
 .steps button:hover {
-  border-color: #3a4656;
-  color: #d4dbe4;
+  border-color: var(--trading-border-strong);
+  color: var(--trading-text-strong);
 }
 
 .steps button:active {
@@ -93,9 +93,9 @@
 }
 
 .steps .activeStep {
-  border-color: rgba(242, 184, 75, 0.58);
-  background: rgba(242, 184, 75, 0.12);
-  color: #f2b84b;
+  border-color: var(--trading-accent-border);
+  background: var(--trading-accent-soft);
+  color: var(--trading-accent);
 }
 
 .disabled {

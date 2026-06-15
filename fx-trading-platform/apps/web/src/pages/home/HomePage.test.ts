@@ -7,6 +7,7 @@ import { describe, it } from 'node:test'
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const pagePath = join(currentDir, 'HomePage.tsx')
 const stylesPath = join(currentDir, 'HomePage.module.css')
+const homeApiPath = join(currentDir, '..', '..', 'services', 'homeApi.ts')
 const homeComponentsDir = join(currentDir, 'components')
 const homeHooksDir = join(currentDir, 'hooks')
 
@@ -64,15 +65,21 @@ describe('prototype home page source', () => {
     assert.match(counterHook, /getHomeCounters/)
     assert.match(counterHook, /setInterval/)
     assert.match(counterHook, /1000/)
+    assert.match(counterHook, /Array\.isArray\(nextCounters\.metricCards\)/)
+
+    const homeApi = readFileSync(homeApiPath, 'utf8')
+    assert.match(homeApi, /HomeMetricCard/)
+    assert.match(homeApi, /metricCards:\s*HomeMetricCard\[\]/)
   })
 
-  it('uses restrained black-gold styling, not decorative device mockups', () => {
+  it('uses restrained theme-aware styling, not decorative device mockups', () => {
     assert.equal(existsSync(stylesPath), true)
     const styles = readFileSync(stylesPath, 'utf8')
 
-    assert.match(styles, /\.page\s*{[\s\S]*background:\s*#181a20/)
-    assert.match(styles, /--home-accent:\s*#f0b90b/)
-    assert.match(styles, /--home-button:\s*#fcd535/)
+    assert.match(styles, /\.page\s*{[\s\S]*background:\s*var\(--theme-background\)/)
+    assert.match(styles, /--home-accent:\s*var\(--theme-primary\)/)
+    assert.match(styles, /--home-button:\s*var\(--theme-primary-hover\)/)
+    assert.match(styles, /--home-surface:\s*var\(--theme-surface\)/)
     assert.match(styles, /\.heroGrid\s*{[\s\S]*max-width:\s*1200px/)
     assert.match(styles, /\.heroGrid\s*{[\s\S]*grid-template-columns:\s*588px\s+432px/)
     assert.match(styles, /\.heroTitle\s*{[\s\S]*font-size:\s*64px[\s\S]*line-height:\s*80px[\s\S]*font-weight:\s*600/)
@@ -80,10 +87,16 @@ describe('prototype home page source', () => {
     assert.match(styles, /\.appDownloadRow/)
     assert.match(styles, /\.supportGrid/)
     assert.match(styles, /\.counterTick\s*{[\s\S]*animation:\s*counterPulse/)
+    assert.match(styles, /\.promoCard\s*{[\s\S]*perspective:/)
+    assert.match(styles, /\.promoCardInner\s*{[\s\S]*transform-style:\s*preserve-3d/)
+    assert.match(styles, /\.promoCard:hover\s+\.promoCardInner/)
+    assert.match(styles, /\.promoCard:focus\s+\.promoCardInner/)
+    assert.match(styles, /\.promoCardBack\s*{[\s\S]*rotateY\(180deg\)/)
+    assert.doesNotMatch(styles, /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.promoCard:hover\s+\.promoCardInner[\s\S]*transform:\s*none/)
     assert.match(styles, /\.panelCard:hover/)
     assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)/)
     assert.match(styles, /@media \(max-width:\s*760px\)[\s\S]*\.heroGrid\s*{[\s\S]*grid-template-columns:\s*1fr/)
-    assert.doesNotMatch(styles, /perspective:\s*1200px|phoneReflection|deviceDrift|scanSweep|radial-gradient\(circle/)
+    assert.doesNotMatch(styles, /phoneReflection|deviceDrift|scanSweep|radial-gradient\(circle/)
   })
 
   it('matches Binance home module rhythm without using protected brand assets', () => {
@@ -96,6 +109,10 @@ describe('prototype home page source', () => {
     ].join('\n')
 
     assert.match(source, /用户的共同选择/)
+    assert.match(source, /用户的共同选择/)
+    assert.match(source, /metricCards\.map/)
+    assert.match(source, /promoCard/)
+    assert.doesNotMatch(source, /\$132,602,379,204|\$28,601,502,458/)
     assert.match(source, /KYC/)
     assert.match(source, /account\/security\/kyc/)
     assert.match(source, /邮箱\/手机号码/)

@@ -7,6 +7,11 @@ public record MarketStatusResponse(
     boolean massiveConfigured,
     boolean redisCacheEnabled,
     long quoteStaleMs,
-    String status
+    String status,
+    boolean demoQuotesEnabled,
+    String sourceMode,
+    String providerStatus,
+    String failureCode,
+    String failureReason
 ) {
 }

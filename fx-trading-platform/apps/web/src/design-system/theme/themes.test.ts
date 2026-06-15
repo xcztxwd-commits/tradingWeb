@@ -8,7 +8,7 @@ const currentDir = dirname(fileURLToPath(import.meta.url))
 const themesPath = join(currentDir, 'themes.ts')
 const cssPath = join(currentDir, 'theme.css')
 
-const themeIds = ['midnight-pro', 'binance-inspired', 'okx-inspired', 'deep-blue-quant', 'light-institutional']
+const themeIds = ['binance-inspired', 'minimal-white']
 const requiredTokens = [
   'background',
   'surface',
@@ -33,7 +33,7 @@ const requiredTokens = [
 ]
 
 describe('trading theme tokens', () => {
-  it('defines the five professional trading themes requested by the design system', () => {
+  it('defines the default dark theme and the global minimal white theme', () => {
     assert.equal(existsSync(themesPath), true, 'themes.ts should exist')
     const source = readFileSync(themesPath, 'utf8')
 
@@ -41,9 +41,18 @@ describe('trading theme tokens', () => {
     for (const themeId of themeIds) {
       assert.match(source, new RegExp(`id:\\s*'${themeId}'`), `${themeId} should be defined`)
     }
-    assert.match(source, /export const defaultThemeId = 'binance-inspired'/)
+    for (const removedThemeId of ['midnight-pro', 'okx-inspired', 'deep-blue-quant', 'light-institutional']) {
+      assert.doesNotMatch(source, new RegExp(`id:\\s*'${removedThemeId}'`), `${removedThemeId} should not be defined`)
+    }
+    assert.match(source, /export const defaultThemeId: TradingThemeId = 'binance-inspired'/)
     assert.match(source, /primary:\s*'#f0b90b'/)
     assert.match(source, /primaryHover:\s*'#fcd535'/)
+    assert.match(source, /id:\s*'minimal-white'/)
+    assert.match(source, /colorScheme:\s*'light'/)
+    assert.match(source, /background:\s*'#f6f8fb'/)
+    assert.match(source, /surface:\s*'#ffffff'/)
+    assert.match(source, /primary:\s*'#111827'/)
+    assert.match(source, /chartGrid:\s*'#e8edf4'/)
   })
 
   it('gives every theme the required token contract', () => {
@@ -68,7 +77,7 @@ describe('trading theme tokens', () => {
     assert.match(css, /--loading-bg:\s*var\(--theme-background\)/)
   })
 
-  it('sets the root trading theme to the exported Binance dark palette and font contract', () => {
+  it('sets the default dark palette and minimal white CSS fallback with the font contract', () => {
     assert.equal(existsSync(cssPath), true, 'theme.css should exist')
     const css = readFileSync(cssPath, 'utf8')
 
@@ -93,6 +102,12 @@ describe('trading theme tokens', () => {
     }
 
     assert.match(css, /--font-ui:\s*BinanceNova,\s*Arial/)
+    assert.match(css, /:root\[data-theme='minimal-white'\]/)
+    assert.match(css, /--theme-background:\s*#f6f8fb/)
+    assert.match(css, /--theme-surface:\s*#ffffff/)
+    assert.match(css, /--theme-text-primary:\s*#111827/)
+    assert.match(css, /--theme-primary:\s*#111827/)
+    assert.match(css, /--theme-chart-grid:\s*#e8edf4/)
     assert.doesNotMatch(css, /\bInter\b/)
   })
 })

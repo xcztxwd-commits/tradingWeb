@@ -9,6 +9,25 @@ const source = readFileSync(join(currentDir, 'ChartTopToolbar.tsx'), 'utf8')
 const styles = readFileSync(join(currentDir, 'ChartTopToolbar.module.css'), 'utf8')
 
 describe('ChartTopToolbar indicator menu', () => {
+  it('opens a chart settings dialog with display toggles and timezone selection', () => {
+    assert.match(source, /Settings\b/)
+    assert.match(source, /chartSettingsOpen/)
+    assert.match(source, /chartTimezoneOptions/)
+    assert.match(source, /aria-label=\{t\('chart\.chartSettings'\)\}/)
+    assert.match(source, /role="dialog"[\s\S]*t\('chart\.chartSettings'\)/)
+    assert.match(source, /settings\.axisSettings\.latestPrice/)
+    assert.match(source, /settings\.axisSettings\.highPriceMark/)
+    assert.match(source, /settings\.axisSettings\.lowPriceMark/)
+    assert.match(source, /settings\.axisSettings\.countdown/)
+    assert.match(source, /settings\.layoutSettings\.gridLines/)
+    assert.match(source, /settings\.timezone/)
+    assert.match(source, /onChartSettingsChange/)
+    assert.match(source, /onResetChartSettings/)
+    assert.match(styles, /\.settingsDialog\s*{/)
+    assert.match(styles, /\.settingsGrid\s*{/)
+    assert.match(styles, /\.switchInput\s*{/)
+  })
+
   it('places the fullscreen control in the fixed right toolbar actions', () => {
     assert.match(source, /fullscreenActive:\s*boolean/)
     assert.match(source, /onToggleFullscreen:\s*\(\)\s*=>\s*void/)
@@ -18,6 +37,99 @@ describe('ChartTopToolbar indicator menu', () => {
     assert.match(styles, /\.toolbarActions\s*{[\s\S]*margin-right:\s*28px/)
     assert.match(styles, /\.fullscreenButton\s*{[\s\S]*width:\s*28px[\s\S]*height:\s*28px/)
     assert.doesNotMatch(styles, /\.fullscreenButton\s*{[^}]*position:\s*absolute/s)
+  })
+
+  it('keeps KLineCharts price scale, realtime, and camera image-save controls', () => {
+    assert.match(source, /priceScaleModeOptions/)
+    assert.match(source, /onPriceScaleModeChange:\s*\(mode: ChartSettings\['axisSettings'\]\['priceScaleMode'\]\) => void/)
+    assert.match(source, /onScrollToRealtime:\s*\(\) => void/)
+    assert.match(source, /onExportChart:\s*\(\) => void/)
+    assert.match(source, /chart\.priceScaleMode/)
+    assert.match(source, /settings\.axisSettings\.priceScaleMode/)
+    assert.match(source, /onPriceScaleModeChange\(event\.target\.value as ChartSettings\['axisSettings'\]\['priceScaleMode'\]\)/)
+    assert.match(source, /chart\.scrollToRealtime/)
+    assert.match(source, /\bCamera\b/)
+    assert.match(source, /<Camera size=\{15\} \/>/)
+    assert.match(source, /chart\.exportImage/)
+    assert.doesNotMatch(source, /\bDownload\b/)
+    assert.match(styles, /\.actionButton\s*{[\s\S]*width:\s*28px[\s\S]*height:\s*28px/)
+  })
+
+  it('uses a custom chart type dropdown instead of the native select menu', () => {
+    assert.match(source, /chartTypeMenuOpen/)
+    assert.match(source, /chartTypeMenuRef/)
+    assert.match(source, /className=\{styles\.chartTypeButton\}/)
+    assert.match(source, /role="menu"[\s\S]*className=\{styles\.chartTypeDropdown\}/)
+    assert.match(source, /role="menuitemradio"/)
+    assert.match(source, /aria-checked=\{item\.value === settings\.chartType\}/)
+    assert.match(styles, /\.chartTypeButton\s*{/)
+    assert.match(styles, /\.chartTypeDropdown\s*{/)
+    assert.match(styles, /\.chartTypeOption\[aria-checked='true'\]\s*{/)
+    assert.doesNotMatch(source, /<select value=\{settings\.chartType\}/)
+  })
+
+  it('blocks interval shortcuts while toolbar popovers are open', () => {
+    assert.match(source, /intervalDropdownOpen \|\| chartTypeMenuOpen \|\| indicatorMenuOpen \|\| chartSettingsOpen/)
+    assert.match(source, /\[\s*favoriteIntervals,\s*intervalDropdownOpen,\s*chartTypeMenuOpen,\s*indicatorMenuOpen,\s*chartSettingsOpen/)
+  })
+
+  it('exposes KLineCharts mark, tooltip, and jump controls without zoom controls', () => {
+    assert.match(source, /onHighLowPriceMarksChange:\s*\(enabled: boolean\) => void/)
+    assert.match(source, /onTooltipStyleChange:\s*\(style: ChartSettings\['axisSettings'\]\['tooltipStyle'\]\) => void/)
+    assert.match(source, /onJumpToTimestamp:\s*\(timestamp: number\) => void/)
+    assert.match(source, /settings\.axisSettings\.highLowPriceMarks/)
+    assert.match(source, /settings\.axisSettings\.tooltipStyle/)
+    assert.match(source, /type="datetime-local"/)
+    assert.match(styles, /\.jumpForm\s*{/)
+    assert.doesNotMatch(source, /\bZoomIn\b/)
+    assert.doesNotMatch(source, /onBarSpaceChange/)
+    assert.doesNotMatch(source, /onResetZoom/)
+    assert.doesNotMatch(source, /onZoomAtTimestamp/)
+    assert.doesNotMatch(source, /settings\.axisSettings\.barSpace/)
+    assert.doesNotMatch(source, /type="range"/)
+    assert.doesNotMatch(styles, /\.zoomControl\s*{/)
+  })
+
+  it('does not expose a chart shortcut settings panel in the toolbar', () => {
+    assert.match(source, /shortcutSettings/)
+    assert.doesNotMatch(source, /\bKeyboard\b/)
+    assert.doesNotMatch(source, /shortcutPanelOpen/)
+    assert.doesNotMatch(source, /onShortcutSettingChange/)
+    assert.doesNotMatch(styles, /\.shortcutPanel\s*{/)
+  })
+
+  it('shows only starred intervals as quick period buttons', () => {
+    assert.match(source, /quickChartIntervals\(settings\)/)
+    assert.match(source, /favoriteIntervals\.map/)
+    assert.match(source, /favoriteIntervals=\{settings\.favoriteIntervals\}/)
+    assert.match(source, /onFavoriteIntervalToggle=\{onFavoriteIntervalToggle\}/)
+    assert.match(source, /onFavoriteIntervalToggle:\s*\(interval: TradingPeriod\) => void/)
+  })
+
+  it('keeps the interval dropdown focused on all periods and star toggles', () => {
+    const dropdownSource = readFileSync(join(currentDir, 'IntervalDropdown.tsx'), 'utf8')
+
+    assert.match(dropdownSource, /favoriteIntervals:\s*TradingPeriod\[\]/)
+    assert.match(dropdownSource, /onFavoriteIntervalToggle:\s*\(interval: TradingPeriod\) => void/)
+    assert.match(dropdownSource, /Star/)
+    assert.match(dropdownSource, /allChartIntervals\.map/)
+    assert.match(dropdownSource, /lockedFavorite = favorite && favoriteIntervals\.length <= 1/)
+    assert.match(dropdownSource, /disabled=\{lockedFavorite\}/)
+    assert.doesNotMatch(dropdownSource, /Keyboard,\s*/)
+    assert.doesNotMatch(dropdownSource, /<Keyboard/)
+    assert.doesNotMatch(dropdownSource, /Pencil/)
+    assert.doesNotMatch(dropdownSource, /Plus/)
+    assert.doesNotMatch(dropdownSource, /intervalHelpTitle/)
+    assert.doesNotMatch(dropdownSource, /intervalHelpDescription/)
+    assert.doesNotMatch(dropdownSource, /customInterval/)
+    assert.doesNotMatch(dropdownSource, /common\.edit/)
+  })
+
+  it('fits every interval option without horizontal scrolling', () => {
+    assert.match(styles, /\.intervalDropdown\s*{[\s\S]*overflow:\s*visible/)
+    assert.match(styles, /\.intervalGrid\s*{[\s\S]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/)
+    assert.match(styles, /@media\s*\(max-width:\s*760px\)\s*{[\s\S]*\.toolbarScroller\s*{[\s\S]*overflow:\s*visible/)
+    assert.doesNotMatch(styles, /overflow-x:\s*auto/)
   })
 
   it('keeps indicator choices folded behind one toolbar button', () => {
@@ -30,14 +142,14 @@ describe('ChartTopToolbar indicator menu', () => {
   it('gives toolbar buttons and dropdowns visible motion-safe interaction states', () => {
     assert.match(styles, /\.group button:focus-visible/)
     assert.match(styles, /\.selectLabel:focus-within/)
-    assert.match(styles, /\.intervalDropdown,\s*\.indicatorDropdown\s*{[\s\S]*animation:\s*toolbarDropdownIn/)
+    assert.match(styles, /\.intervalDropdown,\s*\.chartTypeDropdown,\s*\.indicatorDropdown\s*{[\s\S]*animation:\s*toolbarDropdownIn/)
     assert.match(styles, /@keyframes toolbarDropdownIn/)
-    assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.intervalDropdown,\s*\.indicatorDropdown\s*{[\s\S]*animation:\s*none/)
+    assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*{[\s\S]*\.intervalDropdown,\s*\.chartTypeDropdown,\s*\.indicatorDropdown\s*{[\s\S]*animation:\s*none/)
   })
 
   it('keeps desktop dropdowns outside the toolbar scroll clipping context', () => {
     assert.match(styles, /\.toolbarScroller\s*{[\s\S]*overflow:\s*visible/)
-    assert.match(styles, /@media\s*\(max-width:\s*760px\)\s*{[\s\S]*\.toolbarScroller\s*{[\s\S]*overflow-x:\s*auto/)
+    assert.match(styles, /@media\s*\(max-width:\s*760px\)\s*{[\s\S]*\.toolbarScroller\s*{[\s\S]*overflow:\s*visible/)
   })
 
   it('does not render the KLineCharts brand text in the chart toolbar', () => {
@@ -49,6 +161,6 @@ describe('ChartTopToolbar indicator menu', () => {
     assert.match(source, /indicatorMenuRef/)
     assert.match(source, /pointerdown/)
     assert.match(source, /setIndicatorMenuOpen\(false\)/)
-    assert.match(source, /indicatorMenuRef\.current\.contains\(event\.target as Node\)/)
+    assert.match(source, /indicatorMenuRef\.current\.contains\(event\.target\)/)
   })
 })

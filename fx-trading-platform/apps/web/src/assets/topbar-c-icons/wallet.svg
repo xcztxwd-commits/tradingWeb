@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="钱包">
+  <title>钱包</title>
+  <g fill="none" stroke="#FFFFFF" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+
+    <path d="M286 344 H714 C762 344 798 380 798 428 V714 C798 762 762 798 714 798 H310 C262 798 226 762 226 714 V428 C226 380 262 344 310 344"/>
+    <path d="M308 424 H724 C770 424 798 452 798 492"/>
+    <rect x="574" y="492" width="244" height="150" rx="75" ry="75"/>
+    <circle cx="650" cy="567" r="18" fill="#FFFFFF" stroke="none"/>
+
+  </g>
+</svg>

@@ -48,14 +48,14 @@ describe('mobile trading terminal redesign', () => {
     assert.match(terminalSource, /onOpenMarkets: \(\) => void/)
     assert.match(terminalSource, /onOpenQuote: \(\) => void/)
     assert.match(terminalSource, /onOpenTrade: \(\) => void/)
-    assert.match(terminalSource, /onOpenSettings: \(\) => void/)
+    assert.doesNotMatch(terminalSource, /onOpenSettings|TerminalIconButton|SlidersHorizontal|MoreVertical/)
     assert.match(terminalSource, /formatMarketPrice\(market\.symbol, quote\.mid\)/)
     assert.match(terminalSource, /formatMarketPrice\(market\.symbol, quote\.high24h\)/)
     assert.match(terminalSource, /formatMarketPrice\(market\.symbol, quote\.low24h\)/)
     assert.match(terminalSource, /aria-label=\{t\('trading\.mobileTerminal'\)\}/)
   })
 
-  it('matches the Binance-like mobile contract surface with market tabs, long short actions and bid ask ratio', () => {
+  it('matches the tokenized mobile contract surface with market tabs, long short actions and bid ask ratio', () => {
     const terminalSource = readFileSync(terminalSourcePath, 'utf8')
     const terminalStyles = readFileSync(terminalStylesPath, 'utf8')
 
@@ -67,9 +67,9 @@ describe('mobile trading terminal redesign', () => {
     assert.match(terminalSource, /styles\.bidAskRatio/)
     assert.match(terminalSource, /onClick=\{onOpenTrade\}/)
     assert.match(terminalStyles, /\.marketTabs\s*{[\s\S]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/)
-    assert.match(terminalStyles, /\.longButton\s*{[\s\S]*background:\s*#2ebd85/)
-    assert.match(terminalStyles, /\.shortButton\s*{[\s\S]*background:\s*#f6465d/)
-    assert.match(terminalStyles, /\.bidAskRatio\s*{[\s\S]*#2ebd85/)
+    assert.match(terminalStyles, /\.longButton\s*{[\s\S]*background:\s*var\(--trading-buy\)/)
+    assert.match(terminalStyles, /\.shortButton\s*{[\s\S]*background:\s*var\(--trading-sell\)/)
+    assert.match(terminalStyles, /\.bidAskRatio\s*{[\s\S]*var\(--trading-buy\)/)
   })
 
   it('uses design tokens for mobile density, radius, typography and motion', () => {

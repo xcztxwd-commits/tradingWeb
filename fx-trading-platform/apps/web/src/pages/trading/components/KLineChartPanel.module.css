@@ -1,4 +1,5 @@
 .chartPanel {
+  position: relative;
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -19,9 +20,47 @@
   font-size: 12px;
 }
 
+.ohlcPanel {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  color: var(--trading-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.ohlcPanel span {
+  min-width: 0;
+}
+
 .canvasHeader strong {
   color: var(--trading-accent);
   font-size: 13px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.headerIconButton {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--trading-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.headerIconButton:hover,
+.headerIconButton:focus-visible {
+  border-color: var(--trading-border-strong);
+  background: var(--trading-surface-3);
+  color: var(--trading-text-strong);
 }
 
 .klineCanvas {
@@ -50,6 +89,199 @@
   background: color-mix(in srgb, var(--trading-surface-2) 72%, transparent);
 }
 
+.imagePreviewBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.imagePreviewDialog {
+  width: min(760px, 100%);
+  max-height: calc(100% - 8px);
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--trading-border-strong);
+  border-radius: 8px;
+  background: var(--trading-surface);
+  color: var(--trading-text);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+.imagePreviewHeader,
+.imagePreviewActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+}
+
+.imagePreviewHeader {
+  border-bottom: 1px solid var(--trading-border);
+}
+
+.imagePreviewHeader div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.imagePreviewHeader strong {
+  color: var(--trading-text-strong);
+  font-size: 13px;
+}
+
+.imagePreviewHeader span {
+  overflow: hidden;
+  color: var(--trading-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.imagePreviewCloseButton {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--trading-muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.imagePreviewCloseButton:hover,
+.imagePreviewCloseButton:focus-visible {
+  border-color: var(--trading-border-strong);
+  background: var(--trading-surface-3);
+  color: var(--trading-text-strong);
+}
+
+.imagePreviewFrame {
+  min-height: 180px;
+  max-height: min(62vh, 520px);
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  background: var(--trading-surface-2);
+  padding: 12px;
+}
+
+.imagePreviewFrame img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.imagePreviewActions {
+  border-top: 1px solid var(--trading-border);
+  justify-content: flex-end;
+}
+
+.imagePreviewSecondaryButton,
+.imagePreviewPrimaryButton {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 12px;
+}
+
+.imagePreviewSecondaryButton {
+  border: 1px solid var(--trading-border-strong);
+  background: transparent;
+  color: var(--trading-text);
+}
+
+.imagePreviewPrimaryButton {
+  border: 1px solid var(--trading-accent-border);
+  background: var(--trading-accent);
+  color: #050505;
+  font-weight: 700;
+}
+
+.imagePreviewSecondaryButton:hover,
+.imagePreviewSecondaryButton:focus-visible {
+  background: var(--trading-surface-3);
+}
+
+.imagePreviewPrimaryButton:hover,
+.imagePreviewPrimaryButton:focus-visible {
+  filter: brightness(1.05);
+}
+
+:global(:root[data-theme='minimal-white']) .imagePreviewDialog {
+  border-color: #d8e0eb;
+  background: #ffffff;
+  color: #475569;
+  box-shadow: 0 24px 70px rgb(15 23 42 / 0.18);
+}
+
+:global(:root[data-theme='minimal-white']) .imagePreviewHeader,
+:global(:root[data-theme='minimal-white']) .imagePreviewActions {
+  border-color: #e6ebf2;
+  background: #ffffff;
+}
+
+:global(:root[data-theme='minimal-white']) .imagePreviewHeader strong {
+  color: #111827;
+}
+
+:global(:root[data-theme='minimal-white']) .imagePreviewHeader span,
+:global(:root[data-theme='minimal-white']) .imagePreviewCloseButton {
+  color: #64748b;
+}
+
+:global(:root[data-theme='minimal-white']) .imagePreviewFrame {
+  background: #f8fafc;
+}
+
+:global(:root[data-theme='minimal-white']) .imagePreviewSecondaryButton {
+  border-color: #cfd8e6;
+  background: #ffffff;
+  color: #334155;
+}
+
+:global(:root[data-theme='minimal-white']) .imagePreviewPrimaryButton {
+  border-color: #111827;
+  background: #111827;
+  color: #ffffff;
+}
+
+:global(:root[data-theme='minimal-white']) .imagePreviewPrimaryButton svg {
+  color: #ffffff;
+}
+
+:global(:root[data-theme='minimal-white']) .imagePreviewSecondaryButton:hover,
+:global(:root[data-theme='minimal-white']) .imagePreviewSecondaryButton:focus-visible,
+:global(:root[data-theme='minimal-white']) .imagePreviewCloseButton:hover,
+:global(:root[data-theme='minimal-white']) .imagePreviewCloseButton:focus-visible {
+  border-color: #bcc8d8;
+  background: #f4f7fb;
+  color: #111827;
+}
+
+:global(:root[data-theme='minimal-white']) .imagePreviewPrimaryButton:hover,
+:global(:root[data-theme='minimal-white']) .imagePreviewPrimaryButton:focus-visible {
+  background: #0f172a;
+  color: #ffffff;
+  filter: none;
+}
+
 .overlayEditToolbar {
   position: absolute;
   top: 8px;
@@ -61,16 +293,16 @@
   max-width: min(calc(100% - 84px), 620px);
   min-height: 32px;
   padding: 4px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--trading-border-strong);
   border-radius: 6px;
-  background: rgba(252, 253, 255, 0.96);
+  background: var(--trading-surface);
   box-shadow: 0 12px 26px rgba(0, 0, 0, 0.26);
-  color: #30343a;
+  color: var(--trading-text-strong);
   transform: translateX(-50%);
 }
 
 .toolbarGrip {
-  color: #a0a7b2;
+  color: var(--trading-muted);
   cursor: grab;
   flex: 0 0 auto;
 }
@@ -78,7 +310,7 @@
 .toolbarDivider {
   width: 1px;
   height: 20px;
-  background: #dde2e8;
+  background: var(--trading-border);
   flex: 0 0 auto;
 }
 
@@ -93,15 +325,15 @@
 .colorSwatch {
   width: 17px;
   height: 17px;
-  border: 2px solid #ffffff;
+  border: 2px solid var(--trading-surface);
   border-radius: 50%;
-  box-shadow: 0 0 0 1px #c2c9d1;
+  box-shadow: 0 0 0 1px var(--trading-border-strong);
   cursor: pointer;
   padding: 0;
 }
 
 .colorSwatchActive {
-  box-shadow: 0 0 0 2px #111827;
+  box-shadow: 0 0 0 2px var(--trading-text-strong);
 }
 
 .lineWidthButton,
@@ -113,7 +345,7 @@
   border: 1px solid transparent;
   border-radius: 4px;
   background: transparent;
-  color: #343a42;
+  color: var(--trading-text);
   cursor: pointer;
   padding: 0;
 }
@@ -122,13 +354,13 @@
 .lineWidthButton:focus-visible,
 .iconButton:hover,
 .iconButton:focus-visible {
-  border-color: #c7ced8;
-  background: #eef2f6;
+  border-color: var(--trading-border-strong);
+  background: var(--trading-surface-3);
 }
 
 .lineWidthButtonActive {
-  border-color: #f2b84b;
-  background: #fff7e6;
+  border-color: var(--trading-accent-border);
+  background: var(--trading-accent-soft);
 }
 
 .lineWidthPreview {
@@ -140,14 +372,107 @@
 
 .lineSizeLabel {
   min-width: 24px;
-  color: #606a76;
+  color: var(--trading-muted);
   font-size: 12px;
   line-height: 16px;
 }
 
 .lockButtonActive {
-  color: #f2b84b;
-  background: #fff7e6;
+  color: var(--trading-accent);
+  background: var(--trading-accent-soft);
+}
+
+.drawingManager {
+  position: absolute;
+  top: 46px;
+  right: 10px;
+  z-index: 14;
+  width: min(300px, calc(100% - 20px));
+  max-height: min(60vh, 420px);
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+  border: 1px solid var(--trading-border-strong);
+  border-radius: 6px;
+  background: var(--trading-surface);
+  color: var(--trading-text);
+  padding: 10px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+}
+
+.drawingManagerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.drawingManagerHeader strong {
+  color: var(--trading-text-strong);
+  font-size: 12px;
+}
+
+.drawingManagerHeader div {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.drawingManager button {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--trading-text);
+  cursor: pointer;
+  padding: 0;
+}
+
+.drawingManager button:hover,
+.drawingManager button:focus-visible {
+  border-color: var(--trading-border-strong);
+  background: var(--trading-surface-3);
+}
+
+.drawingManager button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.drawingManager p {
+  margin: 0;
+  color: var(--trading-muted);
+  font-size: 12px;
+}
+
+.drawingManager ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.drawingManager li {
+  min-width: 0;
+  min-height: 30px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--trading-border);
+  border-radius: 4px;
+  padding: 2px 4px 2px 8px;
+}
+
+.drawingManager li span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 @media (max-width: 760px) {
@@ -160,5 +485,38 @@
     max-width: calc(100% - 16px);
     overflow-x: auto;
     transform: none;
+  }
+
+  .canvasHeader {
+    gap: 8px;
+  }
+
+  .ohlcPanel {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .drawingManager {
+    top: 42px;
+    right: 8px;
+  }
+
+  .imagePreviewBackdrop {
+    padding: 8px;
+  }
+
+  .imagePreviewDialog {
+    max-height: calc(100% - 4px);
+  }
+
+  .imagePreviewFrame {
+    min-height: 140px;
+    max-height: 52vh;
+    padding: 8px;
+  }
+
+  .imagePreviewActions {
+    flex-wrap: wrap;
   }
 }

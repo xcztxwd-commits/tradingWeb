@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="下载">
+  <title>下载</title>
+  <g fill="none" stroke="#FFFFFF" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+
+    <path d="M512 238 V602"/>
+    <path d="M370 466 L512 608 L654 466"/>
+    <path d="M252 612 V710 C252 762 294 804 346 804 H678 C730 804 772 762 772 710 V612"/>
+
+  </g>
+</svg>

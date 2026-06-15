@@ -1,7 +1,7 @@
 .panel {
-  border: 1px solid rgb(234 236 239 / 0.08);
+  border: 1px solid var(--trading-border);
   border-radius: 8px;
-  background: #1e2329;
+  background: var(--trading-surface);
   overflow: hidden;
 }
 
@@ -12,12 +12,12 @@
   justify-content: space-between;
   gap: 10px;
   padding: 0 13px;
-  border-bottom: 1px solid rgb(234 236 239 / 0.06);
+  border-bottom: 1px solid var(--trading-border-soft);
 }
 
 .header h2 {
   margin: 0;
-  color: #eef2f7;
+  color: var(--trading-heading);
   font-size: 14px;
 }
 
@@ -25,7 +25,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #687483;
+  color: var(--trading-subtle);
   font-size: 12px;
 }
 
@@ -33,12 +33,12 @@
   display: grid;
   gap: 4px;
   padding: 16px 13px 14px;
-  border-bottom: 1px solid rgb(234 236 239 / 0.06);
+  border-bottom: 1px solid var(--trading-border-soft);
 }
 
 .mid span,
 .quoteGrid span {
-  color: #687483;
+  color: var(--trading-subtle);
   font-size: 11px;
 }
 
@@ -48,7 +48,7 @@
 }
 
 .mid small {
-  color: #87919f;
+  color: var(--trading-text);
   font-size: 12px;
 }
 
@@ -63,8 +63,8 @@
   align-content: center;
   gap: 3px;
   padding: 0 13px;
-  border-right: 1px solid rgb(234 236 239 / 0.06);
-  border-bottom: 1px solid rgb(234 236 239 / 0.06);
+  border-right: 1px solid var(--trading-border-soft);
+  border-bottom: 1px solid var(--trading-border-soft);
 }
 
 .quoteGrid div:nth-child(2n) {
@@ -72,14 +72,14 @@
 }
 
 .quoteGrid strong {
-  color: #dce3ec;
+  color: var(--trading-text-strong);
   font-size: 13px;
 }
 
 .positive {
-  color: #26a69a !important;
+  color: var(--trading-buy) !important;
 }
 
 .negative {
-  color: #ef5350 !important;
+  color: var(--trading-sell) !important;
 }

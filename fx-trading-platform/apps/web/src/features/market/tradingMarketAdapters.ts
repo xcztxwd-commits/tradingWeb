@@ -15,6 +15,10 @@ export type BackendSymbol = {
   provider?: string | null
   providerSymbol?: string | null
   tradable?: boolean | null
+  quoteEnabled?: boolean | null
+  chartEnabled?: boolean | null
+  orderBookEnabled?: boolean | null
+  iconUrl?: string | null
   lastPrice?: string | number | null
   changePercent?: string | number | null
   high24h?: string | number | null
@@ -39,6 +43,18 @@ export type BackendQuote = {
   high24h?: string | number | null
   low24h?: string | number | null
   volume24h?: string | number | null
+}
+
+export type BackendMarketStatus = {
+  massiveConfigured: boolean
+  redisCacheEnabled: boolean
+  quoteStaleMs: number
+  status: string
+  demoQuotesEnabled?: boolean
+  sourceMode?: string
+  providerStatus?: string
+  failureCode?: string | null
+  failureReason?: string | null
 }
 
 export type BackendCandle = {
@@ -73,6 +89,8 @@ export type BackendRecentTrade = {
 
 export const tradingMarketEndpoints = {
   symbols: '/api/market/symbols',
+  favorites: '/api/market/favorites',
+  status: '/api/market/status',
   candles: '/api/chart/candles',
   orderBook: '/api/market/order-book',
   recentTrades: '/api/market/trades'
@@ -111,6 +129,18 @@ export function buildMarketSymbolsPath(limit = defaultMarketSymbolLimit) {
   return `${tradingMarketEndpoints.symbols}?${params.toString()}`
 }
 
+export function buildMarketFavoritesPath() {
+  return tradingMarketEndpoints.favorites
+}
+
+export function buildMarketFavoritePath(symbol: string) {
+  return `${tradingMarketEndpoints.favorites}/${encodeURIComponent(symbol.trim().toUpperCase())}`
+}
+
+export function buildMarketStatusPath() {
+  return tradingMarketEndpoints.status
+}
+
 export function buildMarketOrderBookPath(symbol: string) {
   return `${tradingMarketEndpoints.orderBook}/${encodeURIComponent(symbol)}`
 }
@@ -120,9 +150,9 @@ export function buildMarketRecentTradesPath(symbol: string, limit = 40) {
   return `${tradingMarketEndpoints.recentTrades}/${encodeURIComponent(symbol)}?${params.toString()}`
 }
 
-export function buildMarketCandlesPath(symbol: string, period: TradingPeriod, now = new Date(), count = 220) {
+export function buildMarketCandlesPath(symbol: string, period: TradingPeriod, now: Date | number = new Date(), count = 220) {
   const interval = periodIntervals[period]
-  const to = now
+  const to = typeof now === 'number' ? new Date(now) : now
   const from = new Date(to.getTime() - interval * count)
   const params = new URLSearchParams({
     symbol,
@@ -150,6 +180,7 @@ export function mapSymbolToTradingMarket(symbol: BackendSymbol): TradingMarket {
     name: symbol.displayName,
     category: mapAssetClass(symbol.assetClass),
     favorite: false,
+    iconUrl: optionalText(symbol.iconUrl),
     last: lastPrice ?? 0,
     changePercent: changePercent ?? 0,
     volume: volume24h === undefined ? 'Live' : formatCompactVolume(volume24h),
@@ -160,6 +191,9 @@ export function mapSymbolToTradingMarket(symbol: BackendSymbol): TradingMarket {
     provider: symbol.provider ?? undefined,
     providerSymbol: symbol.providerSymbol ?? undefined,
     tradable: symbol.tradable ?? true,
+    quoteEnabled: symbol.quoteEnabled ?? true,
+    chartEnabled: symbol.chartEnabled ?? true,
+    orderBookEnabled: symbol.orderBookEnabled ?? true,
     minLot: symbol.minLot == null ? undefined : String(symbol.minLot),
     pricePrecision: getSymbolPricePrecision(symbol),
     quantityPrecision: getSymbolQuantityPrecision(symbol),
@@ -243,6 +277,7 @@ export function mapRecentTradesToMarketData(trades: BackendRecentTrade[]): Trade
 export function createTradingMarketPlaceholder(symbol: string): TradingMarket {
   const quote = symbol.endsWith('JPY') ? 'JPY' : symbol.endsWith('USDT') ? 'USDT' : 'USD'
   const base = symbol.endsWith(quote) ? symbol.slice(0, -quote.length) : symbol
+  const realtimeEnabled = symbol.endsWith('USDT')
 
   return {
     symbol,
@@ -258,7 +293,10 @@ export function createTradingMarketPlaceholder(symbol: string): TradingMarket {
     low24h: 0,
     spread: 0,
     source: 'backend',
-    tradable: false
+    tradable: false,
+    quoteEnabled: realtimeEnabled,
+    chartEnabled: realtimeEnabled,
+    orderBookEnabled: realtimeEnabled
   }
 }
 
@@ -327,6 +365,11 @@ function optionalNumber(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') return undefined
   const numberValue = Number(value)
   return Number.isFinite(numberValue) ? numberValue : undefined
+}
+
+function optionalText(value: string | null | undefined) {
+  const text = value?.trim()
+  return text ? text : undefined
 }
 
 function formatCompactVolume(value: number) {

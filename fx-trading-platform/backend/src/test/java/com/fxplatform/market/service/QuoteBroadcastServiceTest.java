@@ -52,7 +52,7 @@ class QuoteBroadcastServiceTest {
         "test",
         1780660000000L);
 
-    when(symbolRepository.findByEnabledTrueOrderBySymbolAsc()).thenReturn(List.of(symbol));
+    when(symbolRepository.findQuoteBroadcastSymbols()).thenReturn(List.of(symbol));
     when(quoteService.latestQuote("EURUSD")).thenReturn(quote);
 
     QuoteBroadcastService service = new QuoteBroadcastService(symbolRepository, quoteService, marketWsPublisher);
@@ -79,7 +79,7 @@ class QuoteBroadcastServiceTest {
         "test",
         1780660000000L);
 
-    when(symbolRepository.findByEnabledTrueOrderBySymbolAsc()).thenReturn(List.of(eurusd, usdjpy));
+    when(symbolRepository.findQuoteBroadcastSymbols()).thenReturn(List.of(eurusd, usdjpy));
     when(quoteService.latestQuote("EURUSD")).thenReturn(quote);
 
     QuoteBroadcastService service = new QuoteBroadcastService(symbolRepository, quoteService, marketWsPublisher);
@@ -91,5 +91,18 @@ class QuoteBroadcastServiceTest {
     verify(quoteService).latestQuote("EURUSD");
     verify(quoteService, never()).latestQuote("USDJPY");
     verify(marketWsPublisher).publishQuote(quote);
+  }
+
+  @Test
+  void readsOnlyQuoteBroadcastSymbolsFromRepository() {
+    when(symbolRepository.findQuoteBroadcastSymbols()).thenReturn(List.of());
+
+    QuoteBroadcastService service = new QuoteBroadcastService(symbolRepository, quoteService, marketWsPublisher);
+    ReflectionTestUtils.setField(service, "enabled", true);
+
+    service.broadcastLatestQuotes();
+
+    verify(symbolRepository).findQuoteBroadcastSymbols();
+    verifyNoInteractions(quoteService, marketWsPublisher);
   }
 }

@@ -19,13 +19,13 @@ describe('SettingsPage theme controls', () => {
     assert.doesNotMatch(appSource, /<Route path="\/settings" element=\{<PlaceholderPage title="设置" \/>\}/)
   })
 
-  it('lets users switch themes from the settings page', () => {
+  it('keeps display preferences without a theme switcher', () => {
     assert.equal(existsSync(settingsPagePath), true, 'SettingsPage.tsx should exist')
     const source = readFileSync(settingsPagePath, 'utf8')
 
-    assert.match(source, /import \{ ThemeSwitcher \} from '..\/..\/design-system\/theme\/ThemeSwitcher'/)
-    assert.match(source, /<ThemeSwitcher \/>/)
     assert.match(source, /settings\.displayPreference/)
+    assert.match(source, /<LanguageSwitcher \/>/)
+    assert.doesNotMatch(source, /ThemeSwitcher/)
   })
 
   it('presents the complete settings center structure', () => {

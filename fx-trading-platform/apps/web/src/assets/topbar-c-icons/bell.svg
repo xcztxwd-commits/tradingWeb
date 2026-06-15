@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="通知铃铛">
+  <title>通知铃铛</title>
+  <g fill="none" stroke="#FFFFFF" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+
+    <path d="M512 278 C608 278 680 352 680 462 V540 C680 614 698 664 742 710"/>
+    <path d="M512 278 C416 278 344 352 344 462 V540 C344 614 326 664 282 710"/>
+    <path d="M282 710 H742"/>
+    <path d="M512 222 V278"/>
+    <path d="M456 770 C468 816 496 842 512 842 C528 842 556 816 568 770"/>
+
+  </g>
+</svg>

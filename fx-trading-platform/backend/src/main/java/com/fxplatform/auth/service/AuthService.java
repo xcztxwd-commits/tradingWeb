@@ -29,13 +29,19 @@ public class AuthService {
 
   @Transactional
   public AuthResponse register(RegisterRequest request) {
-    if (userRepository.existsByEmail(request.email())) {
+    String email = request.email();
+    String phone = request.phone();
+    String password = relaxed(request.password());
+    if (email != null && userRepository.existsByEmail(email)) {
       throw new BusinessException("EMAIL_EXISTS", "Email already exists");
     }
+    if (phone != null && userRepository.existsByPhone(phone)) {
+      throw new BusinessException("PHONE_EXISTS", "Phone already exists");
+    }
     UserEntity user = new UserEntity();
-    user.setEmail(request.email());
-    user.setPhone(request.phone());
-    user.setPasswordHash(passwordEncoder.encode(request.password()));
+    user.setEmail(email);
+    user.setPhone(phone);
+    user.setPasswordHash(passwordEncoder.encode(password));
     userRepository.save(user);
 
     // 注册即创建 DEMO 账户，并通过 LedgerService 写入初始模拟入金流水。
@@ -45,9 +51,11 @@ public class AuthService {
   }
 
   public AuthResponse login(LoginRequest request) {
-    UserEntity user = userRepository.findByEmail(request.email())
+    String identifier = relaxed(request.email());
+    String password = relaxed(request.password());
+    UserEntity user = userRepository.findByEmailOrPhone(identifier)
         .orElseThrow(() -> new BusinessException("BAD_CREDENTIALS", "Invalid email or password"));
-    if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+    if (!passwordEncoder.matches(password, user.getPasswordHash())) {
       throw new BusinessException("BAD_CREDENTIALS", "Invalid email or password");
     }
     return tokenResponse(user);
@@ -60,6 +68,14 @@ public class AuthService {
   }
 
   private AuthResponse tokenResponse(UserEntity user) {
-    return new AuthResponse(user.getId(), user.getEmail(), user.getRole().name(), jwtService.generateAccessToken(user));
+    return new AuthResponse(user.getId(), displayIdentifier(user), user.getRole().name(), jwtService.generateAccessToken(user));
+  }
+
+  private String displayIdentifier(UserEntity user) {
+    return user.getEmail() != null ? user.getEmail() : user.getPhone();
+  }
+
+  private String relaxed(String value) {
+    return value == null ? "" : value;
   }
 }

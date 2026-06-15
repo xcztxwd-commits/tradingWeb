@@ -20,6 +20,8 @@ type ActiveAdapterSession = {
 const symbolProfiles: Record<string, MarketProfile> = {
   BTCUSDT: { lastPrice: 60865.7, spread: 1.1, tickSize: 0.1, amountBase: 0.24 },
   ETHUSDT: { lastPrice: 3420.6, spread: 0.4, tickSize: 0.1, amountBase: 2.8 },
+  SOLUSDT: { lastPrice: 152.12, spread: 0.01, tickSize: 0.01, amountBase: 42 },
+  XRPUSDT: { lastPrice: 2.481, spread: 0.002, tickSize: 0.0001, amountBase: 1200 },
   XAUUSD: { lastPrice: 2348.4, spread: 0.2, tickSize: 0.1, amountBase: 12 },
   US100: { lastPrice: 18924.6, spread: 0.7, tickSize: 0.1, amountBase: 4.4 },
   USDJPY: { lastPrice: 156.42, spread: 0.02, tickSize: 0.1, amountBase: 28 }
@@ -138,6 +140,7 @@ function getLevelPrice(lastPrice: number, profile: MarketProfile, side: OrderBoo
 function getProfile(symbol: string): MarketProfile {
   if (symbolProfiles[symbol]) return symbolProfiles[symbol]
   if (symbol.endsWith('JPY')) return { lastPrice: 156.42, spread: 0.02, tickSize: 0.1, amountBase: 28 }
+  if (symbol.endsWith('USDT')) return { lastPrice: 152.12, spread: 0.01, tickSize: 0.01, amountBase: 42 }
   if (symbol.includes('GBP')) return { lastPrice: 1.2712, spread: 0.01, tickSize: 0.1, amountBase: 140 }
   if (symbol.includes('AUD')) return { lastPrice: 0.6642, spread: 0.01, tickSize: 0.1, amountBase: 180 }
   return { lastPrice: 1.0832, spread: 0.01, tickSize: 0.1, amountBase: 160 }

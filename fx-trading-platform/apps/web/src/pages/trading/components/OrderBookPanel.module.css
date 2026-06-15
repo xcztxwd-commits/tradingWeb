@@ -1,7 +1,7 @@
 .panel {
-  border: 1px solid rgb(234 236 239 / 0.08);
+  border: 1px solid var(--trading-border);
   border-radius: 8px;
-  background: #1e2329;
+  background: var(--trading-surface);
   overflow: hidden;
 }
 
@@ -10,17 +10,17 @@
   display: flex;
   align-items: center;
   padding: 0 13px;
-  border-bottom: 1px solid rgb(234 236 239 / 0.06);
+  border-bottom: 1px solid var(--trading-border-soft);
 }
 
 .header h2 {
   margin: 0;
-  color: #eef2f7;
+  color: var(--trading-heading);
   font-size: 14px;
 }
 
 .header span {
-  color: #687483;
+  color: var(--trading-subtle);
   font-size: 11px;
 }
 
@@ -36,23 +36,23 @@
   align-items: center;
   gap: 12px;
   padding: 0 13px;
-  color: #87919f;
+  color: var(--trading-text);
   font-size: 12px;
 }
 
 .row:hover {
-  background: rgb(234 236 239 / 0.045);
+  background: var(--trading-surface-3);
 }
 
 .row strong {
-  color: #dce3ec;
+  color: var(--trading-text-strong);
   font-weight: 700;
 }
 
 .ask {
-  color: #ef5350;
+  color: var(--trading-sell);
 }
 
 .bid {
-  color: #26a69a;
+  color: var(--trading-buy);
 }

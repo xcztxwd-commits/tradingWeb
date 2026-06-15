@@ -234,6 +234,19 @@ public class AdminMarketCommandService {
     symbol.setLeverage(request.leverage());
     symbol.setSpreadMarkup(request.spreadMarkup());
     symbol.setEnabled(request.enabled());
+    symbol.setIconUrl(request.iconUrl());
+    symbol.setDisplayEnabled(defaultTrue(request.displayEnabled()));
+    symbol.setQuoteEnabled(defaultTrue(request.quoteEnabled()));
+    symbol.setChartEnabled(defaultTrue(request.chartEnabled()));
+    symbol.setOrderBookEnabled(defaultTrue(request.orderBookEnabled()));
+    symbol.setTradable(defaultTrue(request.tradable()));
+    symbol.setFeatured(Boolean.TRUE.equals(request.featured()));
+    symbol.setDisplayGroup(request.displayGroup());
+    symbol.setDisplayOrder(request.displayOrder() == null ? 0 : request.displayOrder());
+  }
+
+  private boolean defaultTrue(Boolean value) {
+    return value == null || value;
   }
 
   private void applyCategory(SymbolCategoryEntity category, AdminSymbolCategoryRequest request) {

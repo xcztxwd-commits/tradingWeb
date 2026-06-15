@@ -32,7 +32,7 @@ public class QuoteBroadcastService {
       return;
     }
     Set<String> allowedSymbols = MarketSymbolFilter.normalizeSymbols(symbols);
-    for (SymbolEntity symbol : symbolRepository.findByEnabledTrueOrderBySymbolAsc()) {
+    for (SymbolEntity symbol : symbolRepository.findQuoteBroadcastSymbols()) {
       if (!MarketSymbolFilter.allows(allowedSymbols, symbol.getSymbol())) {
         continue;
       }

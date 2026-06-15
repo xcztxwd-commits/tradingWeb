@@ -1890,3 +1890,203 @@
     border-radius: 14px;
   }
 }
+
+/* Binance dark trading color layer. Layout from the compact order-entry rules above stays unchanged. */
+.trade-panel {
+  --tp-bg: var(--trading-surface, #181a20);
+  --tp-surface: var(--trading-surface, #181a20);
+  --tp-surface-2: var(--trading-field-bg, #181a20);
+  --tp-surface-3: var(--trading-surface-3, #2b3139);
+  --tp-border: var(--trading-border, #2b3139);
+  --tp-border-strong: var(--trading-border-strong, #474d57);
+  --tp-text: var(--trading-text-strong, #eaecef);
+  --tp-muted: var(--trading-muted, #848e9c);
+  --tp-subtle: var(--trading-subtle, #707a8a);
+  --tp-buy: var(--trading-buy, #2ebd85);
+  --tp-buy-hover: var(--trading-buy-strong, #2ebd85);
+  --tp-sell: var(--trading-sell, #f6465d);
+  --tp-sell-hover: var(--trading-sell-strong, #f6465d);
+  --tp-focus: var(--trading-accent, #fcd535);
+  --tp-warning: var(--trading-accent, #fcd535);
+  background: var(--tp-bg);
+  color: var(--tp-text);
+}
+
+.trade-panel__top-tab,
+.trade-panel__order-tab,
+.trade-panel__field,
+.trade-panel__field-label,
+.trade-panel__quantity-caption,
+.trade-panel__balance,
+.trade-panel__order-metrics,
+.trade-panel__confirm-grid dt,
+.trade-panel__confirm-risk {
+  color: var(--tp-muted);
+}
+
+.trade-panel__top-tab--active,
+.trade-panel__order-tab--active,
+.trade-panel__control input,
+.trade-panel__unit,
+.trade-panel__best-price,
+.trade-panel__check,
+.trade-panel__reduce-only,
+.trade-panel__advanced-link,
+.trade-panel__balance strong,
+.trade-panel__order-metrics strong,
+.trade-panel__leverage-cell button,
+.trade-panel__leverage-popover-head strong,
+.trade-panel__leverage-popover-head button,
+.trade-panel__leverage-stats strong,
+.trade-panel__confirm-head strong,
+.trade-panel__confirm-head button,
+.trade-panel__confirm-grid dd,
+.trade-panel__confirm-skip {
+  color: var(--tp-text);
+}
+
+.trade-panel__top-tab--active::after,
+.trade-panel__order-tab--active::after,
+.trade-panel__range-fill {
+  background: var(--tp-focus);
+}
+
+.trade-panel__leverage-row {
+  background: var(--tp-border);
+}
+
+.trade-panel__leverage-cell button,
+.trade-panel__control,
+.trade-panel__best-price,
+.trade-panel__account-strip span,
+.trade-panel__order-rules span,
+.trade-panel__confirm-grid div,
+.trade-panel__confirm-cancel {
+  background: var(--tp-surface-2);
+}
+
+.trade-panel__leverage-cell button:hover,
+.trade-panel__control:focus-within,
+.trade-panel__best-price:hover:not(:disabled),
+.trade-panel__mode-grid button:hover,
+.trade-panel__strategy-item:hover,
+.trade-panel__strategy-item:focus-visible,
+.trade-panel__strategy-item--active {
+  background: var(--tp-surface-3);
+}
+
+.trade-panel__control,
+.trade-panel__best-price,
+.trade-panel__session-status,
+.trade-panel__leverage-options,
+.trade-panel__confirm,
+.trade-panel__confirm-grid,
+.trade-panel__confirm-cancel {
+  border-color: var(--tp-border);
+}
+
+.trade-panel__field--invalid .trade-panel__control,
+.trade-panel__session-error {
+  border-color: color-mix(in srgb, var(--tp-sell) 42%, transparent);
+}
+
+.trade-panel__field--invalid .trade-panel__control,
+.trade-panel__session-error {
+  background: color-mix(in srgb, var(--tp-sell) 12%, transparent);
+}
+
+.trade-panel__error,
+.trade-panel__tpsl-trigger-note--negative {
+  color: var(--tp-sell);
+}
+
+.trade-panel__tpsl-trigger-note--positive {
+  color: var(--tp-buy);
+}
+
+.trade-panel__range-wrap::before {
+  background: var(--tp-border-strong);
+}
+
+.trade-panel__range-wrap input::-webkit-slider-thumb {
+  border-color: var(--tp-focus);
+  background: var(--tp-bg);
+}
+
+.trade-panel__percent-steps button {
+  color: var(--tp-muted);
+}
+
+.trade-panel__percent-step--active,
+.trade-panel__latest-price,
+.trade-panel__leverage-hint {
+  color: var(--tp-focus) !important;
+}
+
+.trade-panel__submit {
+  color: #ffffff;
+}
+
+.trade-panel__submit--buy,
+.trade-panel__submit--login.trade-panel__submit--buy {
+  background: var(--tp-buy) !important;
+}
+
+.trade-panel__submit--sell,
+.trade-panel__submit--login.trade-panel__submit--sell {
+  background: var(--tp-sell) !important;
+  color: #ffffff;
+}
+
+.trade-panel__leverage-backdrop,
+.trade-panel__confirm-backdrop {
+  background: rgb(0 0 0 / 0.58);
+}
+
+.trade-panel__leverage-layer .trade-panel__leverage-popover,
+.trade-panel__confirm {
+  border-color: var(--tp-border-strong);
+  background: var(--tp-surface);
+  color: var(--tp-text);
+}
+
+.trade-panel__leverage-popover-head,
+.trade-panel__leverage-actions,
+.trade-panel__confirm-head,
+.trade-panel__confirm-grid--tpsl,
+.trade-panel__confirm-actions {
+  border-color: var(--tp-border);
+}
+
+.trade-panel__leverage-options {
+  background: var(--tp-surface-2);
+}
+
+.trade-panel__leverage-options button,
+.trade-panel__leverage-stats {
+  color: var(--tp-muted);
+}
+
+.trade-panel__leverage-option--active,
+.trade-panel__leverage-confirm,
+.trade-panel__confirm-submit {
+  background: var(--tp-focus) !important;
+  color: var(--trading-accent-text, #181a20) !important;
+}
+
+.trade-panel__leverage-cancel,
+.trade-panel__confirm-cancel {
+  border-color: var(--tp-border-strong);
+  background: var(--tp-surface-2);
+  color: var(--tp-text);
+}
+
+.trade-panel__confirm-side--buy {
+  background: color-mix(in srgb, var(--tp-buy) 16%, transparent);
+  color: var(--tp-buy);
+}
+
+.trade-panel__confirm-side--sell {
+  background: color-mix(in srgb, var(--tp-sell) 16%, transparent);
+  color: var(--tp-sell);
+}

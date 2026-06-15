@@ -147,7 +147,16 @@ class AdminMarketCommandServiceTest {
         new BigDecimal("100"),
         100,
         new BigDecimal("0.00002"),
-        true);
+        true,
+        null,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        "majors",
+        10);
 
     var created = service.createSymbol(actorUserId, request);
     var updated = service.updateSymbol(actorUserId, symbolId, request);

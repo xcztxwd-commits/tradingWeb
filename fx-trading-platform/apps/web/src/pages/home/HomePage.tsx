@@ -16,7 +16,7 @@ export function HomePage() {
   return (
     <div className={styles.page}>
       <section className={styles.heroGrid}>
-        {authVariant === 'guest' ? <HomeHeroGuest users={counters.users} /> : null}
+        {authVariant === 'guest' ? <HomeHeroGuest users={counters.users} metricCards={counters.metricCards} /> : null}
         {authVariant === 'authenticated_unverified' ? <HomeHeroUnverified /> : null}
         {authVariant === 'authenticated_verified' ? (
           <HomeHeroVerified activeTraders={counters.activeTraders} dailyTrades={counters.dailyTrades} />

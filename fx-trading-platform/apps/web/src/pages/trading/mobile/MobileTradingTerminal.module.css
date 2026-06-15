@@ -10,7 +10,7 @@
     calc(env(safe-area-inset-top) + var(--space-2))
     var(--space-2)
     calc(env(safe-area-inset-bottom) + var(--mobile-tabs-height) + var(--space-8) + var(--space-8) + var(--space-4));
-  background: #0b0e11;
+  background: var(--trading-page-bg);
   color: var(--trading-text);
   font-family: var(--font-ui);
   overflow-x: hidden;
@@ -23,7 +23,7 @@
   gap: var(--space-1);
   align-items: center;
   border-bottom: 1px solid var(--trading-border-soft);
-  background: #181a20;
+  background: var(--trading-surface);
   margin: calc(var(--space-2) * -1) calc(var(--space-2) * -1) 0;
   padding: var(--space-1) var(--space-2) 0;
 }
@@ -34,7 +34,7 @@
   border: 0;
   border-bottom: 3px solid transparent;
   background: transparent;
-  color: #848e9c;
+  color: var(--trading-muted);
   cursor: pointer;
   font-size: 15px;
   font-weight: 800;
@@ -50,8 +50,8 @@
 }
 
 .activeMarketTab {
-  border-color: #fcd535 !important;
-  color: #eaecef !important;
+  border-color: var(--trading-accent) !important;
+  color: var(--trading-text-strong) !important;
 }
 
 .contractHeader {
@@ -61,7 +61,7 @@
   grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: var(--space-2);
-  border-bottom: 1px solid #333b47;
+  border-bottom: 1px solid var(--trading-border);
   padding-bottom: var(--space-2);
 }
 
@@ -74,8 +74,8 @@
   gap: var(--space-2);
   border: 0;
   border-radius: var(--radius-3);
-  background: #1e2329;
-  color: #eaecef;
+  background: var(--trading-surface);
+  color: var(--trading-text-strong);
   padding: var(--space-1) var(--space-2);
   text-align: left;
   cursor: pointer;
@@ -93,13 +93,13 @@
 }
 
 .symbolButton strong {
-  color: #eaecef;
+  color: var(--trading-text-strong);
   font-size: 16px;
   line-height: 20px;
 }
 
 .symbolButton small {
-  color: #848e9c;
+  color: var(--trading-muted);
   font-size: 11px;
   line-height: 14px;
   overflow: hidden;
@@ -110,7 +110,7 @@
 .symbolButton:hover,
 .symbolButton:focus-visible {
   border-color: var(--trading-accent-border);
-  background: #1e2329;
+  background: var(--trading-surface);
 }
 
 .symbolButton:focus-visible {
@@ -151,6 +151,7 @@
 
 .metricStrip div,
 .sessionStrip,
+.marketDataStrip,
 .depthPreview {
   border: 1px solid var(--trading-border-soft);
   border-radius: var(--radius-4);
@@ -187,13 +188,21 @@
   padding: var(--space-1) var(--space-2);
 }
 
+.marketDataStrip {
+  min-width: 0;
+  min-height: 40px;
+  display: grid;
+  gap: 1px;
+  padding: var(--space-1) var(--space-2);
+}
+
 .orderSurface {
   min-width: 0;
   display: grid;
   gap: var(--space-2);
   border: 1px solid var(--trading-border-soft);
   border-radius: var(--radius-4);
-  background: #1e2329;
+  background: var(--trading-surface);
   padding: var(--space-2);
 }
 
@@ -217,21 +226,21 @@
 }
 
 .orderControls button {
-  background: #2b3139;
-  color: #848e9c;
+  background: var(--trading-surface-3);
+  color: var(--trading-muted);
 }
 
 .orderControlActive {
   background: var(--trading-accent) !important;
-  color: #181a20 !important;
+  color: var(--trading-accent-text) !important;
 }
 
 .orderTypeButton {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  background: #2b3139;
-  color: #eaecef;
+  background: var(--trading-surface-3);
+  color: var(--trading-text-strong);
   padding: 0 var(--space-2);
   text-align: left;
 }
@@ -240,8 +249,8 @@
 .triggerGrid {
   display: grid;
   align-items: center;
-  background: #181a20;
-  color: #848e9c;
+  background: var(--trading-field-bg);
+  color: var(--trading-muted);
   padding: 0 var(--space-2);
 }
 
@@ -251,7 +260,7 @@
 
 .quantityField strong,
 .triggerGrid b {
-  color: #eaecef;
+  color: var(--trading-text-strong);
 }
 
 .positionHints,
@@ -261,19 +270,19 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  color: #848e9c;
+  color: var(--trading-muted);
   font-size: 12px;
   line-height: 18px;
 }
 
 .positionHints strong {
-  color: #eaecef;
+  color: var(--trading-text-strong);
 }
 
 .stopRow button {
   border: 0;
   background: transparent;
-  color: #eaecef;
+  color: var(--trading-text-strong);
   font-size: 12px;
   font-weight: 900;
 }
@@ -288,14 +297,14 @@
 }
 
 .longButton {
-  background: #2ebd85;
-  color: #0b0e11;
+  background: var(--trading-buy);
+  color: var(--trading-page-bg);
   cursor: pointer;
 }
 
 .shortButton {
-  background: #f6465d;
-  color: #0b0e11;
+  background: var(--trading-sell);
+  color: var(--trading-page-bg);
   cursor: pointer;
 }
 
@@ -310,25 +319,35 @@
   overflow: hidden;
   border-radius: var(--radius-4);
   background:
-    linear-gradient(90deg, #2ebd85 0 var(--bid-percent), #f6465d var(--bid-percent) 100%);
+    linear-gradient(90deg, var(--trading-buy) 0 var(--bid-percent), var(--trading-sell) var(--bid-percent) 100%);
   padding: 0 var(--space-2);
-  color: #0b0e11;
+  color: var(--trading-page-bg);
   font-family: var(--font-data);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   font-weight: 900;
 }
 
+:global(:root[data-theme='minimal-white']) .bidAskRatio,
+:global(:root[data-theme='minimal-white']) .longButton,
+:global(:root[data-theme='minimal-white']) .shortButton {
+  color: #ffffff;
+}
+
+:global(:root[data-theme='minimal-white']) .bidAskRatio span:last-child {
+  color: #ffffff;
+}
+
 .bidAskRatio strong {
   border-radius: 999px;
-  background: #181a20;
+  background: var(--trading-surface);
   padding: var(--space-1) var(--space-2);
-  color: #2ebd85;
+  color: var(--trading-buy);
 }
 
 .bidAskRatio span:last-child {
   text-align: right;
-  color: #f6465d;
+  color: var(--trading-sell);
 }
 
 .sessionStrip strong {
@@ -346,6 +365,38 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.marketDataStrip strong,
+.marketDataStrip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marketDataStrip strong {
+  color: var(--trading-text-strong);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.marketDataStrip span {
+  color: var(--trading-muted);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.marketDataStrip[data-tone='live'] strong {
+  color: var(--trading-buy-strong);
+}
+
+.marketDataStrip[data-tone='demo'] strong {
+  color: var(--trading-accent);
+}
+
+.marketDataStrip[data-tone='error'] strong {
+  color: var(--trading-sell-strong);
 }
 
 .chartSection {
@@ -497,7 +548,7 @@
 
 .tradeAction {
   border-color: var(--trading-accent-border) !important;
-  background: rgb(252 213 53 / 0.1) !important;
+  background: var(--trading-accent-soft) !important;
   color: var(--trading-text-strong) !important;
 }
 
@@ -513,6 +564,7 @@
 
 .metricStrip div,
 .sessionStrip,
+.marketDataStrip,
 .depthPreview,
 .orderSurface,
 .chartSection {
@@ -555,7 +607,7 @@
 .actionBar {
   min-height: 48px;
   border-radius: 8px;
-  background: rgb(30 35 41 / 0.98);
+  background: color-mix(in srgb, var(--trading-surface) 96%, transparent);
 }
 
 .actionBar button {

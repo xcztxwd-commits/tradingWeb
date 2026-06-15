@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
@@ -10,8 +10,11 @@ const source = readFileSync(join(currentDir, 'TradingPage.tsx'), 'utf8')
 const sourceLines = source.split(/\r?\n/)
 const desktopSource = readFileSync(join(currentDir, 'components', 'TradingDesktopView.tsx'), 'utf8')
 const mobileSource = readFileSync(join(currentDir, 'components', 'TradingMobileView.tsx'), 'utf8')
-const settingsDialogSource = readFileSync(join(currentDir, 'components', 'TradingSettingsDialog.tsx'), 'utf8')
+const marketSidebarSource = readFileSync(join(currentDir, 'components', 'MarketSidebar.tsx'), 'utf8')
+const settingsDialogPath = join(currentDir, 'components', 'TradingSettingsDialog.tsx')
 const marketSelectionSource = readFileSync(join(currentDir, 'tradingPageMarketSelection.ts'), 'utf8')
+const marketStatusSource = readFileSync(join(currentDir, 'tradingPageMarketDataStatus.ts'), 'utf8')
+const marketStatusHookSource = readFileSync(join(currentDir, 'useTradingMarketDataStatus.ts'), 'utf8')
 const sessionStatusSource = readFileSync(join(currentDir, 'tradingPageSessionStatus.ts'), 'utf8')
 const viewModelsSource = readFileSync(join(currentDir, 'tradingPageViewModels.ts'), 'utf8')
 const chartSettingsSource = readFileSync(join(currentDir, 'useTradingChartSettings.ts'), 'utf8')
@@ -25,7 +28,7 @@ describe('TradingPage terminal viewport', () => {
     assert.match(styles, /\.page\s*{[\s\S]*min-height:\s*100vh[\s\S]*margin:\s*0[\s\S]*padding:\s*0[\s\S]*background:\s*var\(--trading-page-bg\)/)
     assert.doesNotMatch(layoutStyles, /\n\s+height:\s*calc\(100vh - 16px\)/)
     assert.match(layoutStyles, /min-height:\s*calc\(100vh - 16px\)/)
-    assert.match(styles, /--trading-page-bg:\s*#0b0e11/)
+    assert.match(styles, /--trading-page-bg:\s*var\(--theme-background\)/)
     assert.match(styles, /\.terminalTicker/)
     assert.match(styles, /\.binanceGrid/)
   })
@@ -76,7 +79,6 @@ describe('TradingPage terminal viewport', () => {
   it('keeps TradingPage as an orchestration shell with extracted views', () => {
     assert.match(source, /<TradingDesktopView/)
     assert.match(source, /<TradingMobileView/)
-    assert.match(source, /<TradingSettingsDialog/)
     assert.doesNotMatch(source, /<TradingWorkspace[\s\S]*<ChartWorkspace[\s\S]*<TradePanel[\s\S]*<BottomAccountPanel/)
   })
 
@@ -110,27 +112,39 @@ describe('TradingPage terminal viewport', () => {
   it('limits realtime quote subscriptions instead of subscribing every visible market', () => {
     assert.match(source, /getRealtimeQuoteMarkets/)
     assert.match(source, /const quoteMarkets = useMemo/)
-    assert.match(source, /useTradingQuoteMap\(quoteMarkets,\s*token\)/)
+    assert.match(source, /useTradingQuoteMap\(quoteMarkets,\s*token,\s*handleQuoteStatus\)/)
     assert.doesNotMatch(source, /useTradingQuoteMap\(visibleMarkets,\s*token\)/)
   })
 
-  it('exposes a trading settings dialog with the global theme switcher', () => {
-    assert.match(desktopSource, /aria-label=\{t\('trading\.openTradingSettings'\)\}/)
-    assert.match(source, /<TradingSettingsDialog[\s\S]*layoutControls=\{workspaceLayoutControls\}/)
-    assert.match(settingsDialogSource, /role="dialog"[\s\S]*aria-modal="true"[\s\S]*aria-label=\{t\('trading\.tradingSettings'\)\}/)
-    assert.match(settingsDialogSource, /<ThemeSwitcher \/>/)
+  it('waits for backend market capabilities before seeding the full mock watchlist', () => {
+    assert.match(source, /useState<TradingMarket\[\]>\(\[\]\)/)
+    assert.match(source, /catch\(\(\) => \{[\s\S]*setMarkets\(mockTradingMarkets\)/)
+  })
+
+  it('shares market favorites between the trading watchlist and market self-selection', () => {
+    assert.match(source, /useMarketFavorites\(token\)/)
+    assert.match(source, /favorites:\s*favoriteSymbols/)
+    assert.match(source, /onFavorite:\s*toggleFavorite/)
+    assert.match(desktopSource, /<MarketSidebar[\s\S]*favorites=\{favorites\}[\s\S]*onFavorite=\{onFavorite\}/)
+    assert.match(marketSidebarSource, /favorites: Set<string>/)
+    assert.match(marketSidebarSource, /onFavorite: \(symbol: string\) => void/)
+    assert.doesNotMatch(marketSidebarSource, /useState\(\(\) => new Set\(markets\.filter/)
+  })
+
+  it('does not expose the removed trading settings button or dialog', () => {
+    assert.equal(existsSync(settingsDialogPath), false)
+    assert.doesNotMatch(source, /settingsOpen|setSettingsOpen|<TradingSettingsDialog|onOpenSettings/)
+    assert.doesNotMatch(desktopSource, /openTradingSettings|settingsButton|onOpenSettings/)
+    assert.doesNotMatch(mobileSource, /onOpenSettings/)
+    assert.doesNotMatch(viewModelsSource, /onOpenSettings|TradingSettingsDialogProps/)
+    assert.doesNotMatch(styles, /settingsButton|settingsLayer|settingsDialog|layoutPresetButton/)
     assert.doesNotMatch(source, /saveTradingThemeMode\(nextMode\)/)
   })
 
-  it('moves workspace layout presets into the trading settings dialog', () => {
+  it('keeps workspace layout controls internal to the draggable workspace', () => {
     assert.match(source, /useResizableLayout\(\)/)
     assert.match(source, /workspaceLayoutControls/)
     assert.match(desktopSource, /layoutControls=\{workspaceLayoutControls\}/)
-    assert.match(settingsDialogSource, /trading\.workspaceLayout/)
-    assert.match(settingsDialogSource, /layoutControls\.applyPreset\('default'\)/)
-    assert.match(settingsDialogSource, /layoutControls\.applyPreset\('chart-focus'\)/)
-    assert.match(settingsDialogSource, /layoutControls\.applyPreset\('order-focus'\)/)
-    assert.match(settingsDialogSource, /layoutControls\.resetLayout/)
     assert.doesNotMatch(desktopSource, /sessionTelemetry/)
   })
 
@@ -197,6 +211,22 @@ describe('TradingPage terminal viewport', () => {
     assert.match(mobileSource, /allowMockFallback=\{shouldAllowChartMockFallback\(market\)\}/)
     assert.doesNotMatch(desktopSource, /allowMockFallback=\{!market\.provider\}/)
     assert.doesNotMatch(mobileSource, /allowMockFallback=\{!market\.provider\}/)
+  })
+
+  it('shows explicit market data source and failure status on the trading page', () => {
+    assert.match(source, /useTradingMarketDataStatus\(\)/)
+    assert.match(marketStatusHookSource, /fetchMarketStatus/)
+    assert.match(marketStatusHookSource, /marketDataStatus/)
+    assert.match(source, /handleQuoteStatus/)
+    assert.match(marketStatusHookSource, /getTradingMarketDataStatusView\(/)
+    assert.match(source, /marketDataStatusView/)
+    assert.match(source, /marketDataStatusView:\s*marketDataStatusView/)
+    assert.match(desktopSource, /marketDataStatusView/)
+    assert.match(desktopSource, /className=\{styles\.marketDataStatus\}/)
+    assert.match(mobileSource, /marketDataStatusView=\{marketDataStatusView\}/)
+    assert.match(marketStatusSource, /Massive/)
+    assert.match(marketStatusSource, /Demo quote/)
+    assert.match(marketStatusSource, /QUOTE_PROVIDER_UNAVAILABLE/)
   })
 
   it('keeps TradingPage below the orchestration size budget', () => {

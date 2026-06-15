@@ -38,6 +38,16 @@ public class SymbolEntity {
   private Integer leverage;
   private BigDecimal spreadMarkup = BigDecimal.ZERO;
   private Boolean enabled = true;
+  private String iconUrl;
+  private UUID iconAssetId;
+  private Boolean displayEnabled = true;
+  private Boolean quoteEnabled = true;
+  private Boolean chartEnabled = true;
+  private Boolean orderBookEnabled = true;
+  private Boolean tradable = true;
+  private Boolean featured = false;
+  private String displayGroup;
+  private Integer displayOrder = 0;
 
   @TableField(fill = FieldFill.INSERT)
   private Instant createdAt;

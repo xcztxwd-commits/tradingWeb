@@ -1,7 +1,8 @@
-import { ChevronDown, LogOut, Settings, ShieldCheck, UserRound, Wallet } from 'lucide-react'
+import { LogOut, Settings, ShieldCheck, UserRound, Wallet } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
+import { TopbarToolIcon } from '../../components/TopbarToolIcon'
 import { clearStoredAuthToken } from '../../features/trading-session/tradingSessionStorage'
 
 type AccountUserMenuProps = {
@@ -53,11 +54,9 @@ export function AccountUserMenu({ email }: AccountUserMenuProps) {
         aria-label="个人中心"
         aria-haspopup="menu"
         aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
       >
-        <UserRound size={19} aria-hidden="true" />
-        <ChevronDown size={13} aria-hidden="true" />
+        <TopbarToolIcon name="user" />
       </button>
 
       {open ? (

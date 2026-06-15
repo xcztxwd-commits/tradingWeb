@@ -1,14 +1,22 @@
 import { makeMockCandles } from '../../features/market/tradingModels.ts'
 import type { TradingCandle, TradingPeriod } from '../../features/market/tradingModels.ts'
 
-type CandleFetcher = (symbol: string, period: TradingPeriod) => Promise<TradingCandle[]>
+export const historicalCandleBatchSize = 220
+
+type HistoricalLoadType = 'init' | 'forward' | 'backward' | 'update'
+type CandleFetcherOptions = {
+  endTime: number
+  count?: number
+}
+type CandleFetcher = (symbol: string, period: TradingPeriod, options?: CandleFetcherOptions) => Promise<TradingCandle[]>
 type LoadChartCandlesOptions = {
   allowMockFallback?: boolean
+  count?: number
 }
 
-async function fetchBackendCandles(symbol: string, period: TradingPeriod) {
+async function fetchBackendCandles(symbol: string, period: TradingPeriod, options?: CandleFetcherOptions) {
   const { fetchMarketCandles } = await import('../../features/market/tradingMarketApi.ts')
-  return fetchMarketCandles(symbol, period)
+  return fetchMarketCandles(symbol, period, options)
 }
 
 export async function loadChartCandles(
@@ -19,16 +27,25 @@ export async function loadChartCandles(
   options: LoadChartCandlesOptions = {}
 ) {
   try {
-    const candles = await fetcher(symbol, period)
+    const candles = await fetcher(symbol, period, { endTime, count: options.count })
     if (candles.length > 0 && hasUsableCandleScale(symbol, candles)) return candles
   } catch {
     // Keep the local terminal visually useful when the backend is offline.
   }
 
-  if (options.allowMockFallback === false) {
+  if (options.allowMockFallback !== true) {
     return []
   }
   return makeMockCandles(symbol, period, 180, endTime)
+}
+
+export function resolveHistoricalCandleEndTime(type: HistoricalLoadType, timestamp: number | null, now = Date.now()) {
+  if (type === 'forward' && typeof timestamp === 'number') return timestamp - 1
+  return now
+}
+
+export function hasMoreHistoricalCandles(candles: TradingCandle[], count = historicalCandleBatchSize) {
+  return candles.length >= count
 }
 
 function hasUsableCandleScale(symbol: string, candles: TradingCandle[]) {

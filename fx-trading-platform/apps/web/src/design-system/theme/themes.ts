@@ -1,9 +1,4 @@
-export type TradingThemeId =
-  | 'midnight-pro'
-  | 'binance-inspired'
-  | 'okx-inspired'
-  | 'deep-blue-quant'
-  | 'light-institutional'
+export type TradingThemeId = 'binance-inspired' | 'minimal-white'
 
 export type TradingThemeTokens = {
   background: string
@@ -31,46 +26,16 @@ export type TradingThemeTokens = {
 export type TradingTheme = {
   id: TradingThemeId
   name: string
-  description: string
   colorScheme: 'dark' | 'light'
   tokens: TradingThemeTokens
 }
 
-export const defaultThemeId = 'binance-inspired'
+export const defaultThemeId: TradingThemeId = 'binance-inspired'
 
 export const tradingThemes: TradingTheme[] = [
   {
-    id: 'midnight-pro',
-    name: 'Midnight Pro',
-    description: 'settings.themeDescriptions.midnightPro',
-    colorScheme: 'dark',
-    tokens: {
-      background: '#05080C',
-      surface: '#0D1219',
-      surfaceElevated: '#151D28',
-      border: '#1D2530',
-      textPrimary: '#F6F8FB',
-      textSecondary: '#DCE3EC',
-      textMuted: '#8A94A3',
-      primary: '#F2B84B',
-      primaryHover: '#FFD166',
-      accent: '#4FB6FF',
-      success: '#20B26B',
-      buy: '#20B26B',
-      danger: '#F05267',
-      sell: '#F05267',
-      warning: '#F2B84B',
-      chartGrid: '#151D28',
-      chartCandleUp: '#26A69A',
-      chartCandleDown: '#EF5350',
-      orderBookBidBg: 'rgba(23, 154, 91, 0.25)',
-      orderBookAskBg: 'rgba(201, 47, 65, 0.27)'
-    }
-  },
-  {
     id: 'binance-inspired',
     name: 'Binance Inspired',
-    description: 'settings.themeDescriptions.binanceInspired',
     colorScheme: 'dark',
     tokens: {
       background: '#181a20',
@@ -96,95 +61,34 @@ export const tradingThemes: TradingTheme[] = [
     }
   },
   {
-    id: 'okx-inspired',
-    name: 'OKX Inspired',
-    description: 'settings.themeDescriptions.okxInspired',
-    colorScheme: 'dark',
-    tokens: {
-      background: '#030405',
-      surface: '#0E1012',
-      surfaceElevated: '#181B1F',
-      border: '#282C32',
-      textPrimary: '#F5F5F5',
-      textSecondary: '#D6D8DC',
-      textMuted: '#8D9299',
-      primary: '#F4F4F5',
-      primaryHover: '#FFFFFF',
-      accent: '#A1A7B0',
-      success: '#17A76F',
-      buy: '#17A76F',
-      danger: '#E3505B',
-      sell: '#E3505B',
-      warning: '#D6A84F',
-      chartGrid: '#171A1F',
-      chartCandleUp: '#20A77A',
-      chartCandleDown: '#E0525E',
-      orderBookBidBg: 'rgba(23, 167, 111, 0.2)',
-      orderBookAskBg: 'rgba(227, 80, 91, 0.22)'
-    }
-  },
-  {
-    id: 'deep-blue-quant',
-    name: 'Deep Blue Quant',
-    description: 'settings.themeDescriptions.deepBlueQuant',
-    colorScheme: 'dark',
-    tokens: {
-      background: '#050914',
-      surface: '#0B1220',
-      surfaceElevated: '#101A2B',
-      border: '#1D2B42',
-      textPrimary: '#F1F7FF',
-      textSecondary: '#D6E2F1',
-      textMuted: '#8B9CB3',
-      primary: '#4FB6FF',
-      primaryHover: '#79C8FF',
-      accent: '#78E1F7',
-      success: '#22C48B',
-      buy: '#22C48B',
-      danger: '#F26473',
-      sell: '#F26473',
-      warning: '#F3B95F',
-      chartGrid: '#142033',
-      chartCandleUp: '#2AC39A',
-      chartCandleDown: '#F05F70',
-      orderBookBidBg: 'rgba(34, 196, 139, 0.21)',
-      orderBookAskBg: 'rgba(242, 100, 115, 0.23)'
-    }
-  },
-  {
-    id: 'light-institutional',
-    name: 'Light Institutional',
-    description: 'settings.themeDescriptions.lightInstitutional',
+    id: 'minimal-white',
+    name: 'Minimal White',
     colorScheme: 'light',
     tokens: {
-      background: '#F3F6FA',
-      surface: '#FFFFFF',
-      surfaceElevated: '#EEF3F8',
-      border: '#D8DEE8',
-      textPrimary: '#0F172A',
-      textSecondary: '#1F2937',
-      textMuted: '#657386',
+      background: '#f6f8fb',
+      surface: '#ffffff',
+      surfaceElevated: '#f9fafc',
+      border: '#e2e7ef',
+      textPrimary: '#111827',
+      textSecondary: '#475569',
+      textMuted: '#475569',
       primary: '#111827',
-      primaryHover: '#273244',
-      accent: '#2563EB',
-      success: '#059669',
-      buy: '#059669',
-      danger: '#DC3F5F',
-      sell: '#DC3F5F',
-      warning: '#B7791F',
-      chartGrid: '#E6EBF2',
-      chartCandleUp: '#059669',
-      chartCandleDown: '#DC3F5F',
-      orderBookBidBg: 'rgba(5, 150, 105, 0.16)',
-      orderBookAskBg: 'rgba(220, 63, 95, 0.18)'
+      primaryHover: '#0f172a',
+      accent: '#111827',
+      success: '#047857',
+      buy: '#047857',
+      danger: '#be123c',
+      sell: '#be123c',
+      warning: '#9a6a00',
+      chartGrid: '#e8edf4',
+      chartCandleUp: '#047857',
+      chartCandleDown: '#be123c',
+      orderBookBidBg: 'rgba(7, 135, 90, 0.08)',
+      orderBookAskBg: 'rgba(212, 61, 86, 0.08)'
     }
   }
 ]
 
-export function isTradingThemeId(value: unknown): value is TradingThemeId {
-  return typeof value === 'string' && tradingThemes.some((theme) => theme.id === value)
-}
-
-export function getTradingTheme(themeId: TradingThemeId): TradingTheme {
+export function getTradingTheme(themeId: TradingThemeId = defaultThemeId): TradingTheme {
   return tradingThemes.find((theme) => theme.id === themeId) ?? tradingThemes[0]
 }

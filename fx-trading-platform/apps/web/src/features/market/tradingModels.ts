@@ -43,6 +43,8 @@ export type MarketListItem = {
   name: string
   category: Exclude<MarketCategory, 'all' | 'favorites'>
   favorite: boolean
+  iconUrl?: string
+  quoteEnabled?: boolean
 }
 
 export type TradingMarket = MarketListItem & {
@@ -56,6 +58,8 @@ export type TradingMarket = MarketListItem & {
   provider?: string
   providerSymbol?: string
   tradable?: boolean
+  chartEnabled?: boolean
+  orderBookEnabled?: boolean
   minLot?: string
   pricePrecision?: number
   quantityPrecision?: number
@@ -203,16 +207,21 @@ export function getRealtimeQuoteMarkets<T extends MarketListItem>(
   const visibleLimit = Math.max(1, firstScreenLimit)
 
   markets.slice(0, visibleLimit).forEach((market) => {
+    if (!canRequestRealtimeQuote(market)) return
     picked.set(market.symbol, market)
   })
   markets.forEach((market) => {
-    if (market.favorite) picked.set(market.symbol, market)
+    if (market.favorite && canRequestRealtimeQuote(market)) picked.set(market.symbol, market)
   })
 
   const selectedMarket = markets.find((market) => market.symbol === selectedSymbol)
-  if (selectedMarket) picked.set(selectedMarket.symbol, selectedMarket)
+  if (selectedMarket && canRequestRealtimeQuote(selectedMarket)) picked.set(selectedMarket.symbol, selectedMarket)
 
   return Array.from(picked.values())
+}
+
+function canRequestRealtimeQuote(market: MarketListItem) {
+  return market.quoteEnabled !== false
 }
 
 export function getPercentageStep(value: number): (typeof percentageSteps)[number] {
@@ -228,7 +237,8 @@ export function getNextPriceValue(currentValue: string, nextDefaultPrice: string
 }
 
 export function getPricePrecision(symbol: string) {
-  if (symbol.includes('BTC') || symbol.includes('ETH') || symbol === 'US100') return 2
+  if (symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('SOL') || symbol === 'US100') return 2
+  if (symbol.includes('XRP')) return 4
   if (symbol.includes('XAU')) return 2
   if (symbol.endsWith('JPY')) return 3
   return 5
@@ -241,6 +251,8 @@ export function formatMarketPrice(symbol: string, value: number) {
 function getSymbolBasePrice(symbol: string) {
   if (symbol.includes('BTC')) return 67_240
   if (symbol.includes('ETH')) return 3_420
+  if (symbol.includes('SOL')) return 152.12
+  if (symbol.includes('XRP')) return 2.481
   if (symbol.includes('XAU')) return 2_348
   if (symbol.endsWith('JPY')) return 156.42
   if (symbol === 'GBPUSD') return 1.2712
@@ -249,9 +261,9 @@ function getSymbolBasePrice(symbol: string) {
 }
 
 function getMockCandleProfile(symbol: string, base: number) {
-  if (symbol.includes('BTC') || symbol.includes('ETH')) {
+  if (symbol.endsWith('USDT')) {
     return {
-      precision: 2,
+      precision: symbol.includes('XRP') ? 4 : 2,
       step: base * 0.0007,
       wick: base * 0.0011,
       shock: 0.034

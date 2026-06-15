@@ -38,6 +38,15 @@ public record AdminSymbolRequest(
     @NotNull BigDecimal maxLot,
     @NotNull Integer leverage,
     @NotNull BigDecimal spreadMarkup,
-    @NotNull Boolean enabled
+    @NotNull Boolean enabled,
+    String iconUrl,
+    Boolean displayEnabled,
+    Boolean quoteEnabled,
+    Boolean chartEnabled,
+    Boolean orderBookEnabled,
+    Boolean tradable,
+    Boolean featured,
+    String displayGroup,
+    Integer displayOrder
 ) {
 }

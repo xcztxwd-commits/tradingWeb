@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="客服耳机">
+  <title>客服耳机</title>
+  <g fill="none" stroke="#FFFFFF" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+
+    <path d="M258 606 V522 C258 356 364 246 512 246 C660 246 766 356 766 522 V606"/>
+    <rect x="222" y="520" width="126" height="224" rx="63" ry="63"/>
+    <rect x="676" y="520" width="126" height="224" rx="63" ry="63"/>
+    <path d="M740 734 C720 812 644 852 560 852"/>
+    <rect x="442" y="812" width="122" height="76" rx="38" ry="38"/>
+
+  </g>
+</svg>

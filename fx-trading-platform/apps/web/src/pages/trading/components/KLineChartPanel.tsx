@@ -1,11 +1,25 @@
 import { dispose, init } from 'klinecharts'
-import { GripVertical, Lock, MoreHorizontal, Paintbrush, Trash2, Unlock } from 'lucide-react'
+import { Copy, Download, GripVertical, Layers, ListTree, Lock, MoreHorizontal, Paintbrush, Trash2, Unlock, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { buildIndicatorApplyPlan, drawingToolToOverlayName, getChartTypeStyles } from '../chartSettings'
+import { buildIndicatorApplyPlan, defaultChartSettings, drawingToolToOverlayName, getChartVisualStyles } from '../chartSettings'
 import type { ChartSettings, ChartType, IndicatorApplyDescriptor, IndicatorSettings } from '../chartSettings'
-import { loadChartCandles } from '../chartCandleData'
+import {
+  hasMoreHistoricalCandles,
+  historicalCandleBatchSize,
+  loadChartCandles,
+  resolveHistoricalCandleEndTime
+} from '../chartCandleData'
+import {
+  buildRiskTemplateDrawings,
+  clonePersistedDrawing,
+  loadPersistedChartDrawings,
+  savePersistedChartDrawings
+} from '../chartDrawingPersistence'
+import type { PersistedChartDrawing } from '../chartDrawingPersistence'
+import { buildTradeMarkerOverlays, tradeMarkerOverlayGroupId } from '../chartTradeMarkers'
+import type { ChartTradeMarker } from '../chartTradeMarkers'
 import { formatMarketPrice, getPricePrecision, toKLinePeriod } from '../../../features/market/tradingModels'
 import { registerTradingGeneratedIndicators } from '../generatedTradingIndicators'
 import { registerTradingDrawingOverlays } from '../tradingDrawingOverlays'
@@ -20,15 +34,28 @@ type Props = {
   token: string | null
   themeMode: 'dark' | 'light'
   period: TradingPeriod
+  timezone: ChartSettings['timezone']
   chartType: ChartType
+  candleStyle: ChartSettings['candleStyle']
+  axisSettings: ChartSettings['axisSettings']
+  layoutSettings: ChartSettings['layoutSettings']
+  chartActionRequest: ChartActionRequest
   indicatorSettings: IndicatorSettings
   indicatorsVisible: boolean
   drawingToolSettings: ChartSettings['drawingToolSettings']
   drawingClearRequest: number
   drawingsVisible: boolean
+  tradeMarkers: ChartTradeMarker[]
   allowMockFallback?: boolean
   onDrawingComplete: () => void
+  onCandlePriceSelect?: (price: number) => void
   fullscreenActive: boolean
+}
+
+export type ChartActionRequest = {
+  exportImage: number
+  scrollToRealtime: number
+  scrollToTimestamp: { id: number; timestamp: number } | null
 }
 
 type KLineChart = NonNullable<ReturnType<typeof init>>
@@ -40,8 +67,12 @@ type DrawingOverlayEvent = Parameters<Parameters<KLineChart['createOverlay']>[0]
 type DrawingOverlayRecord = {
   id?: string
   name?: string
+  groupId?: string
+  points?: Array<{ timestamp?: number; dataIndex?: number; value?: number }>
   lock?: boolean
   styles?: Record<string, unknown> | null
+  extendData?: unknown
+  visible?: boolean
 }
 type SelectedDrawingOverlay = {
   id: string
@@ -49,10 +80,26 @@ type SelectedDrawingOverlay = {
   lineSize: number
   locked: boolean
 }
+type CrosshairCandle = {
+  timestamp: number
+  open: number
+  high: number
+  low: number
+  close: number
+}
+type ChartImagePreview = {
+  imageUrl: string
+  symbol: string
+}
+type ChartExportContext = {
+  symbol: string
+  themeMode: 'dark' | 'light'
+  backgroundColor: string
+}
 
 const drawingOverlayGroupId = 'trading-page-drawings'
-const drawingOverlayDefaultColor = '#f2b84b'
-const drawingOverlayColors = ['#f2b84b', '#ffffff', '#26a69a', '#ef5350', '#4dd0e1']
+const drawingOverlayDefaultColor = '#fcd535'
+const drawingOverlayColors = ['#fcd535', '#eaecef', '#2ebd85', '#f6465d', '#5ab6ff']
 const drawingOverlayLineSizes = [1, 2, 3] as const
 
 export const KLineChartPanel = memo(function KLineChartPanel({
@@ -60,17 +107,24 @@ export const KLineChartPanel = memo(function KLineChartPanel({
   token,
   themeMode,
   period,
+  timezone,
   chartType,
+  candleStyle,
+  axisSettings,
+  layoutSettings,
+  chartActionRequest,
   indicatorSettings,
   indicatorsVisible,
   drawingToolSettings,
   drawingClearRequest,
   drawingsVisible,
-  allowMockFallback = true,
+  tradeMarkers,
+  allowMockFallback = false,
   onDrawingComplete,
+  onCandlePriceSelect,
   fullscreenActive
 }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<ReturnType<typeof init>>(null)
   const initialThemeModeRef = useRef(themeMode)
@@ -78,9 +132,31 @@ export const KLineChartPanel = memo(function KLineChartPanel({
   const realtimeBarCallbackRef = useRef<((data: TradingCandle) => void) | null>(null)
   const latestRealtimeBarRef = useRef<TradingCandle | null>(null)
   const hasHistoricalCandlesRef = useRef(false)
+  const visibleRangeRef = useRef<ReturnType<KLineChart['getVisibleRange']> | null>(null)
   const [lastClose, setLastClose] = useState<number | null>(null)
   const [hasNoCandles, setHasNoCandles] = useState(false)
   const [selectedDrawing, setSelectedDrawing] = useState<SelectedDrawingOverlay | null>(null)
+  const [drawingManagerOpen, setDrawingManagerOpen] = useState(false)
+  const [drawingRecords, setDrawingRecords] = useState<PersistedChartDrawing[]>([])
+  const [crosshairCandle, setCrosshairCandle] = useState<CrosshairCandle | null>(null)
+  const [chartImagePreview, setChartImagePreview] = useState<ChartImagePreview | null>(null)
+  const chartExportContextRef = useRef<ChartExportContext>({
+    symbol,
+    themeMode,
+    backgroundColor: layoutSettings.background.color
+  })
+  chartExportContextRef.current = {
+    symbol,
+    themeMode,
+    backgroundColor: layoutSettings.background.color
+  }
+
+  const syncPersistedDrawings = useCallback(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    savePersistedChartDrawings(symbol, chart.getOverlays({ groupId: drawingOverlayGroupId }))
+    setDrawingRecords(loadPersistedChartDrawings(symbol))
+  }, [symbol])
 
   const handleOverlaySelected = useCallback((event: DrawingOverlayEvent) => {
     const selected = createSelectedDrawingOverlay(event.overlay)
@@ -92,8 +168,9 @@ export const KLineChartPanel = memo(function KLineChartPanel({
       if (!selectedDrawing) return
       chartRef.current?.overrideOverlay({ id: selectedDrawing.id, styles: buildDrawingOverlayStyles(color, selectedDrawing.lineSize) })
       setSelectedDrawing({ ...selectedDrawing, color })
+      syncPersistedDrawings()
     },
-    [selectedDrawing]
+    [selectedDrawing, syncPersistedDrawings]
   )
 
   const handleOverlayLineSizeChange = useCallback(
@@ -101,8 +178,9 @@ export const KLineChartPanel = memo(function KLineChartPanel({
       if (!selectedDrawing) return
       chartRef.current?.overrideOverlay({ id: selectedDrawing.id, styles: buildDrawingOverlayStyles(selectedDrawing.color, lineSize) })
       setSelectedDrawing({ ...selectedDrawing, lineSize })
+      syncPersistedDrawings()
     },
-    [selectedDrawing]
+    [selectedDrawing, syncPersistedDrawings]
   )
 
   const handleOverlayLockToggle = useCallback(() => {
@@ -110,13 +188,48 @@ export const KLineChartPanel = memo(function KLineChartPanel({
     const nextLocked = !selectedDrawing.locked
     chartRef.current?.overrideOverlay({ id: selectedDrawing.id, lock: nextLocked })
     setSelectedDrawing({ ...selectedDrawing, locked: nextLocked })
-  }, [selectedDrawing])
+    syncPersistedDrawings()
+  }, [selectedDrawing, syncPersistedDrawings])
+
+  const handleRemoveDrawing = useCallback((id: string) => {
+    chartRef.current?.removeOverlay({ id })
+    setSelectedDrawing(null)
+    syncPersistedDrawings()
+  }, [syncPersistedDrawings])
 
   const handleOverlayRemove = useCallback(() => {
     if (!selectedDrawing) return
-    chartRef.current?.removeOverlay({ id: selectedDrawing.id })
-    setSelectedDrawing(null)
-  }, [selectedDrawing])
+    handleRemoveDrawing(selectedDrawing.id)
+  }, [handleRemoveDrawing, selectedDrawing])
+
+  const handleCopyDrawing = useCallback((drawing: PersistedChartDrawing) => {
+    const chart = chartRef.current
+    if (!chart) return
+    chart.createOverlay(createDrawingOverlay(clonePersistedDrawing(drawing), drawingsVisible, handleOverlaySelected, syncPersistedDrawings))
+    syncPersistedDrawings()
+  }, [drawingsVisible, handleOverlaySelected, syncPersistedDrawings])
+
+  const handleLockAllDrawings = useCallback(() => {
+    chartRef.current?.overrideOverlay({ groupId: drawingOverlayGroupId, lock: true })
+    setSelectedDrawing((drawing) => drawing ? { ...drawing, locked: true } : drawing)
+    syncPersistedDrawings()
+  }, [syncPersistedDrawings])
+
+  const handleApplyRiskTemplate = useCallback(() => {
+    const chart = chartRef.current
+    const price = lastClose ?? latestRealtimeBarRef.current?.close ?? null
+    if (!chart || price === null) return
+    const overlays = buildRiskTemplateDrawings(price).map((drawing) =>
+      createDrawingOverlay(drawing, drawingsVisible, handleOverlaySelected, syncPersistedDrawings)
+    )
+    if (overlays.length > 0) chart.createOverlay(overlays)
+    syncPersistedDrawings()
+  }, [drawingsVisible, handleOverlaySelected, lastClose, syncPersistedDrawings])
+
+  const handleDrawingOverlayDrawEnd = useCallback(() => {
+    syncPersistedDrawings()
+    onDrawingComplete()
+  }, [onDrawingComplete, syncPersistedDrawings])
 
   useEffect(() => {
     const container = containerRef.current
@@ -143,13 +256,66 @@ export const KLineChartPanel = memo(function KLineChartPanel({
   useEffect(() => {
     const chart = chartRef.current
     if (!chart) return
-    chart.setStyles(themeMode)
-    chart.setStyles(terminalChartStyles[themeMode])
-  }, [themeMode])
+    chart.setLocale(normalizeChartLocale(i18n.language))
+    chart.setTimezone(resolveChartTimezone(timezone))
+    chart.setThousandsSeparator({
+      sign: ',',
+      format: formatThousandsSeparated
+    })
+    chart.setDecimalFold({
+      threshold: 1_000_000,
+      format: formatDecimalFold
+    })
+    chart.setFormatter({
+      formatDate: formatChartDate,
+      formatBigNumber: formatChartBigNumber
+    })
+  }, [i18n.language, timezone])
 
   useEffect(() => {
-    chartRef.current?.setStyles(getChartTypeStyles(chartType))
-  }, [chartType])
+    const chart = chartRef.current
+    if (!chart) return
+    chart.setStyles(themeMode)
+    chart.setStyles(terminalChartStyles[themeMode])
+    chart.setStyles(getChartVisualStyles({
+      chartType,
+      candleStyle,
+      axisSettings,
+      layoutSettings
+    }))
+    chart.setBarSpace(axisSettings.barSpace)
+    chart.overrideYAxis({ name: axisSettings.priceScaleMode })
+  }, [axisSettings, candleStyle, chartType, layoutSettings, themeMode])
+
+  useEffect(() => {
+    if (chartActionRequest.scrollToRealtime <= 0) return
+    const chart = chartRef.current
+    if (!chart) return
+    chart.scrollToRealTime(160)
+  }, [chartActionRequest.scrollToRealtime])
+
+  useEffect(() => {
+    if (!chartActionRequest.scrollToTimestamp) return
+    const chart = chartRef.current
+    if (!chart) return
+    chart.scrollToTimestamp(chartActionRequest.scrollToTimestamp.timestamp, 160)
+  }, [chartActionRequest.scrollToTimestamp])
+
+  useEffect(() => {
+    if (chartActionRequest.exportImage <= 0) return
+    const chart = chartRef.current
+    if (!chart) return
+    const {
+      symbol: exportSymbol,
+      themeMode: exportThemeMode,
+      backgroundColor: exportBackgroundColor
+    } = chartExportContextRef.current
+    const imageBackgroundColor = exportBackgroundColor === defaultChartSettings.layoutSettings.background.color
+      ? terminalChartImageBackground[exportThemeMode]
+      : exportBackgroundColor
+    const imageUrl = chart.getConvertPictureUrl(true, 'png', imageBackgroundColor)
+    setChartImagePreview({ imageUrl, symbol: exportSymbol })
+  }, [chartActionRequest.exportImage])
 
   useEffect(() => {
     const chart = chartRef.current
@@ -168,31 +334,45 @@ export const KLineChartPanel = memo(function KLineChartPanel({
     setLastClose(null)
     setHasNoCandles(false)
     chart.setDataLoader({
-      getBars: ({ callback }) => {
-        void loadChartCandles(symbol, period, undefined, Date.now(), { allowMockFallback })
+      getBars: ({ type, timestamp, callback }) => {
+        if (type === 'backward') {
+          callback([], { forward: false, backward: false })
+          return
+        }
+
+        void loadChartCandles(symbol, period, undefined, resolveHistoricalCandleEndTime(type, timestamp), {
+          allowMockFallback,
+          count: historicalCandleBatchSize
+        })
           .then((candles) => {
             if (disposed) return
             if (candles.length === 0) {
+              if (type === 'init') {
+                latestRealtimeBarRef.current = null
+                hasHistoricalCandlesRef.current = false
+                setLastClose(null)
+                setHasNoCandles(true)
+              }
+              callback([], { forward: false, backward: false })
+              return
+            }
+            if (type === 'init') {
+              latestRealtimeBarRef.current = candles.at(-1) ?? null
+              hasHistoricalCandlesRef.current = true
+              setLastClose(latestRealtimeBarRef.current?.close ?? null)
+              setHasNoCandles(false)
+            }
+            callback(candles, { forward: hasMoreHistoricalCandles(candles), backward: false })
+          })
+          .catch(() => {
+            if (disposed) return
+            if (type === 'init') {
               latestRealtimeBarRef.current = null
               hasHistoricalCandlesRef.current = false
               setLastClose(null)
               setHasNoCandles(true)
-              callback([])
-              return
             }
-            latestRealtimeBarRef.current = candles.at(-1) ?? null
-            hasHistoricalCandlesRef.current = true
-            setLastClose(latestRealtimeBarRef.current?.close ?? null)
-            setHasNoCandles(false)
-            callback(candles)
-          })
-          .catch(() => {
-            if (disposed) return
-            latestRealtimeBarRef.current = null
-            hasHistoricalCandlesRef.current = false
-            setLastClose(null)
-            setHasNoCandles(true)
-            callback([])
+            callback([], { forward: false, backward: false })
           })
       },
       subscribeBar: ({ callback }) => {
@@ -208,6 +388,55 @@ export const KLineChartPanel = memo(function KLineChartPanel({
       disposed = true
     }
   }, [allowMockFallback, period, symbol])
+
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    const drawings = loadPersistedChartDrawings(symbol)
+    setDrawingRecords(drawings)
+    chart.removeOverlay({ groupId: drawingOverlayGroupId })
+    if (drawings.length > 0) {
+      chart.createOverlay(
+        drawings.map((drawing) => createDrawingOverlay(drawing, drawingsVisible, handleOverlaySelected, syncPersistedDrawings))
+      )
+    }
+  }, [drawingsVisible, handleOverlaySelected, symbol, syncPersistedDrawings])
+
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    const handleCrosshairChange = (payload?: unknown) => {
+      setCrosshairCandle(createCrosshairCandle(payload))
+    }
+    const handleCandleBarClick = (payload?: unknown) => {
+      const price = getActionClosePrice(payload)
+      if (price !== null) onCandlePriceSelect?.(price)
+    }
+    const handleVisibleRangeChange = () => {
+      visibleRangeRef.current = chart.getVisibleRange()
+    }
+
+    chart.subscribeAction('onCrosshairChange', handleCrosshairChange)
+    chart.subscribeAction('onCandleBarClick', handleCandleBarClick)
+    chart.subscribeAction('onVisibleRangeChange', handleVisibleRangeChange)
+
+    return () => {
+      chart.unsubscribeAction('onCrosshairChange', handleCrosshairChange)
+      chart.unsubscribeAction('onCandleBarClick', handleCandleBarClick)
+      chart.unsubscribeAction('onVisibleRangeChange', handleVisibleRangeChange)
+    }
+  }, [onCandlePriceSelect])
+
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+
+    chart.removeOverlay({ groupId: tradeMarkerOverlayGroupId })
+    const overlays = buildTradeMarkerOverlays(tradeMarkers, period)
+    if (overlays.length > 0) chart.createOverlay(overlays)
+  }, [period, tradeMarkers])
 
   useEffect(() => {
     return subscribeQuote(symbol, token, (quote) => {
@@ -256,19 +485,21 @@ export const KLineChartPanel = memo(function KLineChartPanel({
       modeSensitivity: 8,
       visible: drawingsVisible,
       extendData: drawingToolSettings.activeTool === 'text' ? t('trading.chartAnnotation') : undefined,
-      onDrawEnd: onDrawingComplete,
+      onDrawEnd: handleDrawingOverlayDrawEnd,
       onSelected: handleOverlaySelected,
       onClick: handleOverlaySelected,
       onDeselected: () => setSelectedDrawing(null)
     })
     if (id === null) onDrawingComplete()
-  }, [drawingToolSettings.activeTool, drawingToolSettings.magnetMode, drawingsVisible, handleOverlaySelected, onDrawingComplete, t])
+  }, [drawingToolSettings.activeTool, drawingToolSettings.magnetMode, drawingsVisible, handleDrawingOverlayDrawEnd, handleOverlaySelected, onDrawingComplete, t])
 
   useEffect(() => {
     if (drawingClearRequest <= 0) return
     chartRef.current?.removeOverlay({ groupId: drawingOverlayGroupId })
+    savePersistedChartDrawings(symbol, [])
+    setDrawingRecords([])
     setSelectedDrawing(null)
-  }, [drawingClearRequest])
+  }, [drawingClearRequest, symbol])
 
   useEffect(() => {
     chartRef.current?.overrideOverlay({ groupId: drawingOverlayGroupId, visible: drawingsVisible })
@@ -281,7 +512,25 @@ export const KLineChartPanel = memo(function KLineChartPanel({
     <div className={styles.chartPanel}>
       <div className={styles.canvasHeader}>
         <span>{symbol}</span>
+        {crosshairCandle ? (
+          <div className={styles.ohlcPanel}>
+            <span>O {formatMarketPrice(symbol, crosshairCandle.open)}</span>
+            <span>H {formatMarketPrice(symbol, crosshairCandle.high)}</span>
+            <span>L {formatMarketPrice(symbol, crosshairCandle.low)}</span>
+            <span>C {formatMarketPrice(symbol, crosshairCandle.close)}</span>
+          </div>
+        ) : null}
         <strong>{lastClose === null ? '--' : formatMarketPrice(symbol, lastClose)}</strong>
+        <button
+          type="button"
+          className={styles.headerIconButton}
+          title={t('chart.drawingManager')}
+          aria-label={t('chart.drawingManager')}
+          aria-expanded={drawingManagerOpen}
+          onClick={() => setDrawingManagerOpen((open) => !open)}
+        >
+          <ListTree size={15} />
+        </button>
       </div>
       <div className={styles.canvasWrap}>
         <div ref={containerRef} className={styles.klineCanvas} />
@@ -297,9 +546,70 @@ export const KLineChartPanel = memo(function KLineChartPanel({
             onLineSizeChange={handleOverlayLineSizeChange}
             onRemove={handleOverlayRemove}
             onToggleLock={handleOverlayLockToggle}
+            onOpenManager={() => setDrawingManagerOpen((open) => !open)}
+          />
+        ) : null}
+        {drawingManagerOpen && drawingsVisible ? (
+          <ChartDrawingManager
+            drawings={drawingRecords}
+            onApplyRiskTemplate={handleApplyRiskTemplate}
+            onCopyDrawing={handleCopyDrawing}
+            onLockAll={handleLockAllDrawings}
+            onRemoveDrawing={handleRemoveDrawing}
           />
         ) : null}
       </div>
+      {chartImagePreview ? (
+        <div
+          className={styles.imagePreviewBackdrop}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setChartImagePreview(null)
+          }}
+        >
+          <section
+            className={styles.imagePreviewDialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="chart-image-preview-title"
+            data-shortcut-disabled="true"
+          >
+            <div className={styles.imagePreviewHeader}>
+              <div>
+                <strong id="chart-image-preview-title">{t('chart.imagePreviewTitle')}</strong>
+                <span>{chartImagePreview.symbol}</span>
+              </div>
+              <button
+                type="button"
+                className={styles.imagePreviewCloseButton}
+                title={t('chart.closeImagePreview')}
+                aria-label={t('chart.closeImagePreview')}
+                onClick={() => setChartImagePreview(null)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className={styles.imagePreviewFrame}>
+              <img
+                src={chartImagePreview.imageUrl}
+                alt={t('chart.imagePreviewAlt', { symbol: chartImagePreview.symbol })}
+              />
+            </div>
+            <div className={styles.imagePreviewActions}>
+              <button type="button" className={styles.imagePreviewSecondaryButton} onClick={() => setChartImagePreview(null)}>
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                className={styles.imagePreviewPrimaryButton}
+                onClick={() => downloadChartImage(chartImagePreview.imageUrl, chartImagePreview.symbol)}
+              >
+                <Download size={15} />
+                {t('common.save')}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   )
 })
@@ -310,6 +620,7 @@ type ChartOverlayEditToolbarProps = {
   onLineSizeChange: (lineSize: number) => void
   onRemove: () => void
   onToggleLock: () => void
+  onOpenManager: () => void
 }
 
 function ChartOverlayEditToolbar({
@@ -317,7 +628,8 @@ function ChartOverlayEditToolbar({
   onColorChange,
   onLineSizeChange,
   onRemove,
-  onToggleLock
+  onToggleLock,
+  onOpenManager
 }: ChartOverlayEditToolbarProps) {
   const { t } = useTranslation()
 
@@ -377,9 +689,66 @@ function ChartOverlayEditToolbar({
       <button type="button" className={styles.iconButton} title={t('common.delete')} aria-label={t('common.delete')} onClick={onRemove}>
         <Trash2 size={15} />
       </button>
-      <button type="button" className={styles.iconButton} title={t('common.more')} aria-label={t('common.more')}>
+      <button type="button" className={styles.iconButton} title={t('common.more')} aria-label={t('common.more')} onClick={onOpenManager}>
         <MoreHorizontal size={16} />
       </button>
+    </div>
+  )
+}
+
+type ChartDrawingManagerProps = {
+  drawings: PersistedChartDrawing[]
+  onApplyRiskTemplate: () => void
+  onCopyDrawing: (drawing: PersistedChartDrawing) => void
+  onLockAll: () => void
+  onRemoveDrawing: (id: string) => void
+}
+
+function ChartDrawingManager({
+  drawings,
+  onApplyRiskTemplate,
+  onCopyDrawing,
+  onLockAll,
+  onRemoveDrawing
+}: ChartDrawingManagerProps) {
+  const { t } = useTranslation()
+
+  return (
+    <div className={styles.drawingManager} data-shortcut-disabled="true">
+      <div className={styles.drawingManagerHeader}>
+        <strong>{t('chart.drawingManager')}</strong>
+        <div>
+          <button type="button" title={t('chart.lockAllDrawings')} aria-label={t('chart.lockAllDrawings')} onClick={onLockAll}>
+            <Lock size={14} />
+          </button>
+          <button type="button" title={t('chart.applyRiskTemplate')} aria-label={t('chart.applyRiskTemplate')} onClick={onApplyRiskTemplate}>
+            <Layers size={14} />
+          </button>
+        </div>
+      </div>
+      {drawings.length === 0 ? (
+        <p>{t('common.empty')}</p>
+      ) : (
+        <ul>
+          {drawings.map((drawing, index) => (
+            <li key={drawing.id ?? `${drawing.name}-${index}`}>
+              <span>{drawing.extendData == null ? drawing.name : String(drawing.extendData)}</span>
+              <button type="button" title={t('common.copy')} aria-label={t('common.copy')} onClick={() => onCopyDrawing(drawing)}>
+                <Copy size={14} />
+              </button>
+              <button
+                type="button"
+                title={t('common.delete')}
+                aria-label={t('common.delete')}
+                disabled={!drawing.id}
+                onClick={() => drawing.id && onRemoveDrawing(drawing.id)}
+              >
+                <Trash2 size={14} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
@@ -390,6 +759,25 @@ function drawingMagnetModeToOverlayMode(mode: ChartSettings['drawingToolSettings
   return 'normal'
 }
 
+function createDrawingOverlay(
+  drawing: PersistedChartDrawing,
+  visible: boolean,
+  onSelected: (event: DrawingOverlayEvent) => void,
+  onChanged: () => void
+) {
+  const overlay = {
+    ...drawing,
+    styles: drawing.styles ?? undefined,
+    groupId: drawingOverlayGroupId,
+    visible,
+    onDrawEnd: onChanged,
+    onSelected,
+    onClick: onSelected,
+    onDeselected: () => undefined
+  }
+  return overlay
+}
+
 function createSelectedDrawingOverlay(overlay: DrawingOverlayRecord): SelectedDrawingOverlay | null {
   if (!overlay.id) return null
   return {
@@ -398,6 +786,43 @@ function createSelectedDrawingOverlay(overlay: DrawingOverlayRecord): SelectedDr
     lineSize: getOverlayLineSize(overlay.styles),
     locked: overlay.lock === true
   }
+}
+
+function createCrosshairCandle(payload: unknown): CrosshairCandle | null {
+  const kLineData = getActionKLineData(payload)
+  if (!kLineData) return null
+  return {
+    timestamp: kLineData.timestamp,
+    open: kLineData.open,
+    high: kLineData.high,
+    low: kLineData.low,
+    close: kLineData.close
+  }
+}
+
+function getActionClosePrice(payload: unknown) {
+  const kLineData = getActionKLineData(payload)
+  return typeof kLineData?.close === 'number' && Number.isFinite(kLineData.close) && kLineData.close > 0
+    ? kLineData.close
+    : null
+}
+
+function getActionKLineData(payload: unknown): TradingCandle | null {
+  if (!isRecord(payload)) return null
+  const directData = payload.kLineData
+  if (isTradingCandle(directData)) return directData
+  const data = payload.data
+  if (isRecord(data) && isTradingCandle(data.current)) return data.current
+  return null
+}
+
+function isTradingCandle(value: unknown): value is TradingCandle {
+  if (!isRecord(value)) return false
+  return isFiniteNumber(value.timestamp) &&
+    isFiniteNumber(value.open) &&
+    isFiniteNumber(value.high) &&
+    isFiniteNumber(value.low) &&
+    isFiniteNumber(value.close)
 }
 
 function buildDrawingOverlayStyles(color: string, lineSize: number) {
@@ -484,8 +909,65 @@ function isValidLineSize(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeChartLocale(language: string) {
+  if (language.toLowerCase().startsWith('zh')) return 'zh-CN'
+  if (language.toLowerCase().startsWith('ja')) return 'ja-JP'
+  return 'en-US'
+}
+
+function getLocalTimezone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+}
+
+function resolveChartTimezone(timezone: ChartSettings['timezone']) {
+  return timezone === 'local' ? getLocalTimezone() : timezone
+}
+
+function formatChartDate({ dateTimeFormat, timestamp }: { dateTimeFormat: Intl.DateTimeFormat; timestamp: number }) {
+  return dateTimeFormat.format(new Date(timestamp))
+}
+
+function formatChartBigNumber(value: string | number) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return String(value)
+  if (Math.abs(numberValue) >= 1_000_000_000) return `${formatCompactNumber(numberValue / 1_000_000_000)}B`
+  if (Math.abs(numberValue) >= 1_000_000) return `${formatCompactNumber(numberValue / 1_000_000)}M`
+  if (Math.abs(numberValue) >= 1_000) return `${formatCompactNumber(numberValue / 1_000)}K`
+  return formatThousandsSeparated(value)
+}
+
+function formatThousandsSeparated(value: string | number) {
+  const [integerPart, decimalPart] = String(value).split('.')
+  const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return decimalPart === undefined ? formattedInteger : `${formattedInteger}.${decimalPart}`
+}
+
+function formatDecimalFold(value: string | number) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue) || Math.abs(numberValue) < 1_000_000) return String(value)
+  return formatChartBigNumber(numberValue)
+}
+
+function formatCompactNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')
+}
+
+function downloadChartImage(imageUrl: string, symbol: string) {
+  if (typeof document === 'undefined') return
+  const link = document.createElement('a')
+  link.href = imageUrl
+  link.download = `${symbol.toLowerCase()}-chart.png`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
 }
 
 function createChartIndicator(chart: KLineChart, descriptor: IndicatorApplyDescriptor) {
@@ -569,123 +1051,123 @@ const terminalChartStyles = {
   dark: {
     grid: {
       show: true,
-      horizontal: { color: '#151d28', size: 1 },
-      vertical: { color: '#111923', size: 1 }
+      horizontal: { color: '#2b3139', size: 1 },
+      vertical: { color: '#252a32', size: 1 }
     },
     candle: {
       bar: {
-        upColor: '#26a69a',
-        upBorderColor: '#26a69a',
-        upWickColor: '#26a69a',
-        downColor: '#ef5350',
-        downBorderColor: '#ef5350',
-        downWickColor: '#ef5350'
+        upColor: '#2ebd85',
+        upBorderColor: '#2ebd85',
+        upWickColor: '#2ebd85',
+        downColor: '#f6465d',
+        downBorderColor: '#f6465d',
+        downWickColor: '#f6465d'
       },
       priceMark: {
-        high: { color: '#8c97a6' },
-        low: { color: '#8c97a6' },
+        high: { color: '#848e9c' },
+        low: { color: '#848e9c' },
         last: {
-          upColor: '#26a69a',
-          downColor: '#ef5350',
-          noChangeColor: '#f2b84b'
+          upColor: '#2ebd85',
+          downColor: '#f6465d',
+          noChangeColor: '#fcd535'
         }
       }
     },
     xAxis: {
-      axisLine: { color: '#1d2530' },
-      tickText: { color: '#687483' }
+      axisLine: { color: '#2b3139' },
+      tickText: { color: '#848e9c' }
     },
     yAxis: {
-      axisLine: { color: '#1d2530' },
-      tickText: { color: '#687483' }
+      axisLine: { color: '#2b3139' },
+      tickText: { color: '#848e9c' }
     },
     separator: {
-      color: '#1d2530',
+      color: '#2b3139',
       size: 1
     },
     crosshair: {
       horizontal: {
-        line: { color: '#4d5968' },
-        text: { backgroundColor: '#202a36', color: '#dce3ec' }
+        line: { color: '#5e6673' },
+        text: { backgroundColor: '#2b3139', color: '#eaecef' }
       },
       vertical: {
-        line: { color: '#4d5968' },
-        text: { backgroundColor: '#202a36', color: '#dce3ec' }
+        line: { color: '#5e6673' },
+        text: { backgroundColor: '#2b3139', color: '#eaecef' }
       }
     },
     overlay: {
       point: {
-        color: '#f2b84b',
-        borderColor: 'rgba(242, 184, 75, 0.36)',
-        activeColor: '#f2b84b',
-        activeBorderColor: 'rgba(242, 184, 75, 0.44)'
+        color: '#fcd535',
+        borderColor: 'rgba(252, 213, 53, 0.36)',
+        activeColor: '#fcd535',
+        activeBorderColor: 'rgba(252, 213, 53, 0.44)'
       },
       line: {
-        color: '#f2b84b',
+        color: '#fcd535',
         size: 1,
         style: 'solid'
       },
       rect: {
-        color: 'rgba(242, 184, 75, 0.14)',
-        borderColor: '#f2b84b',
+        color: 'rgba(252, 213, 53, 0.14)',
+        borderColor: '#fcd535',
         borderSize: 1
       },
       polygon: {
-        color: 'rgba(242, 184, 75, 0.12)',
-        borderColor: '#f2b84b',
+        color: 'rgba(252, 213, 53, 0.12)',
+        borderColor: '#fcd535',
         borderSize: 1
       },
       text: {
         color: '#050505',
-        backgroundColor: '#f2b84b',
-        borderColor: '#f2b84b'
+        backgroundColor: '#fcd535',
+        borderColor: '#fcd535'
       }
     }
   },
   light: {
     grid: {
       show: true,
-      horizontal: { color: '#e6ebf2', size: 1 },
-      vertical: { color: '#eef2f6', size: 1 }
+      horizontal: { color: '#e8edf4', size: 1 },
+      vertical: { color: '#f1f4f8', size: 1 }
     },
     candle: {
       bar: {
-        upColor: '#059669',
-        upBorderColor: '#059669',
-        upWickColor: '#059669',
-        downColor: '#dc3f5f',
-        downBorderColor: '#dc3f5f',
-        downWickColor: '#dc3f5f'
+        upColor: '#047857',
+        upBorderColor: '#047857',
+        upWickColor: '#047857',
+        downColor: '#be123c',
+        downBorderColor: '#be123c',
+        downWickColor: '#be123c'
       },
       priceMark: {
-        high: { color: '#64748b' },
-        low: { color: '#64748b' },
+        high: { color: '#475569' },
+        low: { color: '#475569' },
         last: {
-          upColor: '#059669',
-          downColor: '#dc3f5f',
-          noChangeColor: '#0f172a'
+          upColor: '#047857',
+          downColor: '#be123c',
+          noChangeColor: '#111827'
         }
       }
     },
     xAxis: {
-      axisLine: { color: '#d8dee8' },
-      tickText: { color: '#64748b' }
+      axisLine: { color: '#dde4ee' },
+      tickText: { color: '#667085' }
     },
     yAxis: {
-      axisLine: { color: '#d8dee8' },
-      tickText: { color: '#64748b' }
+      axisLine: { color: '#dde4ee' },
+      tickText: { color: '#667085' }
     },
     separator: {
-      color: '#d8dee8',
+      color: '#dde4ee',
       size: 1
     },
     crosshair: {
       horizontal: {
-        line: { color: '#94a3b8' },
+        line: { color: '#9aa4b2' },
         text: { backgroundColor: '#111827', color: '#ffffff' }
       },
       vertical: {
-        line: { color: '#94a3b8' },
+        line: { color: '#9aa4b2' },
         text: { backgroundColor: '#111827', color: '#ffffff' }
       }
     },
@@ -718,4 +1200,9 @@ const terminalChartStyles = {
       }
     }
   }
+}
+
+const terminalChartImageBackground = {
+  dark: defaultChartSettings.layoutSettings.background.color,
+  light: '#ffffff'
 }

@@ -1,11 +1,14 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ChartTopToolbar } from './ChartTopToolbar'
 import { isChartFullscreenShortcut, shouldIgnoreChartFullscreenShortcut } from './chartFullscreen'
 import { KLineChartPanel } from './KLineChartPanel'
+import type { ChartActionRequest } from './KLineChartPanel'
+import { buildChartTradeMarkers } from '../chartTradeMarkers'
 import { getDrawingShortcutAction, shouldIgnoreDrawingShortcut } from '../chartSettings'
 import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from '../chartSettings'
+import type { OrderResponse, PositionResponse } from '../../../components/tables/types'
 import type { TradingPeriod } from '../../../features/market/tradingModels'
 import styles from './ChartWorkspace.module.css'
 
@@ -20,31 +23,49 @@ const ChartDrawingToolbar = lazy(() =>
 type Props = {
   symbol: string
   token: string | null
+  orders: OrderResponse[]
+  positions: PositionResponse[]
   themeMode: 'dark' | 'light'
   allowMockFallback?: boolean
   settings: ChartSettings
   indicators: string[]
+  onChartSettingsChange: (settings: ChartSettings) => void
+  onResetChartSettings: () => void
   onChartTypeChange: (chartType: ChartType) => void
+  onHighLowPriceMarksChange: (enabled: boolean) => void
+  onPriceScaleModeChange: (priceScaleMode: ChartSettings['axisSettings']['priceScaleMode']) => void
+  onTooltipStyleChange: (style: ChartSettings['axisSettings']['tooltipStyle']) => void
   onDrawingToolChange: (tool: DrawingTool) => void
   onDrawingMagnetModeChange: (magnetMode: DrawingMagnetMode) => void
+  onFavoriteIntervalToggle: (interval: TradingPeriod) => void
   onPeriodChange: (period: TradingPeriod) => void
   onIndicatorToggle: (indicator: string) => void
   onIndicatorSettingsChange: (settings: IndicatorSettings) => void
+  onSelectPrice?: (price: number) => void
 }
 
 export function ChartWorkspace({
   symbol,
   token,
+  orders,
+  positions,
   themeMode,
-  allowMockFallback = true,
+  allowMockFallback = false,
   settings,
   indicators,
+  onChartSettingsChange,
+  onResetChartSettings,
   onChartTypeChange,
+  onHighLowPriceMarksChange,
+  onPriceScaleModeChange,
+  onTooltipStyleChange,
   onDrawingToolChange,
   onDrawingMagnetModeChange,
+  onFavoriteIntervalToggle,
   onPeriodChange,
   onIndicatorToggle,
-  onIndicatorSettingsChange
+  onIndicatorSettingsChange,
+  onSelectPrice
 }: Props) {
   const { t } = useTranslation()
   const workspaceRef = useRef<HTMLElement | null>(null)
@@ -52,9 +73,18 @@ export function ChartWorkspace({
   const [drawingClearRequest, setDrawingClearRequest] = useState(0)
   const [drawingsHidden, setDrawingsHidden] = useState(false)
   const [indicatorsHidden, setIndicatorsHidden] = useState(false)
+  const [chartActionRequest, setChartActionRequest] = useState<ChartActionRequest>({
+    exportImage: 0,
+    scrollToRealtime: 0,
+    scrollToTimestamp: null
+  })
   const [fullscreen, setFullscreen] = useState(false)
   const [fallbackFullscreen, setFallbackFullscreen] = useState(false)
   const workspaceClassName = fallbackFullscreen ? `${styles.workspace} ${styles.workspaceExpanded}` : styles.workspace
+  const tradeMarkers = useMemo(
+    () => buildChartTradeMarkers(symbol, orders, positions),
+    [orders, positions, symbol]
+  )
 
   const handleClearDrawings = useCallback(() => {
     setDrawingClearRequest((request) => request + 1)
@@ -77,6 +107,27 @@ export function ChartWorkspace({
     setDrawingsHidden(shouldHide)
     setIndicatorsHidden(shouldHide)
   }, [drawingsHidden, indicatorsHidden])
+
+  const handleScrollToRealtime = useCallback(() => {
+    setChartActionRequest((current) => ({
+      ...current,
+      scrollToRealtime: current.scrollToRealtime + 1
+    }))
+  }, [])
+
+  const handleExportChart = useCallback(() => {
+    setChartActionRequest((current) => ({
+      ...current,
+      exportImage: current.exportImage + 1
+    }))
+  }, [])
+
+  const handleJumpToTimestamp = useCallback((timestamp: number) => {
+    setChartActionRequest((current) => ({
+      ...current,
+      scrollToTimestamp: { id: Date.now(), timestamp }
+    }))
+  }, [])
 
   const handleToggleFullscreen = useCallback(() => {
     const workspace = workspaceRef.current
@@ -123,6 +174,7 @@ export function ChartWorkspace({
       if (event.defaultPrevented || shouldIgnoreChartFullscreenShortcut(event.target as { tagName?: string; isContentEditable?: boolean; closest?: (selector: string) => unknown })) {
         return
       }
+      if (!settings.shortcutSettings.fullscreenShortcut) return
       if (!isChartFullscreenShortcut(event)) return
 
       event.preventDefault()
@@ -133,11 +185,12 @@ export function ChartWorkspace({
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [handleToggleFullscreen])
+  }, [handleToggleFullscreen, settings.shortcutSettings.fullscreenShortcut])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return
+      if (!settings.shortcutSettings.drawingShortcuts) return
       if (shouldIgnoreDrawingShortcut(event.target as { tagName?: string; isContentEditable?: boolean; closest?: (selector: string) => unknown })) {
         return
       }
@@ -159,7 +212,7 @@ export function ChartWorkspace({
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [handleDrawingToolChange])
+  }, [handleDrawingToolChange, settings.shortcutSettings.drawingShortcuts])
 
   return (
     <section ref={workspaceRef} className={workspaceClassName}>
@@ -167,10 +220,19 @@ export function ChartWorkspace({
         indicators={indicators}
         settings={settings}
         fullscreenActive={fullscreen || fallbackFullscreen}
+        onChartSettingsChange={onChartSettingsChange}
+        onResetChartSettings={onResetChartSettings}
         onChartTypeChange={onChartTypeChange}
+        onHighLowPriceMarksChange={onHighLowPriceMarksChange}
+        onPriceScaleModeChange={onPriceScaleModeChange}
+        onTooltipStyleChange={onTooltipStyleChange}
         onIndicatorToggle={onIndicatorToggle}
+        onFavoriteIntervalToggle={onFavoriteIntervalToggle}
         onOpenIndicatorSettings={() => setIndicatorModalOpen(true)}
         onIntervalChange={onPeriodChange}
+        onScrollToRealtime={handleScrollToRealtime}
+        onJumpToTimestamp={handleJumpToTimestamp}
+        onExportChart={handleExportChart}
         onToggleFullscreen={handleToggleFullscreen}
       />
       <div className={styles.chartBody}>
@@ -189,12 +251,19 @@ export function ChartWorkspace({
         </Suspense>
         <KLineChartPanel
           chartType={settings.chartType}
+          timezone={settings.timezone}
+          candleStyle={settings.candleStyle}
+          axisSettings={settings.axisSettings}
+          layoutSettings={settings.layoutSettings}
+          chartActionRequest={chartActionRequest}
           drawingClearRequest={drawingClearRequest}
           drawingsVisible={!drawingsHidden}
           drawingToolSettings={settings.drawingToolSettings}
+          tradeMarkers={tradeMarkers}
           indicatorsVisible={!indicatorsHidden}
           indicatorSettings={settings.indicatorSettings}
           allowMockFallback={allowMockFallback}
+          onCandlePriceSelect={onSelectPrice}
           onDrawingComplete={handleDrawingComplete}
           fullscreenActive={fullscreen || fallbackFullscreen}
           period={settings.interval}

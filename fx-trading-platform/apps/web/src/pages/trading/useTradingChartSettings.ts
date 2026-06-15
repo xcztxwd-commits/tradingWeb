@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { getEnabledIndicatorNames, loadChartSettings, saveChartSettings, updateIndicatorEnabled } from './chartSettings'
+import {
+  defaultChartSettings,
+  getEnabledIndicatorNames,
+  loadChartSettings,
+  saveChartSettings,
+  toggleFavoriteInterval,
+  updateIndicatorEnabled
+} from './chartSettings'
 import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from './chartSettings'
 import type { ChartThemeMode, TradingChartCallbacks } from './tradingPageViewModels'
 import type { TradingPeriod } from '../../features/market/tradingModels'
@@ -35,8 +42,43 @@ export function useTradingChartSettings(
 
   const chartCallbacks = useMemo<TradingChartCallbacks>(
     () => ({
+      onChartSettingsChange: (settings: ChartSettings) => {
+        updateChartSettings(() => settings)
+      },
+      onResetChartSettings: () => {
+        updateChartSettings(() => cloneChartSettings(defaultChartSettings))
+      },
       onChartTypeChange: (chartType: ChartType) => {
         updateChartSettings((current) => ({ ...current, chartType }))
+      },
+      onHighLowPriceMarksChange: (highLowPriceMarks: boolean) => {
+        updateChartSettings((current) => ({
+          ...current,
+          axisSettings: {
+            ...current.axisSettings,
+            highPriceMark: highLowPriceMarks,
+            lowPriceMark: highLowPriceMarks,
+            highLowPriceMarks
+          }
+        }))
+      },
+      onPriceScaleModeChange: (priceScaleMode: ChartSettings['axisSettings']['priceScaleMode']) => {
+        updateChartSettings((current) => ({
+          ...current,
+          axisSettings: {
+            ...current.axisSettings,
+            priceScaleMode
+          }
+        }))
+      },
+      onTooltipStyleChange: (tooltipStyle: ChartSettings['axisSettings']['tooltipStyle']) => {
+        updateChartSettings((current) => ({
+          ...current,
+          axisSettings: {
+            ...current.axisSettings,
+            tooltipStyle
+          }
+        }))
       },
       onDrawingMagnetModeChange: (magnetMode: DrawingMagnetMode) => {
         updateChartSettings((current) => ({
@@ -69,6 +111,12 @@ export function useTradingChartSettings(
           )
         }))
       },
+      onFavoriteIntervalToggle: (interval: TradingPeriod) => {
+        updateChartSettings((current) => ({
+          ...current,
+          favoriteIntervals: toggleFavoriteInterval(current.favoriteIntervals, interval)
+        }))
+      },
       onPeriodChange: (interval: TradingPeriod) => {
         updateChartSettings((current) => ({ ...current, interval }))
       }
@@ -86,4 +134,8 @@ export function useTradingChartSettings(
     chartThemeMode: colorScheme === 'light' ? 'light' : 'dark',
     indicators
   }
+}
+
+function cloneChartSettings(settings: ChartSettings): ChartSettings {
+  return JSON.parse(JSON.stringify(settings)) as ChartSettings
 }

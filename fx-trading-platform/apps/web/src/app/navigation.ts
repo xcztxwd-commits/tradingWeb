@@ -11,12 +11,10 @@ export type AppNavItem = {
 export const authRoutes = ['/login', '/register', '/forgot-password', '/two-factor-help'] as const
 
 export const guestNavItems: AppNavItem[] = [
-  { to: '/', labelKey: 'nav.home', icon: Home },
   { to: '/markets', labelKey: 'nav.markets', icon: Briefcase }
 ]
 
 export const authenticatedNavItems: AppNavItem[] = [
-  { to: '/', labelKey: 'nav.home', icon: Home },
   { to: '/markets', labelKey: 'nav.markets', icon: Briefcase },
   { to: '/account/assets', labelKey: 'nav.wallet', icon: Wallet, activePaths: ['/account/assets'] }
 ]

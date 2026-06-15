@@ -44,6 +44,15 @@ public record AdminSymbolResponse(
     Integer leverage,
     BigDecimal spreadMarkup,
     Boolean enabled,
+    String iconUrl,
+    Boolean displayEnabled,
+    Boolean quoteEnabled,
+    Boolean chartEnabled,
+    Boolean orderBookEnabled,
+    Boolean tradable,
+    Boolean featured,
+    String displayGroup,
+    Integer displayOrder,
     Instant createdAt,
     Instant updatedAt
 ) {
@@ -69,6 +78,15 @@ public record AdminSymbolResponse(
         entity.getLeverage(),
         entity.getSpreadMarkup(),
         entity.getEnabled(),
+        entity.getIconUrl(),
+        entity.getDisplayEnabled(),
+        entity.getQuoteEnabled(),
+        entity.getChartEnabled(),
+        entity.getOrderBookEnabled(),
+        entity.getTradable(),
+        entity.getFeatured(),
+        entity.getDisplayGroup(),
+        entity.getDisplayOrder(),
         entity.getCreatedAt(),
         entity.getUpdatedAt());
   }

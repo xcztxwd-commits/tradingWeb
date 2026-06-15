@@ -1,4 +1,3 @@
-import { Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { TradingWorkspace } from '../../../components/layout/TradingWorkspace'
@@ -23,14 +22,16 @@ export function TradingDesktopView({
   indicators,
   loginRequired,
   market,
+  favorites,
+  marketDataStatusView,
   markets,
   onLoginRequired,
   onOpenMarkets,
   onOpenQuote,
-  onOpenSettings,
   onRetrySession,
   onSelectPrice,
   onSelectSymbol,
+  onFavorite,
   quote,
   quotes,
   sessionError,
@@ -57,23 +58,18 @@ export function TradingDesktopView({
         <span>{t('markets.high24h')} {formatMarketPrice(market.symbol, quote.high24h)}</span>
         <span>{t('markets.low24h')} {formatMarketPrice(market.symbol, quote.low24h)}</span>
         <span>{t('markets.volume24h')} {quote.volume}</span>
+        <span className={styles.marketDataStatus} data-tone={marketDataStatusView.tone}>
+          <b>{marketDataStatusView.label}</b>
+          <small>{marketDataStatusView.detail}</small>
+        </span>
       </div>
       <div className={styles.binanceGrid}>
         <TradingWorkspace
           layoutControls={workspaceLayoutControls}
-          watchlist={<MarketSidebar markets={markets} quotes={quotes} selectedSymbol={symbol} onSelect={onSelectSymbol} />}
+          watchlist={<MarketSidebar markets={markets} quotes={quotes} favorites={favorites} selectedSymbol={symbol} onSelect={onSelectSymbol} onFavorite={onFavorite} />}
           header={
             <div className={styles.headerRow}>
               <SymbolHeader market={market} quote={quote} onOpenMarkets={onOpenMarkets} onOpenQuote={onOpenQuote} />
-              <button
-                type="button"
-                className={styles.settingsButton}
-                title={t('trading.tradingSettings')}
-                aria-label={t('trading.openTradingSettings')}
-                onClick={onOpenSettings}
-              >
-                <Settings size={18} aria-hidden="true" />
-              </button>
             </div>
           }
           chart={
@@ -83,13 +79,22 @@ export function TradingDesktopView({
               symbol={symbol}
               themeMode={chartThemeMode}
               token={token}
+              orders={accountPanel.orders}
+              positions={accountPanel.positions}
               allowMockFallback={shouldAllowChartMockFallback(market)}
+              onChartSettingsChange={chartCallbacks.onChartSettingsChange}
+              onResetChartSettings={chartCallbacks.onResetChartSettings}
               onChartTypeChange={chartCallbacks.onChartTypeChange}
+              onHighLowPriceMarksChange={chartCallbacks.onHighLowPriceMarksChange}
+              onPriceScaleModeChange={chartCallbacks.onPriceScaleModeChange}
+              onTooltipStyleChange={chartCallbacks.onTooltipStyleChange}
               onDrawingMagnetModeChange={chartCallbacks.onDrawingMagnetModeChange}
               onDrawingToolChange={chartCallbacks.onDrawingToolChange}
+              onFavoriteIntervalToggle={chartCallbacks.onFavoriteIntervalToggle}
               onIndicatorSettingsChange={chartCallbacks.onIndicatorSettingsChange}
               onIndicatorToggle={chartCallbacks.onIndicatorToggle}
               onPeriodChange={chartCallbacks.onPeriodChange}
+              onSelectPrice={onSelectPrice}
             />
           }
           chartTitle={chartTitle}

@@ -86,6 +86,8 @@ export type MarketStatus = {
   redisCacheEnabled: boolean
   quoteStaleMs: number
   status: string
+  sourceMode?: string
+  providerStatus?: string
 }
 
 export type AdminPage<T> = {
@@ -138,6 +140,8 @@ export type SymbolRow = {
   id: string
   symbol: string
   displayName: string
+  provider?: string | null
+  providerSymbol?: string | null
   assetClass: string
   baseCurrency: string
   quoteCurrency: string
@@ -145,6 +149,103 @@ export type SymbolRow = {
   maxLot: number
   leverage: number
   enabled: boolean
+  iconUrl?: string | null
+  displayEnabled?: boolean
+  quoteEnabled?: boolean
+  chartEnabled?: boolean
+  orderBookEnabled?: boolean
+  tradable?: boolean
+  featured?: boolean
+  displayGroup?: string | null
+  displayOrder?: number
+}
+
+export type DataProviderRow = {
+  id: string
+  code: string
+  name: string
+  providerType: string
+  assetClasses: string[]
+  restBaseUrl: string | null
+  wsUrl: string | null
+  enabled: boolean
+  priority: number
+  timeoutMs: number
+  rateLimitPerMinute: number
+  healthStatus: string
+  lastHealthCheckAt: string | null
+  configJson: string
+  capabilities: string[]
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type DataProviderPayload = {
+  code: string
+  name: string
+  providerType: string
+  assetClasses: string[]
+  restBaseUrl: string | null
+  wsUrl: string | null
+  enabled: boolean
+  priority: number
+  timeoutMs: number
+  rateLimitPerMinute: number
+  configJson: string
+}
+
+export type ProviderInstrumentRow = {
+  id: string
+  providerId: string
+  providerSymbol: string
+  assetClass: string
+  baseAsset: string | null
+  quoteAsset: string | null
+  displayName: string | null
+  listed: boolean
+  rawJson: string
+  lastSyncedAt: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type ProviderSyncResponse = {
+  providerId: string
+  syncedCount: number
+}
+
+export type SymbolProviderBindingRow = {
+  id: string
+  symbolId: string
+  providerId: string
+  providerInstrumentId: string | null
+  providerSymbol: string
+  priority: number
+  enabled: boolean
+  configJson: string
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+export type SymbolProviderBindingPayload = {
+  providerId: string
+  providerInstrumentId: string | null
+  providerSymbol: string
+  priority: number
+  enabled: boolean
+  configJson: string
+}
+
+export type SymbolDisplayPayload = {
+  iconUrl: string | null
+  displayEnabled: boolean
+  quoteEnabled: boolean
+  chartEnabled: boolean
+  orderBookEnabled: boolean
+  tradable: boolean
+  featured: boolean
+  displayGroup: string | null
+  displayOrder: number
 }
 
 export type PaymentMethodRow = {

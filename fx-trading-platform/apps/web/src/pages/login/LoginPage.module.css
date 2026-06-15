@@ -1,10 +1,19 @@
 .page {
+  --auth-bg: var(--theme-background);
+  --auth-surface: var(--theme-surface);
+  --auth-surface-raised: var(--theme-surface-elevated);
+  --auth-border: var(--theme-border);
+  --auth-text: var(--theme-text-primary);
+  --auth-muted: var(--theme-text-muted);
+  --auth-primary: var(--theme-primary);
+  --auth-primary-hover: var(--theme-primary-hover);
+  --auth-primary-contrast: var(--theme-background);
   min-height: 100vh;
   display: grid;
   place-items: center;
   overflow: auto;
-  background: #181a20;
-  color: #eaecef;
+  background: var(--auth-bg);
+  color: var(--auth-text);
   padding: 40px 24px;
   font-family: BinanceNova, Arial, sans-serif;
 }
@@ -36,7 +45,7 @@
 .productIntro {
   align-content: center;
   gap: 18px;
-  color: #eaecef;
+  color: var(--auth-text);
 }
 
 .brandMark {
@@ -44,15 +53,15 @@
   height: 48px;
   display: grid;
   place-items: center;
-  border: 1px solid #f0b90b;
+  border: 1px solid var(--auth-primary);
   border-radius: 8px;
-  background: #fcd535;
-  color: #181a20;
+  background: var(--auth-primary-hover);
+  color: var(--auth-primary-contrast);
 }
 
 .eyebrow {
   margin: 0;
-  color: #f0b90b;
+  color: var(--auth-primary);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0;
@@ -61,7 +70,7 @@
 .productIntro h1 {
   max-width: 12ch;
   margin: 0;
-  color: #eaecef;
+  color: var(--auth-text);
   font-size: 48px;
   line-height: 58px;
   font-weight: 600;
@@ -70,7 +79,7 @@
 .summary {
   max-width: 54ch;
   margin: 0;
-  color: #929aa5;
+  color: var(--auth-muted);
   font-size: 15px;
   line-height: 24px;
 }
@@ -87,10 +96,10 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid #333b47;
+  border: 1px solid var(--auth-border);
   border-radius: 8px;
-  background: #202630;
-  color: #eaecef;
+  background: var(--auth-surface);
+  color: var(--auth-text);
   font-size: 12px;
   font-weight: 700;
 }
@@ -99,11 +108,11 @@
   width: 425px;
   padding: 40px;
   border-radius: 24px;
-  border: 1px solid #333b47;
+  border: 1px solid var(--auth-border);
   align-content: start;
   gap: 16px;
-  background: #202630;
-  box-shadow: 0 24px 80px rgb(0 0 0 / 0.28);
+  background: var(--auth-surface);
+  box-shadow: 0 24px 80px color-mix(in srgb, var(--auth-text) 12%, transparent);
 }
 
 .formHeader {
@@ -114,7 +123,7 @@
 
 .formHeader h2 {
   margin: 0;
-  color: #eaecef;
+  color: var(--auth-text);
   font-size: 28px;
   line-height: 36px;
   font-weight: 600;
@@ -122,7 +131,7 @@
 
 .formHeader p {
   margin: 0;
-  color: #929aa5;
+  color: var(--auth-muted);
   font-size: 14px;
   line-height: 20px;
 }
@@ -130,7 +139,7 @@
 .field {
   display: grid;
   gap: 8px;
-  color: #eaecef;
+  color: var(--auth-text);
   font-size: 14px;
   font-weight: 600;
 }
@@ -138,10 +147,10 @@
 .field input,
 .phoneField select {
   min-height: 48px;
-  border: 1px solid #434c5a;
+  border: 1px solid color-mix(in srgb, var(--auth-border) 76%, var(--auth-muted));
   border-radius: 12px;
-  background: #0b0e11;
-  color: #eaecef;
+  background: var(--auth-bg);
+  color: var(--auth-text);
   padding: 0 14px;
   outline: 0;
   transition:
@@ -152,14 +161,14 @@
 
 .field input:hover,
 .phoneField select:hover {
-  border-color: #5e6673;
+  border-color: color-mix(in srgb, var(--auth-border) 58%, var(--auth-text));
 }
 
 .field input:focus,
 .phoneField select:focus {
-  border-color: #f0b90b;
-  background: #0b0e11;
-  box-shadow: 0 0 0 3px rgb(240 185 11 / 0.18);
+  border-color: var(--auth-primary);
+  background: var(--auth-bg);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--auth-primary) 18%, transparent);
 }
 
 .segmentedControl {
@@ -170,10 +179,10 @@
 
 .segmentedControl button {
   min-height: 44px;
-  border: 1px solid #434c5a;
+  border: 1px solid color-mix(in srgb, var(--auth-border) 76%, var(--auth-muted));
   border-radius: 12px;
-  background: #0b0e11;
-  color: #929aa5;
+  background: var(--auth-bg);
+  color: var(--auth-muted);
   cursor: pointer;
   font-weight: 700;
   transition:
@@ -185,14 +194,14 @@
 
 .segmentedControl button:hover,
 .segmentedControl button:focus-visible {
-  border-color: #f0b90b;
-  color: #eaecef;
+  border-color: var(--auth-primary);
+  color: var(--auth-text);
 }
 
 .segmentedControl button[aria-pressed="true"] {
-  border-color: #fcd535;
-  background: #fcd535;
-  color: #181a20;
+  border-color: var(--auth-primary-hover);
+  background: var(--auth-primary-hover);
+  color: var(--auth-primary-contrast);
 }
 
 .phoneField {
@@ -222,15 +231,15 @@
 }
 
 .supportNotice {
-  border: 1px solid #333b47;
-  background: #0b0e11;
-  color: #929aa5;
+  border: 1px solid var(--auth-border);
+  background: var(--auth-bg);
+  color: var(--auth-muted);
 }
 
 .success {
-  border: 1px solid rgb(46 189 133 / 0.32);
-  background: rgb(46 189 133 / 0.1);
-  color: #2ebd85;
+  border: 1px solid color-mix(in srgb, var(--theme-buy) 32%, transparent);
+  background: color-mix(in srgb, var(--theme-buy) 10%, var(--auth-surface));
+  color: var(--theme-buy);
   font-weight: 700;
 }
 
@@ -242,8 +251,8 @@
   gap: 9px;
   border: 0;
   border-radius: 12px;
-  background: #fcd535;
-  color: #181a20;
+  background: var(--auth-primary-hover);
+  color: var(--auth-primary-contrast);
   font-weight: 800;
   cursor: pointer;
   transition:
@@ -254,12 +263,12 @@
 
 .submit:hover:not(:disabled),
 .submit:focus-visible {
-  background: #f0b90b;
-  box-shadow: 0 0 0 3px rgb(240 185 11 / 0.2);
+  background: var(--auth-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--auth-primary) 20%, transparent);
 }
 
 .submit:focus-visible {
-  outline: 2px solid #fcd535;
+  outline: 2px solid var(--auth-primary-hover);
   outline-offset: 2px;
 }
 
@@ -275,14 +284,14 @@
 
 .socialButton {
   min-height: 48px;
-  border: 1px solid #434c5a;
+  border: 1px solid color-mix(in srgb, var(--auth-border) 76%, var(--auth-muted));
   border-radius: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: #0b0e11;
-  color: #eaecef;
+  background: var(--auth-bg);
+  color: var(--auth-text);
   font-weight: 700;
 }
 
@@ -292,7 +301,7 @@
   justify-content: center;
   gap: 8px 14px;
   padding-top: 4px;
-  color: #929aa5;
+  color: var(--auth-muted);
   font-size: 13px;
   font-weight: 700;
 }
@@ -303,7 +312,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #929aa5;
+  color: var(--auth-muted);
   text-decoration: none;
 }
 
@@ -311,7 +320,7 @@
 .formLinks a:focus-visible,
 .backLink:hover,
 .backLink:focus-visible {
-  color: #f0b90b;
+  color: var(--auth-primary);
   outline: 0;
 }
 

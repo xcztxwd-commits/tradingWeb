@@ -5,7 +5,6 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
 import { LanguageSwitcher } from '../../components/LanguageSwitcher'
-import { ThemeSwitcher } from '../../design-system/theme/ThemeSwitcher'
 import styles from './SettingsPage.module.css'
 
 const settingsStorageKey = 'fx.settings.preferences.v1'
@@ -130,7 +129,6 @@ export function SettingsPage() {
           title={t('settings.displayPreference')}
           description={t('settings.displayPreferenceDescription')}
         >
-          <ThemeSwitcher />
           <LanguageSwitcher />
           <div className={styles.preferenceControls}>
             <PreferenceSegmentedControl
