@@ -143,6 +143,7 @@ export type SymbolRow = {
   provider?: string | null
   providerSymbol?: string | null
   assetClass: string
+  productType: ProductType
   baseCurrency: string
   quoteCurrency: string
   minLot: number
@@ -158,6 +159,36 @@ export type SymbolRow = {
   featured?: boolean
   displayGroup?: string | null
   displayOrder?: number
+}
+
+export type ProductType = 'FX_MARGIN' | 'CRYPTO_SPOT' | 'LINEAR_PERP' | 'INVERSE_PERP'
+
+export type SymbolPayload = {
+  symbol: string
+  displayName: string
+  provider: string
+  providerSymbol: string
+  assetClass: string
+  productType: ProductType
+  baseCurrency: string
+  quoteCurrency: string
+  pipSize: string
+  tickSize: string
+  lotSize: string
+  minLot: string
+  maxLot: string
+  leverage: number
+  spreadMarkup: string
+  enabled: boolean
+  iconUrl: string | null
+  displayEnabled: boolean
+  quoteEnabled: boolean
+  chartEnabled: boolean
+  orderBookEnabled: boolean
+  tradable: boolean
+  featured: boolean
+  displayGroup: string | null
+  displayOrder: number
 }
 
 export type DataProviderRow = {

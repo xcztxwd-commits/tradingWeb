@@ -41,4 +41,45 @@ describe('trade panel market model', () => {
     assert.equal(market.bestAsk, 0)
     assert.equal(market.lastPrice, 0)
   })
+
+  it('models forex quantity as standard lots with margin sizing metadata', () => {
+    const market = createPanelMarket(
+      'EURUSD',
+      { bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378 },
+      { category: 'fx', leverage: 100 }
+    )
+
+    assert.equal(market.symbol, 'EUR-USD')
+    assert.equal(market.unitSize, 100_000)
+    assert.equal(market.quantityMode, 'quantity')
+    assert.equal(market.leverage, 100)
+  })
+
+  it('uses productType to keep leveraged crypto spot in quote-budget market-buy mode', () => {
+    const market = createPanelMarket(
+      'BTCUSDT',
+      { bids: [{ price: 67123.4 }], asks: [{ price: 67124.8 }], lastPrice: 67124.1 },
+      { category: 'crypto', leverage: 20, productType: 'CRYPTO_SPOT' }
+    )
+
+    assert.equal(market.unitSize, 1)
+    assert.equal(market.quantityMode, 'quote-budget')
+    assert.equal(market.productType, 'CRYPTO_SPOT')
+  })
+
+  it('uses explicit productType modes for perpetual contracts', () => {
+    const linear = createPanelMarket(
+      'BTCUSDT',
+      { bids: [{ price: 67123.4 }], asks: [{ price: 67124.8 }], lastPrice: 67124.1 },
+      { category: 'crypto', leverage: 20, productType: 'LINEAR_PERP' }
+    )
+    const inverse = createPanelMarket(
+      'BTCUSD',
+      { bids: [{ price: 67123.4 }], asks: [{ price: 67124.8 }], lastPrice: 67124.1 },
+      { category: 'crypto', leverage: 20, productType: 'INVERSE_PERP' }
+    )
+
+    assert.equal(linear.quantityMode, 'quantity')
+    assert.equal(inverse.quantityMode, 'contracts')
+  })
 })

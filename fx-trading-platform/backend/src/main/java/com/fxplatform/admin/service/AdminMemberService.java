@@ -15,11 +15,13 @@ import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.auth.entity.KycApplicationEntity;
 import com.fxplatform.auth.entity.UserEntity;
 import com.fxplatform.auth.entity.UserProfileEntity;
+import com.fxplatform.auth.enums.KycStatus;
 import com.fxplatform.auth.repository.KycApplicationRepository;
 import com.fxplatform.auth.repository.UserProfileRepository;
 import com.fxplatform.auth.repository.UserRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.finance.entity.MemberPaymentAccountEntity;
+import com.fxplatform.finance.enums.PaymentAccountType;
 import com.fxplatform.finance.repository.MemberPaymentAccountRepository;
 import java.util.List;
 import java.util.UUID;
@@ -84,9 +86,9 @@ public class AdminMemberService {
     kyc.setDocumentNo(request.documentNo());
     kyc.setFrontImageUrl(request.frontImageUrl());
     kyc.setBackImageUrl(request.backImageUrl());
-    kyc.setStatus("PENDING");
+    kyc.setStatus(KycStatus.PENDING);
     KycApplicationEntity saved = kycApplicationRepository.save(kyc);
-    user.setKycStatus("PENDING");
+    user.setKycStatus(KycStatus.PENDING);
     userRepository.save(user);
     audit(actorUserId, "ADMIN_MEMBER_KYC_SUBMIT", "KYC_APPLICATION", saved.getId(), saved.getDocumentType());
     return AdminKycApplicationResponse.from(saved);
@@ -97,7 +99,7 @@ public class AdminMemberService {
   public AdminKycApplicationResponse reviewKyc(UUID actorUserId, UUID kycId, AdminKycApplicationReviewRequest request) {
     KycApplicationEntity kyc = kycApplicationRepository.findById(kycId)
         .orElseThrow(() -> new BusinessException("KYC_APPLICATION_NOT_FOUND", "KYC application not found"));
-    String status = normalizeKycStatus(request.status());
+    KycStatus status = KycStatus.fromReviewCode(request.status());
     kyc.setStatus(status);
     kyc.setReviewReason(request.reason());
     kyc.setReviewedBy(actorUserId);
@@ -107,7 +109,7 @@ public class AdminMemberService {
     UserEntity user = requireUser(saved.getUserId());
     user.setKycStatus(status);
     userRepository.save(user);
-    audit(actorUserId, "ADMIN_MEMBER_KYC_REVIEW", "KYC_APPLICATION", saved.getId(), status);
+    audit(actorUserId, "ADMIN_MEMBER_KYC_REVIEW", "KYC_APPLICATION", saved.getId(), status.code());
     return AdminKycApplicationResponse.from(saved);
   }
 
@@ -121,7 +123,7 @@ public class AdminMemberService {
     requireUser(userId);
     MemberPaymentAccountEntity account = new MemberPaymentAccountEntity();
     account.setUserId(userId);
-    account.setAccountType(normalizeAccountType(request.accountType()));
+    account.setAccountType(PaymentAccountType.fromCode(request.accountType()));
     account.setCurrency(StrUtil.blankToDefault(request.currency(), "USD"));
     account.setNetwork(request.network());
     account.setHolderName(request.holderName());
@@ -132,7 +134,7 @@ public class AdminMemberService {
     account.setEnabled(request.enabled());
     MemberPaymentAccountEntity saved = paymentAccountRepository.save(account);
     audit(actorUserId, "ADMIN_MEMBER_PAYMENT_ACCOUNT_CREATE", "MEMBER_PAYMENT_ACCOUNT",
-        saved.getId(), saved.getAccountType());
+        saved.getId(), saved.getAccountType() == null ? null : saved.getAccountType().code());
     return AdminMemberPaymentAccountResponse.from(saved);
   }
 
@@ -166,31 +168,8 @@ public class AdminMemberService {
         .orElseThrow(() -> new BusinessException("USER_NOT_FOUND", "User not found"));
   }
 
-  private String normalizeKycStatus(String status) {
-    if ("APPROVED".equalsIgnoreCase(status) || "通过".equals(status)) {
-      return "APPROVED";
-    }
-    if ("REJECTED".equalsIgnoreCase(status) || "拒绝".equals(status)) {
-      return "REJECTED";
-    }
-    if ("PENDING".equalsIgnoreCase(status) || "待审核".equals(status)) {
-      return "PENDING";
-    }
-    throw new BusinessException("INVALID_KYC_STATUS", "Invalid KYC status");
-  }
-
   private String normalizeOptionalStatus(String status) {
-    return StrUtil.isBlank(status) ? null : normalizeKycStatus(status);
-  }
-
-  private String normalizeAccountType(String accountType) {
-    if ("BANK".equalsIgnoreCase(accountType) || "银行卡".equals(accountType)) {
-      return "BANK";
-    }
-    if ("WALLET".equalsIgnoreCase(accountType) || "钱包".equals(accountType)) {
-      return "WALLET";
-    }
-    throw new BusinessException("INVALID_PAYMENT_ACCOUNT_TYPE", "Invalid payment account type");
+    return StrUtil.isBlank(status) ? null : KycStatus.fromReviewCode(status).code();
   }
 
   private void audit(UUID actorUserId, String action, String targetType, UUID targetId, String value) {

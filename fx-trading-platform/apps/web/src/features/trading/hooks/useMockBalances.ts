@@ -6,7 +6,10 @@ export const mockMarket: TradeMarket = {
   bestBid: 60732.2,
   bestAsk: 60736.3,
   baseAsset: 'BTC',
-  quoteAsset: 'USDT'
+  quoteAsset: 'USDT',
+  unitSize: 1,
+  quantityMode: 'quote-budget',
+  leverage: 1
 }
 
 export const mockBalances: TradeBalances = {

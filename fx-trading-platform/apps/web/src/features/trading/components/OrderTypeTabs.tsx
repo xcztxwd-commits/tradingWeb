@@ -1,3 +1,4 @@
+import { Info } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { StrategyDropdown } from './StrategyDropdown'
@@ -7,40 +8,42 @@ type Props = {
   orderType: PrimaryOrderType
   strategyType: StrategyType
   onOrderTypeChange: (value: PrimaryOrderType) => void
-  onStrategyChange: (value: StrategyType) => void
-  onUnavailable: (label: string) => void
+  onStrategyOrderTypeChange: (value: PrimaryOrderType) => void
 }
 
 export function OrderTypeTabs({
   orderType,
   strategyType,
   onOrderTypeChange,
-  onStrategyChange,
-  onUnavailable
+  onStrategyOrderTypeChange
 }: Props) {
   const { t } = useTranslation()
+  const strategyActive = strategyType === 'tp_sl'
 
   return (
     <div className="trade-panel__order-tabs" role="tablist" aria-label={t('trading.orderType')}>
       <button
         type="button"
-        className={`trade-panel__order-tab ${orderType === 'limit' ? 'trade-panel__order-tab--active' : ''}`}
+        className={`trade-panel__order-tab ${!strategyActive && orderType === 'limit' ? 'trade-panel__order-tab--active' : ''}`}
         role="tab"
-        aria-selected={orderType === 'limit'}
+        aria-selected={!strategyActive && orderType === 'limit'}
         onClick={() => onOrderTypeChange('limit')}
       >
         {t('trading.limitOrder')}
       </button>
       <button
         type="button"
-        className={`trade-panel__order-tab ${orderType === 'market' ? 'trade-panel__order-tab--active' : ''}`}
+        className={`trade-panel__order-tab ${!strategyActive && orderType === 'market' ? 'trade-panel__order-tab--active' : ''}`}
         role="tab"
-        aria-selected={orderType === 'market'}
+        aria-selected={!strategyActive && orderType === 'market'}
         onClick={() => onOrderTypeChange('market')}
       >
         {t('trading.marketOrder')}
       </button>
-      <StrategyDropdown value={strategyType} onChange={onStrategyChange} onUnavailable={onUnavailable} />
+      <StrategyDropdown active={strategyActive} orderType={orderType} onChange={onStrategyOrderTypeChange} />
+      <span className="trade-panel__order-info" aria-hidden="true">
+        <Info size={14} />
+      </span>
     </div>
   )
 }

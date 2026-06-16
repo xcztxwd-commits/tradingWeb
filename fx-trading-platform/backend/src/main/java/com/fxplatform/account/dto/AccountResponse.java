@@ -1,6 +1,7 @@
 package com.fxplatform.account.dto;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -16,6 +17,12 @@ public record AccountResponse(
     BigDecimal freeMargin,
     BigDecimal marginLevel,
     Integer leverage,
-    String status
+    String status,
+    BigDecimal openFloatingPnl,
+    BigDecimal maintenanceMargin,
+    BigDecimal positionValue,
+    BigDecimal marginAvailable,
+    Instant lastSnapshotAt,
+    String warning
 ) {
 }

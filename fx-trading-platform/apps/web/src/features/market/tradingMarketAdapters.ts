@@ -1,13 +1,16 @@
-import type { TradingCandle, TradingMarket, TradingPeriod, TradingQuote } from './tradingModels'
+import type { ProductType, TradingCandle, TradingMarket, TradingPeriod, TradingQuote } from './tradingModels'
 import type { MarketDataSnapshot, TradeItem } from './marketDataTypes'
 
 export type BackendSymbol = {
   symbol: string
   displayName: string
   assetClass: string
+  productType?: ProductType | string | null
   baseCurrency: string
   quoteCurrency: string
   minLot?: string | number | null
+  maxLot?: string | number | null
+  leverage?: string | number | null
   tickSize?: string | number | null
   pricePrecision?: number | null
   quantityPrecision?: number | null
@@ -188,6 +191,7 @@ export function mapSymbolToTradingMarket(symbol: BackendSymbol): TradingMarket {
     low24h: low24h ?? lastPrice ?? 0,
     spread: spread ?? 0,
     source: symbol.quoteSource ?? symbol.provider ?? 'backend',
+    productType: optionalProductType(symbol.productType),
     provider: symbol.provider ?? undefined,
     providerSymbol: symbol.providerSymbol ?? undefined,
     tradable: symbol.tradable ?? true,
@@ -195,6 +199,7 @@ export function mapSymbolToTradingMarket(symbol: BackendSymbol): TradingMarket {
     chartEnabled: symbol.chartEnabled ?? true,
     orderBookEnabled: symbol.orderBookEnabled ?? true,
     minLot: symbol.minLot == null ? undefined : String(symbol.minLot),
+    leverage: optionalPositiveInteger(symbol.leverage),
     pricePrecision: getSymbolPricePrecision(symbol),
     quantityPrecision: getSymbolQuantityPrecision(symbol),
     marketCap,
@@ -367,9 +372,27 @@ function optionalNumber(value: string | number | null | undefined) {
   return Number.isFinite(numberValue) ? numberValue : undefined
 }
 
+function optionalPositiveInteger(value: string | number | null | undefined) {
+  const numberValue = optionalNumber(value)
+  if (numberValue === undefined || numberValue <= 0) return undefined
+  return Math.round(numberValue)
+}
+
 function optionalText(value: string | null | undefined) {
   const text = value?.trim()
   return text ? text : undefined
+}
+
+function optionalProductType(value: string | null | undefined): ProductType | undefined {
+  if (
+    value === 'FX_MARGIN' ||
+    value === 'CRYPTO_SPOT' ||
+    value === 'LINEAR_PERP' ||
+    value === 'INVERSE_PERP'
+  ) {
+    return value
+  }
+  return undefined
 }
 
 function formatCompactVolume(value: number) {

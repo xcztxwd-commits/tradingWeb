@@ -35,7 +35,15 @@ public class PositionEntity {
   private BigDecimal takeProfit;
   private BigDecimal floatingPnl = BigDecimal.ZERO;
   private BigDecimal realizedPnl = BigDecimal.ZERO;
+  private BigDecimal fundingPnl = BigDecimal.ZERO;
+  private BigDecimal financingAccrued = BigDecimal.ZERO;
   private BigDecimal marginHeld = BigDecimal.ZERO;
+  private BigDecimal notional = BigDecimal.ZERO;
+  private BigDecimal initialMargin = BigDecimal.ZERO;
+  private BigDecimal maintenanceMargin = BigDecimal.ZERO;
+  private BigDecimal markPrice;
+  private String settlementAsset;
+  private String marginAsset;
   private PositionStatus status = PositionStatus.OPEN;
   private Integer leverage;
 

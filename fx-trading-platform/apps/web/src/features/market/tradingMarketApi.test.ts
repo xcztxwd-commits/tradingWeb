@@ -101,6 +101,7 @@ describe('trading market API adapters', () => {
         name: market.name,
         category: market.category,
         favorite: market.favorite,
+      leverage: market.leverage,
       minLot: market.minLot,
       quantityPrecision: market.quantityPrecision,
       provider: market.provider,
@@ -114,6 +115,7 @@ describe('trading market API adapters', () => {
       name: 'Euro / US Dollar',
       category: 'fx',
       favorite: false,
+      leverage: 100,
       minLot: '0.01',
       quantityPrecision: 2,
       provider: undefined,
@@ -150,6 +152,7 @@ describe('trading market API adapters', () => {
       symbol: 'BTCUSDT',
       displayName: 'Bitcoin / Tether',
       assetClass: 'CRYPTO',
+      productType: 'CRYPTO_SPOT',
       baseCurrency: 'BTC',
       quoteCurrency: 'USDT',
       enabled: true,
@@ -160,6 +163,7 @@ describe('trading market API adapters', () => {
 
     assert.equal(market.iconUrl, iconUrl)
     assert.equal(market.category, 'crypto')
+    assert.equal(market.productType, 'CRYPTO_SPOT')
   })
 
   it('preserves runtime market data capabilities from backend symbols', () => {

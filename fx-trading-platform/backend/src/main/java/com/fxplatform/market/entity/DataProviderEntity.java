@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fxplatform.common.mybatis.JsonbStringTypeHandler;
 import com.fxplatform.common.mybatis.TextArrayTypeHandler;
+import com.fxplatform.market.enums.ProviderHealthStatus;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -33,7 +34,7 @@ public class DataProviderEntity {
   private Integer priority = 100;
   private Integer timeoutMs = 5000;
   private Integer rateLimitPerMinute = 1200;
-  private String healthStatus = "UNKNOWN";
+  private ProviderHealthStatus healthStatus = ProviderHealthStatus.UNKNOWN;
   private Instant lastHealthCheckAt;
   @TableField(typeHandler = JsonbStringTypeHandler.class)
   private String configJson = "{}";
@@ -41,4 +42,12 @@ public class DataProviderEntity {
   private Instant createdAt;
   @TableField(fill = FieldFill.INSERT_UPDATE)
   private Instant updatedAt;
+
+  public void setHealthStatus(ProviderHealthStatus healthStatus) {
+    this.healthStatus = healthStatus;
+  }
+
+  public void setHealthStatus(String healthStatus) {
+    this.healthStatus = ProviderHealthStatus.fromCode(healthStatus);
+  }
 }

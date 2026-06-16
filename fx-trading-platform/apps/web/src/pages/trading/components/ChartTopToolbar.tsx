@@ -4,7 +4,6 @@ import {
   Camera,
   ChevronDown,
   ChevronsRight,
-  Clock3,
   Eye,
   LocateFixed,
   Maximize2,
@@ -40,7 +39,6 @@ type Props = {
   onChartTypeChange: (chartType: ChartType) => void
   onHighLowPriceMarksChange: (enabled: boolean) => void
   onPriceScaleModeChange: (mode: ChartSettings['axisSettings']['priceScaleMode']) => void
-  onTooltipStyleChange: (style: ChartSettings['axisSettings']['tooltipStyle']) => void
   onIndicatorToggle: (indicator: string) => void
   onFavoriteIntervalToggle: (interval: TradingPeriod) => void
   onOpenIndicatorSettings: () => void
@@ -60,7 +58,6 @@ export function ChartTopToolbar({
   onChartTypeChange,
   onHighLowPriceMarksChange,
   onPriceScaleModeChange,
-  onTooltipStyleChange,
   onIndicatorToggle,
   onFavoriteIntervalToggle,
   onOpenIndicatorSettings,
@@ -74,14 +71,19 @@ export function ChartTopToolbar({
   const { t } = useTranslation()
   const [intervalDropdownOpen, setIntervalDropdownOpen] = useState(false)
   const [chartTypeMenuOpen, setChartTypeMenuOpen] = useState(false)
+  const [priceScaleMenuOpen, setPriceScaleMenuOpen] = useState(false)
   const [indicatorMenuOpen, setIndicatorMenuOpen] = useState(false)
   const [chartSettingsOpen, setChartSettingsOpen] = useState(false)
   const [jumpTimestampValue, setJumpTimestampValue] = useState('')
   const chartTypeMenuRef = useRef<HTMLDivElement | null>(null)
+  const priceScaleMenuRef = useRef<HTMLDivElement | null>(null)
   const indicatorMenuRef = useRef<HTMLDivElement | null>(null)
   const favoriteIntervals = useMemo(() => quickChartIntervals(settings), [settings.favoriteIntervals])
   const activeChartType = chartTypeOptions.find((item) => item.value === settings.chartType) ?? chartTypeOptions[0]
-  const toolbarPopoverOpen = intervalDropdownOpen || chartTypeMenuOpen || indicatorMenuOpen || chartSettingsOpen
+  const activePriceScaleMode =
+    priceScaleModeOptions.find((item) => item.value === settings.axisSettings.priceScaleMode) ?? priceScaleModeOptions[0]
+  const toolbarPopoverOpen =
+    intervalDropdownOpen || chartTypeMenuOpen || priceScaleMenuOpen || indicatorMenuOpen || chartSettingsOpen
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -106,6 +108,7 @@ export function ChartTopToolbar({
     favoriteIntervals,
     intervalDropdownOpen,
     chartTypeMenuOpen,
+    priceScaleMenuOpen,
     indicatorMenuOpen,
     chartSettingsOpen,
     onIntervalChange,
@@ -114,13 +117,15 @@ export function ChartTopToolbar({
   ])
 
   useEffect(() => {
-    if (!chartTypeMenuOpen && !indicatorMenuOpen) return
+    if (!chartTypeMenuOpen && !priceScaleMenuOpen && !indicatorMenuOpen) return
 
     const handlePointerDown = (event: PointerEvent) => {
       if (!(event.target instanceof Node)) return
       if (chartTypeMenuRef.current !== null && chartTypeMenuRef.current.contains(event.target)) return
+      if (priceScaleMenuRef.current !== null && priceScaleMenuRef.current.contains(event.target)) return
       if (indicatorMenuRef.current !== null && indicatorMenuRef.current.contains(event.target)) return
       setChartTypeMenuOpen(false)
+      setPriceScaleMenuOpen(false)
       setIndicatorMenuOpen(false)
     }
 
@@ -128,7 +133,7 @@ export function ChartTopToolbar({
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown)
     }
-  }, [chartTypeMenuOpen, indicatorMenuOpen])
+  }, [chartTypeMenuOpen, priceScaleMenuOpen, indicatorMenuOpen])
 
   const handleJumpSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -226,20 +231,39 @@ export function ChartTopToolbar({
           ) : null}
         </div>
 
-        <label className={styles.selectLabel}>
-          <Scale size={15} />
-          <select
+        <div className={styles.priceScaleWrap} ref={priceScaleMenuRef}>
+          <button
+            type="button"
+            className={styles.priceScaleButton}
             aria-label={t('chart.priceScaleMode')}
-            value={settings.axisSettings.priceScaleMode}
-            onChange={(event) => onPriceScaleModeChange(event.target.value as ChartSettings['axisSettings']['priceScaleMode'])}
+            aria-haspopup="menu"
+            aria-expanded={priceScaleMenuOpen}
+            onClick={() => setPriceScaleMenuOpen((open) => !open)}
           >
-            {priceScaleModeOptions.map((item) => (
-              <option key={item.value} value={item.value}>
-                {t(item.label)}
-              </option>
-            ))}
-          </select>
-        </label>
+            <Scale size={15} />
+            <span>{t(activePriceScaleMode.label)}</span>
+            <ChevronDown size={13} />
+          </button>
+          {priceScaleMenuOpen ? (
+            <div role="menu" className={styles.priceScaleDropdown} data-shortcut-disabled="true">
+              {priceScaleModeOptions.map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  className={styles.priceScaleOption}
+                  role="menuitemradio"
+                  aria-checked={item.value === settings.axisSettings.priceScaleMode}
+                  onClick={() => {
+                    onPriceScaleModeChange(item.value)
+                    setPriceScaleMenuOpen(false)
+                  }}
+                >
+                  {t(item.label)}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
 
         <label className={styles.toggleLabel}>
           <Eye size={15} />
@@ -249,19 +273,6 @@ export function ChartTopToolbar({
             onChange={(event) => onHighLowPriceMarksChange(event.target.checked)}
           />
           {t('chart.highLowMarks')}
-        </label>
-
-        <label className={styles.selectLabel}>
-          <Clock3 size={15} />
-          <select
-            aria-label={t('chart.tooltipStyle')}
-            value={settings.axisSettings.tooltipStyle}
-            onChange={(event) => onTooltipStyleChange(event.target.value as ChartSettings['axisSettings']['tooltipStyle'])}
-          >
-            <option value="standard">{t('chart.tooltipStyles.standard')}</option>
-            <option value="compact">{t('chart.tooltipStyles.compact')}</option>
-            <option value="hidden">{t('chart.tooltipStyles.hidden')}</option>
-          </select>
         </label>
 
         <form className={styles.jumpForm} data-shortcut-disabled="true" onSubmit={handleJumpSubmit}>

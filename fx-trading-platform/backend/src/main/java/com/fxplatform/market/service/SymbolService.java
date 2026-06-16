@@ -42,6 +42,7 @@ public class SymbolService {
         entity.getSymbol(),
         entity.getDisplayName(),
         entity.getAssetClass(),
+        SymbolProductTypes.readOrLegacy(entity),
         entity.getBaseCurrency(),
         entity.getQuoteCurrency(),
         entity.getMinLot(),
@@ -67,7 +68,8 @@ public class SymbolService {
         null,
         null,
         null,
-        null);
+        null,
+        "{}");
   }
 
   private boolean capabilityEnabled(SymbolEntity entity, Boolean symbolEnabled, MarketDataCapability capability) {

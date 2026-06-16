@@ -9,6 +9,7 @@ import com.fxplatform.market.dto.MarketDepthResponse;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
 import com.fxplatform.market.dto.SymbolResponse;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.provider.MarketDataCapability;
 import com.fxplatform.market.provider.MarketDataProviderAdapter;
 import java.io.IOException;
@@ -289,6 +290,7 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
         symbol.symbol(),
         symbol.displayName(),
         "CRYPTO",
+        ProductType.CRYPTO_SPOT,
         symbol.baseCurrency(),
         symbol.quoteCurrency(),
         DEFAULT_MIN_LOT,

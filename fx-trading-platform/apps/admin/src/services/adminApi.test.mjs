@@ -20,6 +20,7 @@ describe('admin page-level api client', () => {
       'getLedgerPage',
       'getPaymentMethodsPage',
       'getSymbolsPage',
+      'createSymbol',
       'getMarketStatus',
       'getRiskConfigs',
       'getMessagesPage',
@@ -58,6 +59,7 @@ describe('admin page-level api client', () => {
       '/api/admin/finance/ledger',
       '/api/admin/finance/payment-methods',
       '/api/admin/market/symbols',
+      "apiPost<SymbolRow>('/api/admin/market/symbols'",
       '/api/admin/market/categories',
       '/api/admin/market/price-adjustments',
       '/api/admin/market/status',
@@ -104,6 +106,12 @@ describe('admin page-level api client', () => {
     assert.match(apiSource, /\/api\/admin\/market\/categories\?\$\{featureQuery\(query\)\}/)
     assert.match(apiSource, /\/api\/admin\/market\/price-adjustments\?\$\{featureQuery\(query\)\}/)
     assert.match(apiSource, /\/api\/admin\/market\/symbols\/\$\{encodeURIComponent\(symbolId\)\}\/price-adjustments/)
+  })
+
+  it('sends explicit productType for product create and update actions', () => {
+    assert.match(apiSource, /productType: String\(payload\.productType \?\? productTypeForAssetClass\(assetClass\)\)/)
+    assert.match(apiSource, /function productTypeForAssetClass/)
+    assert.match(apiSource, /key: 'productType'/)
   })
 
   it('maps log feature pages to real request and verification log APIs', () => {

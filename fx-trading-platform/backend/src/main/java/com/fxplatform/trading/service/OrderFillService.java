@@ -8,6 +8,14 @@ import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.risk.model.InstrumentProfile;
+import com.fxplatform.risk.model.InstrumentKind;
+import com.fxplatform.risk.service.MarginCalculator;
+import com.fxplatform.risk.service.PerpMarginCalculator;
+import com.fxplatform.risk.service.PnLCalculator;
+import com.fxplatform.risk.service.TradingInstrumentClassifier;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.entity.TradeEntity;
@@ -15,14 +23,16 @@ import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
+import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
-import lombok.RequiredArgsConstructor;
+import java.util.Locale;
+import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
-@RequiredArgsConstructor
 public class OrderFillService {
 
   private final OrderRepository orderRepository;
@@ -30,6 +40,124 @@ public class OrderFillService {
   private final PositionRepository positionRepository;
   private final TradingAccountRepository accountRepository;
   private final LedgerService ledgerService;
+  private final SymbolRepository symbolRepository;
+  private final SpotSettlementService spotSettlementService;
+  private final PositionEngine positionEngine;
+  private final WalletService walletService;
+  private final MarginCalculator marginCalculator = new MarginCalculator();
+  private final PerpMarginCalculator perpMarginCalculator = new PerpMarginCalculator();
+  private final TradingInstrumentClassifier instrumentClassifier = new TradingInstrumentClassifier();
+  private static final Set<String> CRYPTO_BASES = Set.of(
+      "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "OKB", "BCH", "LTC");
+
+  @Autowired
+  public OrderFillService(
+      OrderRepository orderRepository,
+      TradeRepository tradeRepository,
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      SymbolRepository symbolRepository,
+      SpotSettlementService spotSettlementService,
+      PositionEngine positionEngine,
+      WalletService walletService
+  ) {
+    this.orderRepository = orderRepository;
+    this.tradeRepository = tradeRepository;
+    this.positionRepository = positionRepository;
+    this.accountRepository = accountRepository;
+    this.ledgerService = ledgerService;
+    this.symbolRepository = symbolRepository;
+    this.spotSettlementService = spotSettlementService;
+    this.positionEngine = positionEngine;
+    this.walletService = walletService;
+  }
+
+  public OrderFillService(
+      OrderRepository orderRepository,
+      TradeRepository tradeRepository,
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      SymbolRepository symbolRepository,
+      SpotSettlementService spotSettlementService
+  ) {
+    this(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        spotSettlementService,
+        defaultPositionEngine(positionRepository, accountRepository, ledgerService),
+        null);
+  }
+
+  public OrderFillService(
+      OrderRepository orderRepository,
+      TradeRepository tradeRepository,
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      SymbolRepository symbolRepository,
+      SpotSettlementService spotSettlementService,
+      WalletService walletService
+  ) {
+    this(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        spotSettlementService,
+        defaultPositionEngine(positionRepository, accountRepository, ledgerService),
+        walletService);
+  }
+
+  public OrderFillService(
+      OrderRepository orderRepository,
+      TradeRepository tradeRepository,
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      SymbolRepository symbolRepository,
+      SpotSettlementService spotSettlementService,
+      PositionEngine positionEngine
+  ) {
+    this(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        spotSettlementService,
+        positionEngine,
+        null);
+  }
+
+  public OrderFillService(
+      OrderRepository orderRepository,
+      TradeRepository tradeRepository,
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      SymbolRepository symbolRepository
+  ) {
+    this(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService, symbolRepository, null);
+  }
+
+  public OrderFillService(
+      OrderRepository orderRepository,
+      TradeRepository tradeRepository,
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService
+  ) {
+    this(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService, null);
+  }
 
   public OrderEntity fill(
       OrderEntity order,
@@ -58,7 +186,8 @@ public class OrderFillService {
     BigDecimal slippage = orZero(execution.slippage());
     BigDecimal existingOrderHold = orZero(order.getHoldAmount());
     BigDecimal fullMargin = requiredMargin != null ? requiredMargin : existingOrderHold;
-    BigDecimal marginToHold = proportionalMargin(fullMargin, filledQuantity, orderQuantity);
+    BigDecimal marginToHold = executionMargin(order, account, execution.filledPrice(), filledQuantity)
+        .orElseGet(() -> proportionalMargin(fullMargin, filledQuantity, orderQuantity));
 
     order.setStatus(remainingQuantity.compareTo(BigDecimal.ZERO) > 0 ? OrderStatus.PARTIALLY_FILLED : OrderStatus.FILLED);
     order.setExecutionPrice(execution.filledPrice());
@@ -79,6 +208,28 @@ public class OrderFillService {
     trade.setPrice(execution.filledPrice());
     tradeRepository.save(trade);
 
+    SymbolEntity symbol = symbolFor(order);
+    InstrumentProfile profile = instrumentClassifier.profile(symbol);
+    if (profile.kind() == InstrumentKind.SPOT) {
+      settleSpotFill(order, account, execution, symbol, filledQuantity);
+      if (existingOrderHold.compareTo(BigDecimal.ZERO) > 0) {
+        order.setHoldAmount(BigDecimal.ZERO);
+        orderRepository.save(order);
+      }
+      return order;
+    }
+    ExecutionResult normalizedFill = normalizeFill(execution, filledQuantity);
+    if (isNetPositionKind(profile.kind())) {
+      PositionEngine.PositionUpdateResult update = positionEngine.applyFill(
+          account,
+          order,
+          normalizedFill,
+          profile,
+          marginDescription);
+      chargeTradeFee(account, fee, execution.feeAsset(), profile.kind(), update.position().getId());
+      return order;
+    }
+
     PositionEntity position = new PositionEntity();
     position.setAccountId(account.getId());
     position.setSymbol(order.getSymbol());
@@ -88,8 +239,11 @@ public class OrderFillService {
     position.setCurrentPrice(execution.filledPrice());
     position.setStopLoss(order.getStopLoss());
     position.setTakeProfit(order.getTakeProfit());
-    position.setMarginHeld(marginToHold);
     position.setLeverage(positionLeverage(order, account));
+    if (isPerpetual(profile.kind())) {
+      marginToHold = applyPerpMarginSnapshot(position, profile, filledQuantity, execution.filledPrice(), positionLeverage(order, account));
+    }
+    position.setMarginHeld(marginToHold);
     PositionEntity savedPosition = positionRepository.save(position);
 
     BigDecimal delta = marginToHold.subtract(existingOrderHold);
@@ -104,13 +258,6 @@ public class OrderFillService {
       account.setUsedMargin(orZero(account.getUsedMargin()).add(delta).max(BigDecimal.ZERO));
       accountChanged = true;
     }
-    if (fee.compareTo(BigDecimal.ZERO) > 0) {
-      BigDecimal balanceBeforeFee = orZero(account.getBalance());
-      BigDecimal equityBeforeFee = accountEquity(account);
-      account.setBalance(balanceBeforeFee.subtract(fee));
-      account.setEquity(equityBeforeFee.subtract(fee));
-      accountChanged = true;
-    }
     if (accountChanged) {
       account.setFreeMargin(accountEquity(account).subtract(orZero(account.getUsedMargin())));
       accountRepository.save(account);
@@ -118,11 +265,66 @@ public class OrderFillService {
     if (delta.compareTo(BigDecimal.ZERO) > 0) {
       ledgerService.recordMarginHold(account, delta, savedPosition.getId(), marginDescription);
     }
-    if (fee.compareTo(BigDecimal.ZERO) > 0) {
-      ledgerService.recordTradeFee(account, fee, savedPosition.getId(), "Trade fee charged");
-    }
+    chargeTradeFee(account, fee, execution.feeAsset(), profile.kind(), savedPosition.getId());
 
     return order;
+  }
+
+  private boolean isNetPositionKind(InstrumentKind kind) {
+    return kind == InstrumentKind.FOREX
+        || kind == InstrumentKind.LINEAR_PERPETUAL
+        || kind == InstrumentKind.INVERSE_PERPETUAL;
+  }
+
+  private boolean isPerpetual(InstrumentKind kind) {
+    return kind == InstrumentKind.LINEAR_PERPETUAL || kind == InstrumentKind.INVERSE_PERPETUAL;
+  }
+
+  private BigDecimal applyPerpMarginSnapshot(
+      PositionEntity position,
+      InstrumentProfile profile,
+      BigDecimal quantity,
+      BigDecimal markPrice,
+      int leverage
+  ) {
+    PerpMarginCalculator.MarginResult margin = perpMarginCalculator.calculate(profile, quantity, markPrice, leverage);
+    position.setNotional(margin.notional());
+    position.setInitialMargin(margin.initialMargin());
+    position.setMaintenanceMargin(margin.maintenanceMargin());
+    position.setMarkPrice(markPrice);
+    position.setSettlementAsset(profile.settlementAsset());
+    position.setMarginAsset(profile.marginAsset());
+    return margin.initialMargin();
+  }
+
+  private void chargeTradeFee(
+      TradingAccountEntity account,
+      BigDecimal fee,
+      String feeAsset,
+      InstrumentKind kind,
+      java.util.UUID positionId
+  ) {
+    if (fee.compareTo(BigDecimal.ZERO) <= 0) {
+      return;
+    }
+    String normalizedFeeAsset = normalizeFeeAsset(feeAsset);
+    if (kind == InstrumentKind.INVERSE_PERPETUAL && normalizedFeeAsset != null && walletService != null) {
+      walletService.debitAvailableWithEntryType(
+          account.getId(),
+          normalizedFeeAsset,
+          fee,
+          "POSITION",
+          positionId,
+          "Inverse perpetual trade fee charged",
+          "INVERSE_PERP_FEE");
+    }
+    BigDecimal balanceBeforeFee = orZero(account.getBalance());
+    BigDecimal equityBeforeFee = accountEquity(account);
+    account.setBalance(balanceBeforeFee.subtract(fee));
+    account.setEquity(equityBeforeFee.subtract(fee));
+    account.setFreeMargin(accountEquity(account).subtract(orZero(account.getUsedMargin())));
+    accountRepository.save(account);
+    ledgerService.recordTradeFee(account, fee, positionId, "Trade fee charged");
   }
 
   private BigDecimal proportionalMargin(BigDecimal fullMargin, BigDecimal filledQuantity, BigDecimal orderQuantity) {
@@ -134,10 +336,139 @@ public class OrderFillService {
         .divide(orderQuantity, 8, RoundingMode.HALF_UP);
   }
 
+  private java.util.Optional<BigDecimal> executionMargin(
+      OrderEntity order,
+      TradingAccountEntity account,
+      BigDecimal executionPrice,
+      BigDecimal filledQuantity
+  ) {
+    if (executionPrice == null || executionPrice.compareTo(BigDecimal.ZERO) <= 0) {
+      return java.util.Optional.empty();
+    }
+    if (filledQuantity == null || filledQuantity.compareTo(BigDecimal.ZERO) <= 0) {
+      return java.util.Optional.empty();
+    }
+
+    InstrumentProfile profile = instrumentClassifier.profile(symbolFor(order));
+    return java.util.Optional.of(marginCalculator.requiredMargin(
+        profile.kind(),
+        filledQuantity,
+        executionPrice,
+        positionLeverage(order, account),
+        profile.unitSize()));
+  }
+
+  private void settleSpotFill(
+      OrderEntity order,
+      TradingAccountEntity account,
+      ExecutionResult execution,
+      SymbolEntity symbol,
+      BigDecimal filledQuantity
+  ) {
+    ExecutionResult fill = normalizeFill(execution, filledQuantity);
+    if (spotSettlementService != null) {
+      if (order.getSide() == com.fxplatform.trading.enums.OrderSide.BUY) {
+        spotSettlementService.settleBuyFill(order, fill, symbol, account);
+      } else {
+        spotSettlementService.settleSellFill(order, fill, symbol, account);
+      }
+    }
+  }
+
+  private ExecutionResult normalizeFill(ExecutionResult execution, BigDecimal filledQuantity) {
+    if (execution.filledQuantity() != null) {
+      return execution;
+    }
+    return new ExecutionResult(
+        execution.filledPrice(),
+        execution.filledAt(),
+        filledQuantity,
+        execution.remainingQuantity(),
+        execution.fee(),
+        execution.feeAsset(),
+        execution.slippage(),
+        execution.rejectCode(),
+        execution.rejectMessage());
+  }
+
+  private String normalizeFeeAsset(String feeAsset) {
+    if (feeAsset == null || feeAsset.isBlank()) {
+      return null;
+    }
+    return feeAsset.trim().toUpperCase(Locale.ROOT);
+  }
+
   private Integer positionLeverage(OrderEntity order, TradingAccountEntity account) {
     if (order.getLeverage() != null && order.getLeverage() > 0) {
       return order.getLeverage();
     }
     return account.getLeverage();
+  }
+
+  private SymbolEntity symbolFor(OrderEntity order) {
+    String symbol = order.getSymbol();
+    String normalized = symbol == null ? "" : symbol.trim().toUpperCase();
+    if (symbolRepository != null && !normalized.isBlank()) {
+      return symbolRepository.findBySymbol(normalized).orElseGet(() -> fallbackSymbol(order, normalized));
+    }
+    return fallbackSymbol(order, normalized);
+  }
+
+  private SymbolEntity fallbackSymbol(OrderEntity order, String symbol) {
+    SymbolEntity entity = new SymbolEntity();
+    entity.setSymbol(symbol);
+    entity.setAssetClass(null);
+    if (order.getLeverage() != null && order.getLeverage() <= 1 && isCryptoSymbol(symbol)) {
+      entity.setAssetClass("SPOT");
+      entity.setBaseCurrency(baseCurrency(symbol));
+      entity.setQuoteCurrency(quoteCurrency(symbol));
+      entity.setLotSize(BigDecimal.ONE);
+      entity.setLeverage(1);
+    }
+    return entity;
+  }
+
+  private boolean isCryptoSymbol(String symbol) {
+    return hasCryptoBase(symbol, "USDT") || hasCryptoBase(symbol, "USDC") || hasCryptoBase(symbol, "USD");
+  }
+
+  private boolean hasCryptoBase(String symbol, String quoteSuffix) {
+    if (!symbol.endsWith(quoteSuffix) || symbol.length() <= quoteSuffix.length()) {
+      return false;
+    }
+    return CRYPTO_BASES.contains(symbol.substring(0, symbol.length() - quoteSuffix.length()));
+  }
+
+  private String baseCurrency(String symbol) {
+    String quoteCurrency = quoteCurrency(symbol);
+    return quoteCurrency.isBlank() || symbol.length() <= quoteCurrency.length()
+        ? ""
+        : symbol.substring(0, symbol.length() - quoteCurrency.length());
+  }
+
+  private String quoteCurrency(String symbol) {
+    if (symbol.endsWith("USDT")) {
+      return "USDT";
+    }
+    if (symbol.endsWith("USDC")) {
+      return "USDC";
+    }
+    if (symbol.endsWith("USD")) {
+      return "USD";
+    }
+    return "";
+  }
+
+  private static PositionEngine defaultPositionEngine(
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService
+  ) {
+    return new PositionEngine(
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        new MarginCalculator(),
+        new PnLCalculator());
   }
 }

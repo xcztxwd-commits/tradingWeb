@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { readStoredAuthToken } from '../../../features/trading-session/tradingSessionStorage'
+import { authSessionChangedEvent, readStoredAuthToken } from '../../../features/trading-session/tradingSessionStorage'
 
 export type HomeAuthVariant = 'guest' | 'authenticated_unverified' | 'authenticated_verified'
 
@@ -8,7 +8,11 @@ export function useHomeAuthVariant() {
   const [variant, setVariant] = useState<HomeAuthVariant>(() => resolveVariant())
 
   useEffect(() => {
-    setVariant(resolveVariant())
+    const refreshVariant = () => setVariant(resolveVariant())
+
+    refreshVariant()
+    window.addEventListener(authSessionChangedEvent, refreshVariant)
+    return () => window.removeEventListener(authSessionChangedEvent, refreshVariant)
   }, [])
 
   return variant

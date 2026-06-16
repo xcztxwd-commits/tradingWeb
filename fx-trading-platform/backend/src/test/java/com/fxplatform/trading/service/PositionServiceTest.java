@@ -3,6 +3,7 @@ package com.fxplatform.trading.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,7 +14,11 @@ import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.QuoteService;
+import com.fxplatform.risk.model.InstrumentKind;
 import com.fxplatform.risk.service.PnLCalculator;
 import com.fxplatform.trading.dto.request.UpdatePositionProtectionRequest;
 import com.fxplatform.trading.dto.response.PositionResponse;
@@ -48,6 +53,9 @@ class PositionServiceTest {
   @Mock
   private LedgerService ledgerService;
 
+  @Mock
+  private SymbolRepository symbolRepository;
+
   @Test
   void openPositionsRefreshFloatingPnlFromLatestQuote() {
     UUID userId = UUID.randomUUID();
@@ -68,10 +76,10 @@ class PositionServiceTest {
         new BigDecimal("0.00004"),
         "test",
         1780660000000L));
-    when(pnlCalculator.floatingPnl(OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
+    when(pnlCalculator.floatingPnl("EURUSD", "USD", OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
         .thenReturn(floatingPnl);
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     List<PositionResponse> responses = service.openPositions(userId, accountId);
 
@@ -90,14 +98,258 @@ class PositionServiceTest {
     UUID positionId = UUID.randomUUID();
     PositionEntity position = openPosition(accountId, positionId);
     position.setSymbol("BTCUSDT");
+    position.setLeverage(20);
     position.setLots(new BigDecimal("0.01"));
     position.setOpenPrice(new BigDecimal("63874.8"));
     position.setCurrentPrice(new BigDecimal("63874.8"));
     position.setMarginHeld(new BigDecimal("0.07"));
+    position.setMaintenanceMargin(new BigDecimal("250.00000000"));
 
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
         .thenReturn(List.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol(
+        "BTCUSDT",
+        ProductType.LINEAR_PERP,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        20)));
+    when(quoteService.freshQuote("BTCUSDT")).thenReturn(new QuoteResponse(
+        "quote",
+        "BTCUSDT",
+        new BigDecimal("63876.8"),
+        new BigDecimal("63877.0"),
+        new BigDecimal("63876.9"),
+        new BigDecimal("0.2"),
+        "test",
+        1780660000000L));
+    when(pnlCalculator.floatingPnl(
+        InstrumentKind.LINEAR_PERPETUAL,
+        OrderSide.BUY,
+        new BigDecimal("0.01"),
+        new BigDecimal("63874.8"),
+        new BigDecimal("63876.9"),
+        BigDecimal.ONE))
+        .thenReturn(new BigDecimal("0.02000000"));
+
+    PositionService service = service();
+
+    List<PositionResponse> responses = service.openPositions(userId, accountId);
+
+    assertThat(responses).hasSize(1);
+    PositionResponse response = responses.get(0);
+    assertThat(response.instrumentType()).isEqualTo("SWAP");
+    assertThat(response.marginMode()).isEqualTo("CROSS");
+    assertThat(response.leverage()).isEqualTo(20);
+    assertThat(response.positionUnit()).isEqualTo("CONTRACT");
+    assertThat(response.markPrice()).isEqualByComparingTo("63876.9");
+    assertThat(response.liquidationPrice()).isEqualByComparingTo("63867.80000000");
+    assertThat(response.maintenanceMargin()).isEqualByComparingTo("250.00000000");
+    assertThat(response.floatingPnl()).isEqualByComparingTo("0.020");
+    assertThat(response.floatingPnlRatio()).isEqualByComparingTo("0.28571429");
+    verify(pnlCalculator, never()).floatingPnl(eq(OrderSide.BUY), eq(new BigDecimal("0.01")), any(), any());
+  }
+
+  @Test
+  void openSpotCryptoPositionUsesSymbolMetadataForSpotDisplayPnl() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSDT");
+    position.setLeverage(20);
+    position.setLots(new BigDecimal("0.01"));
+    position.setOpenPrice(new BigDecimal("63874.8"));
+    position.setCurrentPrice(new BigDecimal("63874.8"));
+    position.setMarginHeld(new BigDecimal("638.74800000"));
+
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
+        .thenReturn(List.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol(
+        "BTCUSDT",
+        ProductType.CRYPTO_SPOT,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        1)));
+    when(quoteService.freshQuote("BTCUSDT")).thenReturn(new QuoteResponse(
+        "quote",
+        "BTCUSDT",
+        new BigDecimal("63876.8"),
+        new BigDecimal("63877.0"),
+        new BigDecimal("63876.9"),
+        new BigDecimal("0.2"),
+        "test",
+        1780660000000L));
+    when(pnlCalculator.floatingPnl(
+        InstrumentKind.SPOT,
+        OrderSide.BUY,
+        new BigDecimal("0.01"),
+        new BigDecimal("63874.8"),
+        new BigDecimal("63876.8"),
+        BigDecimal.ONE))
+        .thenReturn(new BigDecimal("0.02000000"));
+
+    PositionService service = service();
+
+    List<PositionResponse> responses = service.openPositions(userId, accountId);
+
+    assertThat(responses).hasSize(1);
+    PositionResponse response = responses.get(0);
+    assertThat(response.instrumentType()).isEqualTo("SPOT");
+    assertThat(response.marginMode()).isEqualTo("CASH");
+    assertThat(response.leverage()).isNull();
+    assertThat(response.positionUnit()).isEqualTo("BTC");
+    assertThat(response.liquidationPrice()).isNull();
+    assertThat(response.floatingPnl()).isEqualByComparingTo("0.020");
+    verify(pnlCalculator).floatingPnl(
+        eq(InstrumentKind.SPOT),
+        eq(OrderSide.BUY),
+        eq(new BigDecimal("0.01")),
+        eq(new BigDecimal("63874.8")),
+        eq(new BigDecimal("63876.8")),
+        eq(BigDecimal.ONE));
+  }
+
+  @Test
+  void openCryptoSpotPositionHasNoLeverageOrLiquidationPrice() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSDT");
+    position.setLeverage(50);
+    position.setLots(new BigDecimal("0.1998"));
+    position.setOpenPrice(new BigDecimal("50050.05005"));
+    position.setCurrentPrice(new BigDecimal("50050.05005"));
+    position.setMarginHeld(new BigDecimal("10000.00000000"));
+
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
+        .thenReturn(List.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol(
+        "BTCUSDT",
+        ProductType.CRYPTO_SPOT,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        1)));
+    when(quoteService.freshQuote("BTCUSDT")).thenReturn(new QuoteResponse(
+        "quote",
+        "BTCUSDT",
+        new BigDecimal("54999.8"),
+        new BigDecimal("55000.2"),
+        new BigDecimal("55000.0"),
+        new BigDecimal("0.4"),
+        "test",
+        1780660000000L));
+    when(pnlCalculator.floatingPnl(
+        InstrumentKind.SPOT,
+        OrderSide.BUY,
+        new BigDecimal("0.1998"),
+        new BigDecimal("50050.05005"),
+        new BigDecimal("54999.8"),
+        BigDecimal.ONE))
+        .thenReturn(new BigDecimal("989.06000000"));
+
+    PositionService service = service();
+
+    List<PositionResponse> responses = service.openPositions(userId, accountId);
+
+    assertThat(responses).hasSize(1);
+    PositionResponse response = responses.get(0);
+    assertThat(response.instrumentType()).isEqualTo("SPOT");
+    assertThat(response.marginMode()).isEqualTo("CASH");
+    assertThat(response.leverage()).isNull();
+    assertThat(response.positionUnit()).isEqualTo("BTC");
+    assertThat(response.liquidationPrice()).isNull();
+    assertThat(response.floatingPnl()).isEqualByComparingTo("989.06000000");
+  }
+
+  @Test
+  void openInverseContractPositionUsesReciprocalDisplayPnl() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSD");
+    position.setLeverage(10);
+    position.setLots(new BigDecimal("100"));
+    position.setOpenPrice(new BigDecimal("50000"));
+    position.setCurrentPrice(new BigDecimal("50000"));
+    position.setMarginHeld(new BigDecimal("0.02000000"));
+
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
+        .thenReturn(List.of(position));
+    when(symbolRepository.findBySymbol("BTCUSD")).thenReturn(Optional.of(symbol(
+        "BTCUSD",
+        ProductType.INVERSE_PERP,
+        "BTC",
+        "USD",
+        BigDecimal.ONE,
+        new BigDecimal("100"),
+        10)));
+    when(quoteService.freshQuote("BTCUSD")).thenReturn(new QuoteResponse(
+        "quote",
+        "BTCUSD",
+        new BigDecimal("55000"),
+        new BigDecimal("55010"),
+        new BigDecimal("55005"),
+        new BigDecimal("10"),
+        "test",
+        1780660000000L));
+    when(pnlCalculator.floatingPnl(
+        InstrumentKind.INVERSE_PERPETUAL,
+        OrderSide.BUY,
+        new BigDecimal("100"),
+        new BigDecimal("50000"),
+        new BigDecimal("55005"),
+        new BigDecimal("100")))
+        .thenReturn(new BigDecimal("0.01818182"));
+
+    PositionService service = service();
+
+    List<PositionResponse> responses = service.openPositions(userId, accountId);
+
+    assertThat(responses).hasSize(1);
+    PositionResponse response = responses.get(0);
+    assertThat(response.instrumentType()).isEqualTo("SWAP");
+    assertThat(response.positionUnit()).isEqualTo("CONTRACT");
+    assertThat(response.currentPrice()).isEqualByComparingTo("55000");
+    assertThat(response.markPrice()).isEqualByComparingTo("55005");
+    assertThat(response.liquidationPrice()).isEqualByComparingTo("45454.54545455");
+    assertThat(response.floatingPnl()).isEqualByComparingTo("0.01818182");
+    assertThat(response.floatingPnlRatio()).isEqualByComparingTo("0.90909100");
+  }
+
+  @Test
+  void openPositionsRejectsSymbolWithoutExplicitProductType() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSDT");
+    position.setLeverage(1);
+
+    SymbolEntity symbol = symbol(
+        "BTCUSDT",
+        null,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        20);
+
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
+        .thenReturn(List.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol));
     when(quoteService.freshQuote("BTCUSDT")).thenReturn(new QuoteResponse(
         "quote",
         "BTCUSDT",
@@ -108,18 +360,11 @@ class PositionServiceTest {
         "test",
         1780660000000L));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
-    List<PositionResponse> responses = service.openPositions(userId, accountId);
-
-    assertThat(responses).hasSize(1);
-    PositionResponse response = responses.get(0);
-    assertThat(response.instrumentType()).isEqualTo("SWAP");
-    assertThat(response.positionUnit()).isEqualTo("CONTRACT");
-    assertThat(response.markPrice()).isEqualByComparingTo("63876.9");
-    assertThat(response.floatingPnl()).isEqualByComparingTo("0.020");
-    assertThat(response.floatingPnlRatio()).isEqualByComparingTo("0.28571429");
-    verify(pnlCalculator, never()).floatingPnl(eq(OrderSide.BUY), eq(new BigDecimal("0.01")), any(), any());
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.openPositions(userId, accountId))
+        .isInstanceOf(BusinessException.class)
+        .hasMessageContaining("product type");
   }
 
   @Test
@@ -136,7 +381,7 @@ class PositionServiceTest {
     when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.CLOSED))
         .thenReturn(List.of(position));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     List<PositionResponse> responses = service.positionHistory(userId, accountId);
 
@@ -167,7 +412,7 @@ class PositionServiceTest {
         "test",
         1780660000000L));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     PositionResponse response = service.updateProtection(userId, accountId, positionId, new UpdatePositionProtectionRequest(
         new BigDecimal("1.09500"),
@@ -190,7 +435,7 @@ class PositionServiceTest {
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.updateProtection(
             userId,
@@ -216,7 +461,7 @@ class PositionServiceTest {
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.updateProtection(
             userId,
@@ -248,7 +493,7 @@ class PositionServiceTest {
         "test",
         1780660000000L));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.updateProtection(
             userId,
@@ -271,7 +516,7 @@ class PositionServiceTest {
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     PositionResponse response = service.updateProtection(
         userId,
@@ -293,7 +538,7 @@ class PositionServiceTest {
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.updateProtection(
             userId,
@@ -327,11 +572,11 @@ class PositionServiceTest {
         new BigDecimal("0.00004"),
         "test",
         1780660000000L));
-    when(pnlCalculator.floatingPnl(OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
+    when(pnlCalculator.floatingPnl("EURUSD", "USD", OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
         .thenReturn(realizedPnl);
     when(positionRepository.closeIfOpen(position)).thenReturn(1);
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     PositionResponse response = service.closePosition(userId, accountId, positionId);
 
@@ -373,11 +618,11 @@ class PositionServiceTest {
         new BigDecimal("0.00004"),
         "test",
         1780660000000L));
-    when(pnlCalculator.floatingPnl(OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
+    when(pnlCalculator.floatingPnl("EURUSD", "USD", OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
         .thenReturn(realizedPnl);
     when(positionRepository.closeIfOpen(position)).thenReturn(1);
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     PositionResponse response = service.closePosition(userId, accountId, positionId);
 
@@ -402,7 +647,7 @@ class PositionServiceTest {
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.closePosition(userId, accountId, positionId))
         .isInstanceOf(BusinessException.class)
@@ -434,11 +679,11 @@ class PositionServiceTest {
         new BigDecimal("0.00004"),
         "test",
         1780660000000L));
-    when(pnlCalculator.floatingPnl(OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
+    when(pnlCalculator.floatingPnl("EURUSD", "USD", OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
         .thenReturn(new BigDecimal("10.00000000"));
     when(positionRepository.closeIfOpen(position)).thenReturn(0);
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.closePosition(userId, accountId, positionId))
         .isInstanceOf(BusinessException.class)
@@ -457,7 +702,7 @@ class PositionServiceTest {
 
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.empty());
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.openPositions(userId, accountId))
         .isInstanceOf(AuthorizationException.class)
@@ -474,7 +719,7 @@ class PositionServiceTest {
 
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.empty());
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.closePosition(userId, accountId, positionId))
         .isInstanceOf(AuthorizationException.class)
@@ -495,7 +740,7 @@ class PositionServiceTest {
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.closePosition(userId, accountId, positionId))
         .isInstanceOf(AuthorizationException.class)
@@ -528,11 +773,11 @@ class PositionServiceTest {
         new BigDecimal("0.00004"),
         "test",
         1780660000000L));
-    when(pnlCalculator.floatingPnl(OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
+    when(pnlCalculator.floatingPnl("EURUSD", "USD", OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
         .thenReturn(realizedPnl);
     when(positionRepository.closeIfOpen(position)).thenReturn(1);
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     PositionResponse response = service.closeSystemPosition(accountId, positionId);
 
@@ -552,6 +797,40 @@ class PositionServiceTest {
   }
 
   @Test
+  void closeSystemPositionWithReasonWritesForcedCloseLedger() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    PositionEntity position = openPosition(accountId, positionId);
+    TradingAccountEntity account = account(userId, accountId);
+    BigDecimal realizedPnl = new BigDecimal("-25.00000000");
+
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
+    when(quoteService.freshQuote("EURUSD")).thenReturn(new QuoteResponse(
+        "quote",
+        "EURUSD",
+        new BigDecimal("1.09770"),
+        new BigDecimal("1.09774"),
+        new BigDecimal("1.09772"),
+        new BigDecimal("0.00004"),
+        "test",
+        1780660000000L));
+    when(pnlCalculator.floatingPnl("EURUSD", "USD", OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.09770")))
+        .thenReturn(realizedPnl);
+    when(positionRepository.closeIfOpen(position)).thenReturn(1);
+
+    PositionService service = service();
+
+    PositionResponse response = service.closeSystemPosition(accountId, positionId, "FX_MARGIN_STOP_OUT");
+
+    assertThat(response.status()).isEqualTo(PositionStatus.CLOSED.name());
+    verify(ledgerService).recordMarginRelease(eq(account), eq(new BigDecimal("110.02000000")), eq(positionId), eq("Position margin released"));
+    verify(ledgerService).recordTradePnl(eq(account), eq(realizedPnl), eq(positionId), eq("Position closed"));
+    verify(ledgerService).recordForcedClose(eq(account), eq(positionId), eq("FX_MARGIN_STOP_OUT"));
+  }
+
+  @Test
   void closeSystemPositionRejectsPositionFromDifferentAccount() {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
@@ -561,7 +840,7 @@ class PositionServiceTest {
     when(accountRepository.findById(accountId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
 
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    PositionService service = service();
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.closeSystemPosition(accountId, positionId))
         .isInstanceOf(BusinessException.class)
@@ -571,6 +850,58 @@ class PositionServiceTest {
     verify(accountRepository, never()).save(any());
     verify(ledgerService, never()).recordMarginRelease(any(), any(), any(), any());
     verify(ledgerService, never()).recordTradePnl(any(), any(), any(), any());
+  }
+
+  private PositionService service() {
+    lenient().when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(symbol(
+        "EURUSD",
+        ProductType.FX_MARGIN,
+        "EUR",
+        "USD",
+        new BigDecimal("100000"),
+        new BigDecimal("100000"),
+        100)));
+    return new PositionService(
+        positionRepository,
+        accountRepository,
+        quoteService,
+        pnlCalculator,
+        ledgerService,
+        symbolRepository);
+  }
+
+  private static SymbolEntity symbol(
+      String code,
+      ProductType productType,
+      String baseCurrency,
+      String quoteCurrency,
+      BigDecimal lotSize,
+      BigDecimal contractSize,
+      int leverage
+  ) {
+    SymbolEntity symbol = new SymbolEntity();
+    symbol.setSymbol(code);
+    symbol.setProductType(productType);
+    symbol.setAssetClass(assetClass(productType));
+    symbol.setBaseCurrency(baseCurrency);
+    symbol.setQuoteCurrency(quoteCurrency);
+    symbol.setLotSize(lotSize);
+    symbol.setContractSize(contractSize);
+    symbol.setLeverage(leverage);
+    return symbol;
+  }
+
+  private static String assetClass(ProductType productType) {
+    if (productType == ProductType.CRYPTO_SPOT) {
+      return "CRYPTO";
+    }
+    if (productType == ProductType.LINEAR_PERP) {
+      return "LINEAR_PERPETUAL";
+    }
+    if (productType == ProductType.INVERSE_PERP) {
+      return "INVERSE_PERPETUAL";
+    }
+    return "FOREX";
   }
 
   private static PositionEntity openPosition(UUID accountId, UUID positionId) {
@@ -593,6 +924,7 @@ class PositionServiceTest {
     TradingAccountEntity account = new TradingAccountEntity();
     account.setId(accountId);
     account.setUserId(userId);
+    account.setBaseCurrency("USD");
     account.setBalance(new BigDecimal("10000.00000000"));
     account.setEquity(new BigDecimal("10000.00000000"));
     account.setUsedMargin(new BigDecimal("300.00000000"));
@@ -600,4 +932,5 @@ class PositionServiceTest {
     account.setLeverage(100);
     return account;
   }
+
 }

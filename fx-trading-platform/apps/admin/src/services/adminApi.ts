@@ -22,6 +22,7 @@ import type {
   ProviderSyncResponse,
   RiskConfigRow,
   SymbolDisplayPayload,
+  SymbolPayload,
   SymbolProviderBindingPayload,
   SymbolProviderBindingRow,
   SymbolRow,
@@ -192,6 +193,10 @@ export function getPaymentMethodsPage(token: string, page = 0, size = 50) {
 
 export function getSymbolsPage(token: string, page = 0, size = 50) {
   return apiGet<AdminPage<SymbolRow>>(`/api/admin/market/symbols?${pageQuery(page, size)}`, token)
+}
+
+export function createSymbol(token: string, payload: SymbolPayload) {
+  return apiPost<SymbolRow>('/api/admin/market/symbols', payload, token)
 }
 
 export function getMarketStatus(token: string) {
@@ -1048,12 +1053,14 @@ function postPayload(payload: Record<string, unknown>) {
 
 function productPayload(payload: Record<string, unknown>) {
   const symbol = String(payload.symbol ?? '')
+  const assetClass = String(payload.assetClass ?? payload.category ?? 'FOREX')
   return {
     symbol,
     displayName: String(payload.displayName ?? payload.productName ?? symbol),
     provider: String(payload.provider ?? 'massive'),
     providerSymbol: String(payload.providerSymbol ?? symbol),
-    assetClass: String(payload.assetClass ?? payload.category ?? 'FOREX'),
+    assetClass,
+    productType: String(payload.productType ?? productTypeForAssetClass(assetClass)),
     baseCurrency: String(payload.baseCurrency ?? 'USD'),
     quoteCurrency: String(payload.quoteCurrency ?? 'USD'),
     pipSize: String(payload.pipSize ?? '0.0001'),
@@ -1065,6 +1072,16 @@ function productPayload(payload: Record<string, unknown>) {
     spreadMarkup: String(payload.spreadMarkup ?? '0'),
     enabled: toBoolean(payload.enabled, true)
   }
+}
+
+function productTypeForAssetClass(assetClass: string) {
+  const normalizedAssetClass = assetClass.trim().toUpperCase()
+  if (normalizedAssetClass === 'CRYPTO' || normalizedAssetClass === 'SPOT') return 'CRYPTO_SPOT'
+  if (normalizedAssetClass === 'INVERSE_PERP' || normalizedAssetClass === 'INVERSE_PERPETUAL') return 'INVERSE_PERP'
+  if (['LINEAR_PERP', 'LINEAR_PERPETUAL', 'PERPETUAL', 'SWAP', 'FUTURES', 'CONTRACT'].includes(normalizedAssetClass)) {
+    return 'LINEAR_PERP'
+  }
+  return 'FX_MARGIN'
 }
 
 function paymentMethodPayload(payload: Record<string, unknown>) {
@@ -1170,6 +1187,7 @@ function paymentAccountFields() {
 
 function productFields() {
   return [
+    { key: 'productType', label: 'Product Type', component: 'select', options: productTypeOptions() },
     { key: 'symbol', label: '产品代码', component: 'input', options: [] },
     { key: 'displayName', label: '产品名称', component: 'input', options: [] },
     { key: 'provider', label: '行情源', component: 'input', options: [] },
@@ -1224,6 +1242,15 @@ function booleanOptions() {
   return [
     { label: '启用', value: 'true' },
     { label: '停用', value: 'false' }
+  ]
+}
+
+function productTypeOptions() {
+  return [
+    { label: 'FX_MARGIN', value: 'FX_MARGIN' },
+    { label: 'CRYPTO_SPOT', value: 'CRYPTO_SPOT' },
+    { label: 'LINEAR_PERP', value: 'LINEAR_PERP' },
+    { label: 'INVERSE_PERP', value: 'INVERSE_PERP' }
   ]
 }
 

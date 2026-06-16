@@ -37,7 +37,7 @@ public record AdminDataProviderResponse(
         entity.getPriority(),
         entity.getTimeoutMs(),
         entity.getRateLimitPerMinute(),
-        entity.getHealthStatus(),
+        entity.getHealthStatus() == null ? null : entity.getHealthStatus().code(),
         entity.getLastHealthCheckAt(),
         entity.getConfigJson(),
         capabilities,

@@ -95,13 +95,22 @@ public class QuoteService {
 
   private QuoteResponse fetchLatest(String symbol) {
     try {
-      return marketDataRouter.latestQuote(symbol);
+      QuoteResponse quote = marketDataRouter.latestQuote(symbol);
+      if (demoQuotesEnabled && isStale(quote)) {
+        return mockQuote(symbol);
+      }
+      return quote;
     } catch (BusinessException ex) {
-      if (!demoQuotesEnabled || !"MARKET_PROVIDER_UNAVAILABLE".equals(ex.getCode())) {
+      if (!demoQuotesEnabled || !allowsDemoFallback(ex.getCode())) {
         throw ex;
       }
       return mockQuote(symbol);
     }
+  }
+
+  private boolean allowsDemoFallback(String code) {
+    return "MARKET_PROVIDER_UNAVAILABLE".equals(code)
+        || "MARKET_PROVIDER_BINDING_NOT_FOUND".equals(code);
   }
 
   private boolean isStale(QuoteResponse quote) {

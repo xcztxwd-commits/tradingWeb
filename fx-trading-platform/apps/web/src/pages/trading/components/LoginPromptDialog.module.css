@@ -171,6 +171,88 @@
   transform: scale(0.985);
 }
 
+:global(:root[data-theme='minimal-white']) .layer {
+  background: rgb(15 23 42 / 0.32);
+}
+
+:global(:root[data-theme='minimal-white']) .dialog {
+  border-color: #d8e0eb;
+  background: #ffffff;
+  color: #334155;
+  box-shadow: 0 28px 90px rgb(15 23 42 / 0.18);
+}
+
+:global(:root[data-theme='minimal-white']) .closeButton {
+  color: #64748b;
+}
+
+:global(:root[data-theme='minimal-white']) .closeButton:hover,
+:global(:root[data-theme='minimal-white']) .closeButton:focus-visible {
+  border-color: #cbd5e1;
+  background: #f4f7fb;
+  color: #111827;
+}
+
+:global(:root[data-theme='minimal-white']) .icon {
+  border-color: #d8e0eb;
+  background: #f8fafc;
+  color: #111827;
+}
+
+:global(:root[data-theme='minimal-white']) .eyebrow {
+  color: #047857;
+}
+
+:global(:root[data-theme='minimal-white']) .dialog h2 {
+  color: #111827;
+}
+
+:global(:root[data-theme='minimal-white']) .summary {
+  color: #475569;
+}
+
+:global(:root[data-theme='minimal-white']) .featureGrid span {
+  border-color: #d8e0eb;
+  background: #f8fafc;
+  color: #111827;
+}
+
+:global(:root[data-theme='minimal-white']) .error {
+  border-color: rgb(190 18 60 / 0.28);
+  background: rgb(190 18 60 / 0.08);
+  color: #be123c;
+}
+
+:global(:root[data-theme='minimal-white']) .primaryButton {
+  border-color: #111827;
+  background: #111827;
+  color: #ffffff;
+}
+
+:global(:root[data-theme='minimal-white']) .secondaryButton {
+  border-color: #cbd5e1;
+  background: #ffffff;
+  color: #111827;
+}
+
+:global(:root[data-theme='minimal-white']) .primaryButton:hover,
+:global(:root[data-theme='minimal-white']) .primaryButton:focus-visible {
+  background: #0f172a;
+  box-shadow: 0 0 0 3px rgb(15 23 42 / 0.12);
+}
+
+:global(:root[data-theme='minimal-white']) .secondaryButton:hover,
+:global(:root[data-theme='minimal-white']) .secondaryButton:focus-visible {
+  border-color: #94a3b8;
+  background: #f4f7fb;
+}
+
+:global(:root[data-theme='minimal-white']) .closeButton:focus-visible,
+:global(:root[data-theme='minimal-white']) .primaryButton:focus-visible,
+:global(:root[data-theme='minimal-white']) .secondaryButton:focus-visible {
+  outline-color: rgb(17 24 39 / 0.28);
+}
+
 @keyframes loginPromptLayerIn {
   from {
     opacity: 0;

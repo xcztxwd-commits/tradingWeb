@@ -6,7 +6,7 @@ admin:
 
 market:
   demo-quotes:
-    enabled: ${MARKET_DEMO_QUOTES_ENABLED:true}
+    enabled: ${MARKET_DEMO_QUOTES_ENABLED:false}
   test-data:
     enabled: ${MARKET_TEST_DATA_ENABLED:true}
 

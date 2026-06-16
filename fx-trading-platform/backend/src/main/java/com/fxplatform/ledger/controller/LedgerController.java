@@ -2,7 +2,7 @@ package com.fxplatform.ledger.controller;
 
 import com.fxplatform.common.response.ApiResponse;
 import com.fxplatform.common.security.UserPrincipal;
-import com.fxplatform.ledger.entity.LedgerEntryEntity;
+import com.fxplatform.ledger.dto.LedgerEntryResponse;
 import com.fxplatform.ledger.service.LedgerService;
 import java.util.List;
 import java.util.UUID;
@@ -27,10 +27,10 @@ public class LedgerController {
    * 处理 entries 查询接口请求。
    */
   @GetMapping
-  public ApiResponse<List<LedgerEntryEntity>> entries(
+  public ApiResponse<List<LedgerEntryResponse>> entries(
       @AuthenticationPrincipal UserPrincipal principal,
       @RequestParam UUID accountId
   ) {
-    return ApiResponse.success(ledgerService.entries(principal.id(), accountId));
+    return ApiResponse.success(ledgerService.visibleEntries(principal.id(), accountId));
   }
 }

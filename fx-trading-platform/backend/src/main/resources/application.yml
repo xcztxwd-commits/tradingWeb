@@ -57,6 +57,10 @@ binance:
 market:
   demo-quotes:
     enabled: ${MARKET_DEMO_QUOTES_ENABLED:false}
+  provider-instrument-sync:
+    enabled: ${MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED:true}
+    initial-delay-ms: ${MARKET_PROVIDER_INSTRUMENT_SYNC_INITIAL_DELAY_MS:60000}
+    fixed-delay-ms: ${MARKET_PROVIDER_INSTRUMENT_SYNC_FIXED_DELAY_MS:21600000}
   provider-symbol-cache-ttl-ms: ${MARKET_PROVIDER_SYMBOL_CACHE_TTL_MS:300000}
   provider-snapshot-cache-ttl-ms: ${MARKET_PROVIDER_SNAPSHOT_CACHE_TTL_MS:15000}
   quote-broadcast-enabled: ${MARKET_QUOTE_BROADCAST_ENABLED:false}
@@ -78,6 +82,15 @@ trading:
   stop-out-level: ${STOP_OUT_LEVEL:50}
   pending-order-execution-enabled: ${TRADING_PENDING_ORDER_EXECUTION_ENABLED:false}
   protective-order-execution-enabled: ${TRADING_PROTECTIVE_ORDER_EXECUTION_ENABLED:false}
+  funding:
+    enabled: ${TRADING_FUNDING_ENABLED:false}
+    scan-ms: ${TRADING_FUNDING_SCAN_MS:60000}
+  fx-financing:
+    enabled: ${TRADING_FX_FINANCING_ENABLED:false}
+    scan-ms: ${TRADING_FX_FINANCING_SCAN_MS:86400000}
+  liquidation:
+    enabled: ${TRADING_LIQUIDATION_ENABLED:false}
+    scan-interval-ms: ${TRADING_LIQUIDATION_SCAN_INTERVAL_MS:60000}
 
 management:
   endpoints:

@@ -1,6 +1,7 @@
 package com.fxplatform.admin.repository;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fxplatform.admin.enums.AdminFeatureRecordStatus;
 import com.fxplatform.admin.entity.AdminFeatureRecordEntity;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import java.util.List;
@@ -20,7 +21,7 @@ public interface AdminFeatureRecordRepository extends FxBaseMapper<AdminFeatureR
   default List<AdminFeatureRecordEntity> findActiveByPageKey(String pageKey) {
     return selectList(new LambdaQueryWrapper<AdminFeatureRecordEntity>()
         .eq(AdminFeatureRecordEntity::getPageKey, pageKey)
-        .ne(AdminFeatureRecordEntity::getStatus, "DELETED")
+        .ne(AdminFeatureRecordEntity::getStatus, AdminFeatureRecordStatus.DELETED)
         .orderByDesc(AdminFeatureRecordEntity::getCreatedAt));
   }
 

@@ -23,7 +23,7 @@ public record AdminImportTaskResponse(
     return new AdminImportTaskResponse(
         entity.getId(),
         entity.getPageKey(),
-        entity.getStatus(),
+        entity.getStatus() == null ? null : entity.getStatus().code(),
         entity.getFileName(),
         entity.getTotalRows(),
         entity.getSuccessRows(),

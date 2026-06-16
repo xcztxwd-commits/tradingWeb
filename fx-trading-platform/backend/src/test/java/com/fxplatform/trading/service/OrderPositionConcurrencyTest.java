@@ -14,6 +14,9 @@ import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.ExecutionAdapter;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.risk.service.PnLCalculator;
 import com.fxplatform.risk.service.RiskCheckService;
@@ -27,6 +30,7 @@ import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
+import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -125,10 +129,18 @@ class OrderPositionConcurrencyTest {
         "test",
         1780660000000L));
     PnLCalculator pnlCalculator = mock(PnLCalculator.class);
-    when(pnlCalculator.floatingPnl(OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
+    when(pnlCalculator.floatingPnl("EURUSD", "USD", OrderSide.BUY, new BigDecimal("0.10"), new BigDecimal("1.10020"), new BigDecimal("1.10120")))
         .thenReturn(new BigDecimal("10.00000000"));
     LedgerService ledgerService = mock(LedgerService.class);
-    PositionService service = new PositionService(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService);
+    SymbolRepository symbolRepository = mock(SymbolRepository.class);
+    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(forexSymbol()));
+    PositionService service = new PositionService(
+        positionRepository,
+        accountRepository,
+        quoteService,
+        pnlCalculator,
+        ledgerService,
+        symbolRepository);
 
     List<Attempt> attempts = runConcurrently(
         () -> service.closePosition(userId, accountId, positionId),
@@ -300,6 +312,7 @@ class OrderPositionConcurrencyTest {
         mock(ExecutionAdapter.class),
         new OrderFillService(orderRepository, mock(TradeRepository.class), mock(PositionRepository.class), accountRepository, ledgerService),
         ledgerService,
+        mock(WalletService.class),
         mock(OrderEventService.class),
         new OrderCommandFactory(),
         new OrderEntityFactory(),
@@ -327,6 +340,7 @@ class OrderPositionConcurrencyTest {
     TradingAccountEntity account = new TradingAccountEntity();
     account.setId(accountId);
     account.setUserId(userId);
+    account.setBaseCurrency("USD");
     account.setBalance(balance);
     account.setEquity(balance);
     account.setUsedMargin(usedMargin);
@@ -371,6 +385,18 @@ class OrderPositionConcurrencyTest {
     position.setRealizedPnl(BigDecimal.ZERO);
     position.setStatus(PositionStatus.OPEN);
     return position;
+  }
+
+  private static SymbolEntity forexSymbol() {
+    SymbolEntity symbol = new SymbolEntity();
+    symbol.setSymbol("EURUSD");
+    symbol.setProductType(ProductType.FX_MARGIN);
+    symbol.setAssetClass("FOREX");
+    symbol.setBaseCurrency("EUR");
+    symbol.setQuoteCurrency("USD");
+    symbol.setLotSize(new BigDecimal("100000"));
+    symbol.setLeverage(100);
+    return symbol;
   }
 
   private static TradingAccountEntity copy(TradingAccountEntity source) {

@@ -30,6 +30,23 @@ describe('data source admin pages', () => {
     assert.match(providerInstrumentsSource, /搜索 provider symbol/)
   })
 
+  it('can publish a provider instrument into platform symbol display and binding APIs', () => {
+    assert.match(providerInstrumentsSource, /createSymbol/)
+    assert.match(providerInstrumentsSource, /getSymbolsPage/)
+    assert.match(providerInstrumentsSource, /updateSymbolDisplay/)
+    assert.match(providerInstrumentsSource, /createSymbolProviderBinding/)
+    assert.match(providerInstrumentsSource, /updateSymbolProviderBinding/)
+    assert.match(providerInstrumentsSource, /publishProviderInstrument/)
+    assert.match(providerInstrumentsSource, /derivePlatformSymbol/)
+    assert.match(providerInstrumentsSource, /发布为平台品种/)
+  })
+
+  it('publishes provider instruments with explicit productType', () => {
+    assert.match(typesSource, /productType: ProductType/)
+    assert.match(providerInstrumentsSource, /productType: productTypeForAssetClass\(instrument\.assetClass\)/)
+    assert.match(providerInstrumentsSource, /function productTypeForAssetClass/)
+  })
+
   it('uses synced provider instruments as selectable binding inputs', () => {
     assert.match(symbolBindingsSource, /getProviderInstruments/)
     assert.match(symbolBindingsSource, /ProviderInstrumentRow/)

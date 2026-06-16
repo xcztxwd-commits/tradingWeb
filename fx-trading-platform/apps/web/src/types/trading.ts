@@ -48,6 +48,15 @@ export type AccountSummary = {
   status: string
 }
 
+export type WalletBalance = {
+  id: string
+  accountId: string
+  asset: string
+  total: Amount
+  available: Amount
+  locked: Amount
+}
+
 export type OrderPayload = {
   accountId: string
   symbol: string

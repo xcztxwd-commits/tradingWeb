@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fxplatform.finance.enums.PaymentAccountType;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
@@ -23,7 +24,7 @@ public class MemberPaymentAccountEntity {
   @TableId(value = "id", type = IdType.INPUT)
   private UUID id;
   private UUID userId;
-  private String accountType;
+  private PaymentAccountType accountType;
   private String currency;
   private String network;
   private String holderName;
@@ -36,4 +37,12 @@ public class MemberPaymentAccountEntity {
   private Instant createdAt;
   @TableField(fill = FieldFill.INSERT_UPDATE)
   private Instant updatedAt;
+
+  public void setAccountType(PaymentAccountType accountType) {
+    this.accountType = accountType;
+  }
+
+  public void setAccountType(String accountType) {
+    this.accountType = PaymentAccountType.fromCode(accountType);
+  }
 }

@@ -27,6 +27,7 @@ public record PositionResponse(
     BigDecimal floatingPnlRatio,
     BigDecimal realizedPnl,
     BigDecimal marginHeld,
+    BigDecimal maintenanceMargin,
     BigDecimal maintenanceMarginRate,
     Integer adlLevel,
     String status,

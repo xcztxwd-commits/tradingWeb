@@ -12,11 +12,9 @@ import {
 } from './tradingSession'
 import { getSessionStatus } from '../../services/authApi'
 import type { SessionAuthStatus } from '../../services/authApi'
-import { subscribeQuote } from '../../services/marketStream'
 import type { PositionResponse, OrderResponse } from '../../components/tables/types'
-import type { AccountSummary, LedgerEntry, OrderPayload, UpdatePositionProtectionPayload } from '../../types/trading'
+import type { AccountSummary, LedgerEntry, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
 import { clearStoredAuthToken, readStoredAuthToken } from './tradingSessionStorage'
-import { repriceOpenPositionsForQuote } from './tradingSessionPositions'
 
 type Options = {
   refreshMs?: number
@@ -65,21 +63,13 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
   const [positions, setPositions] = useState<PositionResponse[]>([])
   const [positionHistory, setPositionHistory] = useState<PositionResponse[]>([])
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([])
+  const [walletBalances, setWalletBalances] = useState<WalletBalance[]>([])
   const [sessionReady, setSessionReady] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [sessionAuthStatus, setSessionAuthStatus] = useState<SessionAuthStatus>('guest')
   const [lastOrderError, setLastOrderError] = useState<unknown>(null)
   const [loginRequired, setLoginRequired] = useState(false)
   const accountId = useMemo(() => account?.id, [account])
-  const positionQuoteSymbolsKey = useMemo(() => {
-    return Array.from(new Set(
-      positions
-        .filter((position) => position.status.toUpperCase() === 'OPEN')
-        .map((position) => position.symbol)
-    ))
-      .sort()
-      .join('|')
-  }, [positions])
 
   const markSessionError = useCallback((error: unknown) => {
     setSessionError(formatTradingSessionError(error, t))
@@ -92,6 +82,7 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
     setPositions(data.positions)
     setPositionHistory(data.positionHistory)
     setLedgerEntries(data.ledgerEntries)
+    setWalletBalances(data.walletBalances)
     setSessionError(null)
   }, [])
 
@@ -111,6 +102,7 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
     setPositions([])
     setPositionHistory([])
     setLedgerEntries([])
+    setWalletBalances([])
     setSessionReady(false)
   }, [])
 
@@ -205,21 +197,6 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
     }
   }, [accountId, markSessionError, refreshAccountData, refreshMs, requireLogin, sessionReady, token])
 
-  useEffect(() => {
-    if (!sessionReady || !positionQuoteSymbolsKey) return
-
-    const unsubscribe = positionQuoteSymbolsKey
-      .split('|')
-      .filter(Boolean)
-      .map((symbol) => subscribeQuote(symbol, token, (quote) => {
-        setPositions((current) => repriceOpenPositionsForQuote(current, quote))
-      }))
-
-    return () => {
-      for (const unsubscribeSymbol of unsubscribe) unsubscribeSymbol()
-    }
-  }, [positionQuoteSymbolsKey, sessionReady, token])
-
   const submitOrder = useCallback(
     async (payload: OrderPayload) => {
       setLastOrderError(null)
@@ -273,6 +250,7 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
     positions,
     positionHistory,
     ledgerEntries,
+    walletBalances,
     sessionReady,
     sessionError,
     sessionAuthStatus,

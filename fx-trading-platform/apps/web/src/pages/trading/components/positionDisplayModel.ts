@@ -14,6 +14,10 @@ export type PositionDisplayRow = {
   breakEvenPrice: string
   floatingPnl: string
   floatingPnlTone: PositionPnlTone
+  realizedPnl: string
+  realizedPnlTone: PositionPnlTone
+  maintenanceMargin: string | null
+  showMaintenanceMargin: boolean
   maintenanceMarginRate: string
   margin: string
   marginMode: string
@@ -29,6 +33,8 @@ type Translate = (key: string, options?: Record<string, unknown>) => string
 const defaultTranslate: Translate = (key) => key
 
 export function createPositionDisplayRow(position: PositionResponse, t: Translate = defaultTranslate): PositionDisplayRow {
+  const showMaintenanceMargin = !isSpotPosition(position)
+
   return {
     id: position.id,
     instrument: formatInstrument(position, t),
@@ -40,8 +46,12 @@ export function createPositionDisplayRow(position: PositionResponse, t: Translat
     breakEvenPrice: formatDecimal(position.breakEvenPrice ?? position.openPrice),
     floatingPnl: formatFloatingPnl(position),
     floatingPnlTone: pnlTone(position.floatingPnl),
+    realizedPnl: formatPnlAmount(position.realizedPnl, position),
+    realizedPnlTone: pnlTone(position.realizedPnl),
+    maintenanceMargin: showMaintenanceMargin ? formatMaintenanceMargin(position.maintenanceMargin, position) : null,
+    showMaintenanceMargin,
     maintenanceMarginRate: formatPercent(position.maintenanceMarginRate),
-    margin: `${formatDecimal(position.marginHeld)} ${settlementCurrency(position.symbol)}`,
+    margin: `${formatDecimal(position.marginHeld)} ${settlementCurrency(position)}`,
     marginMode: marginModeLabel(position.marginMode, t),
     stopLoss: formatDecimal(position.stopLoss),
     takeProfit: formatDecimal(position.takeProfit),
@@ -60,6 +70,8 @@ function instrumentTypeLabel(type: string | null | undefined, t: Translate) {
   const normalized = type?.toUpperCase()
   if (normalized === 'SWAP') return t('positions.instrumentTypes.swap')
   if (normalized === 'FUTURES') return t('positions.instrumentTypes.futures')
+  if (normalized === 'SPOT') return t('positions.instrumentTypes.spot')
+  if (normalized === 'FOREX') return t('positions.instrumentTypes.forex')
   return ''
 }
 
@@ -77,8 +89,19 @@ function unitLabel(unit: string | null | undefined, t: Translate) {
 function formatFloatingPnl(position: PositionResponse) {
   const amount = formatDecimal(position.floatingPnl)
   const ratio = formatPercent(position.floatingPnlRatio)
-  const currency = settlementCurrency(position.symbol)
+  const currency = settlementCurrency(position)
   return ratio === '--' ? `${amount} ${currency}` : `${amount} ${currency} (${ratio})`
+}
+
+function formatPnlAmount(value: Amount, position: PositionResponse) {
+  return `${formatDecimal(value)} ${settlementCurrency(position)}`
+}
+
+function formatMaintenanceMargin(value: Amount | null | undefined, position: PositionResponse) {
+  const amount = formatDecimal(value)
+  if (amount === '--') return amount
+  const currency = settlementCurrency(position)
+  return currency ? `${amount} ${currency}` : amount
 }
 
 function formatPercent(value?: Amount | null) {
@@ -119,11 +142,19 @@ function pnlTone(value?: Amount | null): PositionPnlTone {
   return numeric > 0 ? 'positive' : 'negative'
 }
 
-function settlementCurrency(symbol: string) {
-  const normalized = symbol.toUpperCase()
+function settlementCurrency(position: PositionResponse) {
+  const normalized = position.symbol.toUpperCase()
+  const instrumentType = position.instrumentType?.toUpperCase()
+  if (instrumentType === 'SWAP' && normalized.endsWith('USD') && !normalized.endsWith('USDT') && !normalized.endsWith('USDC')) {
+    return normalized.slice(0, -3)
+  }
   if (normalized.endsWith('USDT')) return 'USDT'
   if (normalized.endsWith('USD')) return 'USD'
   return ''
+}
+
+function isSpotPosition(position: PositionResponse) {
+  return position.instrumentType?.toUpperCase() === 'SPOT'
 }
 
 function marginModeLabel(mode: string | null | undefined, t: Translate) {

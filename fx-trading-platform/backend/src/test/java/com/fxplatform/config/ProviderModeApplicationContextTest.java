@@ -23,14 +23,24 @@ class ProviderModeApplicationContextTest {
   }
 
   @Test
-  void devProfileDefaultsToDemoProvidersForLocalSmoke() {
+  void devProfileDoesNotEnableDemoQuotesUnlessExplicitlyConfigured() {
     contextRunner()
         .withPropertyValues("spring.profiles.active=dev")
         .run(context -> {
-          assertThat(context.getEnvironment().getProperty("market.demo-quotes.enabled", Boolean.class)).isTrue();
+          assertThat(context.getEnvironment().getProperty("market.demo-quotes.enabled", Boolean.class)).isFalse();
           assertThat(context.getEnvironment().getProperty("market.test-data.enabled", Boolean.class)).isTrue();
           assertThat(context.getEnvironment().getProperty("execution.mode")).isEqualTo("demo");
         });
+  }
+
+  @Test
+  void envOverrideCanEnableDevDemoQuotes() {
+    contextRunner()
+        .withPropertyValues(
+            "spring.profiles.active=dev",
+            "MARKET_DEMO_QUOTES_ENABLED=true")
+        .run(context ->
+            assertThat(context.getEnvironment().getProperty("market.demo-quotes.enabled", Boolean.class)).isTrue());
   }
 
   @Test

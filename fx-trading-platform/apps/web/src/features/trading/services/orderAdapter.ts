@@ -32,7 +32,7 @@ function normalizeLeverage(leverage: number | undefined) {
 
 function getLots(form: TradeFormState, market: TradeMarket) {
   if (Number(form.amount) > 0) return form.amount
-  if (form.side !== 'buy' || form.orderType !== 'market') return form.amount
+  if (form.side !== 'buy' || form.orderType !== 'market' || market.quantityMode !== 'quote-budget') return form.amount
 
   const marketPrice = market.lastPrice > 0 ? market.lastPrice : market.bestAsk
   const total = Number(form.total)

@@ -47,6 +47,7 @@ export type PositionResponse = {
   floatingPnlRatio?: Amount | null
   realizedPnl: Amount
   marginHeld: Amount
+  maintenanceMargin?: Amount | null
   maintenanceMarginRate?: Amount | null
   adlLevel?: number | null
   status: string

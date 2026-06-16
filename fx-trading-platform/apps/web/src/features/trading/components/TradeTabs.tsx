@@ -10,10 +10,16 @@ export function TradeTabs({ onToolsUnavailable }: Props) {
   return (
     <div className="trade-panel__top-tabs" role="tablist" aria-label={t('trading.panel')}>
       <button type="button" className="trade-panel__top-tab trade-panel__top-tab--active" role="tab" aria-selected="true">
-        {t('trading.trade')}
+        {t('trading.spot')}
       </button>
       <button type="button" className="trade-panel__top-tab" role="tab" aria-selected="false" onClick={onToolsUnavailable}>
-        {t('trading.tools')}
+        {t('trading.crossMargin')}
+      </button>
+      <button type="button" className="trade-panel__top-tab" role="tab" aria-selected="false" onClick={onToolsUnavailable}>
+        {t('trading.isolatedMargin')}
+      </button>
+      <button type="button" className="trade-panel__top-tab" role="tab" aria-selected="false" onClick={onToolsUnavailable}>
+        {t('trading.gridTrading')}
       </button>
     </div>
   )

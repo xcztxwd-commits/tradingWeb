@@ -13,6 +13,8 @@ import com.fxplatform.audit.service.AuditDetailsBuilder;
 import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.finance.entity.FundOrderEntity;
+import com.fxplatform.finance.enums.FundOrderStatus;
+import com.fxplatform.finance.enums.FundOrderType;
 import com.fxplatform.finance.repository.FundOrderRepository;
 import java.util.List;
 import java.util.Map;
@@ -44,12 +46,15 @@ public class AdminFundOrderService {
     QueryWrapper<FundOrderEntity> wrapper = new QueryWrapper<>();
     String effectiveType = StrUtil.blankToDefault(orderType, query.filter("orderType"));
     if (StrUtil.isNotBlank(effectiveType)) {
-      wrapper.eq("order_type", normalizeType(effectiveType));
+      wrapper.eq("order_type", FundOrderType.fromCode(effectiveType).code());
     }
     AdminFeatureQuerySupport.eqUuidIfPresent(wrapper, query, "userId", "user_id");
     AdminFeatureQuerySupport.eqUuidIfPresent(wrapper, query, "uid", "user_id");
     AdminFeatureQuerySupport.eqUuidIfPresent(wrapper, query, "accountId", "account_id");
-    AdminFeatureQuerySupport.eqIfPresent(wrapper, query, "status", "status");
+    String effectiveStatus = query.filter("status");
+    if (StrUtil.isNotBlank(effectiveStatus)) {
+      wrapper.eq("status", FundOrderStatus.fromCode(effectiveStatus).code());
+    }
     AdminFeatureQuerySupport.eqIfPresent(wrapper, query, "currency", "currency");
     AdminFeatureQuerySupport.applyOrder(wrapper, query, Map.of(
         "userId", "user_id",
@@ -72,12 +77,12 @@ public class AdminFundOrderService {
     FundOrderEntity order = new FundOrderEntity();
     order.setUserId(request.userId());
     order.setAccountId(request.accountId());
-    order.setOrderType(normalizeType(request.orderType()));
+    order.setOrderType(FundOrderType.fromCode(request.orderType()));
     order.setAmount(request.amount());
     order.setCurrency(request.currency());
     order.setPaymentMethodId(request.paymentMethodId());
     order.setApplicantNote(request.note());
-    order.setStatus("PENDING_REVIEW");
+    order.setStatus(FundOrderStatus.PENDING_REVIEW);
     order.setCreatedBy(actorUserId);
     FundOrderEntity saved = fundOrderRepository.save(order);
     audit(actorUserId, "ADMIN_FUND_ORDER_CREATE", saved, request.note());
@@ -93,13 +98,13 @@ public class AdminFundOrderService {
       throw new BusinessException("FUND_ORDER_ALREADY_REVIEWED", "Fund order already reviewed");
     }
 
-    String status = normalizeReviewStatus(request.status());
+    FundOrderStatus status = FundOrderStatus.fromReviewCode(request.status());
     order.setStatus(status);
     order.setReviewReason(request.reason());
     order.setReviewedBy(actorUserId);
     order.setReviewedAt(DateUtil.date().toInstant());
 
-    if ("APPROVED".equals(status)) {
+    if (status.isApproved()) {
       AdminFundOperationResponse operation = applyApprovedOrder(actorUserId, order, request.reason());
       order.setFundOperationId(operation.id());
       audit(actorUserId, "ADMIN_FUND_ORDER_APPROVE", order, request.reason());
@@ -116,41 +121,21 @@ public class AdminFundOrderService {
         order.getPaymentMethodId(),
         order.getApplicantNote(),
         "fund-order-" + order.getId());
-    if ("RECHARGE".equals(order.getOrderType())) {
+    if (order.getOrderType() == FundOrderType.RECHARGE) {
       return financeCommandService.deposit(actorUserId, order.getAccountId(), operationRequest);
     }
     return financeCommandService.withdraw(actorUserId, order.getAccountId(), operationRequest);
   }
 
-  private String normalizeType(String orderType) {
-    if ("DEPOSIT".equalsIgnoreCase(orderType) || "RECHARGE".equalsIgnoreCase(orderType)) {
-      return "RECHARGE";
-    }
-    if ("WITHDRAW".equalsIgnoreCase(orderType) || "WITHDRAWAL".equalsIgnoreCase(orderType)) {
-      return "WITHDRAWAL";
-    }
-    throw new BusinessException("INVALID_FUND_ORDER_TYPE", "Invalid fund order type");
-  }
-
-  private String normalizeReviewStatus(String status) {
-    if ("APPROVED".equalsIgnoreCase(status) || "通过".equals(status)) {
-      return "APPROVED";
-    }
-    if ("REJECTED".equalsIgnoreCase(status) || "拒绝".equals(status)) {
-      return "REJECTED";
-    }
-    throw new BusinessException("INVALID_FUND_ORDER_STATUS", "Invalid fund order status");
-  }
-
-  private boolean isPendingReview(String status) {
-    return "PENDING_REVIEW".equals(status) || "PENDING".equals(status);
+  private boolean isPendingReview(FundOrderStatus status) {
+    return status != null && status.isPendingReview();
   }
 
   private void audit(UUID actorUserId, String action, FundOrderEntity order, String reason) {
     auditLogService.record(actorUserId, action, "FUND_ORDER", order.getId().toString(),
         AuditDetailsBuilder.create()
-            .put("orderType", order.getOrderType())
-            .put("status", order.getStatus())
+            .put("orderType", order.getOrderType() == null ? null : order.getOrderType().code())
+            .put("status", order.getStatus() == null ? null : order.getStatus().code())
             .put("reason", reason)
             .toJson());
   }

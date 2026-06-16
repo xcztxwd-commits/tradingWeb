@@ -1,6 +1,6 @@
 import type { OrderResponse, PositionResponse } from '../../components/tables/types'
 import { parseSymbolAssets } from '../trading/utils/symbols.ts'
-import type { AccountSummary, OrderPayload } from '../../types/trading'
+import type { AccountSummary, OrderPayload, WalletBalance } from '../../types/trading'
 
 export type TradingBalances = Record<string, number>
 
@@ -20,8 +20,19 @@ export function createLocalPreviewOrder(payload: OrderPayload, createdAt = new D
 export function deriveTradingBalances(
   account: AccountSummary | undefined,
   positions: PositionResponse[],
-  symbol: string
+  symbol: string,
+  walletBalances: WalletBalance[] = []
 ): TradingBalances {
+  if (walletBalances.length > 0) {
+    return walletBalances.reduce<TradingBalances>((balances, wallet) => {
+      const asset = wallet.asset.trim().toUpperCase()
+      if (asset) {
+        balances[asset] = amountToNumber(wallet.available)
+      }
+      return balances
+    }, {})
+  }
+
   const balances: TradingBalances = {}
   const { baseAsset, quoteAsset } = parseSymbolAssets(symbol)
 

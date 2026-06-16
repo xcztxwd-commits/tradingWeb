@@ -6,7 +6,22 @@ const fallbackCounters: HomeCounters = {
   users: 321443508,
   activeTraders: 18420,
   dailyTrades: 726340,
-  metricCards: []
+  metricCards: [
+    {
+      slot: 'asset',
+      frontRank: 'No.1',
+      frontLabel: '客户资产',
+      backTitle: '资产',
+      backValue: '$134,166,872,529'
+    },
+    {
+      slot: 'volume',
+      frontRank: 'No.1',
+      frontLabel: '交易量',
+      backTitle: '24H',
+      backValue: '$44,301,728,218'
+    }
+  ]
 }
 
 export function useHomeCounters() {

@@ -15,10 +15,13 @@ import com.fxplatform.market.entity.PriceAdjustmentEntity;
 import com.fxplatform.market.entity.SymbolAdminEventEntity;
 import com.fxplatform.market.entity.SymbolCategoryEntity;
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.enums.PriceAdjustmentStatus;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.PriceAdjustmentRepository;
 import com.fxplatform.market.repository.SymbolAdminEventRepository;
 import com.fxplatform.market.repository.SymbolCategoryRepository;
 import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.market.service.SymbolProductTypes;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -170,7 +173,7 @@ public class AdminMarketCommandService {
     adjustment.setTargetPrice(request.targetPrice());
     adjustment.setStartsAt(request.startsAt());
     adjustment.setEndsAt(request.endsAt());
-    adjustment.setStatus("SCHEDULED");
+    adjustment.setStatus(PriceAdjustmentStatus.SCHEDULED);
     adjustment.setAdminUserId(actorUserId);
     adjustment.setReason(request.reason());
     PriceAdjustmentEntity saved = priceAdjustmentRepository.save(adjustment);
@@ -200,23 +203,25 @@ public class AdminMarketCommandService {
   ) {
     PriceAdjustmentEntity adjustment = priceAdjustmentRepository.findById(adjustmentId)
         .orElseThrow(() -> new BusinessException("PRICE_ADJUSTMENT_NOT_FOUND", "Price adjustment not found"));
-    if ("CANCELED".equalsIgnoreCase(adjustment.getStatus())) {
+    if (adjustment.getStatus() != null && adjustment.getStatus().isCanceled()) {
       return AdminPriceAdjustmentResponse.from(adjustment);
     }
-    String before = adjustment.getStatus();
-    adjustment.setStatus("CANCELED");
+    String before = adjustment.getStatus() == null ? null : adjustment.getStatus().code();
+    adjustment.setStatus(PriceAdjustmentStatus.CANCELED);
     PriceAdjustmentEntity saved = priceAdjustmentRepository.save(adjustment);
     auditLogService.record(
         actorUserId,
         "ADMIN_PRICE_ADJUSTMENT_CANCEL",
         "PRICE_ADJUSTMENT",
         saved.getId().toString(),
-        details(request.reason(), before, "CANCELED"));
+        details(request.reason(), before, PriceAdjustmentStatus.CANCELED.code()));
     return AdminPriceAdjustmentResponse.from(saved);
   }
 
   /** 将产品请求写入实体，新增和编辑共用，减少字段遗漏。 */
   private void applySymbol(SymbolEntity symbol, AdminSymbolRequest request) {
+    ProductType productType = SymbolProductTypes.requireExplicit(request.productType());
+    SymbolProductTypes.validateAssetClassCompatibility(productType, request.assetClass());
     symbol.setSymbol(request.symbol());
     symbol.setDisplayName(request.displayName());
     symbol.setProvider(request.provider() == null || request.provider().isBlank() ? "massive" : request.provider());
@@ -224,6 +229,7 @@ public class AdminMarketCommandService {
         ? request.symbol()
         : request.providerSymbol());
     symbol.setAssetClass(request.assetClass());
+    symbol.setProductType(productType);
     symbol.setBaseCurrency(request.baseCurrency());
     symbol.setQuoteCurrency(request.quoteCurrency());
     symbol.setPipSize(request.pipSize());

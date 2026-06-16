@@ -268,7 +268,6 @@ select option:checked {
   display: flex;
   align-items: center;
   gap: 14px;
-  border-bottom: 1px solid var(--bn-line);
   background: var(--bn-bg);
   color: var(--bn-text);
   padding: 0 24px;
@@ -2683,9 +2682,6 @@ th {
 
 .trading-nav-menu__panel,
 .account-user-menu__panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  right: 0;
   z-index: 60;
   min-width: 260px;
   border: 1px solid rgb(148 163 184 / 0.18);
@@ -2697,8 +2693,20 @@ th {
 }
 
 .trading-nav-menu__panel {
+  position: absolute;
+  top: calc(100% + 10px);
   left: 0;
   right: auto;
+}
+
+.account-user-menu__panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  right: auto;
+  width: 260px;
+  transform: translateX(-50%);
+  animation: accountUserMenuIn 140ms ease both;
 }
 
 .trading-nav-menu__panel button,
@@ -3765,9 +3773,20 @@ th {
   }
 }
 
+@keyframes accountUserMenuIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
 @media (max-width: 900px) {
-  .trading-nav-menu__panel,
-  .account-user-menu__panel {
+  .trading-nav-menu__panel {
     right: 0;
     left: auto;
     max-width: min(320px, calc(100vw - 24px));

@@ -1,56 +1,63 @@
-import { ChevronDown } from 'lucide-react'
-import { useState } from 'react'
+import { Check, ChevronDown } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { strategyOptions } from '../types/order'
-import type { StrategyType } from '../types/order'
+import type { PrimaryOrderType } from '../types/order'
 
 type Props = {
-  value: StrategyType
-  onChange: (value: StrategyType) => void
-  onUnavailable: (label: string) => void
+  active: boolean
+  orderType: PrimaryOrderType
+  onChange: (value: PrimaryOrderType) => void
 }
 
-export function StrategyDropdown({ value, onChange, onUnavailable }: Props) {
+const strategyChoices: Array<{ id: 'limit_tp_sl' | 'market_tp_sl'; orderType: PrimaryOrderType; labelKey: string }> = [
+  { id: 'limit_tp_sl', orderType: 'limit', labelKey: 'trading.limitTpSl' },
+  { id: 'market_tp_sl', orderType: 'market', labelKey: 'trading.marketTpSl' }
+]
+
+export function StrategyDropdown({ active, orderType, onChange }: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  const selected = strategyOptions.find((option) => option.value === value)
+  const selected = active
+    ? strategyChoices.find((option) => option.orderType === orderType) ?? strategyChoices[0]
+    : strategyChoices[0]
+
+  useEffect(() => {
+    setOpen(false)
+  }, [active, orderType])
 
   return (
     <div className="trade-panel__strategy">
       <button
         type="button"
-        className={`trade-panel__order-tab ${value !== 'none' ? 'trade-panel__order-tab--active' : ''}`}
+        className={`trade-panel__order-tab ${active ? 'trade-panel__order-tab--active' : ''}`}
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        {selected ? t(selected.labelKey) : t('trading.strategy.tpSl')}
+        {t(selected.labelKey)}
         <ChevronDown size={14} aria-hidden="true" />
       </button>
 
       {open ? (
         <div className="trade-panel__strategy-menu" role="menu">
-          {strategyOptions.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`trade-panel__strategy-item ${
-                option.value === value ? 'trade-panel__strategy-item--active' : ''
-              } ${option.available ? '' : 'trade-panel__strategy-item--disabled'}`}
-              role="menuitem"
-              aria-disabled={!option.available}
-              onClick={() => {
-                setOpen(false)
-                if (!option.available) {
-                  onUnavailable(t(option.labelKey))
-                  return
-                }
-                onChange(option.value)
-              }}
-            >
-              {t(option.labelKey)}
-            </button>
-          ))}
+          {strategyChoices.map((option) => {
+            const optionActive = active && option.orderType === orderType
+            return (
+              <button
+                key={option.id}
+                type="button"
+                className={`trade-panel__strategy-item ${optionActive ? 'trade-panel__strategy-item--active' : ''}`}
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false)
+                  onChange(option.orderType)
+                }}
+              >
+                <span>{t(option.labelKey)}</span>
+                {optionActive ? <Check size={14} aria-hidden="true" /> : null}
+              </button>
+            )
+          })}
         </div>
       ) : null}
     </div>

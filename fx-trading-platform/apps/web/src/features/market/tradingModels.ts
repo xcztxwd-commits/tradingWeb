@@ -36,6 +36,8 @@ export type TradingCandle = {
 
 export type MarketCategory = 'all' | 'favorites' | 'fx' | 'crypto' | 'metals' | 'indices'
 
+export type ProductType = 'FX_MARGIN' | 'CRYPTO_SPOT' | 'LINEAR_PERP' | 'INVERSE_PERP'
+
 export type MarketListItem = {
   symbol: string
   base: string
@@ -55,12 +57,14 @@ export type TradingMarket = MarketListItem & {
   low24h: number
   spread: number
   source: string
+  productType?: ProductType
   provider?: string
   providerSymbol?: string
   tradable?: boolean
   chartEnabled?: boolean
   orderBookEnabled?: boolean
   minLot?: string
+  leverage?: number
   pricePrecision?: number
   quantityPrecision?: number
   marketCap?: number

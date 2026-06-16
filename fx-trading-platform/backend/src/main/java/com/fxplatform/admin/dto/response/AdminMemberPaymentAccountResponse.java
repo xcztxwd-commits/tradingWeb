@@ -26,7 +26,7 @@ public record AdminMemberPaymentAccountResponse(
     return new AdminMemberPaymentAccountResponse(
         entity.getId(),
         entity.getUserId(),
-        entity.getAccountType(),
+        entity.getAccountType() == null ? null : entity.getAccountType().code(),
         entity.getCurrency(),
         entity.getNetwork(),
         entity.getHolderName(),

@@ -2,6 +2,7 @@ package com.fxplatform.admin.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import com.fxplatform.market.model.ProductType;
 import java.math.BigDecimal;
 
 /**
@@ -29,6 +30,7 @@ public record AdminSymbolRequest(
     String provider,
     String providerSymbol,
     @NotBlank String assetClass,
+    @NotNull ProductType productType,
     @NotBlank String baseCurrency,
     @NotBlank String quoteCurrency,
     @NotNull BigDecimal pipSize,

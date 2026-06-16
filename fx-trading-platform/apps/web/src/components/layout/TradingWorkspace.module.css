@@ -95,6 +95,10 @@
   cursor: grabbing;
 }
 
+.tradePanel .dragHandle {
+  display: none;
+}
+
 .mobileChartToggle {
   display: none;
 }
@@ -146,10 +150,15 @@
 }
 
 .tradePanel :global(.trade-panel) {
-  height: 100%;
-  overflow: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--trading-border-strong) var(--trading-page-bg);
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
+
+.tradePanel .panelShell,
+.tradePanel .panelContent {
+  height: auto;
+  overflow: visible;
 }
 
 .tradePanel :global(.trade-panel__header) {
@@ -159,13 +168,12 @@
 
 .tradePanel :global(.trade-panel__header-actions),
 .tradePanel :global(.trade-panel__order-tabs) {
-  justify-content: space-between;
+  justify-content: flex-start;
 }
 
 .tradePanel :global(.trade-panel__order-tabs) {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
+  display: flex;
+  gap: 18px;
   overflow: visible;
 }
 
@@ -189,15 +197,15 @@
 }
 
 .tradePanel :global(.trade-panel__order-tab) {
-  width: 100%;
+  width: auto;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 3px;
-  border: 1px solid var(--tp-border);
-  border-radius: 6px;
-  background: var(--tp-surface-2);
-  padding: 0 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -207,9 +215,7 @@
 }
 
 .tradePanel :global(.trade-panel__mobile-sides) {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  display: none;
 }
 
 .tradePanel :global(.trade-panel__mobile-sides button) {
@@ -228,8 +234,8 @@
 }
 
 .tradePanel :global(.trade-panel__forms) {
-  grid-template-columns: 1fr;
-  gap: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
 }
 
 .tradePanel :global(.trade-panel__leverage-row),
@@ -253,7 +259,7 @@
 
 .tradePanel :global(.trade-panel--mobile-buy .trade-panel__side--sell),
 .tradePanel :global(.trade-panel--mobile-sell .trade-panel__side--buy) {
-  display: none;
+  display: grid;
 }
 
 .tradePanel :global(.trade-panel__tpsl-grid),
@@ -328,6 +334,22 @@
 
   .tradePanel :global(.trade-panel__order-tabs) {
     padding-bottom: 5px;
+  }
+
+  .tradePanel :global(.trade-panel__forms) {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .tradePanel :global(.trade-panel__mobile-sides) {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .tradePanel :global(.trade-panel--mobile-buy .trade-panel__side--sell),
+  .tradePanel :global(.trade-panel--mobile-sell .trade-panel__side--buy) {
+    display: none;
   }
 
   .tradePanel :global(.trade-panel__top-tabs) {

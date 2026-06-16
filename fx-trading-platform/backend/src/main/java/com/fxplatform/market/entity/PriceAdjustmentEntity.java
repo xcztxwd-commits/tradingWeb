@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fxplatform.market.enums.PriceAdjustmentStatus;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -30,10 +31,18 @@ public class PriceAdjustmentEntity {
   private BigDecimal targetPrice;
   private Instant startsAt;
   private Instant endsAt;
-  private String status = "SCHEDULED";
+  private PriceAdjustmentStatus status = PriceAdjustmentStatus.SCHEDULED;
   private UUID adminUserId;
   private String reason;
 
   @TableField(fill = FieldFill.INSERT)
   private Instant createdAt;
+
+  public void setStatus(PriceAdjustmentStatus status) {
+    this.status = status;
+  }
+
+  public void setStatus(String status) {
+    this.status = PriceAdjustmentStatus.fromCode(status);
+  }
 }

@@ -21,7 +21,7 @@ public record AdminExportTaskResponse(
     return new AdminExportTaskResponse(
         entity.getId(),
         entity.getPageKey(),
-        entity.getStatus(),
+        entity.getStatus() == null ? null : entity.getStatus().code(),
         entity.getFilterJson(),
         entity.getFileUrl(),
         entity.getCreatedBy(),

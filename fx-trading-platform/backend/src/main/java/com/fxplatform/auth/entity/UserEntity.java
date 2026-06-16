@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fxplatform.auth.enums.KycStatus;
 import com.fxplatform.auth.enums.UserRole;
 import com.fxplatform.auth.enums.UserStatus;
 import java.time.Instant;
@@ -29,7 +30,7 @@ public class UserEntity {
   private String passwordHash;
   private UserStatus status = UserStatus.ACTIVE;
   private UserRole role = UserRole.USER;
-  private String kycStatus = "NOT_SUBMITTED";
+  private KycStatus kycStatus = KycStatus.NOT_SUBMITTED;
   private String riskLevel = "NORMAL";
 
   @TableField(fill = FieldFill.INSERT)
@@ -37,4 +38,12 @@ public class UserEntity {
 
   @TableField(fill = FieldFill.INSERT_UPDATE)
   private Instant updatedAt;
+
+  public void setKycStatus(KycStatus kycStatus) {
+    this.kycStatus = kycStatus;
+  }
+
+  public void setKycStatus(String kycStatus) {
+    this.kycStatus = KycStatus.fromCode(kycStatus);
+  }
 }

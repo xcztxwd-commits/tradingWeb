@@ -12,6 +12,7 @@ import com.fxplatform.admin.repository.AdminUserNoteRepository;
 import com.fxplatform.audit.service.AuditDetailsBuilder;
 import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.auth.entity.UserEntity;
+import com.fxplatform.auth.enums.KycStatus;
 import com.fxplatform.auth.repository.UserRepository;
 import com.fxplatform.common.exception.BusinessException;
 import java.util.Map;
@@ -61,15 +62,16 @@ public class AdminUserService {
   @Transactional
   public AdminUserResponse reviewKyc(UUID actorUserId, UUID userId, AdminKycReviewRequest request) {
     UserEntity user = findUser(userId);
-    String before = user.getKycStatus();
-    user.setKycStatus(request.kycStatus());
+    String before = user.getKycStatus() == null ? null : user.getKycStatus().code();
+    KycStatus after = KycStatus.fromReviewCode(request.kycStatus());
+    user.setKycStatus(after);
     userRepository.save(user);
     auditLogService.record(
         actorUserId,
         "ADMIN_USER_KYC_REVIEW",
         "USER",
         userId.toString(),
-        details(request.reason(), before, request.kycStatus(), request.reviewNote()));
+        details(request.reason(), before, after.code(), request.reviewNote()));
     return AdminUserResponse.from(user);
   }
 

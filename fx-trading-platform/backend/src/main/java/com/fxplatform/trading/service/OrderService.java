@@ -20,6 +20,7 @@ import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.repository.OrderRepository;
+import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -39,6 +40,7 @@ public class OrderService {
   private final ExecutionAdapter executionAdapter;
   private final OrderFillService orderFillService;
   private final LedgerService ledgerService;
+  private final WalletService walletService;
   private final OrderEventService orderEventService;
   private final OrderCommandFactory orderCommandFactory;
   private final OrderEntityFactory orderEntityFactory;
@@ -82,7 +84,7 @@ public class OrderService {
       throw new BusinessException("ORDER_NOT_CANCELABLE", "Only pending orders can be canceled");
     }
     if (holdAmount.compareTo(BigDecimal.ZERO) > 0) {
-      releaseOrderHold(account, holdAmount, order.getId(), "Pending order canceled");
+      releaseOrderHold(account, order, holdAmount, "Pending order canceled", "Pending spot order canceled");
       order.setHoldAmount(BigDecimal.ZERO);
     }
     orderEventService.record(
@@ -110,6 +112,7 @@ public class OrderService {
 
     TradingAccountEntity account = requireOwnedAccount(principal.id(), order.getAccountId());
     BigDecimal oldHold = orZero(order.getHoldAmount());
+    boolean spotWalletHold = isSpotWalletHold(order);
     CreateOrderRequest riskRequest = new CreateOrderRequest(
         order.getAccountId(),
         order.getSymbol(),
@@ -125,11 +128,16 @@ public class OrderService {
         price,
         order.getLeverage());
     BigDecimal newHold = riskCheckService.checkOrder(accountForMarginCheck(account, oldHold), riskRequest);
+    String holdCurrency = spotWalletHold
+        ? riskCheckService.resolveHoldCurrency(account, riskRequest)
+        : account.getBaseCurrency();
     BigDecimal delta = newHold.subtract(oldHold);
     if (delta.compareTo(BigDecimal.ZERO) > 0) {
-      reserveOrderHold(account, delta, order.getId(), "Pending order margin increased");
+      reserveOrderHold(account, delta, holdCurrency, spotWalletHold, order.getId(),
+          "Pending order margin increased", "Pending spot order wallet increased");
     } else if (delta.compareTo(BigDecimal.ZERO) < 0) {
-      releaseOrderHold(account, delta.abs(), order.getId(), "Pending order margin decreased");
+      releaseOrderHold(account, order, delta.abs(),
+          "Pending order margin decreased", "Pending spot order wallet decreased");
     }
 
     order.setLots(quantity);
@@ -140,7 +148,7 @@ public class OrderService {
     order.setTakeProfit(update.takeProfit() != null ? update.takeProfit() : order.getTakeProfit());
     order.setRemainingQuantity(quantity.subtract(orZero(order.getFilledQuantity())));
     order.setHoldAmount(newHold);
-    order.setHoldCurrency(account.getBaseCurrency());
+    order.setHoldCurrency(holdCurrency);
     orderRepository.save(order);
     orderEventService.record(
         order.getId(),
@@ -163,6 +171,10 @@ public class OrderService {
 
     BigDecimal requiredMargin = riskCheckService.checkOrder(account, request);
     int effectiveLeverage = riskCheckService.resolveEffectiveLeverage(account, request);
+    boolean spotWalletHold = riskCheckService.isSpotSymbol(command.symbol());
+    String holdCurrency = spotWalletHold
+        ? riskCheckService.resolveHoldCurrency(account, request)
+        : account.getBaseCurrency();
     OrderEntity order = orderEntityFactory.createReceived(command);
     order.setLeverage(effectiveLeverage);
 
@@ -171,9 +183,10 @@ public class OrderService {
       order.setFilledQuantity(BigDecimal.ZERO);
       order.setRemainingQuantity(command.quantity());
       order.setHoldAmount(requiredMargin);
-      order.setHoldCurrency(account.getBaseCurrency());
+      order.setHoldCurrency(holdCurrency);
       orderRepository.save(order);
-      reserveOrderHold(account, requiredMargin, order.getId(), "Pending order margin reserved");
+      reserveOrderHold(account, requiredMargin, holdCurrency, spotWalletHold, order.getId(),
+          "Pending order margin reserved", "Pending spot order wallet locked");
       orderEventService.record(
           order.getId(),
           "ORDER_PENDING",
@@ -250,27 +263,57 @@ public class OrderService {
   private void reserveOrderHold(
       TradingAccountEntity account,
       BigDecimal amount,
+      String holdCurrency,
+      boolean spotWalletHold,
       UUID orderId,
-      String description
+      String marginDescription,
+      String spotDescription
   ) {
+    if (spotWalletHold) {
+      walletService.lockAvailableWithEntryType(
+          account.getId(),
+          holdCurrency,
+          amount,
+          "ORDER",
+          orderId,
+          spotDescription,
+          "SPOT_ORDER_LOCK");
+      return;
+    }
     if (accountRepository.reserveMarginIfAvailable(account.getId(), amount) != 1) {
       throw new BusinessException("INSUFFICIENT_MARGIN", "Free margin is not enough");
     }
     account.setUsedMargin(orZero(account.getUsedMargin()).add(amount));
     account.setFreeMargin(accountEquity(account).subtract(account.getUsedMargin()));
-    ledgerService.recordOrderHold(account, amount, orderId, description);
+    ledgerService.recordOrderHold(account, amount, orderId, marginDescription);
   }
 
   private void releaseOrderHold(
       TradingAccountEntity account,
+      OrderEntity order,
       BigDecimal amount,
-      UUID orderId,
-      String description
+      String marginDescription,
+      String spotDescription
   ) {
+    if (isSpotWalletHold(order)) {
+      walletService.releaseLockedWithEntryType(
+          account.getId(),
+          order.getHoldCurrency(),
+          amount,
+          "ORDER",
+          order.getId(),
+          spotDescription,
+          "SPOT_ORDER_RELEASE");
+      return;
+    }
     account.setUsedMargin(orZero(account.getUsedMargin()).subtract(amount).max(BigDecimal.ZERO));
     account.setFreeMargin(accountEquity(account).subtract(account.getUsedMargin()));
     accountRepository.save(account);
-    ledgerService.recordOrderRelease(account, amount, orderId, description);
+    ledgerService.recordOrderRelease(account, amount, order.getId(), marginDescription);
+  }
+
+  private boolean isSpotWalletHold(OrderEntity order) {
+    return riskCheckService.isSpotSymbol(order.getSymbol());
   }
 
   private TradingAccountEntity accountForMarginCheck(TradingAccountEntity account, BigDecimal existingHold) {

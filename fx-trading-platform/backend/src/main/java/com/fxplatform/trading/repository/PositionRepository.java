@@ -6,6 +6,7 @@ import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.PositionStatus;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -21,10 +22,30 @@ public interface PositionRepository extends FxBaseMapper<PositionEntity> {
         .orderByDesc(PositionEntity::getOpenedAt));
   }
 
+  default Optional<PositionEntity> findOpenNetPosition(UUID accountId, String symbol) {
+    String normalizedSymbol = symbol == null ? "" : symbol.trim().toUpperCase();
+    return selectList(new LambdaQueryWrapper<PositionEntity>()
+        .eq(PositionEntity::getAccountId, accountId)
+        .eq(PositionEntity::getSymbol, normalizedSymbol)
+        .eq(PositionEntity::getStatus, PositionStatus.OPEN)
+        .orderByDesc(PositionEntity::getOpenedAt)
+        .last("LIMIT 1"))
+        .stream()
+        .findFirst();
+  }
+
   /** 按状态查询持仓，供止盈止损调度和后台统计使用。 */
   default List<PositionEntity> findByStatus(PositionStatus status) {
     return selectList(new LambdaQueryWrapper<PositionEntity>()
         .eq(PositionEntity::getStatus, status));
+  }
+
+  default List<PositionEntity> findBySymbolAndStatusOrderByOpenedAtAsc(String symbol, PositionStatus status) {
+    String normalizedSymbol = symbol == null ? "" : symbol.trim().toUpperCase();
+    return selectList(new LambdaQueryWrapper<PositionEntity>()
+        .eq(PositionEntity::getSymbol, normalizedSymbol)
+        .eq(PositionEntity::getStatus, status)
+        .orderByAsc(PositionEntity::getOpenedAt));
   }
 
   default long countByStatus(PositionStatus status) {

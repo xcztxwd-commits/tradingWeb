@@ -7,6 +7,7 @@ import com.fxplatform.admin.dto.request.AdminFeatureOperationRequest;
 import com.fxplatform.admin.dto.response.AdminFeatureActionResponse;
 import com.fxplatform.admin.dto.response.AdminFeatureOperationResponse;
 import com.fxplatform.admin.dto.response.AdminFeaturePageResponse;
+import com.fxplatform.admin.enums.AdminFeatureRecordStatus;
 import com.fxplatform.admin.entity.AdminFeatureRecordEntity;
 import com.fxplatform.admin.repository.AdminFeatureRecordRepository;
 import com.fxplatform.audit.service.AuditDetailsBuilder;
@@ -184,7 +185,7 @@ public class AdminFeatureOperationService {
     record.setPageKey(pageKey);
     record.setRecordKey(recordKey);
     record.setData(JSONUtil.toJsonStr(enrichPayload(action, payload, domainTargetId)));
-    record.setStatus("delete".equals(action) ? "DELETED" : "ACTIVE");
+    record.setStatus(AdminFeatureRecordStatus.fromAction(action));
     if (insert) {
       record.setCreatedBy(actorUserId);
     }

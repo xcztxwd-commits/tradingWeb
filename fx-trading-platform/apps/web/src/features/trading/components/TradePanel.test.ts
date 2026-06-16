@@ -5,46 +5,43 @@ import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const leverageControlsPath = join(currentDir, 'TradePanelLeverageControls.tsx')
-const accountStripPath = join(currentDir, 'TradePanelAccountStrip.tsx')
 const sessionStatusPath = join(currentDir, 'TradePanelSessionStatus.tsx')
 const submitHookPath = join(currentDir, '..', 'hooks', 'useTradePanelSubmit.ts')
 const tradePanelSource = readFileSync(join(currentDir, 'TradePanel.tsx'), 'utf8')
 const tradePanelLines = tradePanelSource.split(/\r?\n/)
-const leverageControlsSource = existsSync(leverageControlsPath) ? readFileSync(leverageControlsPath, 'utf8') : ''
-const accountStripSource = existsSync(accountStripPath) ? readFileSync(accountStripPath, 'utf8') : ''
 const sessionStatusSource = existsSync(sessionStatusPath) ? readFileSync(sessionStatusPath, 'utf8') : ''
 const submitHookSource = existsSync(submitHookPath) ? readFileSync(submitHookPath, 'utf8') : ''
 const confirmDialogSource = readFileSync(join(currentDir, 'OrderConfirmationDialog.tsx'), 'utf8')
 const orderSideSource = readFileSync(join(currentDir, 'OrderFormSide.tsx'), 'utf8')
 const orderSubmitButtonSource = readFileSync(join(currentDir, 'OrderSubmitButton.tsx'), 'utf8')
+const orderTypeTabsSource = readFileSync(join(currentDir, 'OrderTypeTabs.tsx'), 'utf8')
+const tradeTabsSource = readFileSync(join(currentDir, 'TradeTabs.tsx'), 'utf8')
+const strategyDropdownSource = readFileSync(join(currentDir, 'StrategyDropdown.tsx'), 'utf8')
 const tpSlPanelSource = readFileSync(join(currentDir, 'TpSlPanel.tsx'), 'utf8')
 const styles = readFileSync(join(currentDir, '..', 'styles', 'trade-panel.css'), 'utf8')
 
 const userFacingSources = [
   tradePanelSource,
-  leverageControlsSource,
-  accountStripSource,
   sessionStatusSource,
   confirmDialogSource,
   orderSideSource,
   orderSubmitButtonSource,
+  orderTypeTabsSource,
+  tradeTabsSource,
+  strategyDropdownSource,
   tpSlPanelSource
 ]
 
 describe('OKX-style trade panel density', () => {
-  it('keeps TradePanel as a compact composition shell with extracted session, leverage, and submit logic', () => {
-    assert.equal(existsSync(leverageControlsPath), true)
-    assert.equal(existsSync(accountStripPath), true)
+  it('keeps TradePanel as a compact composition shell for the spot order form', () => {
     assert.equal(existsSync(sessionStatusPath), true)
     assert.equal(existsSync(submitHookPath), true)
-    assert.ok(tradePanelLines.length <= 280, `TradePanel.tsx has ${tradePanelLines.length} lines`)
-    assert.match(tradePanelSource, /<TradePanelSessionStatus/)
-    assert.match(tradePanelSource, /<TradePanelAccountStrip/)
-    assert.match(tradePanelSource, /<TradePanelLeverageToggle/)
-    assert.match(tradePanelSource, /<TradePanelLeverageControls/)
+    assert.ok(tradePanelLines.length <= 260, `TradePanel.tsx has ${tradePanelLines.length} lines`)
     assert.match(tradePanelSource, /<OrderConfirmationDialog/)
     assert.match(tradePanelSource, /useTradePanelSubmit/)
+    assert.doesNotMatch(tradePanelSource, /TradePanelAccountStrip/)
+    assert.doesNotMatch(tradePanelSource, /TradePanelLeverageToggle/)
+    assert.doesNotMatch(tradePanelSource, /TradePanelLeverageControls/)
     assert.doesNotMatch(tradePanelSource, /function LeverageCell/)
     assert.doesNotMatch(tradePanelSource, /function formatOrderError/)
   })
@@ -55,14 +52,18 @@ describe('OKX-style trade panel density', () => {
     }
   })
 
-  it('exposes leverage controls and a leverage adjustment popover', () => {
-    assert.match(leverageControlsSource, /trade-panel__leverage-row/)
-    assert.match(leverageControlsSource, /trade-panel__leverage-popover/)
-    assert.match(leverageControlsSource, /t\('trading\.adjustLeverage'\)/)
-    assert.match(leverageControlsSource, /const leverageOptions = \[5, 10, 20, 30, 50, 75, 100\]/)
-    assert.match(leverageControlsSource, /\$\{option\}x/)
-    assert.match(leverageControlsSource, /Number\.isFinite\(nextValue\)/)
-    assert.match(leverageControlsSource, /onUpdate\(nextValue\)/)
+  it('matches the Binance-style spot mode tabs and strategy dropdown from the reference', () => {
+    assert.match(tradeTabsSource, /t\('trading\.spot'\)/)
+    assert.match(tradeTabsSource, /t\('trading\.crossMargin'\)/)
+    assert.match(tradeTabsSource, /t\('trading\.isolatedMargin'\)/)
+    assert.match(tradeTabsSource, /t\('trading\.gridTrading'\)/)
+    assert.match(orderTypeTabsSource, /const strategyActive = strategyType === 'tp_sl'/)
+    assert.match(orderTypeTabsSource, /!strategyActive && orderType === 'limit'/)
+    assert.match(orderTypeTabsSource, /!strategyActive && orderType === 'market'/)
+    assert.match(orderTypeTabsSource, /Info/)
+    assert.match(strategyDropdownSource, /limit_tp_sl/)
+    assert.match(strategyDropdownSource, /market_tp_sl/)
+    assert.match(strategyDropdownSource, /Check/)
   })
 
   it('keeps the Binance-style dual form shell for wide layouts', () => {
@@ -71,18 +72,11 @@ describe('OKX-style trade panel density', () => {
     assert.match(styles, /\.trade-panel--compact\s+\.trade-panel__forms--dual\s*{[\s\S]*grid-template-columns:\s*1fr/)
   })
 
-  it('shows advanced TP\\/SL labels and contract sizing inside each side form', () => {
+  it('shows spot TP\\/SL and asset sizing inside each side form', () => {
     assert.match(tpSlPanelSource, /t\('trading\.takeProfitStopLoss'\)/)
-    assert.match(tpSlPanelSource, /t\('trading\.advanced'\)/)
-    assert.match(orderSideSource, /t\('trading\.singleContractValue'/)
-    assert.match(orderSideSource, /t\('trading\.contractsUnit'\)/)
-  })
-
-  it('adds account mode and fee context above the order forms', () => {
-    assert.match(accountStripSource, /trade-panel__account-strip/)
-    assert.match(accountStripSource, /t\('trading\.spot'\)/)
-    assert.match(accountStripSource, /t\('trading\.feeRate'/)
-    assert.match(accountStripSource, /Cash/)
+    assert.match(tpSlPanelSource, /trade-panel__tpsl-expanded/)
+    assert.match(orderSideSource, /usesQuoteBudgetMarketBuy\(form,\s*market\)/)
+    assert.match(orderSideSource, /marginQuantityMarket \? t\('trading\.contractsUnit'\) : baseAsset/)
   })
 
   it('uses the real order callback when a backend trading session is ready', () => {
@@ -90,22 +84,18 @@ describe('OKX-style trade panel density', () => {
     assert.match(submitHookSource, /toOrderPayload\(accountId,\s*form,\s*market,\s*leverage\)/)
     assert.match(submitHookSource, /await onSubmitOrder\(payload\)/)
     assert.match(tradePanelSource, /useTradePanelSubmit\(\{[\s\S]*leverage,/)
+    assert.match(tradePanelSource, /resolveTradePanelLeverage\(symbolLeverage\)/)
+    assert.match(tradePanelSource, /createPanelMarket\(symbol,\s*snapshot,\s*\{ category,\s*leverage,\s*productType \}\)/)
+    assert.doesNotMatch(tradePanelSource, /const leverage = 1/)
     assert.match(tradePanelSource, /backendReady/)
     assert.match(submitHookSource, /\.\.\/services\/orderAdapter/)
-  })
-
-  it('shows compact order metrics inside each side form', () => {
-    assert.match(orderSideSource, /trade-panel__order-metrics/)
-    assert.match(orderSideSource, /t\('trading\.estimatedCost'\)/)
-    assert.match(orderSideSource, /t\('trading\.estimatedLiquidationPrice'\)/)
-    assert.match(orderSideSource, /formatFiatForcePrice/)
   })
 
   it('keeps trading limits and precision props available to the order form', () => {
     assert.match(tradePanelSource, /minOrderAmount/)
     assert.match(tradePanelSource, /pricePrecision/)
     assert.match(tradePanelSource, /quantityPrecision/)
-    assert.match(orderSideSource, /t\('trading\.availableBalance'\)/)
+    assert.match(orderSideSource, /t\('trading\.available'\)/)
     assert.match(orderSideSource, /minAmount/)
   })
 
@@ -124,15 +114,13 @@ describe('OKX-style trade panel density', () => {
     assert.match(tradePanelSource, /confirmed:\s*skipConfirm/)
   })
 
-  it('renders market orders without a price field while keeping OKX quantity and TP/SL structure', () => {
+  it('renders market orders with a disabled market price field and slippage controls, not TP\\/SL', () => {
     assert.match(orderSideSource, /form\.orderType === 'limit' \?/)
-    assert.match(orderSideSource, /caption=\{t\('trading\.singleContractValue'/)
+    assert.match(orderSideSource, /<StaticOrderField/)
+    assert.match(orderSideSource, /<SlippageTolerance/)
     assert.match(orderSideSource, /trade-panel__side--\$\{form\.orderType\}/)
-    assert.match(tpSlPanelSource, /trade-panel__tpsl-order-row/)
-    assert.match(tpSlPanelSource, /trade-panel__tpsl-trigger-note/)
-    assert.match(tpSlPanelSource, /t\('trading\.triggerMarketNote'/)
-    assert.match(tpSlPanelSource, /t\('trading\.triggerMarketPnlNote'/)
-    assert.match(tpSlPanelSource, /t\('trading\.latestPrice'\)/)
+    assert.match(orderSideSource, /form\.orderType === 'market' \?/)
+    assert.doesNotMatch(orderSideSource, /form\.orderType === 'market' \?[\s\S]*<TpSlPanel/)
   })
 
   it('accepts clicked quote prices as limit price prefill signals', () => {
@@ -151,10 +139,12 @@ describe('OKX-style trade panel density', () => {
     assert.match(tradePanelSource, /t\('trading\.editingPrice'\)/)
   })
 
-  it('uses OKX-like compact surfaces instead of oversized form gaps', () => {
-    assert.match(styles, /\.trade-panel__account-strip\s*{[\s\S]*display:\s*grid/)
-    assert.match(styles, /\.trade-panel__order-metrics\s*{[\s\S]*display:\s*grid/)
-    assert.match(styles, /\.trade-panel__forms\s*{[\s\S]*gap:\s*18px/)
+  it('uses cohesive compact light surfaces instead of mixed order-form layers', () => {
+    assert.match(styles, /--tp-bg:\s*#ffffff/)
+    assert.match(styles, /--tp-surface-2:\s*#f5f7fa/)
+    assert.match(styles, /\.trade-panel__price-row\s*{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*46px/)
+    assert.match(styles, /\.trade-panel__submit\s*{[\s\S]*border-radius:\s*4px/)
+    assert.doesNotMatch(orderSideSource, /trade-panel__order-metrics/)
   })
 
   it('does not expose mock login as a normal trading path', () => {
@@ -165,7 +155,8 @@ describe('OKX-style trade panel density', () => {
   })
 
   it('keeps unavailable backend sessions in loading or error states without engineering preview copy', () => {
-    assert.match(submitHookSource, /t\('trading\.simulatedMode'\)/)
+    assert.match(submitHookSource, /useState\(''\)/)
+    assert.doesNotMatch(submitHookSource, /useState\(\(\) => t\('trading\.simulatedMode'\)\)/)
     assert.match(sessionStatusSource, /t\('trading\.sessionConnected'\)/)
     assert.match(tradePanelSource, /sessionMode/)
     assert.doesNotMatch(tradePanelSource, /offline-preview/)

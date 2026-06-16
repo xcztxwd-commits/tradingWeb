@@ -1,8 +1,8 @@
 :root {
   --theme-background: #181a20;
-  --theme-surface: #202630;
-  --theme-surface-elevated: #29313d;
-  --theme-border: #333b47;
+  --theme-surface: #181a20;
+  --theme-surface-elevated: #1e2329;
+  --theme-border: #2b3139;
   --theme-text-primary: #eaecef;
   --theme-text-secondary: #929aa5;
   --theme-text-muted: #707a8a;
@@ -14,7 +14,7 @@
   --theme-danger: #f6465d;
   --theme-sell: #f6465d;
   --theme-warning: #f0b90b;
-  --theme-chart-grid: #333b47;
+  --theme-chart-grid: #2b3139;
   --theme-chart-candle-up: #2ebd85;
   --theme-chart-candle-down: #f6465d;
   --theme-order-book-bid-bg: rgba(46, 189, 133, 0.1);

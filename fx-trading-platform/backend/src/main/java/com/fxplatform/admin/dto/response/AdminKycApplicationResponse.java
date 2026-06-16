@@ -31,7 +31,7 @@ public record AdminKycApplicationResponse(
         entity.getDocumentNo(),
         entity.getFrontImageUrl(),
         entity.getBackImageUrl(),
-        entity.getStatus(),
+        entity.getStatus() == null ? null : entity.getStatus().code(),
         entity.getReviewReason(),
         entity.getReviewedBy(),
         entity.getReviewedAt(),

@@ -16,6 +16,7 @@ import com.fxplatform.admin.entity.AdminBatchOperationEntity;
 import com.fxplatform.admin.entity.AdminExportTaskEntity;
 import com.fxplatform.admin.entity.AdminImportTaskEntity;
 import com.fxplatform.admin.entity.AdminTableColumnPreferenceEntity;
+import com.fxplatform.admin.enums.AdminTaskStatus;
 import com.fxplatform.admin.repository.AdminBatchOperationRepository;
 import com.fxplatform.admin.repository.AdminExportTaskRepository;
 import com.fxplatform.admin.repository.AdminImportTaskRepository;
@@ -70,7 +71,7 @@ public class AdminTableToolService {
   public AdminExportTaskResponse createExportTask(UUID actorUserId, AdminExportTaskRequest request) {
     AdminExportTaskEntity task = new AdminExportTaskEntity();
     task.setPageKey(request.pageKey());
-    task.setStatus("QUEUED");
+    task.setStatus(AdminTaskStatus.QUEUED);
     task.setFilterJson(StrUtil.blankToDefault(request.filterJson(), "{}"));
     task.setCreatedBy(actorUserId);
     AdminExportTaskEntity saved = exportTaskRepository.save(task);
@@ -83,7 +84,7 @@ public class AdminTableToolService {
   public AdminImportTaskResponse createImportTask(UUID actorUserId, AdminImportTaskRequest request) {
     AdminImportTaskEntity task = new AdminImportTaskEntity();
     task.setPageKey(request.pageKey());
-    task.setStatus("QUEUED");
+    task.setStatus(AdminTaskStatus.QUEUED);
     task.setFileName(request.fileName());
     task.setTotalRows(0);
     task.setSuccessRows(0);
@@ -102,7 +103,7 @@ public class AdminTableToolService {
     task.setOperation(request.operation());
     task.setRowIds(JSONUtil.toJsonStr(CollUtil.emptyIfNull(request.rowIds())));
     task.setReason(request.reason());
-    task.setStatus("QUEUED");
+    task.setStatus(AdminTaskStatus.QUEUED);
     task.setCreatedBy(actorUserId);
     AdminBatchOperationEntity saved = batchOperationRepository.save(task);
     audit(actorUserId, "ADMIN_TABLE_BATCH_OPERATION_CREATE", "ADMIN_BATCH_OPERATION", saved.getId(), request.operation());

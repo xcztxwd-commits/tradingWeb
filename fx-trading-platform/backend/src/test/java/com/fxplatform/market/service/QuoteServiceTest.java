@@ -138,6 +138,21 @@ class QuoteServiceTest {
   }
 
   @Test
+  void latestQuoteUsesDemoWhenProviderBindingIsMissingAndDemoIsEnabled() {
+    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+    when(valueOperations.get("quote:EURUSD")).thenReturn(null);
+    when(marketDataRouter.latestQuote("EURUSD"))
+        .thenThrow(new BusinessException("MARKET_PROVIDER_BINDING_NOT_FOUND", "No enabled provider binding supports QUOTE"));
+
+    QuoteService service = service(true);
+
+    QuoteResponse quote = service.latestQuote("EURUSD");
+
+    assertThat(quote.symbol()).isEqualTo("EURUSD");
+    assertThat(quote.source()).isEqualTo("demo");
+  }
+
+  @Test
   void freshQuoteRefreshesStaleCachedQuoteBeforeTrading() throws Exception {
     QuoteResponse stale = new QuoteResponse(
         "quote",
@@ -168,6 +183,56 @@ class QuoteServiceTest {
     QuoteResponse quote = service.freshQuote("EURUSD");
 
     assertThat(quote).isSameAs(providerQuote);
+  }
+
+  @Test
+  void freshQuoteFallsBackToDemoWhenProviderQuoteIsStaleAndDemoIsEnabled() {
+    QuoteResponse staleProviderQuote = new QuoteResponse(
+        "quote",
+        "EURUSD",
+        new BigDecimal("1.16025"),
+        new BigDecimal("1.16029"),
+        new BigDecimal("1.16027"),
+        new BigDecimal("0.00004"),
+        "massive-aggregate",
+        System.currentTimeMillis() - 60_000);
+
+    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+    when(valueOperations.get("quote:EURUSD")).thenReturn(null);
+    when(marketDataRouter.latestQuote("EURUSD")).thenReturn(staleProviderQuote);
+
+    QuoteService service = service(true);
+    ReflectionTestUtils.setField(service, "quoteStaleMs", 1000);
+
+    QuoteResponse quote = service.freshQuote("EURUSD");
+
+    assertThat(quote.symbol()).isEqualTo("EURUSD");
+    assertThat(quote.source()).isEqualTo("demo");
+    assertThat(quote.timestamp()).isGreaterThan(staleProviderQuote.timestamp());
+  }
+
+  @Test
+  void freshQuoteRejectsStaleProviderQuoteWhenDemoIsDisabled() {
+    QuoteResponse staleProviderQuote = new QuoteResponse(
+        "quote",
+        "EURUSD",
+        new BigDecimal("1.16025"),
+        new BigDecimal("1.16029"),
+        new BigDecimal("1.16027"),
+        new BigDecimal("0.00004"),
+        "massive-aggregate",
+        System.currentTimeMillis() - 60_000);
+
+    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+    when(valueOperations.get("quote:EURUSD")).thenReturn(null);
+    when(marketDataRouter.latestQuote("EURUSD")).thenReturn(staleProviderQuote);
+
+    QuoteService service = service(false);
+    ReflectionTestUtils.setField(service, "quoteStaleMs", 1000);
+
+    assertThatThrownBy(() -> service.freshQuote("EURUSD"))
+        .isInstanceOfSatisfying(BusinessException.class, ex ->
+            assertThat(ex.getCode()).isEqualTo("QUOTE_STALE"));
   }
 
   @Test

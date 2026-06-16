@@ -38,7 +38,7 @@ export function useTradePanelSubmit({
 }: UseTradePanelSubmitArgs) {
   const { t } = useTranslation()
   const [attempted, setAttempted] = useState<Record<TradeSide, boolean>>({ buy: false, sell: false })
-  const [notice, setNotice] = useState(() => t('trading.simulatedMode'))
+  const [notice, setNotice] = useState('')
   const [submittingSide, setSubmittingSide] = useState<TradeSide | null>(null)
 
   const handleSubmit = useCallback(

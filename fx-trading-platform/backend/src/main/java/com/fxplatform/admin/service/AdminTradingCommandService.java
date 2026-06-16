@@ -13,12 +13,14 @@ import com.fxplatform.audit.service.AuditDetailsBuilder;
 import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.service.OrderEventService;
 import com.fxplatform.trading.service.PositionService;
+import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.EnumSet;
@@ -50,6 +52,8 @@ public class AdminTradingCommandService {
   private final OrderRepository orderRepository;
   private final TradingAccountRepository accountRepository;
   private final LedgerService ledgerService;
+  private final WalletService walletService;
+  private final RiskCheckService riskCheckService;
   private final OrderEventService orderEventService;
   /** 持仓领域服务，用于复用现有平仓结算链路。 */
   private final PositionService positionService;
@@ -141,6 +145,18 @@ public class AdminTradingCommandService {
   private void releasePendingOrderHold(OrderEntity order) {
     BigDecimal holdAmount = orZero(order.getHoldAmount());
     if (holdAmount.compareTo(BigDecimal.ZERO) <= 0) {
+      return;
+    }
+    if (riskCheckService.isSpotSymbol(order.getSymbol())) {
+      walletService.releaseLockedWithEntryType(
+          order.getAccountId(),
+          order.getHoldCurrency(),
+          holdAmount,
+          "ORDER",
+          order.getId(),
+          "Admin canceled pending spot order",
+          "SPOT_ORDER_RELEASE");
+      order.setHoldAmount(BigDecimal.ZERO);
       return;
     }
     TradingAccountEntity account = accountRepository.findById(order.getAccountId())

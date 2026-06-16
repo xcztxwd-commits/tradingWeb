@@ -1,6 +1,8 @@
 package com.fxplatform.admin.dto.response;
 
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.service.SymbolProductTypes;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -34,6 +36,7 @@ public record AdminSymbolResponse(
     String provider,
     String providerSymbol,
     String assetClass,
+    ProductType productType,
     String baseCurrency,
     String quoteCurrency,
     BigDecimal pipSize,
@@ -68,6 +71,7 @@ public record AdminSymbolResponse(
         entity.getProvider(),
         entity.getProviderSymbol(),
         entity.getAssetClass(),
+        SymbolProductTypes.readOrLegacy(entity),
         entity.getBaseCurrency(),
         entity.getQuoteCurrency(),
         entity.getPipSize(),

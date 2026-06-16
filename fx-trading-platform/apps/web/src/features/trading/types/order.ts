@@ -1,5 +1,7 @@
 export type TradeSide = 'buy' | 'sell'
 
+export type TradeProductType = 'FX_MARGIN' | 'CRYPTO_SPOT' | 'LINEAR_PERP' | 'INVERSE_PERP'
+
 export type PrimaryOrderType = 'limit' | 'market'
 
 export type StrategyType =
@@ -25,6 +27,10 @@ export type TradeMarket = {
   bestAsk: number
   baseAsset: string
   quoteAsset: string
+  unitSize?: number
+  quantityMode?: 'quantity' | 'quote-budget' | 'contracts'
+  leverage?: number
+  productType?: TradeProductType
 }
 
 export type TradeBalances = Record<string, number>

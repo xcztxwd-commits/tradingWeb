@@ -55,7 +55,6 @@ export function TradingMobileView({
               onChartTypeChange={chartCallbacks.onChartTypeChange}
               onHighLowPriceMarksChange={chartCallbacks.onHighLowPriceMarksChange}
               onPriceScaleModeChange={chartCallbacks.onPriceScaleModeChange}
-              onTooltipStyleChange={chartCallbacks.onTooltipStyleChange}
               onDrawingMagnetModeChange={chartCallbacks.onDrawingMagnetModeChange}
               onDrawingToolChange={chartCallbacks.onDrawingToolChange}
               onFavoriteIntervalToggle={chartCallbacks.onFavoriteIntervalToggle}

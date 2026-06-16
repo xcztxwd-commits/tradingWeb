@@ -26,7 +26,7 @@ public record AdminBatchOperationResponse(
         entity.getOperation(),
         AdminTableColumnPreferenceResponse.parseStringList(entity.getRowIds()),
         entity.getReason(),
-        entity.getStatus(),
+        entity.getStatus() == null ? null : entity.getStatus().code(),
         entity.getCreatedBy(),
         entity.getCreatedAt());
   }

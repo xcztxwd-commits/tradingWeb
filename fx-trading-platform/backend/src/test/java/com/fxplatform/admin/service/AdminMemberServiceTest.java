@@ -15,10 +15,12 @@ import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.auth.entity.KycApplicationEntity;
 import com.fxplatform.auth.entity.UserEntity;
 import com.fxplatform.auth.entity.UserProfileEntity;
+import com.fxplatform.auth.enums.KycStatus;
 import com.fxplatform.auth.repository.KycApplicationRepository;
 import com.fxplatform.auth.repository.UserProfileRepository;
 import com.fxplatform.auth.repository.UserRepository;
 import com.fxplatform.finance.entity.MemberPaymentAccountEntity;
+import com.fxplatform.finance.enums.PaymentAccountType;
 import com.fxplatform.finance.repository.MemberPaymentAccountRepository;
 import java.time.Instant;
 import java.util.Optional;
@@ -69,7 +71,7 @@ class AdminMemberServiceTest {
     });
     when(paymentAccountRepository.save(any(MemberPaymentAccountEntity.class))).thenAnswer(invocation -> {
       MemberPaymentAccountEntity account = invocation.getArgument(0);
-      account.setId("BANK".equals(account.getAccountType()) ? bankId : walletId);
+      account.setId(account.getAccountType() == PaymentAccountType.BANK ? bankId : walletId);
       return account;
     });
 
@@ -119,7 +121,7 @@ class AdminMemberServiceTest {
     assertThat(bank.accountType()).isEqualTo("BANK");
     assertThat(wallet.network()).isEqualTo("TRC20");
     verify(userRepository, times(2)).save(user);
-    assertThat(user.getKycStatus()).isEqualTo("APPROVED");
+    assertThat(user.getKycStatus()).isEqualTo(KycStatus.APPROVED);
     verify(auditLogService).record(eq(actorUserId), eq("ADMIN_MEMBER_KYC_REVIEW"), eq("KYC_APPLICATION"), eq(kycId.toString()), any());
   }
 }

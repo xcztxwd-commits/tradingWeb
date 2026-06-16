@@ -1,6 +1,7 @@
 package com.fxplatform.database;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fxplatform.chart.entity.CandleEntity;
@@ -92,6 +93,37 @@ class PostgresDatabaseIT {
     assertThat(updated.getVolume()).isEqualByComparingTo("7.00000000");
   }
 
+  @Test
+  void productTypeConstraintsRejectNullAndInvalidWrites() {
+    String nullProductTypeSymbol = "PTN" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
+    assertThatThrownBy(() -> insertSymbol(nullProductTypeSymbol, null))
+        .hasMessageContaining("product_type");
+
+    String invalidProductTypeSymbol = "PTI" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
+    assertThatThrownBy(() -> insertSymbol(invalidProductTypeSymbol, "BAD_PRODUCT"))
+        .hasMessageContaining("product_type");
+  }
+
+  @Test
+  void flywayBackfillsLegacySymbolsAndDefaultProductType() {
+    assertThat(count("select count(*) from market.symbols where product_type is null"))
+        .isZero();
+
+    String defaultedSymbol = "PTD" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
+    jdbcTemplate.update("""
+        insert into market.symbols (
+          symbol, display_name, provider_symbol, asset_class, base_currency, quote_currency,
+          pip_size, tick_size, lot_size, min_lot, max_lot, leverage
+        ) values (?, ?, ?, 'FOREX', 'EUR', 'USD', 0.0001, 0.00001, 100000, 0.01, 100, 100)
+        """, defaultedSymbol, defaultedSymbol, defaultedSymbol);
+
+    String productType = jdbcTemplate.queryForObject(
+        "select product_type from market.symbols where symbol = ?",
+        String.class,
+        defaultedSymbol);
+    assertThat(productType).isEqualTo("FX_MARGIN");
+  }
+
   private int candleCount(String symbol, String timeframe, Instant openTime) {
     return jdbcTemplate.queryForObject("""
         select count(*)
@@ -102,6 +134,15 @@ class PostgresDatabaseIT {
 
   private int count(String sql) {
     return jdbcTemplate.queryForObject(sql, Integer.class);
+  }
+
+  private void insertSymbol(String symbol, String productType) {
+    jdbcTemplate.update("""
+        insert into market.symbols (
+          symbol, display_name, provider_symbol, asset_class, product_type, base_currency, quote_currency,
+          pip_size, tick_size, lot_size, min_lot, max_lot, leverage
+        ) values (?, ?, ?, 'FOREX', ?, 'EUR', 'USD', 0.0001, 0.00001, 100000, 0.01, 100, 100)
+        """, symbol, symbol, symbol, productType);
   }
 
   static class DockerRequiredCondition implements ExecutionCondition {

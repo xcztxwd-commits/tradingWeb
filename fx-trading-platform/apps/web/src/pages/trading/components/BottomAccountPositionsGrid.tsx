@@ -8,10 +8,11 @@ import styles from './BottomAccountPanel.module.css'
 type Props = {
   positions: PositionResponse[]
   emptyLabel: string
+  mode?: 'current' | 'history'
   onClosePosition?: (position: PositionResponse) => Promise<unknown> | void
 }
 
-export function PositionsGrid({ positions, emptyLabel, onClosePosition }: Props) {
+export function PositionsGrid({ positions, emptyLabel, mode = 'current', onClosePosition }: Props) {
   const { t } = useTranslation()
 
   if (positions.length === 0) return <EmptyState label={emptyLabel} />
@@ -26,8 +27,8 @@ export function PositionsGrid({ positions, emptyLabel, onClosePosition }: Props)
           <th>{t('positions.openAveragePrice')}</th>
           <th>{t('positions.estimatedLiquidationPrice')}</th>
           <th>{t('positions.breakEvenPrice')}</th>
-          <th>{t('positions.floatingPnl')}</th>
-          <th>{t('positions.maintenanceMarginRate')}</th>
+          <th>{mode === 'history' ? t('positions.realizedPnl') : t('positions.floatingPnl')}</th>
+          <th>{t('positions.maintenanceMargin')}</th>
           <th>{t('positions.margin')}</th>
           <th>{t('positions.takeProfitStopLoss')}</th>
           <th>{t('common.action')}</th>
@@ -36,10 +37,12 @@ export function PositionsGrid({ positions, emptyLabel, onClosePosition }: Props)
       <tbody>
         {positions.map((position) => {
           const row = createPositionDisplayRow(position, t)
+          const pnlValue = mode === 'history' ? row.realizedPnl : row.floatingPnl
+          const pnlTone = mode === 'history' ? row.realizedPnlTone : row.floatingPnlTone
           const pnlClass =
-            row.floatingPnlTone === 'positive'
+            pnlTone === 'positive'
               ? styles.positiveValue
-              : row.floatingPnlTone === 'negative'
+              : pnlTone === 'negative'
                 ? styles.negativeValue
                 : undefined
 
@@ -54,8 +57,8 @@ export function PositionsGrid({ positions, emptyLabel, onClosePosition }: Props)
               <td>{row.openPrice}</td>
               <td>{row.liquidationPrice}</td>
               <td>{row.breakEvenPrice}</td>
-              <td className={pnlClass}>{row.floatingPnl}</td>
-              <td>{row.maintenanceMarginRate}</td>
+              <td className={pnlClass}>{pnlValue}</td>
+              <td>{row.showMaintenanceMargin ? row.maintenanceMargin : null}</td>
               <td>
                 <span>{row.margin}</span>
                 <span className={styles.positionMeta}>{row.marginMode}</span>

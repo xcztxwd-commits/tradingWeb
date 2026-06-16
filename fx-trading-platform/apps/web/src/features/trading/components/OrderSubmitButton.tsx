@@ -15,7 +15,7 @@ type Props = {
 export function OrderSubmitButton({ side, baseAsset, canTrade, loginRequired = false, submitting, onClick }: Props) {
   const { t } = useTranslation()
   const sideLabel = side === 'buy' ? t('trading.openLong') : t('trading.openShort')
-  const label = loginRequired ? t('auth.loginAccount') : canTrade ? sideLabel : t('trading.sessionNotReady')
+  const label = loginRequired || !canTrade ? t('auth.loginAccount') : sideLabel
 
   return (
     <button

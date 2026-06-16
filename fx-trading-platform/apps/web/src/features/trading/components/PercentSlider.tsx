@@ -29,11 +29,10 @@ export function PercentSlider({ value, onChange }: Props) {
           <button
             key={step}
             type="button"
+            aria-label={`${step}%`}
             className={step === value ? 'trade-panel__percent-step--active' : ''}
             onClick={() => onChange(step)}
-          >
-            {step}%
-          </button>
+          />
         ))}
       </div>
     </div>

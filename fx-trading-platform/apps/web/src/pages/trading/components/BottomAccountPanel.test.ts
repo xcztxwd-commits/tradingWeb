@@ -22,7 +22,10 @@ const expectedViewFiles = [
 const testT = (key: string) =>
   ({
     'positions.instrumentTypes.swap': 'Perpetual',
+    'positions.instrumentTypes.spot': 'Spot',
+    'positions.instrumentTypes.forex': 'Forex',
     'positions.units.contract': 'contracts',
+    'positions.units.lot': 'lots',
     'positions.marginModes.cross': 'Cross'
   })[key] ?? key
 
@@ -113,9 +116,12 @@ describe('bottom account panel tabs', () => {
     assert.match(positionsGridSource, /positions\.estimatedLiquidationPrice/)
     assert.match(positionsGridSource, /positions\.breakEvenPrice/)
     assert.match(positionsGridSource, /positions\.floatingPnl/)
-    assert.match(positionsGridSource, /positions\.maintenanceMarginRate/)
+    assert.match(positionsGridSource, /positions\.realizedPnl/)
+    assert.match(positionsGridSource, /positions\.maintenanceMargin/)
+    assert.match(positionsGridSource, /row\.maintenanceMargin/)
     assert.match(positionsGridSource, /positions\.takeProfitStopLoss/)
     assert.match(positionsGridSource, /positions\.closeAllMarket/)
+    assert.match(source, /mode=\{activeTab === 'historicalPositions' \? 'history' : 'current'\}/)
   })
 
   it('formats crypto swap positions with OKX-style labels', () => {
@@ -129,6 +135,143 @@ describe('bottom account panel tabs', () => {
     assert.equal(row.quantity, '0.15 contracts')
     assert.equal(row.marginMode, 'Cross')
     assert.equal(row.liquidationPrice, '--')
+  })
+
+  it('formats forex, spot, linear perp, and inverse perp position rows with algorithm-aware units', () => {
+    const forexRow = createPositionDisplayRow({
+      id: 'fx-long',
+      symbol: 'EURUSD',
+      side: 'BUY',
+      instrumentType: 'FOREX',
+      marginMode: 'CROSS',
+      leverage: 50,
+      positionUnit: 'LOT',
+      lots: '1.00',
+      openPrice: '1.10002',
+      currentPrice: '1.10100',
+      floatingPnl: '98.00',
+      floatingPnlRatio: '0.04454464',
+      realizedPnl: '91.00',
+      marginHeld: '2200.04',
+      status: 'OPEN'
+    }, testT)
+    const spotRow = createPositionDisplayRow({
+      id: 'spot-btc',
+      symbol: 'BTCUSDT',
+      side: 'BUY',
+      instrumentType: 'SPOT',
+      marginMode: null,
+      leverage: null,
+      positionUnit: 'BTC',
+      lots: '0.1998',
+      openPrice: '50050.05005',
+      currentPrice: '55000',
+      floatingPnl: '978.011',
+      floatingPnlRatio: null,
+      realizedPnl: '978.011',
+      marginHeld: '10000',
+      status: 'OPEN'
+    }, testT)
+    const inverseRow = createPositionDisplayRow({
+      id: 'inverse-btc',
+      symbol: 'BTCUSD',
+      side: 'BUY',
+      instrumentType: 'SWAP',
+      marginMode: 'CROSS',
+      leverage: 10,
+      positionUnit: 'CONTRACT',
+      lots: '100',
+      openPrice: '50000',
+      markPrice: '55000',
+      currentPrice: '55000',
+      floatingPnl: '0.01799091',
+      floatingPnlRatio: '0.89954550',
+      realizedPnl: '0.01799091',
+      marginHeld: '0.02000000',
+      status: 'OPEN'
+    }, testT)
+
+    assert.equal(forexRow.instrument, 'EURUSD Forex')
+    assert.equal(forexRow.quantity, '1 lots')
+    assert.equal(forexRow.floatingPnl, '98 USD (+4.45%)')
+    assert.equal(forexRow.realizedPnl, '91 USD')
+    assert.equal(spotRow.instrument, 'BTCUSDT Spot')
+    assert.equal(spotRow.leverage, '--')
+    assert.equal(spotRow.quantity, '0.1998 BTC')
+    assert.equal(spotRow.floatingPnl, '978.011 USDT')
+    assert.equal(inverseRow.instrument, 'BTCUSD Perpetual')
+    assert.equal(inverseRow.quantity, '100 contracts')
+    assert.equal(inverseRow.floatingPnl, '0.01799091 BTC (+89.95%)')
+    assert.equal(inverseRow.margin, '0.02 BTC')
+  })
+
+  it('formats linear perp maintenance margin amounts', () => {
+    const row = createPositionDisplayRow({
+      id: 'linear-btc',
+      symbol: 'BTCUSDT',
+      side: 'BUY',
+      instrumentType: 'LINEAR_PERP',
+      marginMode: 'CROSS',
+      leverage: 20,
+      positionUnit: 'CONTRACT',
+      lots: '0.50',
+      openPrice: '60000',
+      currentPrice: '60200',
+      floatingPnl: '100',
+      realizedPnl: '0',
+      marginHeld: '1505.00',
+      maintenanceMargin: '120.40',
+      maintenanceMarginRate: '0.004',
+      status: 'OPEN'
+    }, testT)
+
+    assert.equal(row.showMaintenanceMargin, true)
+    assert.equal(row.maintenanceMargin, '120.4 USDT')
+  })
+
+  it('does not display maintenance margin for spot positions', () => {
+    const row = createPositionDisplayRow({
+      id: 'spot-eth',
+      symbol: 'ETHUSDT',
+      side: 'BUY',
+      instrumentType: 'SPOT',
+      marginMode: null,
+      leverage: null,
+      positionUnit: 'ETH',
+      lots: '1.25',
+      openPrice: '3200',
+      currentPrice: '3300',
+      floatingPnl: '125',
+      realizedPnl: '125',
+      marginHeld: '4000',
+      maintenanceMargin: '25',
+      status: 'OPEN'
+    }, testT)
+
+    assert.equal(row.showMaintenanceMargin, false)
+    assert.equal(row.maintenanceMargin, null)
+  })
+
+  it('falls back safely when maintenance margin is missing', () => {
+    const row = createPositionDisplayRow({
+      id: 'fx-missing-maintenance',
+      symbol: 'EURUSD',
+      side: 'BUY',
+      instrumentType: 'FOREX',
+      marginMode: 'CROSS',
+      leverage: 50,
+      positionUnit: 'LOT',
+      lots: '1.00',
+      openPrice: '1.10000',
+      currentPrice: '1.10100',
+      floatingPnl: '100',
+      realizedPnl: '0',
+      marginHeld: '2200',
+      status: 'OPEN'
+    }, testT)
+
+    assert.equal(row.showMaintenanceMargin, true)
+    assert.equal(row.maintenanceMargin, '--')
   })
 
   it('keeps bottom tabs and table actions keyboard-visible with smooth state changes', () => {

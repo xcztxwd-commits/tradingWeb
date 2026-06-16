@@ -16,6 +16,7 @@ import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.market.entity.PriceAdjustmentEntity;
 import com.fxplatform.market.entity.SymbolAdminEventEntity;
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.PriceAdjustmentRepository;
 import com.fxplatform.market.repository.SymbolAdminEventRepository;
 import com.fxplatform.market.repository.SymbolCategoryRepository;
@@ -138,6 +139,7 @@ class AdminMarketCommandServiceTest {
         "massive",
         "GBPUSD",
         "FOREX",
+        ProductType.FX_MARGIN,
         "GBP",
         "USD",
         new BigDecimal("0.0001"),
@@ -163,10 +165,50 @@ class AdminMarketCommandServiceTest {
     service.deleteSymbol(actorUserId, symbolId, "后台下架产品");
 
     assertThat(created.id()).isEqualTo(symbolId);
+    assertThat(created.productType()).isEqualTo(ProductType.FX_MARGIN);
     assertThat(updated.symbol()).isEqualTo("GBPUSD");
+    assertThat(updated.productType()).isEqualTo(ProductType.FX_MARGIN);
     verify(auditLogService).record(eq(actorUserId), eq("ADMIN_SYMBOL_CREATE"), eq("SYMBOL"), eq(symbolId.toString()), contains("GBPUSD"));
     verify(auditLogService).record(eq(actorUserId), eq("ADMIN_SYMBOL_UPDATE"), eq("SYMBOL"), eq(symbolId.toString()), contains("GBPUSD"));
     verify(auditLogService).record(eq(actorUserId), eq("ADMIN_SYMBOL_DELETE"), eq("SYMBOL"), eq(symbolId.toString()), contains("后台下架产品"));
+  }
+
+  @Test
+  void createSymbolRejectsMissingProductTypeBeforeRepositoryWrite() {
+    UUID actorUserId = UUID.randomUUID();
+    when(symbolRepository.findBySymbol("GBPUSD")).thenReturn(Optional.empty());
+    AdminMarketCommandService service = new AdminMarketCommandService(
+        symbolRepository,
+        symbolAdminEventRepository,
+        symbolCategoryRepository,
+        priceAdjustmentRepository,
+        auditLogService);
+
+    assertThatThrownBy(() -> service.createSymbol(actorUserId, symbolRequest("GBPUSD", "FOREX", null)))
+        .isInstanceOf(BusinessException.class)
+        .extracting("code")
+        .isEqualTo("SYMBOL_PRODUCT_TYPE_REQUIRED");
+  }
+
+  @Test
+  void updateSymbolRejectsProductTypeAssetClassConflictBeforeRepositoryWrite() {
+    UUID actorUserId = UUID.randomUUID();
+    UUID symbolId = UUID.randomUUID();
+    when(symbolRepository.findById(symbolId)).thenReturn(Optional.of(symbol(symbolId)));
+    AdminMarketCommandService service = new AdminMarketCommandService(
+        symbolRepository,
+        symbolAdminEventRepository,
+        symbolCategoryRepository,
+        priceAdjustmentRepository,
+        auditLogService);
+
+    assertThatThrownBy(() -> service.updateSymbol(
+        actorUserId,
+        symbolId,
+        symbolRequest("BTCUSDT", "FOREX", ProductType.CRYPTO_SPOT)))
+        .isInstanceOf(BusinessException.class)
+        .extracting("code")
+        .isEqualTo("SYMBOL_PRODUCT_TYPE_ASSET_CLASS_CONFLICT");
   }
 
   private SymbolEntity symbol(UUID id) {
@@ -177,6 +219,7 @@ class AdminMarketCommandServiceTest {
     symbol.setProvider("massive");
     symbol.setProviderSymbol("EURUSD");
     symbol.setAssetClass("FOREX");
+    symbol.setProductType(ProductType.FX_MARGIN);
     symbol.setBaseCurrency("EUR");
     symbol.setQuoteCurrency("USD");
     symbol.setPipSize(new BigDecimal("0.0001"));
@@ -188,5 +231,34 @@ class AdminMarketCommandServiceTest {
     symbol.setSpreadMarkup(new BigDecimal("0.00002"));
     symbol.setEnabled(true);
     return symbol;
+  }
+
+  private AdminSymbolRequest symbolRequest(String symbol, String assetClass, ProductType productType) {
+    return new AdminSymbolRequest(
+        symbol,
+        symbol + " display",
+        "massive",
+        symbol,
+        assetClass,
+        productType,
+        symbol.substring(0, 3),
+        symbol.substring(Math.max(symbol.length() - 3, 0)),
+        new BigDecimal("0.0001"),
+        new BigDecimal("0.00001"),
+        new BigDecimal("100000"),
+        new BigDecimal("0.01"),
+        new BigDecimal("100"),
+        100,
+        new BigDecimal("0.00002"),
+        true,
+        null,
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        "majors",
+        10);
   }
 }

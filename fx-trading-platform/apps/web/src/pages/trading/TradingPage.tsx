@@ -55,6 +55,7 @@ export function TradingPage() {
     positions,
     positionHistory,
     ledgerEntries,
+    walletBalances,
     sessionReady,
     sessionMode,
     sessionError,
@@ -90,8 +91,8 @@ export function TradingPage() {
   const sessionStatusLabel = getTradingSessionStatusLabel(sessionMode, sessionAuthStatus, t)
   const sessionStatusText = getTradingSessionStatusText({ sessionMode, sessionAuthStatus, sessionError, loginRequired, t })
   const balances = useMemo(
-    () => deriveTradingBalances(account, positions, selectedSymbol),
-    [account, positions, selectedSymbol]
+    () => deriveTradingBalances(account, positions, selectedSymbol, walletBalances),
+    [account, positions, selectedSymbol, walletBalances]
   )
   const tradeMinOrderAmount = getTradeMinOrderAmount(selectedMarket)
   const tradePricePrecision = selectedMarket.pricePrecision ?? getPricePrecision(selectedMarket.symbol)
@@ -275,10 +276,13 @@ export function TradingPage() {
           compact
           accountId={accountId}
           balances={balances}
+          category={selectedMarket.category}
+          productType={selectedMarket.productType}
           sessionReady={sessionReady}
           sessionMode={tradePanelSessionMode}
           sessionError={sessionError}
           loginRequired={loginRequired}
+          leverage={selectedMarket.leverage}
           minOrderAmount={tradeMinOrderAmount}
           pricePrecision={tradePricePrecision}
           quantityPrecision={tradeQuantityPrecision}

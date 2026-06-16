@@ -3,12 +3,14 @@ package com.fxplatform.market.adapter.binance;
 import cn.hutool.core.util.StrUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fxplatform.chart.dto.CandleResponse;
 import com.fxplatform.market.dto.MarketDepthLevelResponse;
 import com.fxplatform.market.dto.MarketDepthResponse;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
 import com.fxplatform.market.dto.SymbolResponse;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.provider.MarketDataCapability;
 import com.fxplatform.market.provider.MarketDataProviderAdapter;
 import java.io.IOException;
@@ -116,9 +118,10 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
       return List.of();
     }
     Map<String, String> iconUrls = fetchAssetIconUrls();
+    Map<String, String> tradingRules = fetchTradingRules();
     return CRYPTO_SYMBOLS.stream()
         .limit(limit)
-        .map(symbol -> toSymbol(symbol, iconUrls.get(symbol.baseCurrency())))
+        .map(symbol -> toSymbol(symbol, iconUrls.get(symbol.baseCurrency()), tradingRules.get(symbol.symbol())))
         .toList();
   }
 
@@ -180,6 +183,10 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
 
   private URI assetCatalogUri() {
     return URI.create("%s/bapi/asset/v2/public/asset/asset/get-all-asset".formatted(assetBaseUrl()));
+  }
+
+  private URI exchangeInfoUri() {
+    return URI.create("%s/api/v3/exchangeInfo".formatted(baseUrl()));
   }
 
   private String baseUrl() {
@@ -298,11 +305,12 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
     return decimalValue(node, field).orElse(BigDecimal.ZERO);
   }
 
-  private SymbolResponse toSymbol(CryptoSymbol symbol, String iconUrl) {
+  private SymbolResponse toSymbol(CryptoSymbol symbol, String iconUrl, String providerMetadataJson) {
     return new SymbolResponse(
         symbol.symbol(),
         symbol.displayName(),
         "CRYPTO",
+        ProductType.CRYPTO_SPOT,
         symbol.baseCurrency(),
         symbol.quoteCurrency(),
         DEFAULT_MIN_LOT,
@@ -328,7 +336,95 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
         null,
         null,
         null,
-        null);
+        null,
+        providerMetadataJson == null || providerMetadataJson.isBlank() ? "{}" : providerMetadataJson);
+  }
+
+  private Map<String, String> fetchTradingRules() {
+    if (!isConfigured()) {
+      return Map.of();
+    }
+    return sendJson(exchangeInfoUri())
+        .map(this::parseTradingRules)
+        .orElse(Map.of());
+  }
+
+  private Map<String, String> parseTradingRules(JsonNode body) {
+    JsonNode symbols = body.path("symbols");
+    if (!symbols.isArray()) {
+      return Map.of();
+    }
+    Map<String, String> rules = new LinkedHashMap<>();
+    symbols.forEach(symbol -> {
+      String symbolCode = normalizeTicker(symbol.path("symbol").asText(""));
+      if (symbolCode.isBlank()) {
+        return;
+      }
+      toTradingRuleMetadata(symbol)
+          .ifPresent(metadata -> rules.put(symbolCode, metadata));
+    });
+    return Map.copyOf(rules);
+  }
+
+  private Optional<String> toTradingRuleMetadata(JsonNode symbol) {
+    ObjectNode metadata = objectMapper.createObjectNode();
+    metadata.put("provider", "binance");
+    metadata.put("marketType", "SPOT");
+    putIfNotBlank(metadata, "providerSymbol", symbol.path("symbol").asText(""));
+    putIfNotBlank(metadata, "status", symbol.path("status").asText(""));
+    putIfNotBlank(metadata, "baseAsset", symbol.path("baseAsset").asText(""));
+    putIfNotBlank(metadata, "quoteAsset", symbol.path("quoteAsset").asText(""));
+
+    ObjectNode rules = metadata.putObject("rules");
+    filter(symbol, "PRICE_FILTER").ifPresent(priceFilter ->
+        putIfNotBlank(rules, "tickSize", priceFilter.path("tickSize").asText("")));
+    filter(symbol, "LOT_SIZE").ifPresent(lotFilter -> {
+      putIfNotBlank(rules, "stepSize", lotFilter.path("stepSize").asText(""));
+      putIfNotBlank(rules, "minLot", lotFilter.path("minQty").asText(""));
+      putIfNotBlank(rules, "maxLot", lotFilter.path("maxQty").asText(""));
+    });
+    filter(symbol, "MIN_NOTIONAL")
+        .or(() -> filter(symbol, "NOTIONAL"))
+        .ifPresent(notionalFilter -> {
+          putIfNotBlank(rules, "minNotional", notionalFilter.path("minNotional").asText(""));
+          putIfNotBlank(rules, "maxNotional", notionalFilter.path("maxNotional").asText(""));
+        });
+
+    ObjectNode margin = metadata.putObject("margin");
+    margin.put("spotTradingAllowed", symbol.path("isSpotTradingAllowed").asBoolean(false));
+    margin.put("marginTradingAllowed", symbol.path("isMarginTradingAllowed").asBoolean(false));
+    putIfNotBlank(margin, "marginAsset", symbol.path("marginAsset").asText(""));
+    putIfNotBlank(margin, "requiredMarginPercent", symbol.path("requiredMarginPercent").asText(""));
+    putIfNotBlank(margin, "maintMarginPercent", symbol.path("maintMarginPercent").asText(""));
+    margin.put("leverageSource", "Binance spot exchangeInfo exposes margin eligibility, not leverage brackets");
+
+    JsonNode permissions = symbol.path("permissions");
+    if (permissions.isArray()) {
+      metadata.set("permissions", permissions);
+    }
+    metadata.set("filters", symbol.path("filters"));
+
+    try {
+      return Optional.of(objectMapper.writeValueAsString(metadata));
+    } catch (IOException ex) {
+      return Optional.empty();
+    }
+  }
+
+  private Optional<JsonNode> filter(JsonNode symbol, String filterType) {
+    JsonNode filters = symbol.path("filters");
+    if (!filters.isArray()) {
+      return Optional.empty();
+    }
+    return java.util.stream.StreamSupport.stream(filters.spliterator(), false)
+        .filter(filter -> filterType.equals(filter.path("filterType").asText("")))
+        .findFirst();
+  }
+
+  private void putIfNotBlank(ObjectNode node, String field, String value) {
+    if (value != null && !value.isBlank()) {
+      node.put(field, value);
+    }
   }
 
   private Map<String, String> fetchAssetIconUrls() {

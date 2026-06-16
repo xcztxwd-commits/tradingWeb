@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fxplatform.chart.dto.CandleResponse;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.SymbolResponse;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.provider.MarketDataCapability;
 import com.fxplatform.market.provider.MarketDataProviderAdapter;
 import java.io.IOException;
@@ -437,6 +438,7 @@ public class MassiveRestClient implements MarketDataProviderAdapter {
         normalizedSymbol.get(),
         displayName,
         "FOREX",
+        ProductType.FX_MARGIN,
         baseCurrency,
         quoteCurrency,
         DEFAULT_MIN_LOT,

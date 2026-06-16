@@ -1,6 +1,7 @@
 package com.fxplatform.admin.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -13,6 +14,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderSide;
@@ -21,6 +23,7 @@ import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.service.OrderEventService;
 import com.fxplatform.trading.service.PositionService;
+import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,6 +53,12 @@ class AdminTradingCommandServiceTest {
   @Mock
   private AuditLogService auditLogService;
 
+  @Mock
+  private RiskCheckService riskCheckService;
+
+  @Mock
+  private WalletService walletService;
+
   @Test
   void cancelsPendingOrderWithAudit() {
     UUID actorUserId = UUID.randomUUID();
@@ -66,6 +75,8 @@ class AdminTradingCommandServiceTest {
         orderRepository,
         accountRepository,
         ledgerService,
+        walletService,
+        riskCheckService,
         orderEventService,
         positionService,
         auditLogService);
@@ -100,6 +111,8 @@ class AdminTradingCommandServiceTest {
         orderRepository,
         accountRepository,
         ledgerService,
+        walletService,
+        riskCheckService,
         orderEventService,
         positionService,
         auditLogService);
@@ -138,6 +151,7 @@ class AdminTradingCommandServiceTest {
         BigDecimal.ZERO,
         null,
         null,
+        null,
         "CLOSED",
         null,
         null);
@@ -147,6 +161,8 @@ class AdminTradingCommandServiceTest {
         orderRepository,
         accountRepository,
         ledgerService,
+        walletService,
+        riskCheckService,
         orderEventService,
         positionService,
         auditLogService);
@@ -159,6 +175,42 @@ class AdminTradingCommandServiceTest {
     assertThat(response.status()).isEqualTo("CLOSED");
     verify(positionService).closeSystemPosition(accountId, positionId);
     verify(auditLogService).record(eq(actorUserId), eq("ADMIN_POSITION_FORCE_CLOSE"), eq("POSITION"), eq(positionId.toString()), contains("risk threshold"));
+  }
+
+  @Test
+  void cancelSpotPendingOrderReleasesWalletHoldWithoutMarginLedger() {
+    UUID actorUserId = UUID.randomUUID();
+    OrderEntity order = pendingOrder(UUID.randomUUID());
+    order.setSymbol("BTCUSDT");
+    order.setHoldAmount(new BigDecimal("5000.00000000"));
+    order.setHoldCurrency("USDT");
+    when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+    when(riskCheckService.isSpotSymbol("BTCUSDT")).thenReturn(true);
+
+    AdminTradingCommandService service = new AdminTradingCommandService(
+        orderRepository,
+        accountRepository,
+        ledgerService,
+        walletService,
+        riskCheckService,
+        orderEventService,
+        positionService,
+        auditLogService);
+
+    var response = service.cancelOrder(actorUserId, order.getId(), new AdminCancelOrderRequest("client requested", "cancel-spot-1"));
+
+    assertThat(response.status()).isEqualTo("CANCELED");
+    verify(walletService).releaseLockedWithEntryType(
+        eq(order.getAccountId()),
+        eq("USDT"),
+        eq(new BigDecimal("5000.00000000")),
+        eq("ORDER"),
+        eq(order.getId()),
+        eq("Admin canceled pending spot order"),
+        eq("SPOT_ORDER_RELEASE"));
+    verify(accountRepository, never()).findById(order.getAccountId());
+    verify(ledgerService, never()).recordOrderRelease(any(), any(), any(), any());
+    verify(auditLogService).record(eq(actorUserId), eq("ADMIN_ORDER_CANCEL"), eq("ORDER"), eq(order.getId().toString()), contains("client requested"));
   }
 
   private OrderEntity pendingOrder(UUID orderId) {

@@ -21,7 +21,6 @@ export type TradingChartCallbacks = {
   onChartTypeChange: (chartType: ChartType) => void
   onHighLowPriceMarksChange: (enabled: boolean) => void
   onPriceScaleModeChange: (priceScaleMode: ChartSettings['axisSettings']['priceScaleMode']) => void
-  onTooltipStyleChange: (style: ChartSettings['axisSettings']['tooltipStyle']) => void
   onDrawingMagnetModeChange: (magnetMode: DrawingMagnetMode) => void
   onDrawingToolChange: (activeTool: DrawingTool) => void
   onIndicatorSettingsChange: (indicatorSettings: IndicatorSettings) => void

@@ -7,7 +7,7 @@ import { createLocalPreviewOrder, deriveTradingBalances } from './tradingSession
 import { repriceOpenPositionsForQuote } from './tradingSessionPositions.ts'
 import { clearStoredAuthToken, readStoredAuthToken, writeStoredAuthToken } from './tradingSessionStorage.ts'
 import type { PositionResponse } from '../../components/tables/types.ts'
-import type { AccountSummary, OrderPayload, Quote } from '../../types/trading.ts'
+import type { AccountSummary, OrderPayload, Quote, WalletBalance } from '../../types/trading.ts'
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -122,6 +122,34 @@ describe('trading session models', () => {
     assert.equal(balances.USDT, 9876.5)
     assert.equal(balances.BTC, 0.03)
     assert.equal(balances.ETH, undefined)
+  })
+
+  it('prefers wallet balances over free margin and legacy position-derived inventory', () => {
+    const account: AccountSummary = {
+      id: 'acct_1',
+      accountType: 'DEMO',
+      baseCurrency: 'USD',
+      balance: '10000',
+      equity: '10020',
+      usedMargin: '120',
+      freeMargin: '9876.5',
+      marginLevel: null,
+      leverage: 100,
+      status: 'ACTIVE'
+    }
+    const positions: PositionResponse[] = [
+      makePosition({ id: 'pos_1', symbol: 'BTCUSDT', side: 'BUY', lots: '0.50' })
+    ]
+    const walletBalances: WalletBalance[] = [
+      walletBalance('USDT', '5000.00000000'),
+      walletBalance('BTC', '0.09990000')
+    ]
+
+    const balances = deriveTradingBalances(account, positions, 'BTCUSDT', walletBalances)
+
+    assert.equal(balances.USDT, 5000)
+    assert.equal(balances.BTC, 0.0999)
+    assert.equal(balances.USD, undefined)
   })
 
   it('reprices forex open positions from websocket quotes without touching history rows', () => {
@@ -299,13 +327,14 @@ describe('trading session submit mode', () => {
     assert.doesNotMatch(pollingBlock, /setOrders\(\[\]\)/)
   })
 
-  it('uses websocket quotes for realtime open-position repricing while keeping REST refresh as fallback', () => {
+  it('uses backend position refresh as the authoritative open-position PnL source', () => {
     const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
 
-    assert.match(source, /subscribeQuote/)
-    assert.match(source, /repriceOpenPositionsForQuote/)
-    assert.match(source, /positionQuoteSymbolsKey/)
     assert.match(source, /setInterval/)
+    assert.match(source, /refreshAccountData\(token,\s*accountId/)
+    assert.doesNotMatch(source, /subscribeQuote/)
+    assert.doesNotMatch(source, /repriceOpenPositionsForQuote/)
+    assert.doesNotMatch(source, /positionQuoteSymbolsKey/)
   })
 })
 
@@ -340,6 +369,17 @@ function makePosition(patch: Partial<PositionResponse>): PositionResponse {
     marginHeld: '0',
     status: 'OPEN',
     ...patch
+  }
+}
+
+function walletBalance(asset: string, available: string): WalletBalance {
+  return {
+    id: `wallet-${asset}`,
+    accountId: 'acct_1',
+    asset,
+    total: available,
+    available,
+    locked: '0'
   }
 }
 

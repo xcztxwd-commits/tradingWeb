@@ -28,7 +28,7 @@ public record AdminUserResponse(
         user.getPhone(),
         user.getStatus().name(),
         user.getRole().name(),
-        user.getKycStatus(),
+        user.getKycStatus() == null ? null : user.getKycStatus().code(),
         user.getRiskLevel(),
         user.getCreatedAt());
   }

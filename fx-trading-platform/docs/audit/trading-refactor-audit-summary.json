@@ -1,0 +1,277 @@
+{
+  "auditDate": "2026-06-16",
+  "workspace": "C:\\Users\\User\\Desktop\\workspace\\tradingView-KlineChart\\fx-trading-platform",
+  "overallScore": 87,
+  "overallStatus": "PARTIAL",
+  "launchReadiness": "NOT_READY",
+  "scopeSources": [
+    "C:\\Users\\User\\Downloads\\codex_step1_to_step10_detailed_task_doc.md",
+    "C:\\Users\\User\\Downloads\\okx_binance_spot_perp_algorithms_selfcheck.md",
+    "C:\\Users\\User\\Downloads\\forex_leveraged_trading_algorithm_selfcheck.md"
+  ],
+  "testCommands": [
+    {
+      "name": "baseline",
+      "command": "mvn \"-Dtest=!com.fxplatform.audit.*,!*AuditTest,!FullTradingRegressionAuditTest\" test",
+      "workdir": "C:\\Users\\User\\Desktop\\workspace\\tradingView-KlineChart\\fx-trading-platform\\backend",
+      "status": "PASS",
+      "result": {
+        "tests": 390,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 3
+      },
+      "notes": [
+        "PostgresDatabaseIT skipped because Docker/Testcontainers was unavailable."
+      ]
+    },
+    {
+      "name": "step-audit",
+      "command": "mvn \"-Dtest=Step01ProductTypeAuditTest,Step02AccountSnapshotAuditTest,Step03FeeNotionalAuditTest,Step04WalletSchemaAuditTest,Step05SpotWalletSettlementAuditTest,Step06PositionEngineAuditTest,Step07PerpMaintenanceMarginAuditTest,Step08FundingServiceAuditTest,Step09LiquidationServiceAuditTest,Step10FxFinancingConversionAuditTest\" test",
+      "workdir": "C:\\Users\\User\\Desktop\\workspace\\tradingView-KlineChart\\fx-trading-platform\\backend",
+      "status": "PASS",
+      "result": {
+        "tests": 32,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    },
+    {
+      "name": "full-regression-audit",
+      "command": "mvn \"-Dtest=FullTradingRegressionAuditTest\" test",
+      "workdir": "C:\\Users\\User\\Desktop\\workspace\\tradingView-KlineChart\\fx-trading-platform\\backend",
+      "status": "PASS",
+      "result": {
+        "tests": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "notes": [
+        "The current FullTradingRegressionAuditTest is formula/service-level, not a full DB/API/frontend/ledger scenario."
+      ]
+    },
+    {
+      "name": "frontend-web-tests",
+      "command": "cmd.exe /d /s /c \"npm.cmd --prefix fx-trading-platform run web:test\"",
+      "workdir": "C:\\Users\\User\\Desktop\\workspace\\tradingView-KlineChart",
+      "status": "PASS",
+      "result": {
+        "tests": 370,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    }
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "name": "productType",
+      "score": 92,
+      "status": "PASS",
+      "risk": "MEDIUM",
+      "passedTests": [
+        "Step01ProductTypeAuditTest",
+        "tradePanelMarket.test.ts productType quantity mode coverage"
+      ],
+      "failedTests": [],
+      "missingItems": [
+        "Provider instruments do not natively carry productType everywhere."
+      ],
+      "recommendation": "Keep provider instruments productType coverage aligned before deployment."
+    },
+    {
+      "step": 2,
+      "name": "AccountSnapshotService",
+      "score": 88,
+      "status": "PARTIAL",
+      "risk": "MEDIUM",
+      "passedTests": [
+        "Step02AccountSnapshotAuditTest",
+        "AccountSnapshotServiceTest",
+        "AccountSummarySnapshotIntegrationTest"
+      ],
+      "failedTests": [],
+      "missingItems": [
+        "Perpetual snapshot valuation is not clearly mark-price first in AccountSnapshotService."
+      ],
+      "recommendation": "Reuse the mark-price recomputation path for perpetual account snapshots."
+    },
+    {
+      "step": 3,
+      "name": "Fee Notional",
+      "score": 86,
+      "status": "PARTIAL",
+      "risk": "MEDIUM",
+      "passedTests": [
+        "Step03FeeNotionalAuditTest",
+        "SimulatedExecutionAdapterFeeTest"
+      ],
+      "failedTests": [],
+      "missingItems": [
+        "TradeEntity/trading.trades do not persist generic fill-level fee, feeAsset, or notional fields.",
+        "Spot fee settlement is wallet asset-ledger based rather than cash TRADE_FEE ledger based."
+      ],
+      "recommendation": "Add per-fill fee/notional audit fields if reconciliation requires them."
+    },
+    {
+      "step": 4,
+      "name": "Wallet Schema",
+      "score": 94,
+      "status": "PASS",
+      "risk": "LOW",
+      "passedTests": [
+        "Step04WalletSchemaAuditTest",
+        "WalletServiceTest",
+        "AccountControllerWalletTest",
+        "AccountWalletInitializationTest"
+      ],
+      "failedTests": [],
+      "missingItems": [
+        "Wallet numeric precision is NUMERIC(24,8), below the recommended 36,18."
+      ],
+      "recommendation": "Consider widening wallet precision before production crypto ledger use."
+    },
+    {
+      "step": 5,
+      "name": "Spot Wallet Settlement",
+      "score": 94,
+      "status": "PASS",
+      "risk": "LOW",
+      "passedTests": [
+        "Step05SpotWalletSettlementAuditTest",
+        "SpotSettlementServiceTest",
+        "tradingSession.test.ts wallet preference coverage"
+      ],
+      "failedTests": [],
+      "missingItems": [
+        "Frontend has fallback/mock balance behavior when wallet data is empty."
+      ],
+      "recommendation": "Keep fallback balances visibly separate from live wallet balances."
+    },
+    {
+      "step": 6,
+      "name": "PositionEngine",
+      "score": 90,
+      "status": "PASS",
+      "risk": "MEDIUM",
+      "passedTests": [
+        "Step06PositionEngineAuditTest",
+        "PositionEngineTest",
+        "OrderPositionConcurrencyTest"
+      ],
+      "failedTests": [],
+      "missingItems": [
+        "No DB uniqueness or repair path for historical duplicate open net positions.",
+        "Reduce-only semantics are not fully covered."
+      ],
+      "recommendation": "Add a data repair or uniqueness strategy for open net positions."
+    },
+    {
+      "step": 7,
+      "name": "Perp Maintenance Margin",
+      "score": 84,
+      "status": "PARTIAL",
+      "risk": "MEDIUM",
+      "passedTests": [
+        "Step07PerpMaintenanceMarginAuditTest",
+        "PerpMarginCalculatorTest",
+        "BottomAccountPanel.test.ts mark/MMR display coverage"
+      ],
+      "failedTests": [],
+      "missingItems": [
+        "Frontend PositionResponse type/display does not expose maintenanceMargin amount.",
+        "V34 migration backfills perpetual fields from asset_class rather than product_type."
+      ],
+      "recommendation": "Expose maintenanceMargin in frontend position rows and align migration backfill with product_type."
+    },
+    {
+      "step": 8,
+      "name": "FundingService",
+      "score": 88,
+      "status": "PARTIAL",
+      "risk": "HIGH",
+      "passedTests": [
+        "Step08FundingServiceAuditTest",
+        "FundingServiceTest"
+      ],
+      "failedTests": [],
+      "missingItems": [
+        "Audit test does not explicitly cover inverse short positive funding."
+      ],
+      "recommendation": "Add inverse-short funding audit coverage."
+    },
+    {
+      "step": 9,
+      "name": "LiquidationService",
+      "score": 86,
+      "status": "PASS",
+      "risk": "MEDIUM",
+      "passedTests": [
+        "Step09LiquidationServiceAuditTest",
+        "LiquidationServiceTest",
+        "LiquidationFeeLedgerServiceTest"
+      ],
+      "failedTests": [],
+      "missingItems": [
+        "shouldLiquidate(AccountSnapshot) is narrower than scanAccount and does not include fresh mark recomputation or liquidation fee buffer.",
+        "Inverse liquidation fee account-vs-wallet currency handling needs reconciliation."
+      ],
+      "recommendation": "Make shouldLiquidate share the full scan risk model or document it as a shallow helper."
+    },
+    {
+      "step": 10,
+      "name": "FX Financing & Conversion",
+      "score": 92,
+      "status": "PARTIAL",
+      "risk": "MEDIUM",
+      "passedTests": [
+        "Step10FxFinancingConversionAuditTest",
+        "ForexConversionServiceTest",
+        "ForexFinancingServiceTest",
+        "PnLCalculatorTest"
+      ],
+      "failedTests": [],
+      "missingItems": [
+        "OANDA-style gainQuoteHome/lossQuoteHome conversion factors remain TODO."
+      ],
+      "recommendation": "Keep docs/audit/fx-financing-basis.md as the current basis contract; add OANDA-style home conversion factors only if that broker-specific model becomes in scope."
+    }
+  ],
+  "fullRegression": {
+    "status": "PASS",
+    "score": 70,
+    "automatedTest": "FullTradingRegressionAuditTest",
+    "fx": "PASS",
+    "spot": "PASS",
+    "linearPerp": "PASS",
+    "inversePerp": "PASS",
+    "liquidation": "PARTIAL",
+    "notes": [
+      "Implemented test class passes.",
+      "Coverage is formula/service-level and does not prove a full DB/API/frontend/ledger scenario for each product type."
+    ]
+  },
+  "p0Issues": [],
+  "p1Issues": [
+    "AccountSnapshotService perpetual valuation is not clearly mark-price first.",
+    "Frontend does not expose backend maintenanceMargin amount for perpetual positions."
+  ],
+  "p2Issues": [
+    "Trade rows lack generic per-fill fee, feeAsset, and notional audit fields.",
+    "Historical duplicate open net positions are not repaired or blocked by DB uniqueness.",
+    "Funding audit coverage should add inverse-short positive funding.",
+    "LiquidationService.shouldLiquidate(AccountSnapshot) is narrower than scanAccount.",
+    "OANDA-style home conversion factors and conversion markup ledger are not implemented."
+  ],
+  "reports": {
+    "markdown": "C:\\Users\\User\\Desktop\\workspace\\tradingView-KlineChart\\fx-trading-platform\\docs\\audit\\trading-refactor-audit-report.md",
+    "json": "C:\\Users\\User\\Desktop\\workspace\\tradingView-KlineChart\\fx-trading-platform\\docs\\audit\\trading-refactor-audit-summary.json"
+  },
+  "modifiedFilesThisAuditTurn": [
+    "docs/audit/trading-refactor-audit-report.md",
+    "docs/audit/trading-refactor-audit-summary.json"
+  ]
+}

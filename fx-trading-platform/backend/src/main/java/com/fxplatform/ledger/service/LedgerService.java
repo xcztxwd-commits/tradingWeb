@@ -3,26 +3,48 @@ package com.fxplatform.ledger.service;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.AuthorizationException;
+import com.fxplatform.ledger.dto.LedgerEntryResponse;
 import com.fxplatform.ledger.entity.LedgerEntryEntity;
 import com.fxplatform.ledger.enums.LedgerEntryType;
 import com.fxplatform.ledger.repository.LedgerEntryRepository;
+import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
  * LedgerService 是资金流水模块的业务服务。
  */
 @Service
-@RequiredArgsConstructor
 public class LedgerService {
 
   /** 资金流水仓储，用于保存和查询账务流水。 */
   private final LedgerEntryRepository ledgerEntryRepository;
   /** 交易账户仓储，用于校验用户对账户的访问权。 */
   private final TradingAccountRepository accountRepository;
+  private final AssetLedgerEntryRepository assetLedgerEntryRepository;
+
+  @Autowired
+  public LedgerService(
+      LedgerEntryRepository ledgerEntryRepository,
+      TradingAccountRepository accountRepository,
+      AssetLedgerEntryRepository assetLedgerEntryRepository
+  ) {
+    this.ledgerEntryRepository = ledgerEntryRepository;
+    this.accountRepository = accountRepository;
+    this.assetLedgerEntryRepository = assetLedgerEntryRepository;
+  }
+
+  public LedgerService(
+      LedgerEntryRepository ledgerEntryRepository,
+      TradingAccountRepository accountRepository
+  ) {
+    this(ledgerEntryRepository, accountRepository, null);
+  }
 
   public LedgerEntryEntity recordDemoDeposit(
       TradingAccountEntity account,
@@ -86,6 +108,41 @@ public class LedgerService {
     return save(account, LedgerEntryType.TRADE_FEE, amount.negate(), account.getBalance(), "POSITION", tradeOrPositionId, description);
   }
 
+  public LedgerEntryEntity recordFundingFee(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID positionId,
+      String description
+  ) {
+    return save(account, LedgerEntryType.FUNDING_FEE, amount, account.getBalance(), "POSITION", positionId, description);
+  }
+
+  public LedgerEntryEntity recordLiquidationFee(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID positionId,
+      String description
+  ) {
+    return save(account, LedgerEntryType.LIQUIDATION_FEE, amount.negate(), account.getBalance(), "POSITION", positionId, description);
+  }
+
+  public LedgerEntryEntity recordFinancing(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID positionId,
+      String description
+  ) {
+    return save(account, LedgerEntryType.FINANCING, amount, account.getBalance(), "POSITION", positionId, description);
+  }
+
+  public LedgerEntryEntity recordForcedClose(
+      TradingAccountEntity account,
+      UUID positionId,
+      String description
+  ) {
+    return save(account, LedgerEntryType.FORCED_CLOSE, BigDecimal.ZERO, account.getBalance(), "POSITION", positionId, description);
+  }
+
   /**
    * 记录后台人工资金调整流水。
    */
@@ -109,6 +166,24 @@ public class LedgerService {
     accountRepository.findByIdAndUserId(accountId, userId)
         .orElseThrow(() -> new AuthorizationException("ACCOUNT_NOT_FOUND", "Account not found"));
     return ledgerEntryRepository.findByAccountIdOrderByCreatedAtDesc(accountId);
+  }
+
+  public List<LedgerEntryResponse> visibleEntries(UUID userId, UUID accountId) {
+    accountRepository.findByIdAndUserId(accountId, userId)
+        .orElseThrow(() -> new AuthorizationException("ACCOUNT_NOT_FOUND", "Account not found"));
+    List<LedgerEntryResponse> combined = new ArrayList<>();
+    ledgerEntryRepository.findByAccountIdOrderByCreatedAtDesc(accountId).stream()
+        .map(LedgerEntryResponse::fromCashLedger)
+        .forEach(combined::add);
+    if (assetLedgerEntryRepository != null) {
+      assetLedgerEntryRepository.findByAccountIdOrderByCreatedAtDesc(accountId).stream()
+          .map(LedgerEntryResponse::fromAssetLedger)
+          .forEach(combined::add);
+    }
+    combined.sort(Comparator
+        .comparing(LedgerEntryResponse::createdAt, Comparator.nullsFirst(Comparator.naturalOrder()))
+        .reversed());
+    return combined;
   }
 
   private LedgerEntryEntity save(

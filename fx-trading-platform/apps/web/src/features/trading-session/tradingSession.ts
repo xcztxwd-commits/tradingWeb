@@ -1,4 +1,4 @@
-import { createDemoAccount, getAccounts, getAccountSummary } from '../../services/accountApi'
+import { createDemoAccount, getAccounts, getAccountSummary, getWalletBalances } from '../../services/accountApi'
 import { ApiClientError } from '../../services/apiClient'
 import { getLedgerEntries } from '../../services/ledgerApi'
 import {
@@ -10,7 +10,7 @@ import {
   updatePositionProtection
 } from '../../services/tradingApi'
 import type { OrderResponse, PositionResponse } from '../../components/tables/types'
-import type { AccountSummary, LedgerEntry, OrderPayload, UpdatePositionProtectionPayload } from '../../types/trading'
+import type { AccountSummary, LedgerEntry, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
 
 export { deriveTradingBalances } from './tradingSessionModels'
 export type { TradingBalances } from './tradingSessionModels'
@@ -26,6 +26,7 @@ export type TradingAccountData = {
   positions: PositionResponse[]
   positionHistory: PositionResponse[]
   ledgerEntries: LedgerEntry[]
+  walletBalances: WalletBalance[]
 }
 
 export function isAuthSessionFailure(error: unknown) {
@@ -33,15 +34,16 @@ export function isAuthSessionFailure(error: unknown) {
 }
 
 export async function loadTradingAccountData(token: string, accountId: string): Promise<TradingAccountData> {
-  const [account, orders, positions, positionHistory, ledgerEntries] = await Promise.all([
+  const [account, orders, positions, positionHistory, ledgerEntries, walletBalances] = await Promise.all([
     getAccountSummary(accountId, token),
     getOrders(token),
     getPositions(accountId, token),
     getPositionHistory(accountId, token),
-    getLedgerEntries(accountId, token)
+    getLedgerEntries(accountId, token),
+    getWalletBalances(accountId, token)
   ])
 
-  return { account, orders, positions, positionHistory, ledgerEntries }
+  return { account, orders, positions, positionHistory, ledgerEntries, walletBalances }
 }
 
 export async function submitTradingOrder(payload: OrderPayload, token?: string | null) {

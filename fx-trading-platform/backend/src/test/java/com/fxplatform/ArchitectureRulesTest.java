@@ -249,7 +249,38 @@ class ArchitectureRulesTest {
   @Test
   void ledgerTypesIncludeOrderAndFeeBoundaries() {
     assertThat(Arrays.stream(LedgerEntryType.values()).map(Enum::name))
-        .contains("ORDER_HOLD", "ORDER_RELEASE", "TRADE_FEE");
+        .contains(
+            "ORDER_HOLD",
+            "ORDER_RELEASE",
+            "TRADE_FEE",
+            "FORCED_CLOSE",
+            "LIQUIDATION_FEE",
+            "FINANCING",
+            "CONVERSION_FEE");
+  }
+
+  @Test
+  void fxConversionAndFinancingMigrationAddsOnlyFxTablesAndPositionAccrual() throws Exception {
+    String migration = Files.readString(Path.of("src/main/resources/db/migration/V36__fx_conversion_and_financing.sql"));
+
+    assertThat(migration).contains("CREATE TABLE IF NOT EXISTS trading.fx_conversion_rates");
+    assertThat(migration).contains("CREATE TABLE IF NOT EXISTS trading.fx_financing_rates");
+    assertThat(migration).contains("ADD COLUMN IF NOT EXISTS financing_accrued NUMERIC(24, 8) NOT NULL DEFAULT 0");
+    assertThat(migration).doesNotContain("wallet_balances");
+    assertThat(migration).doesNotContain("funding_rates");
+  }
+
+  @Test
+  void fxFinancingSchedulerIsDisabledByDefault() throws Exception {
+    String application = Files.readString(Path.of("src/main/resources/application.yml"));
+    String scheduler = Files.readString(Path.of(
+        "src/main/java/com/fxplatform/trading/service/ForexFinancingScheduler.java"));
+
+    assertThat(application).contains("fx-financing:");
+    assertThat(application).contains("enabled: ${TRADING_FX_FINANCING_ENABLED:false}");
+    assertThat(application).contains("scan-ms: ${TRADING_FX_FINANCING_SCAN_MS:86400000}");
+    assertThat(scheduler).contains("ConditionalOnProperty");
+    assertThat(scheduler).contains("trading.fx-financing");
   }
 
   @Test
@@ -273,11 +304,17 @@ class ArchitectureRulesTest {
         "src/main/java/com/fxplatform/trading/service/PendingOrderExecutionService.java"));
     String protectiveService = Files.readString(Path.of(
         "src/main/java/com/fxplatform/trading/service/ProtectiveOrderExecutionService.java"));
+    String liquidationScheduler = Files.readString(Path.of(
+        "src/main/java/com/fxplatform/trading/service/LiquidationScanScheduler.java"));
 
     assertThat(application).contains("pending-order-execution-enabled: ${TRADING_PENDING_ORDER_EXECUTION_ENABLED:false}");
     assertThat(application).contains("protective-order-execution-enabled: ${TRADING_PROTECTIVE_ORDER_EXECUTION_ENABLED:false}");
+    assertThat(application).contains("enabled: ${TRADING_LIQUIDATION_ENABLED:false}");
+    assertThat(application).contains("scan-interval-ms: ${TRADING_LIQUIDATION_SCAN_INTERVAL_MS:60000}");
     assertThat(pendingService).contains("ConditionalOnProperty");
     assertThat(protectiveService).contains("ConditionalOnProperty");
+    assertThat(liquidationScheduler).contains("ConditionalOnProperty");
+    assertThat(liquidationScheduler).contains("trading.liquidation.scan-interval-ms");
   }
 
   @Test

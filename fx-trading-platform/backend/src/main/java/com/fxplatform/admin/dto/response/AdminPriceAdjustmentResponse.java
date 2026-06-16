@@ -49,7 +49,7 @@ public record AdminPriceAdjustmentResponse(
         entity.getTargetPrice(),
         entity.getStartsAt(),
         entity.getEndsAt(),
-        entity.getStatus(),
+        entity.getStatus() == null ? null : entity.getStatus().code(),
         entity.getAdminUserId(),
         entity.getReason(),
         entity.getCreatedAt());

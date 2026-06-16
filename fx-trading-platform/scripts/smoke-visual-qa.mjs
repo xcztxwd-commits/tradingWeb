@@ -130,6 +130,10 @@ async function runRouteCheck(page, route, viewport) {
     await sleep(350)
 
     const nonEmpty = await assertPageNonEmpty(page)
+    const positionAlgorithmSamples =
+      route.ready === 'positions-auth'
+        ? await assertPositionAlgorithmSamples(page)
+        : { skipped: true, reason: 'route does not render authenticated positions' }
     const overlay = await assertNoFrameworkOverlay(page)
     const horizontalScroll = await assertNoBodyHorizontalScroll(page)
     const consoleHealth = assertNoConsoleErrors(diagnostics.errors)
@@ -151,6 +155,7 @@ async function runRouteCheck(page, route, viewport) {
       checks: {
         nonEmpty,
         consoleHealth,
+        positionAlgorithmSamples,
         overlay,
         horizontalScroll,
         mobileBottomAction
@@ -204,7 +209,11 @@ async function waitForRouteReady(page, route) {
       }
       if (readyKind === 'markets') {
         const loading = document.querySelector('.state-panel--loading')
-        return !loading && Boolean(document.querySelector('.market-rank-grid')) && Boolean(document.querySelector('tbody tr, .data-table__card'))
+        const marketGrid = document.querySelector('.market-rank-grid, .market-ranking-preview-grid, .market-data-dashboard')
+        const marketGridText = (marketGrid?.textContent ?? '').replace(/\s+/g, '').trim()
+        return !loading &&
+          Boolean(marketGrid) &&
+          (marketGridText.length > 40 || Boolean(document.querySelector('tbody tr, .data-table__card')))
       }
       if (readyKind === 'home') {
         const main = document.querySelector('main')
@@ -265,6 +274,26 @@ async function assertPageNonEmpty(page) {
   assert(result.width > 0 && result.height > 0, `Expected visible root dimensions, got ${result.width}x${result.height}`)
   assert(result.visibleElementCount > 3, `Expected visible UI elements, got ${result.visibleElementCount}`)
   return result
+}
+
+async function assertPositionAlgorithmSamples(page) {
+  const text = await page.evaluate(() => (document.body.textContent ?? '').replace(/\s+/g, ' ').trim())
+  const expected = [
+    'EURUSD',
+    'BTCUSDT',
+    'BTCUSD',
+    '1.10002',
+    '1.10100',
+    '98.00',
+    '91.00',
+    '978.011',
+    '4953.00',
+    '0.01799091',
+    '0.02000000'
+  ]
+  const missing = expected.filter((item) => !text.includes(item))
+  assert(missing.length === 0, `Missing position algorithm samples: ${missing.join(', ')}`)
+  return { matched: expected.length, expected }
 }
 
 async function assertNoFrameworkOverlay(page) {
@@ -343,6 +372,10 @@ async function assertMobileBottomActionClearance(page, route) {
     const actions = [...main.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])')]
       .filter((element) => {
         if (element.closest('.mobile-tabs, .sidebar')) return false
+        for (let current = element.parentElement; current && current !== main; current = current.parentElement) {
+          const position = window.getComputedStyle(current).position
+          if (position === 'fixed' || position === 'sticky') return false
+        }
         const style = window.getComputedStyle(element)
         const rect = element.getBoundingClientRect()
         const visibleInViewport = rect.bottom > 0 && rect.top < window.innerHeight
@@ -898,55 +931,107 @@ function visualOrders() {
 function visualPositions() {
   return [
     {
-      id: 'position-btc-long',
-      symbol: 'BTCUSDT',
+      id: 'position-eurusd-long',
+      symbol: 'EURUSD',
       side: 'LONG',
-      instrumentType: 'PERP',
-      marginMode: 'CROSS',
-      leverage: 20,
-      positionUnit: 'BTC',
-      lots: '0.85',
-      openPrice: '66420.00',
-      markPrice: '68412.40',
-      currentPrice: '68412.40',
-      liquidationPrice: '61280.00',
-      breakEvenPrice: '66502.30',
-      stopLoss: '64200.00',
-      takeProfit: '70600.00',
-      floatingPnl: '1693.54',
-      floatingPnlRatio: '3.00',
-      realizedPnl: '124.20',
-      marginHeld: '2822.85',
+      instrumentType: 'FOREX',
+      marginMode: 'ISOLATED',
+      leverage: 50,
+      positionUnit: 'LOT',
+      lots: '1.00',
+      openPrice: '1.10002',
+      markPrice: '1.10101',
+      currentPrice: '1.10100',
+      liquidationPrice: '1.07800',
+      breakEvenPrice: '1.10009',
+      stopLoss: '1.09500',
+      takeProfit: '1.11200',
+      floatingPnl: '98.00',
+      floatingPnlRatio: '0.04454464',
+      realizedPnl: '91.00',
+      marginHeld: '2200.04',
       maintenanceMarginRate: '0.005',
-      adlLevel: 2,
+      adlLevel: 1,
       status: 'OPEN',
       openedAt: '2026-06-14T07:32:00.000Z',
       closedAt: null
     },
     {
-      id: 'position-xau-short',
-      symbol: 'XAUUSD',
-      side: 'SHORT',
-      instrumentType: 'CFD',
-      marginMode: 'ISOLATED',
-      leverage: 10,
-      positionUnit: 'XAU',
-      lots: '1.20',
-      openPrice: '2354.20',
-      markPrice: '2341.22',
-      currentPrice: '2341.22',
-      liquidationPrice: '2420.00',
-      breakEvenPrice: '2352.80',
-      stopLoss: '2375.00',
-      takeProfit: '2308.00',
-      floatingPnl: '155.76',
-      floatingPnlRatio: '5.52',
-      realizedPnl: '0.00',
-      marginHeld: '282.50',
-      maintenanceMarginRate: '0.01',
-      adlLevel: 1,
+      id: 'position-btc-spot',
+      symbol: 'BTCUSDT',
+      side: 'LONG',
+      instrumentType: 'SPOT',
+      marginMode: 'CASH',
+      leverage: null,
+      positionUnit: 'BTC',
+      lots: '0.1998',
+      openPrice: '50050.05005',
+      markPrice: '55000.00',
+      currentPrice: '55000.00',
+      liquidationPrice: null,
+      breakEvenPrice: '50050.05005',
+      stopLoss: '48000.00',
+      takeProfit: '58000.00',
+      floatingPnl: '978.011',
+      floatingPnlRatio: null,
+      realizedPnl: '978.011',
+      marginHeld: '10000.00',
+      maintenanceMarginRate: '0',
+      adlLevel: null,
       status: 'OPEN',
-      openedAt: '2026-06-13T14:06:00.000Z',
+      openedAt: '2026-06-14T08:00:00.000Z',
+      closedAt: null
+    },
+    {
+      id: 'position-btc-linear-long',
+      symbol: 'BTCUSDT',
+      side: 'LONG',
+      instrumentType: 'SWAP',
+      marginMode: 'CROSS',
+      leverage: 10,
+      positionUnit: 'BTC',
+      lots: '1.00',
+      openPrice: '50000.00',
+      markPrice: '55000.00',
+      currentPrice: '55000.00',
+      liquidationPrice: '45500.00',
+      breakEvenPrice: '50042.00',
+      stopLoss: '48000.00',
+      takeProfit: '58000.00',
+      floatingPnl: '5000.00',
+      floatingPnlRatio: '0.9906',
+      realizedPnl: '4953.00',
+      marginHeld: '5000.00',
+      maintenanceMarginRate: '0.01',
+      adlLevel: 2,
+      status: 'OPEN',
+      openedAt: '2026-06-14T08:15:00.000Z',
+      closedAt: null
+    },
+    {
+      id: 'position-btc-inverse-long',
+      symbol: 'BTCUSD',
+      side: 'LONG',
+      instrumentType: 'SWAP',
+      marginMode: 'CROSS',
+      leverage: 10,
+      positionUnit: 'CONTRACT',
+      lots: '100',
+      openPrice: '50000.00',
+      markPrice: '55000.00',
+      currentPrice: '55000.00',
+      liquidationPrice: '45454.55',
+      breakEvenPrice: '50100.00',
+      stopLoss: '48000.00',
+      takeProfit: '58000.00',
+      floatingPnl: '0.01799091',
+      floatingPnlRatio: '0.89954550',
+      realizedPnl: '0.01799091',
+      marginHeld: '0.02000000',
+      maintenanceMarginRate: '0.005',
+      adlLevel: 3,
+      status: 'OPEN',
+      openedAt: '2026-06-14T08:30:00.000Z',
       closedAt: null
     }
   ]
@@ -955,10 +1040,11 @@ function visualPositions() {
 function visualPositionHistory() {
   return [
     {
-      ...visualPositions()[0],
+      ...visualPositions()[2],
       id: 'position-eth-closed',
       symbol: 'ETHUSDT',
       side: 'LONG',
+      positionUnit: 'ETH',
       lots: '3.00',
       openPrice: '3310.00',
       currentPrice: '3428.60',

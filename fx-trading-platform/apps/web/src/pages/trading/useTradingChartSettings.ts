@@ -71,15 +71,6 @@ export function useTradingChartSettings(
           }
         }))
       },
-      onTooltipStyleChange: (tooltipStyle: ChartSettings['axisSettings']['tooltipStyle']) => {
-        updateChartSettings((current) => ({
-          ...current,
-          axisSettings: {
-            ...current.axisSettings,
-            tooltipStyle
-          }
-        }))
-      },
       onDrawingMagnetModeChange: (magnetMode: DrawingMagnetMode) => {
         updateChartSettings((current) => ({
           ...current,

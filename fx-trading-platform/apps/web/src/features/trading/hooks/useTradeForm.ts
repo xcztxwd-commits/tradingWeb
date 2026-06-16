@@ -120,9 +120,9 @@ export function useTradeForm(
       ...current,
       strategyType,
       orderType: strategyType === 'advanced_limit' ? 'limit' : current.orderType,
-      tpSlEnabled: strategyType === 'tp_sl' ? true : current.tpSlEnabled,
-      takeProfitEnabled: strategyType === 'tp_sl' ? true : current.takeProfitEnabled,
-      stopLossEnabled: strategyType === 'tp_sl' ? true : current.stopLossEnabled
+      tpSlEnabled: strategyType === 'none' || strategyType === 'tp_sl' ? false : current.tpSlEnabled,
+      takeProfitEnabled: strategyType === 'none' || strategyType === 'tp_sl' ? false : current.takeProfitEnabled,
+      stopLossEnabled: strategyType === 'none' || strategyType === 'tp_sl' ? false : current.stopLossEnabled
     }))
   }, [])
 
@@ -220,25 +220,24 @@ export function deriveTradeForm(
 
   if (next.orderType === 'market') {
     const marketPrice = market?.lastPrice ?? 0
-    if (next.side === 'buy' && sourceField === 'total' && total > 0 && marketPrice > 0) {
-      next.amount = formatDecimal(total / marketPrice)
+    const unitSize = getMarketUnitSize(market)
+    if (usesQuoteBudgetMarketBuy(next, market) && sourceField === 'total' && total > 0 && marketPrice > 0) {
+      next.amount = formatDecimal(total / (marketPrice * unitSize))
     }
-    if (next.side === 'buy' && sourceField === 'amount' && amount > 0 && marketPrice > 0) {
-      next.total = formatDecimal(amount * marketPrice)
-    }
-    if (next.side === 'sell' && sourceField === 'amount' && amount > 0 && marketPrice > 0) {
-      next.total = formatDecimal(amount * marketPrice)
+    if (sourceField === 'amount' && amount > 0 && marketPrice > 0) {
+      next.total = formatDecimal(amount * marketPrice * unitSize)
     }
     return next
   }
 
   if (next.orderType === 'limit' && price > 0) {
+    const unitSize = getMarketUnitSize(market)
     if ((sourceField === 'price' || sourceField === 'amount') && amount > 0) {
-      next.total = formatDecimal(price * amount)
+      next.total = formatDecimal(price * amount * unitSize)
     }
 
     if (sourceField === 'total' && total > 0) {
-      next.amount = formatDecimal(total / price)
+      next.amount = formatDecimal(total / (price * unitSize))
     }
   }
 
@@ -248,7 +247,7 @@ export function deriveTradeForm(
 export function applyBestPrice(form: TradeFormState, market: TradeMarket): TradeFormState {
   const price = form.side === 'buy' ? market.bestAsk : market.bestBid
   if (price <= 0) return form
-  return deriveTradeForm(form, { price: formatPrice(price) }, 'price')
+  return deriveTradeForm(form, { price: formatPrice(price) }, 'price', market)
 }
 
 export function syncLimitPriceFromMarket(
@@ -278,8 +277,10 @@ export function applyPercent(
 
   if (form.side === 'buy') {
     const quoteBalance = balances[quoteAsset] ?? 0
-    const total = (quoteBalance * boundedPercent) / 100
-    const amount = price > 0 ? total / price : 0
+    const leverage = getMarginLeverage(market)
+    const unitSize = getMarketUnitSize(market)
+    const total = ((quoteBalance * boundedPercent) / 100) * (isMarginQuantityMarket(market) ? leverage : 1)
+    const amount = price > 0 ? total / (price * unitSize) : 0
     return {
       ...form,
       percent: boundedPercent,
@@ -289,7 +290,12 @@ export function applyPercent(
   }
 
   const baseBalance = balances[baseAsset] ?? 0
-  const amount = (baseBalance * boundedPercent) / 100
+  const leverage = getMarginLeverage(market)
+  const unitSize = getMarketUnitSize(market)
+  const quoteBalance = balances[quoteAsset] ?? 0
+  const amount = isMarginQuantityMarket(market)
+    ? price > 0 ? ((quoteBalance * boundedPercent) / 100) * leverage / (price * unitSize) : 0
+    : (baseBalance * boundedPercent) / 100
   return deriveTradeForm(
     {
       ...form,
@@ -297,7 +303,8 @@ export function applyPercent(
       amount: amount > 0 ? formatDecimal(amount) : ''
     },
     {},
-    'amount'
+    'amount',
+    market
   )
 }
 
@@ -316,6 +323,7 @@ export function validateOrder(form: TradeFormState, options: ValidationOptions, 
   const price = toNumber(form.price)
   const amount = toNumber(form.amount)
   const total = getOrderNotional(form, options.market)
+  const requiredMargin = getRequiredMargin(form, options.market)
   const quoteBalance = options.balances[options.market.quoteAsset] ?? 0
   const baseBalance = options.balances[options.market.baseAsset] ?? 0
 
@@ -336,11 +344,15 @@ export function validateOrder(form: TradeFormState, options: ValidationOptions, 
     errors.push('minNotional')
   }
 
-  if (form.side === 'buy' && total > quoteBalance) {
+  if (form.side === 'buy' && requiredMargin > quoteBalance) {
     errors.push('quoteBalance')
   }
 
-  if (form.side === 'sell' && amount > baseBalance) {
+  if (form.side === 'sell' && isMarginQuantityMarket(options.market) && requiredMargin > quoteBalance) {
+    errors.push('quoteBalance')
+  }
+
+  if (form.side === 'sell' && !isMarginQuantityMarket(options.market) && amount > baseBalance) {
     errors.push('baseBalance')
   }
 
@@ -366,11 +378,32 @@ export function validateOrder(form: TradeFormState, options: ValidationOptions, 
 
 export function getOrderNotional(form: TradeFormState, market: TradeMarket) {
   const total = toNumber(form.total)
-  if (total > 0) return total
+  if (usesQuoteBudgetMarketBuy(form, market) && total > 0) return total
 
   const amount = toNumber(form.amount)
   const price = form.orderType === 'market' ? market.lastPrice : toNumber(form.price)
-  return amount * price
+  return amount * price * getMarketUnitSize(market)
+}
+
+export function getRequiredMargin(form: TradeFormState, market: TradeMarket) {
+  const notional = getOrderNotional(form, market)
+  return isMarginQuantityMarket(market) ? notional / getMarginLeverage(market) : notional
+}
+
+export function usesQuoteBudgetMarketBuy(form: Pick<TradeFormState, 'side' | 'orderType'>, market?: TradeMarket) {
+  return form.side === 'buy' && form.orderType === 'market' && market?.quantityMode === 'quote-budget'
+}
+
+export function isMarginQuantityMarket(market?: TradeMarket) {
+  return market?.quantityMode === 'quantity' || market?.quantityMode === 'contracts'
+}
+
+function getMarketUnitSize(market?: TradeMarket) {
+  return market?.unitSize && market.unitSize > 0 ? market.unitSize : 1
+}
+
+function getMarginLeverage(market?: TradeMarket) {
+  return market?.leverage && market.leverage > 0 ? market.leverage : 1
 }
 
 export function toNumber(value: string | number | undefined) {

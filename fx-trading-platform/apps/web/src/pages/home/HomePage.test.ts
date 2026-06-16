@@ -10,6 +10,7 @@ const stylesPath = join(currentDir, 'HomePage.module.css')
 const homeApiPath = join(currentDir, '..', '..', 'services', 'homeApi.ts')
 const homeComponentsDir = join(currentDir, 'components')
 const homeHooksDir = join(currentDir, 'hooks')
+const publicDir = join(currentDir, '..', '..', '..', 'public')
 
 describe('prototype home page source', () => {
   it('splits the homepage into explicit guest, unverified and verified states', () => {
@@ -65,11 +66,22 @@ describe('prototype home page source', () => {
     assert.match(counterHook, /getHomeCounters/)
     assert.match(counterHook, /setInterval/)
     assert.match(counterHook, /1000/)
+    assert.match(counterHook, /slot:\s*'asset'/)
+    assert.match(counterHook, /slot:\s*'volume'/)
     assert.match(counterHook, /Array\.isArray\(nextCounters\.metricCards\)/)
 
     const homeApi = readFileSync(homeApiPath, 'utf8')
     assert.match(homeApi, /HomeMetricCard/)
     assert.match(homeApi, /metricCards:\s*HomeMetricCard\[\]/)
+  })
+
+  it('refreshes the auth hero when auth storage changes on the same route', () => {
+    const authVariantHook = readFileSync(join(homeHooksDir, 'useHomeAuthVariant.ts'), 'utf8')
+
+    assert.match(authVariantHook, /authSessionChangedEvent/)
+    assert.match(authVariantHook, /const refreshVariant = \(\) => setVariant\(resolveVariant\(\)\)/)
+    assert.match(authVariantHook, /window\.addEventListener\(authSessionChangedEvent, refreshVariant\)/)
+    assert.match(authVariantHook, /window\.removeEventListener\(authSessionChangedEvent, refreshVariant\)/)
   })
 
   it('uses restrained theme-aware styling, not decorative device mockups', () => {
@@ -88,15 +100,22 @@ describe('prototype home page source', () => {
     assert.match(styles, /\.supportGrid/)
     assert.match(styles, /\.counterTick\s*{[\s\S]*animation:\s*counterPulse/)
     assert.match(styles, /\.promoCard\s*{[\s\S]*perspective:/)
-    assert.match(styles, /\.promoCardInner\s*{[\s\S]*transform-style:\s*preserve-3d/)
-    assert.match(styles, /\.promoCard:hover\s+\.promoCardInner/)
-    assert.match(styles, /\.promoCard:focus\s+\.promoCardInner/)
-    assert.match(styles, /\.promoCardBack\s*{[\s\S]*rotateY\(180deg\)/)
-    assert.doesNotMatch(styles, /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.promoCard:hover\s+\.promoCardInner[\s\S]*transform:\s*none/)
+    assert.match(styles, /\.promoCardSurface\s*{[\s\S]*border:\s*0/)
+    assert.match(styles, /\.promoTextInner\s*{[\s\S]*transform-style:\s*preserve-3d/)
+    assert.match(styles, /\.promoCard:hover\s+\.promoTextInner/)
+    assert.match(styles, /\.promoCard:focus-visible\s+\.promoTextInner/)
+    assert.match(styles, /\.promoTextBack\s*{[\s\S]*rotateY\(180deg\)/)
+    assert.match(styles, /\.laurelRight\s*{[\s\S]*scaleX\(-1\)/)
+    assert.doesNotMatch(styles, /\.laurelLeft::|\.laurelRight::|\.promoCardFace/)
+    assert.doesNotMatch(styles, /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.promoCard:hover\s+\.promoTextInner[\s\S]*transform:\s*none/)
     assert.match(styles, /\.panelCard:hover/)
     assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)/)
     assert.match(styles, /@media \(max-width:\s*760px\)[\s\S]*\.heroGrid\s*{[\s\S]*grid-template-columns:\s*1fr/)
     assert.doesNotMatch(styles, /phoneReflection|deviceDrift|scanSweep|radial-gradient\(circle/)
+
+    const laurelAsset = join(publicDir, 'home-laurel.svg')
+    assert.equal(existsSync(laurelAsset), true)
+    assert.match(readFileSync(laurelAsset, 'utf8'), /<svg width="20" height="47"/)
   })
 
   it('matches Binance home module rhythm without using protected brand assets', () => {
@@ -112,6 +131,7 @@ describe('prototype home page source', () => {
     assert.match(source, /用户的共同选择/)
     assert.match(source, /metricCards\.map/)
     assert.match(source, /promoCard/)
+    assert.match(source, /home-laurel\.svg/)
     assert.doesNotMatch(source, /\$132,602,379,204|\$28,601,502,458/)
     assert.match(source, /KYC/)
     assert.match(source, /account\/security\/kyc/)

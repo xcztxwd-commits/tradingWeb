@@ -1,5 +1,7 @@
 package com.fxplatform.market.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fxplatform.market.model.ProductType;
 import java.math.BigDecimal;
 
 /**
@@ -9,6 +11,7 @@ public record SymbolResponse(
     String symbol,
     String displayName,
     String assetClass,
+    ProductType productType,
     String baseCurrency,
     String quoteCurrency,
     BigDecimal minLot,
@@ -34,12 +37,81 @@ public record SymbolResponse(
     BigDecimal marketCap,
     BigDecimal spread,
     Long quoteTimestamp,
-    String quoteSource
+    String quoteSource,
+    @JsonIgnore
+    String providerMetadataJson
 ) {
   public SymbolResponse(
       String symbol,
       String displayName,
       String assetClass,
+      String baseCurrency,
+      String quoteCurrency,
+      BigDecimal minLot,
+      BigDecimal maxLot,
+      Integer leverage,
+      boolean enabled,
+      String provider,
+      String providerSymbol,
+      boolean tradable,
+      String iconUrl,
+      boolean displayEnabled,
+      boolean quoteEnabled,
+      boolean chartEnabled,
+      boolean orderBookEnabled,
+      boolean featured,
+      String displayGroup,
+      Integer displayOrder,
+      BigDecimal lastPrice,
+      BigDecimal changePercent,
+      BigDecimal high24h,
+      BigDecimal low24h,
+      BigDecimal volume24h,
+      BigDecimal marketCap,
+      BigDecimal spread,
+      Long quoteTimestamp,
+      String quoteSource,
+      String providerMetadataJson
+  ) {
+    this(
+        symbol,
+        displayName,
+        assetClass,
+        null,
+        baseCurrency,
+        quoteCurrency,
+        minLot,
+        maxLot,
+        leverage,
+        enabled,
+        provider,
+        providerSymbol,
+        tradable,
+        iconUrl,
+        displayEnabled,
+        quoteEnabled,
+        chartEnabled,
+        orderBookEnabled,
+        featured,
+        displayGroup,
+        displayOrder,
+        lastPrice,
+        changePercent,
+        high24h,
+        low24h,
+        volume24h,
+        marketCap,
+        spread,
+        quoteTimestamp,
+        quoteSource,
+        providerMetadataJson);
+  }
+
+  public SymbolResponse(
+      String symbol,
+      String displayName,
+      String assetClass,
+      ProductType productType,
       String baseCurrency,
       String quoteCurrency,
       BigDecimal minLot,
@@ -54,6 +126,7 @@ public record SymbolResponse(
         symbol,
         displayName,
         assetClass,
+        productType,
         baseCurrency,
         quoteCurrency,
         minLot,
@@ -79,6 +152,37 @@ public record SymbolResponse(
         null,
         null,
         null,
-        null);
+        null,
+        "{}");
+  }
+
+  public SymbolResponse(
+      String symbol,
+      String displayName,
+      String assetClass,
+      String baseCurrency,
+      String quoteCurrency,
+      BigDecimal minLot,
+      BigDecimal maxLot,
+      Integer leverage,
+      boolean enabled,
+      String provider,
+      String providerSymbol,
+      boolean tradable
+  ) {
+    this(
+        symbol,
+        displayName,
+        assetClass,
+        null,
+        baseCurrency,
+        quoteCurrency,
+        minLot,
+        maxLot,
+        leverage,
+        enabled,
+        provider,
+        providerSymbol,
+        tradable);
   }
 }

@@ -4,28 +4,28 @@ import { useTranslation } from 'react-i18next'
 import { OrderConfirmationDialog } from './OrderConfirmationDialog'
 import { OrderFormSide } from './OrderFormSide'
 import { OrderTypeTabs } from './OrderTypeTabs'
-import { TradePanelAccountStrip } from './TradePanelAccountStrip'
-import { TradePanelLeverageControls, TradePanelLeverageToggle } from './TradePanelLeverageControls'
-import { TradePanelSessionStatus, getTradePanelSessionState } from './TradePanelSessionStatus'
+import { getTradePanelSessionState } from './TradePanelSessionStatus'
 import type { TradePanelSessionMode } from './TradePanelSessionStatus'
 import { TradeTabs } from './TradeTabs'
 import { createPanelMarket } from './tradePanelMarket'
 import { useMockBalances } from '../hooks/useMockBalances'
 import { useTradePanelSubmit } from '../hooks/useTradePanelSubmit'
 import { useTradeForm } from '../hooks/useTradeForm'
-import type { OrderValidationResult, TradeBalances, TradeFormState, TradeSide } from '../types/order'
+import type { OrderValidationResult, TradeBalances, TradeFormState, TradeMarket, TradeSide } from '../types/order'
 import { useMarketDataSnapshot } from '../../market/marketDataStore'
 import type { OrderResponse } from '../../../components/tables/types'
 import type { OrderPayload } from '../../../types/trading'
 import '../styles/trade-panel.css'
-
 const skipConfirmStorageKey = 'fx-trade-confirm-skip'
 
 type Props = {
   symbol: string
+  category?: 'fx' | 'crypto' | 'metals' | 'indices'
   compact?: boolean
   accountId?: string
   balances?: TradeBalances
+  leverage?: number
+  productType?: TradeMarket['productType']
   minOrderAmount?: number
   pricePrecision?: number
   quantityPrecision?: number
@@ -43,9 +43,11 @@ const emptyBalances: TradeBalances = {}
 
 export function TradePanel({
   symbol,
+  category,
   compact = false,
   accountId,
   balances: externalBalances = emptyBalances,
+  leverage: symbolLeverage, productType,
   minOrderAmount = 0.0001,
   pricePrecision = 2,
   quantityPrecision = 6,
@@ -60,14 +62,13 @@ export function TradePanel({
 }: Props) {
   const { t } = useTranslation()
   const snapshot = useMarketDataSnapshot()
-  const market = useMemo(() => createPanelMarket(symbol, snapshot), [snapshot, symbol])
+  const leverage = resolveTradePanelLeverage(symbolLeverage)
+  const market = useMemo(() => createPanelMarket(symbol, snapshot, { category, leverage, productType }), [category, leverage, productType, snapshot, symbol])
   const mockBalances = useMockBalances()
   const balances = useMemo(() => ({ ...mockBalances, ...externalBalances }), [externalBalances, mockBalances])
   const buyForm = useTradeForm('buy', market, balances, 5, minOrderAmount)
   const sellForm = useTradeForm('sell', market, balances, 5, minOrderAmount)
   const [mobileSide, setMobileSide] = useState<TradeSide>('buy')
-  const [leverage, setLeverage] = useState(100)
-  const [leverageOpen, setLeverageOpen] = useState(false)
   const [skipConfirm, setSkipConfirm] = useState(readSkipConfirmPreference)
   const [confirmation, setConfirmation] = useState<{
     form: TradeFormState
@@ -109,17 +110,15 @@ export function TradePanel({
   const updateBothOrderTypes = (orderType: TradeFormState['orderType']) => {
     buyForm.setOrderType(orderType)
     sellForm.setOrderType(orderType)
+    buyForm.setStrategyType('none')
+    sellForm.setStrategyType('none')
   }
 
-  const updateBothStrategies = (strategyType: TradeFormState['strategyType']) => {
-    buyForm.setStrategyType(strategyType)
-    sellForm.setStrategyType(strategyType)
-  }
-
-  const updateLeverage = (value: number) => {
-    const nextLeverage = Math.min(100, Math.max(1, Math.round(value)))
-    setLeverage(nextLeverage)
-    setNotice(t('trading.leverageChanged', { leverage: nextLeverage }))
+  const updateBothStrategyOrderTypes = (orderType: TradeFormState['orderType']) => {
+    buyForm.setOrderType(orderType)
+    sellForm.setOrderType(orderType)
+    buyForm.setStrategyType('tp_sl')
+    sellForm.setStrategyType('tp_sl')
   }
 
   const updateSkipConfirm = (value: boolean) => {
@@ -148,28 +147,14 @@ export function TradePanel({
     >
       <header className="trade-panel__header">
         <TradeTabs onToolsUnavailable={() => setNotice(t('trading.toolUnavailable'))} />
-        <TradePanelLeverageToggle open={leverageOpen} onToggle={() => setLeverageOpen((current) => !current)} />
       </header>
-
-      <TradePanelSessionStatus onRetrySession={onRetrySession} state={sessionState} />
-
-      <TradePanelLeverageControls
-        leverage={leverage}
-        open={leverageOpen}
-        onClose={() => setLeverageOpen(false)}
-        onOpen={() => setLeverageOpen(true)}
-        onUpdate={updateLeverage}
-      />
 
       <OrderTypeTabs
         orderType={activeOrderType}
         strategyType={activeStrategyType}
         onOrderTypeChange={updateBothOrderTypes}
-        onStrategyChange={updateBothStrategies}
-        onUnavailable={(label) => setNotice(t('trading.featureUnavailable', { label }))}
+        onStrategyOrderTypeChange={updateBothStrategyOrderTypes}
       />
-
-      <TradePanelAccountStrip accountStatus={sessionState.accountStatus} />
 
       <div className="trade-panel__mobile-sides" role="tablist" aria-label={t('trading.sideTabs')}>
         <button
@@ -200,7 +185,6 @@ export function TradePanel({
           showErrors={attempted.buy}
           canTrade={canTrade}
           loginRequired={loginRequired}
-          leverage={leverage}
           submitting={submittingSide === 'buy'}
           onFieldChange={buyForm.updateField}
           onPriceFocusChange={buyForm.setPriceFocused}
@@ -219,7 +203,6 @@ export function TradePanel({
           showErrors={attempted.sell}
           canTrade={canTrade}
           loginRequired={loginRequired}
-          leverage={leverage}
           submitting={submittingSide === 'sell'}
           onFieldChange={sellForm.updateField}
           onPriceFocusChange={sellForm.setPriceFocused}
@@ -229,9 +212,11 @@ export function TradePanel({
         />
       </div>
 
-      <footer className="trade-panel__notice" role="status">
-        <span>{notice}</span>
-      </footer>
+      {notice ? (
+        <footer className="trade-panel__notice" role="status">
+          <span>{notice}</span>
+        </footer>
+      ) : null}
 
       {confirmation ? (
         <OrderConfirmationDialog
@@ -266,4 +251,9 @@ function writeSkipConfirmPreference(value: boolean) {
   } catch {
     // Ignore storage failures; the checkbox state still works for this session.
   }
+}
+
+export function resolveTradePanelLeverage(leverage?: number) {
+  if (leverage === undefined || !Number.isFinite(leverage) || leverage <= 0) return 1
+  return Math.round(leverage)
 }

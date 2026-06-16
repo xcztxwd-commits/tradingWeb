@@ -10,6 +10,10 @@ type HomeHeroGuestProps = {
   metricCards: HomeMetricCard[]
 }
 
+function LaurelDecoration({ className }: { className: string }) {
+  return <img className={className} src="/home-laurel.svg" alt="" aria-hidden="true" draggable={false} />
+}
+
 export function HomeHeroGuest({ users, metricCards }: HomeHeroGuestProps) {
   return (
     <section className={styles.heroCopy} aria-labelledby="home-hero-title">
@@ -23,23 +27,21 @@ export function HomeHeroGuest({ users, metricCards }: HomeHeroGuestProps) {
       <div className={styles.metricGrid} aria-label="平台指标">
         {metricCards.map((card) => (
           <article key={card.slot} className={styles.promoCard} tabIndex={0}>
-            <div className={styles.promoCardInner}>
-              <div className={`${styles.promoCardFace} ${styles.promoCardFront}`}>
-                <span className={styles.laurelLeft} aria-hidden="true" />
-                <div>
-                  <strong className={styles.promoRank}>{card.frontRank}</strong>
-                  <span className={styles.promoLabel}>{card.frontLabel}</span>
+            <div className={styles.promoCardSurface}>
+              <LaurelDecoration className={styles.laurelLeft} />
+              <div className={styles.promoTextFlip}>
+                <div className={styles.promoTextInner}>
+                  <div className={`${styles.promoTextFace} ${styles.promoTextFront}`}>
+                    <strong className={styles.promoRank}>{card.frontRank}</strong>
+                    <span className={styles.promoLabel}>{card.frontLabel}</span>
+                  </div>
+                  <div className={`${styles.promoTextFace} ${styles.promoTextBack}`}>
+                    <strong className={styles.promoBackTitle}>{card.backTitle}</strong>
+                    <small className={styles.promoValue}>{card.backValue}</small>
+                  </div>
                 </div>
-                <span className={styles.laurelRight} aria-hidden="true" />
               </div>
-              <div className={`${styles.promoCardFace} ${styles.promoCardBack}`}>
-                <span className={styles.laurelLeft} aria-hidden="true" />
-                <div>
-                  <strong className={styles.promoBackTitle}>{card.backTitle}</strong>
-                  <small className={styles.promoValue}>{card.backValue}</small>
-                </div>
-                <span className={styles.laurelRight} aria-hidden="true" />
-              </div>
+              <LaurelDecoration className={styles.laurelRight} />
             </div>
           </article>
         ))}

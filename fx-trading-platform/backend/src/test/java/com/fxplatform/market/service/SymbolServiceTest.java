@@ -5,6 +5,7 @@ import static org.mockito.Mockito.when;
 
 import com.fxplatform.market.dto.SymbolResponse;
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.provider.MarketDataCapability;
 import com.fxplatform.market.provider.ProviderResolver;
 import com.fxplatform.market.repository.SymbolRepository;
@@ -40,6 +41,8 @@ class SymbolServiceTest {
 
     assertThat(symbols).extracting(SymbolResponse::symbol).containsExactly("EURUSD", "BTCUSDT");
     assertThat(symbols.getFirst().displayEnabled()).isTrue();
+    assertThat(symbols.getFirst().productType()).isEqualTo(ProductType.FX_MARGIN);
+    assertThat(symbols.get(1).productType()).isEqualTo(ProductType.CRYPTO_SPOT);
     assertThat(symbols.getFirst().quoteEnabled()).isTrue();
     assertThat(symbols.getFirst().chartEnabled()).isTrue();
     assertThat(symbols.getFirst().displayOrder()).isEqualTo(10);
@@ -65,6 +68,19 @@ class SymbolServiceTest {
     List<SymbolResponse> symbols = new SymbolService(symbolRepository, providerResolver).enabledSymbols(null, 100);
 
     assertThat(symbols).isEmpty();
+  }
+
+  @Test
+  void enabledSymbolsReturnsProductTypeForLegacyRows() {
+    SymbolEntity legacy = symbol("EURUSD", "FOREX", true, true, 10);
+
+    when(symbolRepository.findVisibleSymbols(null)).thenReturn(List.of(legacy));
+    providerAvailable(legacy);
+
+    List<SymbolResponse> symbols = new SymbolService(symbolRepository, providerResolver).enabledSymbols();
+
+    assertThat(legacy.getProductType()).isNull();
+    assertThat(symbols.getFirst().productType()).isEqualTo(ProductType.FX_MARGIN);
   }
 
   @Test

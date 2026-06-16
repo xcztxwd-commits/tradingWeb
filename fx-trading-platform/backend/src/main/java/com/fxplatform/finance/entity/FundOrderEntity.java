@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fxplatform.finance.enums.FundOrderStatus;
+import com.fxplatform.finance.enums.FundOrderType;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -25,10 +27,10 @@ public class FundOrderEntity {
   private UUID id;
   private UUID userId;
   private UUID accountId;
-  private String orderType;
+  private FundOrderType orderType;
   private BigDecimal amount;
   private String currency = "USD";
-  private String status = "PENDING";
+  private FundOrderStatus status = FundOrderStatus.PENDING;
   private UUID paymentMethodId;
   private String applicantNote;
   private String reviewReason;
@@ -40,4 +42,20 @@ public class FundOrderEntity {
   private Instant createdAt;
   @TableField(fill = FieldFill.INSERT_UPDATE)
   private Instant updatedAt;
+
+  public void setOrderType(FundOrderType orderType) {
+    this.orderType = orderType;
+  }
+
+  public void setOrderType(String orderType) {
+    this.orderType = FundOrderType.fromCode(orderType);
+  }
+
+  public void setStatus(FundOrderStatus status) {
+    this.status = status;
+  }
+
+  public void setStatus(String status) {
+    this.status = FundOrderStatus.fromCode(status);
+  }
 }

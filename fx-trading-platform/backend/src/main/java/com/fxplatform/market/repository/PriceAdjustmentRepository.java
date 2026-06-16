@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fxplatform.common.mybatis.FxBaseMapper;
+import com.fxplatform.market.enums.PriceAdjustmentStatus;
 import com.fxplatform.market.entity.PriceAdjustmentEntity;
 import java.util.List;
 
@@ -17,7 +18,7 @@ public interface PriceAdjustmentRepository extends FxBaseMapper<PriceAdjustmentE
     LambdaQueryWrapper<PriceAdjustmentEntity> query = new LambdaQueryWrapper<PriceAdjustmentEntity>()
         .orderByDesc(PriceAdjustmentEntity::getCreatedAt);
     if (StrUtil.isNotBlank(status)) {
-      query.eq(PriceAdjustmentEntity::getStatus, status);
+      query.eq(PriceAdjustmentEntity::getStatus, PriceAdjustmentStatus.fromCode(status));
     }
     return selectPage(new Page<>(1, size), query).getRecords();
   }

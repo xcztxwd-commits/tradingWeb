@@ -7,6 +7,7 @@ import { clearStoredAuthToken } from '../../features/trading-session/tradingSess
 
 type AccountUserMenuProps = {
   email?: string | null
+  onLogout: () => void
 }
 
 const accountLinks = [
@@ -16,7 +17,7 @@ const accountLinks = [
   { to: '/account/security/kyc', label: '身份认证', icon: ShieldCheck }
 ] as const
 
-export function AccountUserMenu({ email }: AccountUserMenuProps) {
+export function AccountUserMenu({ email, onLogout }: AccountUserMenuProps) {
   const navigate = useNavigate()
   const menuRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
@@ -42,12 +43,13 @@ export function AccountUserMenu({ email }: AccountUserMenuProps) {
 
   const logout = () => {
     clearStoredAuthToken()
+    onLogout()
     setOpen(false)
     navigate('/')
   }
 
   return (
-    <div className="account-user-menu" ref={menuRef} onMouseLeave={() => setOpen(false)}>
+    <div className="account-user-menu" ref={menuRef}>
       <button
         type="button"
         className="app-topbar__icon account-user-menu__trigger"

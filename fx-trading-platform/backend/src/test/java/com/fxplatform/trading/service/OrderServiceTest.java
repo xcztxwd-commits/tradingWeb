@@ -29,6 +29,7 @@ import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
+import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -66,6 +67,9 @@ class OrderServiceTest {
   @Mock
   private LedgerService ledgerService;
 
+  @Mock
+  private WalletService walletService;
+
   @Test
   void marketOrderRecordsMarginLedgerAfterRiskAndExecution() {
     UUID userId = UUID.randomUUID();
@@ -73,13 +77,14 @@ class OrderServiceTest {
     UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
     CreateOrderRequest request = marketOrder(accountId, "idem-1");
     TradingAccountEntity account = demoAccount(userId, accountId);
-    BigDecimal requiredMargin = new BigDecimal("110.02000000");
+    BigDecimal requiredMargin = new BigDecimal("110.00000000");
+    BigDecimal filledMargin = new BigDecimal("110.02000000");
     Instant filledAt = Instant.parse("2026-06-05T12:00:00Z");
 
     when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "idem-1")).thenReturn(Optional.empty());
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(requiredMargin);
-    when(accountRepository.reserveMarginIfAvailable(accountId, requiredMargin)).thenReturn(1);
+    when(accountRepository.reserveMarginIfAvailable(accountId, filledMargin)).thenReturn(1);
     when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(new BigDecimal("1.10020"), filledAt));
     when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
       OrderEntity order = invocation.getArgument(0);
@@ -98,7 +103,7 @@ class OrderServiceTest {
 
     assertThat(response.status()).isEqualTo(OrderStatus.FILLED.name());
     assertThat(response.executionPrice()).isEqualByComparingTo("1.10020");
-    assertThat(account.getUsedMargin()).isEqualByComparingTo(requiredMargin);
+    assertThat(account.getUsedMargin()).isEqualByComparingTo(filledMargin);
     assertThat(account.getFreeMargin()).isEqualByComparingTo("9889.98000000");
 
     ArgumentCaptor<OrderEntity> orderCaptor = ArgumentCaptor.forClass(OrderEntity.class);
@@ -108,9 +113,9 @@ class OrderServiceTest {
     verify(tradeRepository).save(any(TradeEntity.class));
     ArgumentCaptor<PositionEntity> positionCaptor = ArgumentCaptor.forClass(PositionEntity.class);
     verify(positionRepository).save(positionCaptor.capture());
-    assertThat(positionCaptor.getValue().getMarginHeld()).isEqualByComparingTo(requiredMargin);
-    verify(accountRepository).reserveMarginIfAvailable(accountId, requiredMargin);
-    verify(ledgerService).recordMarginHold(eq(account), eq(requiredMargin), any(UUID.class), eq("Market order margin hold"));
+    assertThat(positionCaptor.getValue().getMarginHeld()).isEqualByComparingTo(filledMargin);
+    verify(accountRepository).reserveMarginIfAvailable(accountId, filledMargin);
+    verify(ledgerService).recordMarginHold(eq(account), eq(filledMargin), any(UUID.class), eq("Market order margin hold"));
   }
 
   @Test
@@ -223,7 +228,7 @@ class OrderServiceTest {
     when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "idem-partial-1")).thenReturn(Optional.empty());
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(requiredMargin);
-    when(accountRepository.reserveMarginIfAvailable(accountId, new BigDecimal("40.00000000"))).thenReturn(1);
+    when(accountRepository.reserveMarginIfAvailable(accountId, new BigDecimal("44.04000000"))).thenReturn(1);
     when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(
         new BigDecimal("1.10100"),
         filledAt,
@@ -254,16 +259,16 @@ class OrderServiceTest {
     assertThat(response.remainingQuantity()).isEqualByComparingTo("0.06");
     assertThat(response.fee()).isEqualByComparingTo("0.44");
     assertThat(response.slippage()).isEqualByComparingTo("0.00010");
-    assertThat(account.getUsedMargin()).isEqualByComparingTo("40.00000000");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("44.04000000");
     assertThat(account.getBalance()).isEqualByComparingTo("9999.56000000");
     assertThat(account.getEquity()).isEqualByComparingTo("9999.56000000");
-    assertThat(account.getFreeMargin()).isEqualByComparingTo("9959.56000000");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("9955.52000000");
 
     ArgumentCaptor<PositionEntity> positionCaptor = ArgumentCaptor.forClass(PositionEntity.class);
     verify(positionRepository).save(positionCaptor.capture());
     assertThat(positionCaptor.getValue().getLots()).isEqualByComparingTo("0.04");
-    assertThat(positionCaptor.getValue().getMarginHeld()).isEqualByComparingTo("40.00000000");
-    verify(ledgerService).recordMarginHold(eq(account), eq(new BigDecimal("40.00000000")), any(UUID.class), eq("Market order margin hold"));
+    assertThat(positionCaptor.getValue().getMarginHeld()).isEqualByComparingTo("44.04000000");
+    verify(ledgerService).recordMarginHold(eq(account), eq(new BigDecimal("44.04000000")), any(UUID.class), eq("Market order margin hold"));
     verify(ledgerService).recordTradeFee(eq(account), eq(new BigDecimal("0.44")), any(UUID.class), eq("Trade fee charged"));
   }
 
@@ -276,12 +281,13 @@ class OrderServiceTest {
     TradingAccountEntity account = demoAccount(userId, accountId);
     account.setEquity(null);
     BigDecimal requiredMargin = new BigDecimal("100.00000000");
+    BigDecimal filledMargin = new BigDecimal("110.10000000");
     Instant filledAt = Instant.parse("2026-06-05T12:06:00Z");
 
     when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "idem-fee-null-equity")).thenReturn(Optional.empty());
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(requiredMargin);
-    when(accountRepository.reserveMarginIfAvailable(accountId, requiredMargin)).thenReturn(1);
+    when(accountRepository.reserveMarginIfAvailable(accountId, filledMargin)).thenReturn(1);
     when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(
         new BigDecimal("1.10100"),
         filledAt,
@@ -308,8 +314,8 @@ class OrderServiceTest {
 
     assertThat(account.getBalance()).isEqualByComparingTo("9999.56000000");
     assertThat(account.getEquity()).isEqualByComparingTo("9999.56000000");
-    assertThat(account.getUsedMargin()).isEqualByComparingTo("100.00000000");
-    assertThat(account.getFreeMargin()).isEqualByComparingTo("9899.56000000");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("110.10000000");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("9889.46000000");
     verify(ledgerService).recordTradeFee(eq(account), eq(new BigDecimal("0.44")), any(UUID.class), eq("Trade fee charged"));
   }
 
@@ -421,6 +427,127 @@ class OrderServiceTest {
         eq(OrderStatus.PENDING),
         eq(null),
         eq("Pending order accepted and waiting"));
+  }
+
+  @Test
+  void spotLimitOrderLocksQuoteWalletInsteadOfMargin() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = new CreateOrderRequest(
+        accountId,
+        "BTCUSDT",
+        OrderSide.BUY,
+        OrderType.LIMIT,
+        null,
+        null,
+        null,
+        null,
+        "idem-spot-limit",
+        "client-spot-limit",
+        new BigDecimal("0.10"),
+        new BigDecimal("50000.00000000"),
+        1);
+    TradingAccountEntity account = demoAccount(userId, accountId);
+    BigDecimal holdAmount = new BigDecimal("5000.00000000");
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "client-spot-limit"))
+        .thenReturn(Optional.empty());
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(holdAmount);
+    when(riskCheckService.resolveEffectiveLeverage(eq(account), any(CreateOrderRequest.class))).thenReturn(1);
+    when(riskCheckService.isSpotSymbol("BTCUSDT")).thenReturn(true);
+    when(riskCheckService.resolveHoldCurrency(eq(account), any(CreateOrderRequest.class))).thenReturn("USDT");
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
+      OrderEntity order = invocation.getArgument(0);
+      order.setId(UUID.randomUUID());
+      return order;
+    });
+
+    OrderEventService orderEventService = org.mockito.Mockito.mock(OrderEventService.class);
+    OrderService service = orderService(orderEventService);
+
+    OrderResponse response = service.createOrder(principal, request);
+
+    assertThat(response.status()).isEqualTo(OrderStatus.PENDING.name());
+    assertThat(response.holdAmount()).isEqualByComparingTo(holdAmount);
+    assertThat(response.holdCurrency()).isEqualTo("USDT");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("0");
+    verify(walletService).lockAvailableWithEntryType(
+        eq(accountId),
+        eq("USDT"),
+        eq(holdAmount),
+        eq("ORDER"),
+        any(UUID.class),
+        eq("Pending spot order wallet locked"),
+        eq("SPOT_ORDER_LOCK"));
+    verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
+    verify(ledgerService, never()).recordOrderHold(any(), any(), any(), any());
+    verify(executionAdapter, never()).execute(any());
+    verify(orderEventService).record(
+        any(UUID.class),
+        eq("ORDER_PENDING"),
+        eq(OrderStatus.ACCEPTED),
+        eq(OrderStatus.PENDING),
+        eq(null),
+        eq("Pending order accepted and waiting"));
+  }
+
+  @Test
+  void spotSellLimitOrderLocksBaseWalletInsteadOfMargin() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = new CreateOrderRequest(
+        accountId,
+        "BTCUSDT",
+        OrderSide.SELL,
+        OrderType.LIMIT,
+        null,
+        null,
+        null,
+        null,
+        "idem-spot-sell-limit",
+        "client-spot-sell-limit",
+        new BigDecimal("0.10"),
+        new BigDecimal("55000.00000000"),
+        1);
+    TradingAccountEntity account = demoAccount(userId, accountId);
+    BigDecimal holdAmount = new BigDecimal("0.10000000");
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "client-spot-sell-limit"))
+        .thenReturn(Optional.empty());
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(holdAmount);
+    when(riskCheckService.resolveEffectiveLeverage(eq(account), any(CreateOrderRequest.class))).thenReturn(1);
+    when(riskCheckService.isSpotSymbol("BTCUSDT")).thenReturn(true);
+    when(riskCheckService.resolveHoldCurrency(eq(account), any(CreateOrderRequest.class))).thenReturn("BTC");
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
+      OrderEntity order = invocation.getArgument(0);
+      order.setId(UUID.randomUUID());
+      return order;
+    });
+
+    OrderEventService orderEventService = org.mockito.Mockito.mock(OrderEventService.class);
+    OrderService service = orderService(orderEventService);
+
+    OrderResponse response = service.createOrder(principal, request);
+
+    assertThat(response.status()).isEqualTo(OrderStatus.PENDING.name());
+    assertThat(response.holdAmount()).isEqualByComparingTo(holdAmount);
+    assertThat(response.holdCurrency()).isEqualTo("BTC");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("0");
+    verify(walletService).lockAvailableWithEntryType(
+        eq(accountId),
+        eq("BTC"),
+        eq(holdAmount),
+        eq("ORDER"),
+        any(UUID.class),
+        eq("Pending spot order wallet locked"),
+        eq("SPOT_ORDER_LOCK"));
+    verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
+    verify(ledgerService, never()).recordOrderHold(any(), any(), any(), any());
+    verify(executionAdapter, never()).execute(any());
   }
 
   @Test
@@ -601,6 +728,49 @@ class OrderServiceTest {
   }
 
   @Test
+  void cancelSpotPendingOrderReleasesWalletHoldWithoutMarginLedger() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID orderId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    TradingAccountEntity account = demoAccount(userId, accountId);
+    OrderEntity order = pendingOrderEntity(userId, accountId, orderId);
+    order.setSymbol("BTCUSDT");
+    order.setHoldAmount(new BigDecimal("5000.00000000"));
+    order.setHoldCurrency("USDT");
+
+    when(orderRepository.findByUserIdAndId(userId, orderId)).thenReturn(Optional.of(order));
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(orderRepository.cancelPending(any(OrderEntity.class))).thenReturn(1);
+    when(riskCheckService.isSpotSymbol("BTCUSDT")).thenReturn(true);
+    OrderEventService orderEventService = org.mockito.Mockito.mock(OrderEventService.class);
+    OrderService service = orderService(orderEventService);
+
+    OrderResponse response = service.cancelOrder(principal, orderId);
+
+    assertThat(response.status()).isEqualTo(OrderStatus.CANCELED.name());
+    assertThat(response.holdAmount()).isEqualByComparingTo("0");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("0");
+    verify(walletService).releaseLockedWithEntryType(
+        eq(accountId),
+        eq("USDT"),
+        eq(new BigDecimal("5000.00000000")),
+        eq("ORDER"),
+        eq(orderId),
+        eq("Pending spot order canceled"),
+        eq("SPOT_ORDER_RELEASE"));
+    verify(accountRepository, never()).save(account);
+    verify(ledgerService, never()).recordOrderRelease(any(), any(), any(), any());
+    verify(orderEventService).record(
+        eq(orderId),
+        eq("ORDER_CANCELED"),
+        eq(OrderStatus.PENDING),
+        eq(OrderStatus.CANCELED),
+        eq(null),
+        eq("Pending order canceled"));
+  }
+
+  @Test
   void cancelFilledOrderIsRejected() {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
@@ -765,6 +935,7 @@ class OrderServiceTest {
         executionAdapter,
         new OrderFillService(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService),
         ledgerService,
+        walletService,
         orderEventService,
         new OrderCommandFactory(),
         new OrderEntityFactory(),

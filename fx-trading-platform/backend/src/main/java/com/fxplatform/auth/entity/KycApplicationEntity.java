@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fxplatform.auth.enums.KycStatus;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
@@ -28,7 +29,7 @@ public class KycApplicationEntity {
   private String documentNo;
   private String frontImageUrl;
   private String backImageUrl;
-  private String status = "PENDING";
+  private KycStatus status = KycStatus.PENDING;
   private String reviewReason;
   private UUID reviewedBy;
   private Instant reviewedAt;
@@ -36,4 +37,12 @@ public class KycApplicationEntity {
   private Instant createdAt;
   @TableField(fill = FieldFill.INSERT_UPDATE)
   private Instant updatedAt;
+
+  public void setStatus(KycStatus status) {
+    this.status = status;
+  }
+
+  public void setStatus(String status) {
+    this.status = KycStatus.fromReviewCode(status);
+  }
 }

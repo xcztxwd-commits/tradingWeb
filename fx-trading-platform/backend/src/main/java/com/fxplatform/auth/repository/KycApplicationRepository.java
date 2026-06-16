@@ -2,6 +2,7 @@ package com.fxplatform.auth.repository;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fxplatform.auth.enums.KycStatus;
 import com.fxplatform.auth.entity.KycApplicationEntity;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import java.util.List;
@@ -24,7 +25,7 @@ public interface KycApplicationRepository extends FxBaseMapper<KycApplicationEnt
     LambdaQueryWrapper<KycApplicationEntity> query = new LambdaQueryWrapper<KycApplicationEntity>()
         .orderByDesc(KycApplicationEntity::getCreatedAt);
     if (cn.hutool.core.util.StrUtil.isNotBlank(status)) {
-      query.eq(KycApplicationEntity::getStatus, status);
+      query.eq(KycApplicationEntity::getStatus, KycStatus.fromReviewCode(status));
     }
     return selectPage(new Page<>(1, size), query).getRecords();
   }

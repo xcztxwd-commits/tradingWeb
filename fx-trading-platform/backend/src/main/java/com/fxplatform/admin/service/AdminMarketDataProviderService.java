@@ -15,6 +15,7 @@ import com.fxplatform.market.entity.DataProviderEntity;
 import com.fxplatform.market.entity.ProviderInstrumentEntity;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.entity.SymbolProviderBindingEntity;
+import com.fxplatform.market.enums.ProviderHealthStatus;
 import com.fxplatform.market.provider.MarketDataProviderAdapter;
 import com.fxplatform.market.provider.ProviderRegistry;
 import com.fxplatform.market.repository.DataProviderCapabilityRepository;
@@ -74,7 +75,7 @@ public class AdminMarketDataProviderService {
     boolean configured = providerRegistry.find(provider.getCode())
         .map(MarketDataProviderAdapter::configured)
         .orElse(false);
-    provider.setHealthStatus(configured ? "UP" : "DOWN");
+    provider.setHealthStatus(ProviderHealthStatus.fromConfigured(configured));
     provider.setLastHealthCheckAt(Instant.now());
     DataProviderEntity saved = providerRepository.save(provider);
     return AdminDataProviderResponse.from(saved, capabilities(saved.getId()));
@@ -83,16 +84,39 @@ public class AdminMarketDataProviderService {
   @Transactional
   public AdminProviderSyncResponse syncInstruments(UUID providerId) {
     DataProviderEntity provider = findProvider(providerId);
+    return syncProviderInstruments(provider);
+  }
+
+  @Transactional
+  public int syncEnabledProviderInstruments() {
+    int count = 0;
+    for (DataProviderEntity provider : providerRepository.findAll()) {
+      if (!Boolean.TRUE.equals(provider.getEnabled())) {
+        continue;
+      }
+      try {
+        count += syncProviderInstruments(provider).syncedCount();
+        provider.setHealthStatus(ProviderHealthStatus.UP);
+      } catch (RuntimeException ex) {
+        provider.setHealthStatus(ProviderHealthStatus.DOWN);
+      }
+      provider.setLastHealthCheckAt(Instant.now());
+      providerRepository.save(provider);
+    }
+    return count;
+  }
+
+  private AdminProviderSyncResponse syncProviderInstruments(DataProviderEntity provider) {
     MarketDataProviderAdapter adapter = providerRegistry.find(provider.getCode())
         .orElseThrow(() -> new BusinessException("MARKET_PROVIDER_NOT_CONFIGURED", "Provider adapter not configured"));
     int count = 0;
     for (String assetClass : provider.getAssetClasses()) {
       for (SymbolResponse symbol : adapter.fetchSymbols(assetClass, 2000)) {
-        upsertInstrument(providerId, symbol);
+        upsertInstrument(provider.getId(), symbol);
         count++;
       }
     }
-    return new AdminProviderSyncResponse(providerId, count);
+    return new AdminProviderSyncResponse(provider.getId(), count);
   }
 
   public List<AdminProviderInstrumentResponse> instruments(UUID providerId) {
@@ -155,8 +179,13 @@ public class AdminMarketDataProviderService {
     instrument.setQuoteAsset(symbol.quoteCurrency());
     instrument.setDisplayName(symbol.displayName());
     instrument.setListed(true);
+    instrument.setRawJson(metadataJson(symbol.providerMetadataJson()));
     instrument.setLastSyncedAt(Instant.now());
     instrumentRepository.save(instrument);
+  }
+
+  private String metadataJson(String rawJson) {
+    return rawJson == null || rawJson.isBlank() ? "{}" : rawJson;
   }
 
   private void applyProvider(DataProviderEntity provider, AdminDataProviderRequest request) {

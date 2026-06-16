@@ -56,6 +56,10 @@ describe('TradingPage terminal viewport', () => {
   it('wires the TradePanel to the real trading session submit path', () => {
     assert.match(desktopSource, /trade=\{[\s\S]*<TradePanel[\s\S]*symbol=\{symbol\}/)
     assert.match(source, /<MobileOrderSheet[\s\S]*<TradePanel[\s\S]*compact[\s\S]*symbol=\{selectedSymbol\}/)
+    assert.match(desktopSource, /category=\{market\.category\}/)
+    assert.match(source, /category=\{selectedMarket\.category\}/)
+    assert.match(desktopSource, /leverage=\{market\.leverage\}/)
+    assert.match(source, /leverage=\{selectedMarket\.leverage\}/)
     assert.match(source, /accountId=\{accountId\}/)
     assert.match(source, /balances=\{balances\}/)
     assert.match(source, /sessionReady=\{sessionReady\}/)

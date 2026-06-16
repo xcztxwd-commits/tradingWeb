@@ -1,5 +1,7 @@
 type AuthTokenStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
+export const authSessionChangedEvent = 'fx-platform-auth-session-changed'
+
 const authTokenStorageKey = 'fx-platform-auth-token'
 const legacyAuthTokenStorageKey = 'fx-platform-demo-token'
 
@@ -26,6 +28,7 @@ export function writeStoredAuthToken(token: string, storage = getAuthTokenStorag
   } catch {
     // Login must keep working in browser contexts that block localStorage.
   }
+  notifyAuthSessionChanged()
 }
 
 export function clearStoredAuthToken(storage = getAuthTokenStorage()) {
@@ -39,6 +42,7 @@ export function clearStoredAuthToken(storage = getAuthTokenStorage()) {
   } catch {
     // Clearing a best-effort cached token should not block a fresh session.
   }
+  notifyAuthSessionChanged()
 }
 
 export function readStoredDemoToken(storage = getAuthTokenStorage()) {
@@ -75,5 +79,14 @@ function clearLegacyStoredAuthToken(storage: AuthTokenStorage | undefined) {
     storage?.removeItem(legacyAuthTokenStorageKey)
   } catch {
     // Legacy cleanup is best effort after the formal token is available.
+  }
+}
+
+function notifyAuthSessionChanged() {
+  try {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(new Event(authSessionChangedEvent))
+  } catch {
+    // Storage changes are still valid when the browser blocks custom events.
   }
 }

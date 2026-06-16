@@ -34,7 +34,6 @@ type Props = {
   onChartTypeChange: (chartType: ChartType) => void
   onHighLowPriceMarksChange: (enabled: boolean) => void
   onPriceScaleModeChange: (priceScaleMode: ChartSettings['axisSettings']['priceScaleMode']) => void
-  onTooltipStyleChange: (style: ChartSettings['axisSettings']['tooltipStyle']) => void
   onDrawingToolChange: (tool: DrawingTool) => void
   onDrawingMagnetModeChange: (magnetMode: DrawingMagnetMode) => void
   onFavoriteIntervalToggle: (interval: TradingPeriod) => void
@@ -58,7 +57,6 @@ export function ChartWorkspace({
   onChartTypeChange,
   onHighLowPriceMarksChange,
   onPriceScaleModeChange,
-  onTooltipStyleChange,
   onDrawingToolChange,
   onDrawingMagnetModeChange,
   onFavoriteIntervalToggle,
@@ -225,7 +223,6 @@ export function ChartWorkspace({
         onChartTypeChange={onChartTypeChange}
         onHighLowPriceMarksChange={onHighLowPriceMarksChange}
         onPriceScaleModeChange={onPriceScaleModeChange}
-        onTooltipStyleChange={onTooltipStyleChange}
         onIndicatorToggle={onIndicatorToggle}
         onFavoriteIntervalToggle={onFavoriteIntervalToggle}
         onOpenIndicatorSettings={() => setIndicatorModalOpen(true)}

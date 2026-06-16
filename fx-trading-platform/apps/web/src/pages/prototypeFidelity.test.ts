@@ -101,9 +101,9 @@ describe('HTML export fidelity baseline', () => {
 
     for (const token of [
       '--theme-background: #181a20',
-      '--theme-surface: #202630',
-      '--theme-surface-elevated: #29313d',
-      '--theme-border: #333b47',
+      '--theme-surface: #181a20',
+      '--theme-surface-elevated: #1e2329',
+      '--theme-border: #2b3139',
       '--theme-text-primary: #eaecef',
       '--theme-text-secondary: #929aa5',
       '--theme-text-muted: #707a8a',
@@ -114,7 +114,7 @@ describe('HTML export fidelity baseline', () => {
       '--theme-buy: #2ebd85',
       '--theme-danger: #f6465d',
       '--theme-sell: #f6465d',
-      '--theme-chart-grid: #333b47'
+      '--theme-chart-grid: #2b3139'
     ]) {
       assert.match(themeStyles, new RegExp(escapeRegExp(token)))
     }

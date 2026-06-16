@@ -87,7 +87,6 @@ export function TradingDesktopView({
               onChartTypeChange={chartCallbacks.onChartTypeChange}
               onHighLowPriceMarksChange={chartCallbacks.onHighLowPriceMarksChange}
               onPriceScaleModeChange={chartCallbacks.onPriceScaleModeChange}
-              onTooltipStyleChange={chartCallbacks.onTooltipStyleChange}
               onDrawingMagnetModeChange={chartCallbacks.onDrawingMagnetModeChange}
               onDrawingToolChange={chartCallbacks.onDrawingToolChange}
               onFavoriteIntervalToggle={chartCallbacks.onFavoriteIntervalToggle}
@@ -103,6 +102,8 @@ export function TradingDesktopView({
             <TradePanel
               accountId={accountId}
               balances={balances}
+              category={market.category}
+              productType={market.productType}
               minOrderAmount={tradeMinOrderAmount}
               pricePrecision={tradePricePrecision}
               quantityPrecision={tradeQuantityPrecision}
@@ -111,6 +112,7 @@ export function TradingDesktopView({
               sessionMode={tradePanelSessionMode}
               sessionError={sessionError}
               loginRequired={loginRequired}
+              leverage={market.leverage}
               symbol={symbol}
               onLoginRequired={onLoginRequired}
               onSubmitOrder={submitOrder}

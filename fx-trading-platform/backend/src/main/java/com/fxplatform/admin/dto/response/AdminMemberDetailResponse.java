@@ -30,7 +30,7 @@ public record AdminMemberDetailResponse(
         user.getEmail(),
         user.getPhone(),
         user.getStatus().name(),
-        user.getKycStatus(),
+        user.getKycStatus() == null ? null : user.getKycStatus().code(),
         user.getRiskLevel(),
         profile,
         kycApplications,

@@ -26,18 +26,19 @@ export function PriceInput({
   return (
     <div className="trade-panel__price-row">
       <label className={`trade-panel__field ${error ? 'trade-panel__field--invalid' : ''}`}>
-        <span className="trade-panel__field-label">{t('common.price')}</span>
-        <span className="trade-panel__control">
+        <span className="trade-panel__control trade-panel__control--with-stepper">
+          <span className="trade-panel__field-label">{t('common.price')}</span>
           <input
             aria-label={ariaLabel}
             inputMode="decimal"
-            placeholder="0.00"
+            placeholder=""
             value={value}
             onBlur={() => onFocusChange?.(false)}
             onChange={(event) => onChange(event.target.value)}
             onFocus={() => onFocusChange?.(true)}
           />
           <span className="trade-panel__unit">{unit}</span>
+          <span className="trade-panel__stepper" aria-hidden="true"><span /><span /></span>
         </span>
         {error ? <span className="trade-panel__error">{error}</span> : null}
       </label>

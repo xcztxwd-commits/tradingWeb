@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fxplatform.finance.enums.AdminFundOperationStatus;
+import com.fxplatform.finance.enums.AdminFundOperationType;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -25,12 +27,12 @@ public class AdminFundOperationEntity {
   private UUID id;
   private UUID accountId;
   private UUID userId;
-  private String operationType;
+  private AdminFundOperationType operationType;
   private BigDecimal amount;
   private String currency = "USD";
   private BigDecimal beforeBalance;
   private BigDecimal afterBalance;
-  private String status = "COMPLETED";
+  private AdminFundOperationStatus status = AdminFundOperationStatus.COMPLETED;
   private UUID adminUserId;
   private String reason;
   private UUID paymentMethodId;
@@ -39,4 +41,20 @@ public class AdminFundOperationEntity {
 
   @TableField(fill = FieldFill.INSERT)
   private Instant createdAt;
+
+  public void setOperationType(AdminFundOperationType operationType) {
+    this.operationType = operationType;
+  }
+
+  public void setOperationType(String operationType) {
+    this.operationType = AdminFundOperationType.fromCode(operationType);
+  }
+
+  public void setStatus(AdminFundOperationStatus status) {
+    this.status = status;
+  }
+
+  public void setStatus(String status) {
+    this.status = AdminFundOperationStatus.fromCode(status);
+  }
 }

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fxplatform.admin.enums.AdminFeatureRecordStatus;
 import com.fxplatform.common.mybatis.JsonbStringTypeHandler;
 import java.time.Instant;
 import java.util.UUID;
@@ -31,7 +32,7 @@ public class AdminFeatureRecordEntity {
   @TableField(typeHandler = JsonbStringTypeHandler.class)
   private String data = "{}";
 
-  private String status = "ACTIVE";
+  private AdminFeatureRecordStatus status = AdminFeatureRecordStatus.ACTIVE;
 
   private UUID createdBy;
 
@@ -42,4 +43,12 @@ public class AdminFeatureRecordEntity {
 
   @TableField(fill = FieldFill.INSERT_UPDATE)
   private Instant updatedAt;
+
+  public void setStatus(AdminFeatureRecordStatus status) {
+    this.status = status;
+  }
+
+  public void setStatus(String status) {
+    this.status = AdminFeatureRecordStatus.fromCode(status);
+  }
 }

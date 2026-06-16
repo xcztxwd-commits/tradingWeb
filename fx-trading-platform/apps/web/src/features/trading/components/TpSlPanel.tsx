@@ -1,8 +1,6 @@
-import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
 import type { TradeField, TradeFormState } from '../types/order'
-import { formatDecimal } from '../utils/format'
 
 type Props = {
   form: TradeFormState
@@ -11,59 +9,76 @@ type Props = {
   onFieldChange: (field: TradeField, value: string | boolean) => void
 }
 
-type TriggerNote = {
-  text: string
-  tone: 'positive' | 'negative' | 'neutral'
+type TpSlInput = {
+  field: TradeField
+  placeholder: string
+  value: string
+  unit?: string
+  error?: string
 }
 
 export function TpSlPanel({ form, showErrors, fieldErrors, onFieldChange }: Props) {
   const { t } = useTranslation()
-  const expanded = form.tpSlEnabled || form.strategyType === 'tp_sl'
-  const takeProfitError = showErrors ? fieldErrors.takeProfitTriggerPrice : undefined
-  const stopLossError = showErrors ? fieldErrors.stopLossTriggerPrice : undefined
-  const quoteAsset = form.symbol.endsWith('USDT') ? 'USDT' : ''
+  const expanded = form.tpSlEnabled
+  const buySide = form.side === 'buy'
 
-  const updateTakeProfit = (value: string) => {
-    if (value && !form.takeProfitEnabled) onFieldChange('takeProfitEnabled', true)
-    onFieldChange('takeProfitTriggerPrice', value)
-  }
-
-  const updateStopLoss = (value: string) => {
-    if (value && !form.stopLossEnabled) onFieldChange('stopLossEnabled', true)
-    onFieldChange('stopLossTriggerPrice', value)
+  const handleToggle = (checked: boolean) => {
+    onFieldChange('tpSlEnabled', checked)
+    onFieldChange('takeProfitEnabled', checked)
+    onFieldChange('stopLossEnabled', checked)
   }
 
   return (
     <section className="trade-panel__tpsl">
       <div className="trade-panel__tpsl-head">
         <label className="trade-panel__check">
-          <input
-            type="checkbox"
-            checked={form.tpSlEnabled}
-            onChange={(event) => onFieldChange('tpSlEnabled', event.target.checked)}
-          />
+          <input type="checkbox" checked={expanded} onChange={(event) => handleToggle(event.target.checked)} />
           <span>{t('trading.takeProfitStopLoss')}</span>
         </label>
-        <span className="trade-panel__advanced-link">{t('trading.advanced')} ›</span>
       </div>
 
       {expanded ? (
-        <div className="trade-panel__tpsl-grid">
-          <TriggerInput
-            label={t('trading.takeProfitPrice')}
-            unit={quoteAsset}
-            value={form.takeProfitTriggerPrice}
-            error={takeProfitError}
-            note={buildTriggerNote('takeProfit', form, t)}
-            onChange={updateTakeProfit}
+        <div className="trade-panel__tpsl-expanded">
+          <TpSlGroup
+            title={buySide ? t('trading.takeProfit') : t('trading.bargainHunting')}
+            inputs={[
+              {
+                field: 'takeProfitOrderPrice',
+                placeholder: buySide ? t('trading.limitTakeProfit') : t('trading.limitBargainHunting'),
+                value: form.takeProfitOrderPrice
+              },
+              {
+                field: 'takeProfitTriggerPrice',
+                placeholder: t('markets.changePercent'),
+                value: form.takeProfitTriggerPrice,
+                unit: '%',
+                error: showErrors ? fieldErrors.takeProfitTriggerPrice : undefined
+              }
+            ]}
+            onFieldChange={onFieldChange}
           />
-          <TriggerInput
-            label={t('trading.stopLossPrice')}
-            unit={quoteAsset}
-            value={form.stopLossTriggerPrice}
-            error={stopLossError}
-            note={buildTriggerNote('stopLoss', form, t)}
-            onChange={updateStopLoss}
+          <TpSlGroup
+            title={buySide ? t('trading.stopLoss') : t('trading.chaseUp')}
+            inputs={[
+              {
+                field: 'stopLossTriggerPrice',
+                placeholder: t('trading.stopLossTriggerPrice'),
+                value: form.stopLossTriggerPrice,
+                error: showErrors ? fieldErrors.stopLossTriggerPrice : undefined
+              },
+              {
+                field: 'trailingCallbackRatio',
+                placeholder: t('markets.changePercent'),
+                value: form.trailingCallbackRatio,
+                unit: '%'
+              },
+              {
+                field: 'stopLossOrderPrice',
+                placeholder: buySide ? t('trading.limitStopLoss') : t('trading.limitChaseUp'),
+                value: form.stopLossOrderPrice
+              }
+            ]}
+            onFieldChange={onFieldChange}
           />
         </div>
       ) : null}
@@ -71,63 +86,50 @@ export function TpSlPanel({ form, showErrors, fieldErrors, onFieldChange }: Prop
   )
 }
 
-type TriggerInputProps = {
-  label: string
-  value: string
-  unit: string
-  note: TriggerNote
-  error?: string
-  onChange: (value: string) => void
-}
-
-function TriggerInput({ label, value, unit, note, error, onChange }: TriggerInputProps) {
-  const { t } = useTranslation()
-
+function TpSlGroup({
+  title,
+  inputs,
+  onFieldChange
+}: {
+  title: string
+  inputs: TpSlInput[]
+  onFieldChange: (field: TradeField, value: string | boolean) => void
+}) {
   return (
-    <label className={`trade-panel__field ${error ? 'trade-panel__field--invalid' : ''}`}>
-      <span className="trade-panel__control trade-panel__control--compact trade-panel__tpsl-order-row">
-        <span className="trade-panel__field-label">{label}</span>
-        <input
-          aria-label={label}
-          inputMode="decimal"
-          placeholder={label}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        {unit ? <span className="trade-panel__unit">{unit}</span> : null}
-        <span className="trade-panel__latest-price">{t('trading.latestPrice')}</span>
-      </span>
-      {note.text ? (
-        <span className={`trade-panel__tpsl-trigger-note trade-panel__tpsl-trigger-note--${note.tone}`}>{note.text}</span>
-      ) : null}
-      {error ? <span className="trade-panel__error">{error}</span> : null}
-    </label>
+    <div className="trade-panel__tpsl-group">
+      <span className="trade-panel__tpsl-group-title">{title}</span>
+      <div className="trade-panel__tpsl-row">
+        {inputs.slice(0, 2).map((input) => (
+          <TradePanelInput key={input.field} input={input} onFieldChange={onFieldChange} />
+        ))}
+      </div>
+      {inputs[2] ? <TradePanelInput input={inputs[2]} full onFieldChange={onFieldChange} /> : null}
+    </div>
   )
 }
 
-function buildTriggerNote(kind: 'takeProfit' | 'stopLoss', form: TradeFormState, t: TFunction): TriggerNote {
-  const triggerValue = Number(kind === 'takeProfit' ? form.takeProfitTriggerPrice : form.stopLossTriggerPrice)
-  const amount = Number(form.amount)
-  const reference = Number(form.price)
-
-  if (!Number.isFinite(triggerValue) || triggerValue <= 0) return { text: '', tone: 'neutral' as const }
-
-  const formattedTrigger = `${triggerValue.toLocaleString(undefined, { maximumFractionDigits: 8 })} USDT`
-  if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(reference) || reference <= 0) {
-    return {
-      text: t('trading.triggerMarketNote', { price: formattedTrigger }),
-      tone: 'neutral' as const
-    }
-  }
-
-  const direction = form.side === 'buy' ? 1 : -1
-  const estimatedPnl = (triggerValue - reference) * amount * direction
-  const tone: TriggerNote['tone'] = estimatedPnl >= 0 ? 'positive' : 'negative'
-  const sign = estimatedPnl >= 0 ? '+' : ''
-  const pnlText = `${sign}${formatDecimal(estimatedPnl) || estimatedPnl.toFixed(2)} USDT`
-
-  return {
-    text: t('trading.triggerMarketPnlNote', { price: formattedTrigger, pnl: pnlText }),
-    tone
-  }
+function TradePanelInput({
+  input,
+  full = false,
+  onFieldChange
+}: {
+  input: TpSlInput
+  full?: boolean
+  onFieldChange: (field: TradeField, value: string | boolean) => void
+}) {
+  return (
+    <label className={`trade-panel__field ${full ? 'trade-panel__field--full' : ''} ${input.error ? 'trade-panel__field--invalid' : ''}`}>
+      <span className="trade-panel__control trade-panel__control--compact">
+        <input
+          aria-label={input.placeholder}
+          inputMode="decimal"
+          placeholder={input.placeholder}
+          value={input.value}
+          onChange={(event) => onFieldChange(input.field, event.target.value)}
+        />
+        {input.unit ? <span className="trade-panel__unit trade-panel__unit--dropdown">{input.unit}</span> : null}
+      </span>
+      {input.error ? <span className="trade-panel__error">{input.error}</span> : null}
+    </label>
+  )
 }

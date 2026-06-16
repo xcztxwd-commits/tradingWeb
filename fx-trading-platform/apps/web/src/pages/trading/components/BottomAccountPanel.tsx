@@ -94,6 +94,7 @@ export function BottomAccountPanel({
             {activeView.kind === 'positions' ? (
               <PositionsGrid
                 emptyLabel={selection.positionEmptyLabel}
+                mode={activeTab === 'historicalPositions' ? 'history' : 'current'}
                 positions={selection.positions}
                 onClosePosition={onClosePosition}
               />

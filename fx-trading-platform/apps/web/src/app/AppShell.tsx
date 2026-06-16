@@ -6,7 +6,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom'
 import { LanguageSwitcher } from '../components/LanguageSwitcher'
 import { TopbarToolIcon } from '../components/TopbarToolIcon'
 import { useTheme } from '../design-system/theme/ThemeProvider'
-import { readStoredAuthToken } from '../features/trading-session/tradingSessionStorage'
+import { authSessionChangedEvent, readStoredAuthToken } from '../features/trading-session/tradingSessionStorage'
 import { getSessionStatus } from '../services/authApi'
 import { AccountUserMenu } from './components/AccountUserMenu'
 import { TradingNavMenu } from './components/TradingNavMenu'
@@ -27,26 +27,36 @@ export function AppShell({ children }: AppShellProps) {
   }))
 
   useEffect(() => {
-    const token = readStoredAuthToken()
-    if (!token) {
-      setSession({ authenticated: false, email: null })
-      return
+    let active = true
+    const refreshSession = () => {
+      const token = readStoredAuthToken()
+      if (!token) {
+        setSession({ authenticated: false, email: null })
+        return
+      }
+
+      setSession((current) => ({ ...current, authenticated: true }))
+      getSessionStatus(token)
+        .then((status) => {
+          if (!active || readStoredAuthToken() !== token) return
+          setSession({ authenticated: status.authenticated, email: status.email })
+        })
+        .catch(() => {
+          if (active && readStoredAuthToken() === token) setSession((current) => ({ ...current, authenticated: true }))
+        })
     }
 
-    let active = true
-    setSession((current) => ({ ...current, authenticated: true }))
-    getSessionStatus(token)
-      .then((status) => {
-        if (!active) return
-        setSession({ authenticated: status.authenticated, email: status.email })
-      })
-      .catch(() => {
-        if (active) setSession((current) => ({ ...current, authenticated: true }))
-      })
+    refreshSession()
+    window.addEventListener(authSessionChangedEvent, refreshSession)
     return () => {
       active = false
+      window.removeEventListener(authSessionChangedEvent, refreshSession)
     }
   }, [location.pathname])
+
+  const handleLogout = () => {
+    setSession({ authenticated: false, email: null })
+  }
 
   const navItems = useMemo(() => (session.authenticated ? authenticatedNavItems : guestNavItems), [session.authenticated])
 
@@ -72,7 +82,7 @@ export function AppShell({ children }: AppShellProps) {
             </button>
             {session.authenticated ? (
               <>
-                <AccountUserMenu email={session.email} />
+                <AccountUserMenu email={session.email} onLogout={handleLogout} />
                 <Link className="app-topbar__icon" to="/wallet" aria-label="Wallet">
                   <TopbarToolIcon name="wallet" />
                 </Link>

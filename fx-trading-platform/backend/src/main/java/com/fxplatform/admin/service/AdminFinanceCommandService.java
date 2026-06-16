@@ -15,6 +15,7 @@ import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.finance.entity.AdminFundOperationEntity;
 import com.fxplatform.finance.entity.AdminPaymentMethodEntity;
+import com.fxplatform.finance.enums.AdminFundOperationType;
 import com.fxplatform.finance.repository.AdminFundOperationRepository;
 import com.fxplatform.finance.repository.AdminPaymentMethodRepository;
 import com.fxplatform.ledger.service.LedgerService;
@@ -52,7 +53,7 @@ public class AdminFinanceCommandService {
     return applyBalanceChange(
         actorUserId,
         accountId,
-        "DEPOSIT",
+        AdminFundOperationType.DEPOSIT,
         requirePositive(request.amount(), "Deposit amount must be positive"),
         request.reason(),
         request.paymentMethodId(),
@@ -69,7 +70,7 @@ public class AdminFinanceCommandService {
     return applyBalanceChange(
         actorUserId,
         accountId,
-        "WITHDRAWAL",
+        AdminFundOperationType.WITHDRAWAL,
         requirePositive(request.amount(), "Withdrawal amount must be positive").negate(),
         request.reason(),
         request.paymentMethodId(),
@@ -93,7 +94,7 @@ public class AdminFinanceCommandService {
     return applyBalanceChange(
         actorUserId,
         accountId,
-        "ADJUSTMENT",
+        AdminFundOperationType.ADJUSTMENT,
         request.delta(),
         request.reason(),
         null,
@@ -165,7 +166,7 @@ public class AdminFinanceCommandService {
   private AdminFundOperationResponse applyBalanceChange(
       UUID actorUserId,
       UUID accountId,
-      String operationType,
+      AdminFundOperationType operationType,
       BigDecimal signedAmount,
       String reason,
       UUID paymentMethodId,
@@ -176,7 +177,7 @@ public class AdminFinanceCommandService {
     if (StrUtil.isNotBlank(idempotencyKey)) {
       var existing = fundOperationRepository.findByAccountIdAndOperationTypeAndIdempotencyKey(
           accountId,
-          operationType,
+          operationType.code(),
           idempotencyKey);
       if (existing.isPresent()) {
         return AdminFundOperationResponse.from(existing.get());
@@ -233,7 +234,7 @@ public class AdminFinanceCommandService {
     }
     return fundOperationRepository.findByAccountIdAndOperationTypeAndIdempotencyKey(
             operation.getAccountId(),
-            operation.getOperationType(),
+            operation.getOperationType().code(),
             operation.getIdempotencyKey())
         .orElseThrow(() -> new BusinessException("IDEMPOTENCY_RESULT_NOT_FOUND", "Idempotent operation result not found"));
   }

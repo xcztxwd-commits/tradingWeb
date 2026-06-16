@@ -110,8 +110,9 @@ describe('prototype-driven app shell and routes', () => {
 
   it('bridges the hover gap between the trading trigger and dropdown panel', () => {
     const bridgeRule = getCssRule(styles, '.trading-nav-menu:hover::after')
+    const tradingPanelRule = getCssRule(styles, '.trading-nav-menu__panel')
 
-    assert.match(styles, /\.trading-nav-menu__panel,\s*\.account-user-menu__panel\s*{[\s\S]*top:\s*calc\(100% \+ 10px\)/)
+    assert.match(tradingPanelRule, /top:\s*calc\(100% \+ 10px\)/)
     assert.match(bridgeRule, /content:\s*''/)
     assert.match(bridgeRule, /top:\s*100%/)
     assert.match(bridgeRule, /height:\s*10px/)
@@ -125,6 +126,30 @@ describe('prototype-driven app shell and routes', () => {
     assert.doesNotMatch(accountMenuSource, /setOpen\(\(current\) => !current\)/)
     assert.doesNotMatch(accountMenuSource, /onFocus=\{\(\) => setOpen\(true\)\}/)
     assert.match(accountMenuSource, /if \(event\.key === 'Escape'\) setOpen\(false\)/)
+  })
+
+  it('refreshes the shell session immediately after account logout', () => {
+    const accountMenuSource = readFileSync(join(currentDir, 'components', 'AccountUserMenu.tsx'), 'utf8')
+
+    assert.match(accountMenuSource, /onLogout:\s*\(\)\s*=>\s*void/)
+    assert.match(accountMenuSource, /clearStoredAuthToken\(\)[\s\S]*onLogout\(\)/)
+    assert.match(appShellSource, /const handleLogout = \(\) => \{[\s\S]*setSession\(\{ authenticated: false, email: null \}\)[\s\S]*\}/)
+    assert.match(appShellSource, /<AccountUserMenu email=\{session\.email\} onLogout=\{handleLogout\} \/>/)
+  })
+
+  it('keeps the account user panel stable across the pointer gap and centered on the profile icon', () => {
+    const accountMenuSource = readFileSync(join(currentDir, 'components', 'AccountUserMenu.tsx'), 'utf8')
+    const accountPanelRule = getCssRuleContaining(styles, '.account-user-menu__panel', /position:\s*absolute/)
+    const accountMenuRule = getCssRule(styles, '.account-user-menu')
+
+    assert.doesNotMatch(accountMenuSource, /onMouseLeave/)
+    assert.match(accountMenuSource, /document\.addEventListener\('pointerdown', handlePointer\)/)
+    assert.match(accountMenuRule, /position:\s*relative/)
+    assert.match(accountPanelRule, /position:\s*absolute/)
+    assert.match(accountPanelRule, /top:\s*calc\(100% \+ 10px\)/)
+    assert.match(accountPanelRule, /left:\s*50%/)
+    assert.match(accountPanelRule, /right:\s*auto/)
+    assert.match(accountPanelRule, /transform:\s*translateX\(-50%\)/)
   })
 
   it('keeps desktop IA focused on markets, trading, wallet and account', () => {
@@ -172,6 +197,7 @@ describe('prototype-driven app shell and routes', () => {
     assert.match(styles, /\.app-shell\s*{[\s\S]*background:\s*var\(--bn-bg\)/)
     assert.match(styles, /\.app-shell--terminal\s*{[\s\S]*background:\s*var\(--bn-terminal-bg\)/)
     assert.match(styles, /\.app-topbar\s*{[\s\S]*background:\s*var\(--bn-bg\)/)
+    assert.doesNotMatch(styles, /(^|\n)\.app-topbar\s*{[^}]*border-bottom\s*:/)
     assert.match(styles, /\.app-topbar__utility-cluster/)
     assert.match(styles, /\.app-topbar__primary\s*{[\s\S]*background:\s*var\(--color-BtnBg\)/)
     assert.match(styles, /\.mobile-tabs\s*{[\s\S]*position:\s*fixed/)
@@ -212,6 +238,18 @@ function getCssRule(sourceText: string, selector: string) {
   const end = sourceText.indexOf('\n}', start)
   assert.notEqual(end, -1, `${selector} should close`)
   return sourceText.slice(start, end + 2)
+}
+
+function getCssRuleContaining(sourceText: string, selector: string, pattern: RegExp) {
+  let start = sourceText.indexOf(`${selector} {`)
+  while (start !== -1) {
+    const end = sourceText.indexOf('\n}', start)
+    assert.notEqual(end, -1, `${selector} should close`)
+    const rule = sourceText.slice(start, end + 2)
+    if (pattern.test(rule)) return rule
+    start = sourceText.indexOf(`${selector} {`, end)
+  }
+  assert.fail(`${selector} rule matching ${pattern} should exist`)
 }
 
 function escapeRegExp(value: string) {
