@@ -35,6 +35,8 @@ export type Candle = {
 
 export type Amount = string | number
 
+export type WalletType = 'FX_MARGIN' | 'SPOT' | 'USDT_PERP' | 'COIN_PERP' | 'FUNDING'
+
 export type AccountSummary = {
   id: string
   accountType: string
@@ -57,6 +59,7 @@ export type AccountSummary = {
 export type WalletBalance = {
   id: string
   accountId: string
+  walletType: WalletType | string
   asset: string
   total: Amount
   available: Amount
@@ -66,6 +69,7 @@ export type WalletBalance = {
 export type AssetLedgerEntry = {
   id: string
   accountId: string
+  walletType: WalletType | string
   asset: string
   amount: Amount
   balanceAfter: Amount
@@ -74,6 +78,27 @@ export type AssetLedgerEntry = {
   referenceId: string | null
   description: string | null
   createdAt: string | null
+}
+
+export type AssetConversionPayload = {
+  fromWalletType: WalletType | string
+  fromAsset: string
+  toWalletType: WalletType | string
+  toAsset: string
+  amount: string
+  conversionId?: string
+}
+
+export type AssetConversionResponse = {
+  accountId: string
+  fromWalletType: WalletType | string
+  fromAsset: string
+  toWalletType: WalletType | string
+  toAsset: string
+  fromAmount: Amount
+  toAmount: Amount
+  rate: Amount
+  conversionId: string
 }
 
 export type OrderPayload = {
@@ -122,6 +147,7 @@ export type LedgerEntry = {
   entryType: string
   amount: Amount
   balanceAfter: Amount
+  walletType?: WalletType | string
   currency: string
   referenceType: string | null
   referenceId: string | null

@@ -1,6 +1,5 @@
-import { createDemoAccount, getAccounts, getAccountSummary, getWalletBalances } from '../../services/accountApi'
+import { createDemoAccount, getAccounts, getAccountSummary, getAssetLedger, getWalletBalances } from '../../services/accountApi'
 import { ApiClientError } from '../../services/apiClient'
-import { getLedgerEntries } from '../../services/ledgerApi'
 import {
   closePosition,
   createOrder,
@@ -10,7 +9,7 @@ import {
   updatePositionProtection
 } from '../../services/tradingApi'
 import type { OrderResponse, PositionResponse } from '../../components/tables/types'
-import type { AccountSummary, LedgerEntry, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
+import type { AccountSummary, AssetLedgerEntry, LedgerEntry, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
 
 export { deriveTradingBalances } from './tradingSessionModels'
 export type { TradingBalances } from './tradingSessionModels'
@@ -34,16 +33,33 @@ export function isAuthSessionFailure(error: unknown) {
 }
 
 export async function loadTradingAccountData(token: string, accountId: string): Promise<TradingAccountData> {
-  const [account, orders, positions, positionHistory, ledgerEntries, walletBalances] = await Promise.all([
+  const [account, orders, positions, positionHistory, assetLedgerEntries, walletBalances] = await Promise.all([
     getAccountSummary(accountId, token),
     getOrders(token),
     getPositions(accountId, token),
     getPositionHistory(accountId, token),
-    getLedgerEntries(accountId, token),
+    getAssetLedger(accountId, token),
     getWalletBalances(accountId, token)
   ])
+  const ledgerEntries = assetLedgerEntries.map(mapAssetLedgerEntry)
 
   return { account, orders, positions, positionHistory, ledgerEntries, walletBalances }
+}
+
+function mapAssetLedgerEntry(entry: AssetLedgerEntry): LedgerEntry {
+  return {
+    id: entry.id,
+    accountId: entry.accountId,
+    walletType: entry.walletType,
+    entryType: entry.entryType,
+    amount: entry.amount,
+    balanceAfter: entry.balanceAfter,
+    currency: entry.asset,
+    referenceType: entry.referenceType,
+    referenceId: entry.referenceId,
+    description: entry.description,
+    createdAt: entry.createdAt
+  }
 }
 
 export async function submitTradingOrder(payload: OrderPayload, token?: string | null) {

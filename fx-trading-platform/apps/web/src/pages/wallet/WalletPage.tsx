@@ -9,6 +9,7 @@ import { DataTable, type DataTableColumn } from '../../components/user-page/Data
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { filterByStatus, formatApiError, toNumber } from '../../components/user-page/userPageModels'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
+import { convertAsset } from '../../services/accountApi'
 import { createFundOrder, getFundOrders } from '../../services/financeApi'
 import type { Amount, FundOrder, LedgerEntry, WalletBalance } from '../../types/trading'
 
@@ -16,6 +17,8 @@ const fundOrderStatuses = ['ALL', 'PENDING_REVIEW', 'PENDING', 'APPROVED', 'REJE
 const fundOrderTypes = ['ALL', 'RECHARGE', 'WITHDRAWAL']
 
 type AssetRow = {
+  key: string
+  walletType: string
   currency: string
   balance: Amount
   available: Amount
@@ -26,18 +29,20 @@ type AssetRow = {
 export function WalletPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { token, account, accountId, ledgerEntries, walletBalances, sessionMode, sessionError, loginRequired, retrySession } =
+  const { token, account, accountId, ledgerEntries, walletBalances, sessionMode, sessionError, loginRequired, refreshAccountData, retrySession } =
     useTradingSession()
   const [fundOrders, setFundOrders] = useState<FundOrder[]>([])
   const [fundOrdersLoading, setFundOrdersLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [typeFilter, setTypeFilter] = useState('ALL')
   const [ledgerTypeFilter, setLedgerTypeFilter] = useState('ALL')
+  const [ledgerWalletTypeFilter, setLedgerWalletTypeFilter] = useState('ALL')
   const [ledgerCurrencyFilter, setLedgerCurrencyFilter] = useState('ALL')
   const [ledgerFromDate, setLedgerFromDate] = useState('')
   const [ledgerToDate, setLedgerToDate] = useState('')
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null)
   const [fundOrderType, setFundOrderType] = useState<'RECHARGE' | 'WITHDRAWAL'>('RECHARGE')
+  const [conversionLoading, setConversionLoading] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [apiError, setApiError] = useState<ReturnType<typeof formatApiError> | null>(null)
 
@@ -59,18 +64,23 @@ export function WalletPage() {
     [account, frozenAmount, ledgerEntries, walletBalances]
   )
   const selectedAssetRow = useMemo(
-    () => assetRows.find((asset) => asset.currency === (selectedAsset ?? currency)) ?? assetRows[0],
-    [assetRows, currency, selectedAsset]
+    () => assetRows.find((asset) => asset.key === selectedAsset) ?? assetRows[0],
+    [assetRows, selectedAsset]
   )
   const ledgerTypeOptions = useMemo(() => getUniqueValues(ledgerEntries.map((entry) => entry.entryType)), [ledgerEntries])
+  const ledgerWalletTypeOptions = useMemo(
+    () => getUniqueValues(ledgerEntries.map((entry) => entry.walletType).filter((walletType): walletType is string => Boolean(walletType))),
+    [ledgerEntries]
+  )
   const ledgerCurrencyOptions = useMemo(() => getUniqueValues(ledgerEntries.map((entry) => entry.currency)), [ledgerEntries])
   const visibleLedgerEntries = useMemo(
     () =>
       ledgerEntries
         .filter((entry) => ledgerTypeFilter === 'ALL' || entry.entryType === ledgerTypeFilter)
+        .filter((entry) => ledgerWalletTypeFilter === 'ALL' || entry.walletType === ledgerWalletTypeFilter)
         .filter((entry) => ledgerCurrencyFilter === 'ALL' || entry.currency === ledgerCurrencyFilter)
         .filter((entry) => matchesDateRange(entry.createdAt, ledgerFromDate, ledgerToDate)),
-    [ledgerCurrencyFilter, ledgerEntries, ledgerFromDate, ledgerToDate, ledgerTypeFilter]
+    [ledgerCurrencyFilter, ledgerEntries, ledgerFromDate, ledgerToDate, ledgerTypeFilter, ledgerWalletTypeFilter]
   )
   const fundOrderColumns = useMemo(() => createFundOrderColumns(t), [t])
   const assetTableColumns = useMemo(() => createAssetColumns(setSelectedAsset, t), [t])
@@ -118,6 +128,36 @@ export function WalletPage() {
       await loadFundOrders()
     } catch (error) {
       setApiError(formatApiError(error))
+    }
+  }
+
+  const handleConversionSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!token || !accountId) return
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    setNotice(null)
+    setApiError(null)
+    setConversionLoading(true)
+    try {
+      const conversion = await convertAsset(
+        accountId,
+        {
+          fromWalletType: 'USDT_PERP',
+          fromAsset: 'USDT',
+          toWalletType: 'FX_MARGIN',
+          toAsset: 'USD',
+          amount: String(form.get('amount') ?? '')
+        },
+        token
+      )
+      setNotice(`${conversion.fromAmount} ${conversion.fromAsset} -> ${conversion.toAmount} ${conversion.toAsset}`)
+      await refreshAccountData(token, accountId)
+      formElement.reset()
+    } catch (error) {
+      setApiError(formatApiError(error))
+    } finally {
+      setConversionLoading(false)
     }
   }
 
@@ -227,15 +267,20 @@ export function WalletPage() {
         <DataTable
           rows={assetRows}
           columns={assetTableColumns}
-          rowKey={(asset) => asset.currency}
+          rowKey={(asset) => asset.key}
           emptyMessage={t('assets.emptyAssets')}
           emptyAction={{ label: t('assets.goDeposit'), href: '/wallet' }}
           pageSize={5}
         />
+        <AssetConversionPanel
+          disabled={!token || !accountId || conversionLoading}
+          loading={conversionLoading}
+          onSubmit={handleConversionSubmit}
+        />
         {selectedAssetRow ? (
           <div className="wallet-asset-detail" aria-label={t('assets.singleAssetDetail')}>
             <div>
-              <strong>{selectedAssetRow.currency} {t('assets.singleAssetDetail')}</strong>
+              <strong>{selectedAssetRow.walletType} {selectedAssetRow.currency} {t('assets.singleAssetDetail')}</strong>
               <span>
                 {t('assets.singleAssetSummary', {
                   balance: selectedAssetRow.balance,
@@ -375,6 +420,17 @@ export function WalletPage() {
             </select>
           </label>
           <label>
+            <span>Wallet</span>
+            <select value={ledgerWalletTypeFilter} onChange={(event) => setLedgerWalletTypeFilter(event.target.value)}>
+              <option value="ALL">ALL</option>
+              {ledgerWalletTypeOptions.map((walletType) => (
+                <option key={walletType} value={walletType}>
+                  {walletType}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             <span>{t('common.currency')}</span>
             <select value={ledgerCurrencyFilter} onChange={(event) => setLedgerCurrencyFilter(event.target.value)}>
               <option value="ALL">ALL</option>
@@ -432,6 +488,7 @@ export function WalletPage() {
 
   function clearLedgerFilters() {
     setLedgerTypeFilter('ALL')
+    setLedgerWalletTypeFilter('ALL')
     setLedgerCurrencyFilter('ALL')
     setLedgerFromDate('')
     setLedgerToDate('')
@@ -461,6 +518,7 @@ function createFundOrderColumns(t: TFunction): Array<DataTableColumn<FundOrder>>
 
 function createAssetColumns(setSelectedAsset: (currency: string) => void, t: TFunction): Array<DataTableColumn<AssetRow>> {
   return [
+    { key: 'walletType', label: 'Wallet', sortable: true },
     {
       key: 'currency',
       label: t('assets.asset'),
@@ -480,7 +538,7 @@ function createAssetColumns(setSelectedAsset: (currency: string) => void, t: TFu
       key: 'actions',
       label: t('common.action'),
       render: (asset) => (
-        <button type="button" className="table-action table-action--secondary" onClick={() => setSelectedAsset(asset.currency)}>
+        <button type="button" className="table-action table-action--secondary" onClick={() => setSelectedAsset(asset.key)}>
           {t('common.viewDetails')}
         </button>
       )
@@ -488,9 +546,40 @@ function createAssetColumns(setSelectedAsset: (currency: string) => void, t: TFu
   ]
 }
 
+function AssetConversionPanel({
+  disabled,
+  loading,
+  onSubmit
+}: {
+  disabled: boolean
+  loading: boolean
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+}) {
+  return (
+    <form className="user-page__form wallet-conversion-form" onSubmit={onSubmit}>
+      <label>
+        <span>From</span>
+        <input value="USDT_PERP · USDT" readOnly />
+      </label>
+      <label>
+        <span>To</span>
+        <input value="FX_MARGIN · USD" readOnly />
+      </label>
+      <label>
+        <span>Amount</span>
+        <input name="amount" type="number" min="0.00000001" step="0.00000001" required />
+      </label>
+      <button type="submit" className="table-action table-action--primary" disabled={disabled}>
+        {loading ? 'Converting' : 'Convert'}
+      </button>
+    </form>
+  )
+}
+
 function createLedgerColumns(t: TFunction): Array<DataTableColumn<LedgerEntry>> {
   return [
     { key: 'createdAt', label: t('common.time'), sortable: true, render: (entry) => formatTime(entry.createdAt) },
+    { key: 'walletType', label: 'Wallet', sortable: true, render: (entry) => entry.walletType ?? '-' },
     { key: 'entryType', label: t('common.type'), sortable: true },
     { key: 'amount', label: t('common.amount'), sortable: true },
     { key: 'balanceAfter', label: t('assets.balance'), sortable: true },
@@ -518,33 +607,48 @@ function getAssetRows(
   const rows = new Map<string, AssetRow>()
 
   balances.forEach((balance) => {
-    rows.set(balance.asset, {
+    const key = walletKey(balance.walletType, balance.asset)
+    rows.set(key, {
+      key,
+      walletType: balance.walletType,
       currency: balance.asset,
       balance: balance.total,
       available: balance.available,
       frozen: balance.locked,
-      activityCount: entries.filter((entry) => entry.currency === balance.asset).length
+      activityCount: entries.filter(
+        (entry) => entry.walletType === balance.walletType && entry.currency === balance.asset
+      ).length
     })
   })
 
-  if (account && !rows.has(account.baseCurrency)) {
-    rows.set(account.baseCurrency, {
+  const accountKey = account ? walletKey('FX_MARGIN', account.baseCurrency) : ''
+  if (account && !rows.has(accountKey)) {
+    rows.set(accountKey, {
+      key: accountKey,
+      walletType: 'FX_MARGIN',
       currency: account.baseCurrency,
       balance: account.balance,
       available: account.freeMargin,
       frozen: frozenAmount.toFixed(2),
-      activityCount: entries.filter((entry) => entry.currency === account.baseCurrency).length
+      activityCount: entries.filter(
+        (entry) => entry.walletType === 'FX_MARGIN' && entry.currency === account.baseCurrency
+      ).length
     })
   }
 
   entries.forEach((entry) => {
-    if (rows.has(entry.currency)) return
-    rows.set(entry.currency, {
+    const key = walletKey(entry.walletType, entry.currency)
+    if (rows.has(key)) return
+    rows.set(key, {
+      key,
+      walletType: entry.walletType ?? 'UNKNOWN',
       currency: entry.currency,
       balance: '-',
       available: '-',
       frozen: '-',
-      activityCount: entries.filter((item) => item.currency === entry.currency).length
+      activityCount: entries.filter(
+        (item) => item.walletType === entry.walletType && item.currency === entry.currency
+      ).length
     })
   })
 
@@ -561,4 +665,8 @@ function matchesDateRange(createdAt: string | null | undefined, fromDate: string
   if (fromDate && day < fromDate) return false
   if (toDate && day > toDate) return false
   return true
+}
+
+function walletKey(walletType: string | undefined, asset: string) {
+  return `${walletType || 'UNKNOWN'}:${asset}`
 }

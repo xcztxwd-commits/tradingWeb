@@ -336,6 +336,16 @@ describe('trading session submit mode', () => {
     assert.doesNotMatch(source, /repriceOpenPositionsForQuote/)
     assert.doesNotMatch(source, /positionQuoteSymbolsKey/)
   })
+
+  it('loads account asset ledger rows for wallet conversion refreshes', () => {
+    const source = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
+
+    assert.match(source, /getAssetLedger/)
+    assert.match(source, /mapAssetLedgerEntry/)
+    assert.match(source, /currency:\s*entry\.asset/)
+    assert.match(source, /walletType:\s*entry\.walletType/)
+    assert.doesNotMatch(source, /getLedgerEntries/)
+  })
 })
 
 function sourceBetween(source: string, start: string, end: string) {
@@ -376,6 +386,7 @@ function walletBalance(asset: string, available: string): WalletBalance {
   return {
     id: `wallet-${asset}`,
     accountId: 'acct_1',
+    walletType: 'SPOT',
     asset,
     total: available,
     available,
