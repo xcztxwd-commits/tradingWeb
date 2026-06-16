@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
+import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
@@ -55,9 +56,29 @@ class Step04WalletSchemaAuditTest {
   }
 
   @Test
+  void walletTypeMigrationPartitionsBalancesByWalletType() throws IOException {
+    String migration = Files.readString(Path.of(
+        "src",
+        "main",
+        "resources",
+        "db",
+        "migration",
+        "V40__wallet_type_asset_conversion.sql"));
+
+    assertThat(migration)
+        .contains("ADD COLUMN wallet_type")
+        .contains("DEFAULT 'SPOT'")
+        .contains("DROP CONSTRAINT ux_wallet_balances_account_asset")
+        .contains("ux_wallet_balances_account_wallet_asset")
+        .contains("UNIQUE(account_id, wallet_type, asset)")
+        .contains("idx_asset_ledger_account_wallet_time");
+  }
+
+  @Test
   void walletServiceCreatesBalanceAndWritesAssetLedgerEntry() {
     UUID accountId = UUID.randomUUID();
-    when(walletBalanceRepository.findByAccountIdAndAsset(accountId, "USDT")).thenReturn(Optional.empty());
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "USDT"))
+        .thenReturn(Optional.empty());
     when(walletBalanceRepository.save(any(WalletBalanceEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
     when(assetLedgerEntryRepository.save(any(AssetLedgerEntryEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -65,6 +86,7 @@ class Step04WalletSchemaAuditTest {
         .creditAvailable(accountId, "usdt", new BigDecimal("100.00000000"), "AUDIT", UUID.randomUUID(), "Audit credit");
 
     assertThat(balance.getAsset()).isEqualTo("USDT");
+    assertThat(balance.getWalletType()).isEqualTo(WalletType.SPOT.code());
     AuditAssertions.assertAmountClose(balance.getTotal(), "100.00000000");
     AuditAssertions.assertAmountClose(balance.getAvailable(), "100.00000000");
     AuditAssertions.assertAmountClose(balance.getLocked(), "0.00000000");
@@ -72,6 +94,7 @@ class Step04WalletSchemaAuditTest {
     ArgumentCaptor<AssetLedgerEntryEntity> captor = ArgumentCaptor.forClass(AssetLedgerEntryEntity.class);
     verify(assetLedgerEntryRepository).save(captor.capture());
     assertThat(captor.getValue().getEntryType()).isEqualTo("CREDIT_AVAILABLE");
+    assertThat(captor.getValue().getWalletType()).isEqualTo(WalletType.SPOT.code());
     AuditAssertions.assertAmountClose(captor.getValue().getAmount(), "100.00000000");
     AuditAssertions.assertAmountClose(captor.getValue().getBalanceAfter(), "100.00000000");
   }

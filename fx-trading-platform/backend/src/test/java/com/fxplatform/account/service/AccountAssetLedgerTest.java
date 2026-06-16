@@ -8,6 +8,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
+import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -46,6 +47,7 @@ class AccountAssetLedgerTest {
     account.setUserId(userId);
     AssetLedgerEntryEntity entity = assetEntry(
         accountId,
+        WalletType.USDT_PERP.code(),
         "USDT",
         "-5000.00000000",
         "5000.00000000",
@@ -54,7 +56,7 @@ class AccountAssetLedgerTest {
         from.plusSeconds(10));
 
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
-    when(walletService.assetLedgerEntries(accountId, "usdt", "SPOT_BUY_QUOTE_OUT", orderId, from, to))
+    when(walletService.assetLedgerEntries(accountId, "USDT_PERP", "usdt", "SPOT_BUY_QUOTE_OUT", orderId, from, to))
         .thenReturn(List.of(entity));
 
     AccountService service = new AccountService(accountRepository, ledgerService, accountSnapshotService, walletService);
@@ -62,6 +64,7 @@ class AccountAssetLedgerTest {
     List<AssetLedgerEntryResponse> entries = service.assetLedger(
         userId,
         accountId,
+        "USDT_PERP",
         "usdt",
         "SPOT_BUY_QUOTE_OUT",
         orderId,
@@ -69,6 +72,7 @@ class AccountAssetLedgerTest {
         to);
 
     assertThat(entries).hasSize(1);
+    assertThat(entries.getFirst().walletType()).isEqualTo("USDT_PERP");
     assertThat(entries.getFirst().asset()).isEqualTo("USDT");
     assertThat(entries.getFirst().entryType()).isEqualTo("SPOT_BUY_QUOTE_OUT");
     assertThat(entries.getFirst().referenceId()).isEqualTo(orderId);
@@ -76,6 +80,7 @@ class AccountAssetLedgerTest {
 
   private static AssetLedgerEntryEntity assetEntry(
       UUID accountId,
+      String walletType,
       String asset,
       String amount,
       String balanceAfter,
@@ -86,6 +91,7 @@ class AccountAssetLedgerTest {
     AssetLedgerEntryEntity entry = new AssetLedgerEntryEntity();
     entry.setId(UUID.randomUUID());
     entry.setAccountId(accountId);
+    entry.setWalletType(walletType);
     entry.setAsset(asset);
     entry.setAmount(new BigDecimal(amount));
     entry.setBalanceAfter(new BigDecimal(balanceAfter));

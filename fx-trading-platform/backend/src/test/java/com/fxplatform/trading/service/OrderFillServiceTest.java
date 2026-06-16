@@ -24,6 +24,7 @@ import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
 import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
+import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
@@ -319,7 +320,8 @@ class OrderFillServiceTest {
       return position;
     });
     when(accountRepository.reserveMarginIfAvailable(eq(accountId), any(BigDecimal.class))).thenReturn(1);
-    when(walletBalanceRepository.findByAccountIdAndAsset(accountId, "BTC")).thenReturn(Optional.of(btcBalance));
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "BTC"))
+        .thenReturn(Optional.of(btcBalance));
 
     OrderFillService service = new OrderFillService(
         orderRepository,
@@ -452,6 +454,7 @@ class OrderFillServiceTest {
     WalletBalanceEntity balance = new WalletBalanceEntity();
     balance.setId(UUID.randomUUID());
     balance.setAccountId(accountId);
+    balance.setWalletType(WalletType.SPOT.code());
     balance.setAsset(asset);
     balance.setTotal(new BigDecimal(total));
     balance.setAvailable(new BigDecimal(available));

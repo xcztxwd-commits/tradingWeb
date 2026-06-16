@@ -1,11 +1,14 @@
 package com.fxplatform.account.controller;
 
 import com.fxplatform.account.dto.AccountResponse;
+import com.fxplatform.account.dto.AssetConversionRequest;
+import com.fxplatform.account.dto.AssetConversionResponse;
 import com.fxplatform.account.dto.AssetLedgerEntryResponse;
 import com.fxplatform.account.dto.WalletBalanceResponse;
 import com.fxplatform.account.service.AccountService;
 import com.fxplatform.common.response.ApiResponse;
 import com.fxplatform.common.security.UserPrincipal;
+import jakarta.validation.Valid;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -14,6 +17,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -59,6 +63,7 @@ public class AccountController {
   public ApiResponse<List<AssetLedgerEntryResponse>> assetLedger(
       @AuthenticationPrincipal UserPrincipal principal,
       @PathVariable UUID accountId,
+      @RequestParam(required = false) String walletType,
       @RequestParam(required = false) String asset,
       @RequestParam(required = false) String entryType,
       @RequestParam(required = false) UUID referenceId,
@@ -68,11 +73,21 @@ public class AccountController {
     return ApiResponse.success(accountService.assetLedger(
         principal.id(),
         accountId,
+        walletType,
         asset,
         entryType,
         referenceId,
         from,
         to));
+  }
+
+  @PostMapping("/{accountId}/asset-conversions")
+  public ApiResponse<AssetConversionResponse> convertAsset(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @PathVariable UUID accountId,
+      @Valid @RequestBody AssetConversionRequest request
+  ) {
+    return ApiResponse.success(accountService.convertAsset(principal.id(), accountId, request));
   }
 
   /**

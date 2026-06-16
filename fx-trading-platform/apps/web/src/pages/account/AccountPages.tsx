@@ -1,55 +1,446 @@
-import { ArrowDownCircle, ArrowUpCircle, Bell, CheckCircle2, CircleDollarSign, Settings, ShieldCheck, UserRound } from 'lucide-react'
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowDownCircle, ArrowUpCircle, Bell, CheckCircle2, CircleDollarSign, RefreshCcw, Settings, ShieldCheck, UserRound } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { Link, NavLink } from 'react-router-dom'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
+
+import { AssetMark } from '../../components/asset/AssetMark'
+import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
+import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
+import { filterByStatus, formatApiError, toNumber } from '../../components/user-page/userPageModels'
+import { useTradingSession, type TradingSessionMode } from '../../features/trading-session/useTradingSession'
+import { createFundOrder, getFundOrders } from '../../services/financeApi'
+import type { OrderResponse, PositionResponse } from '../../components/tables/types'
+import type { AccountSummary, Amount, FundOrder, LedgerEntry, WalletBalance } from '../../types/trading'
 
 const accountNav = [
-  { to: '/account/overview', label: '总览' },
-  { to: '/account/assets', label: '资产' },
-  { to: '/account/orders/funding', label: '资金流水' },
-  { to: '/account/orders/trades', label: '交易订单' },
-  { to: '/account/security/kyc', label: '身份认证' },
-  { to: '/account/settings', label: '设置' }
+  { to: '/account/overview', label: 'Overview' },
+  { to: '/account/assets', label: 'Assets' },
+  { to: '/account/orders/funding', label: 'Funding records', nativeLabel: '资金流水' },
+  { to: '/account/orders/trades', label: 'Trade orders', nativeLabel: '交易订单' },
+  { to: '/account/security/kyc', label: 'Identity verification', nativeLabel: '身份认证' },
+  { to: '/account/settings', label: 'Settings' }
 ] as const
 
-const ledgers = [
-  { time: '2026-06-14 09:20', type: '充值', asset: 'USDT', amount: '+2,400.00', note: '账户入金' },
-  { time: '2026-06-14 10:42', type: '交易', asset: 'BTC', amount: '-0.018', note: '现货买入' },
-  { time: '2026-06-14 12:18', type: '提现', asset: 'USDT', amount: '-300.00', note: '处理中' }
+const fundOrderStatuses = ['ALL', 'PENDING_REVIEW', 'PENDING', 'APPROVED', 'REJECTED']
+const fundOrderTypes = ['ALL', 'RECHARGE', 'WITHDRAWAL']
+const tradeOrderTabs = [
+  { value: 'OPEN', label: 'Open orders' },
+  { value: 'HISTORY', label: 'Order history' },
+  { value: 'FILLED', label: 'Fill history' }
 ] as const
 
-const tradeOrders = [
-  { pair: 'BTCUSDT', side: '买入', status: '当前委托', price: '67,240.00', quantity: '0.018', time: '2026-06-14 12:40' },
-  { pair: 'ETHUSDT', side: '卖出', status: '历史委托', price: '3,420.00', quantity: '0.42', time: '2026-06-13 22:11' },
-  { pair: 'EURUSD', side: '买入', status: '历史成交', price: '1.0832', quantity: '20,000', time: '2026-06-13 14:32' }
-] as const
+type TradeOrderTab = (typeof tradeOrderTabs)[number]['value']
+
+type AssetRow = {
+  currency: string
+  balance: Amount
+  available: Amount
+  frozen: Amount
+  activityCount: number
+}
+
+type AccountStateProps = {
+  sessionMode: TradingSessionMode
+  sessionError: string | null
+  loginRequired: boolean
+  retrySession: () => Promise<void>
+  redirect: string
+}
 
 export function AccountOverviewPage() {
+  const {
+    account,
+    ledgerEntries,
+    loginRequired,
+    orders,
+    positions,
+    retrySession,
+    sessionError,
+    sessionMode,
+    walletBalances
+  } = useTradingSession()
+
   return (
-    <AccountShell title="总览" summary="账户、资产、认证和近期行为集中展示。">
+    <AccountShell
+      account={account}
+      title="Overview"
+      summary="Live account, asset, risk and recent activity from the backend session."
+    >
+      <AccountPageState
+        loginRequired={loginRequired}
+        redirect="/account/overview"
+        retrySession={retrySession}
+        sessionError={sessionError}
+        sessionMode={sessionMode}
+      />
       <div className="account-dashboard-layout">
-        <AccountProfileSummary />
-        <AccountOnboardingSteps />
-        <AccountAssetActionPanel />
-        <AccountDashboardInsights />
+        <AccountProfileSummary account={account} positions={positions} />
+        <AccountOnboardingSteps account={account} />
+        <AccountAssetActionPanel account={account} walletBalances={walletBalances} />
+        <AccountDashboardInsights account={account} ledgerEntries={ledgerEntries} orders={orders} positions={positions} />
+      </div>
+      <RecentLedgerPanel entries={ledgerEntries.slice(0, 5)} />
+    </AccountShell>
+  )
+}
+
+export function AccountAssetsPage() {
+  const { account, ledgerEntries, loginRequired, retrySession, sessionError, sessionMode, walletBalances } = useTradingSession()
+  const frozenAmount = toNumber(account?.usedMargin) ?? 0
+  const assetRows = useMemo(
+    () => getAssetRows(account, walletBalances, ledgerEntries, frozenAmount),
+    [account, frozenAmount, ledgerEntries, walletBalances]
+  )
+  const assetColumns = useMemo(() => createAssetColumns(), [])
+
+  return (
+    <AccountShell
+      account={account}
+      title="Assets"
+      summary="Wallet balances, available funds, locked amounts and recent ledger movement."
+    >
+      <AccountPageState
+        loginRequired={loginRequired}
+        redirect="/account/assets"
+        retrySession={retrySession}
+        sessionError={sessionError}
+        sessionMode={sessionMode}
+      />
+      <div className="account-split-grid">
+        <AssetAccountCards account={account} rows={assetRows} />
+        <RecentLedgerPanel entries={ledgerEntries.slice(0, 6)} />
+      </div>
+      <DataTable
+        rows={assetRows}
+        columns={assetColumns}
+        rowKey={(asset) => asset.currency}
+        emptyMessage="No wallet balances"
+        emptyAction={{ label: 'Create funding request', href: '/account/orders/funding' }}
+        pageSize={8}
+      />
+    </AccountShell>
+  )
+}
+
+export function FundingRecordsPage() {
+  const { account, accountId, ledgerEntries, loginRequired, retrySession, sessionError, sessionMode, token } = useTradingSession()
+  const [fundOrders, setFundOrders] = useState<FundOrder[]>([])
+  const [fundOrdersLoading, setFundOrdersLoading] = useState(false)
+  const [statusFilter, setStatusFilter] = useState('ALL')
+  const [typeFilter, setTypeFilter] = useState('ALL')
+  const [fundOrderType, setFundOrderType] = useState<'RECHARGE' | 'WITHDRAWAL'>('RECHARGE')
+  const [notice, setNotice] = useState<string | null>(null)
+  const [apiError, setApiError] = useState<ReturnType<typeof formatApiError> | null>(null)
+
+  const visibleFundOrders = useMemo(() => {
+    return filterByStatus(fundOrders, statusFilter).filter((order) => typeFilter === 'ALL' || order.orderType === typeFilter)
+  }, [fundOrders, statusFilter, typeFilter])
+  const fundOrderColumns = useMemo(() => createFundOrderColumns(), [])
+  const ledgerColumns = useMemo(() => createLedgerColumns(), [])
+  const currency = account?.baseCurrency ?? 'USDT'
+
+  const loadFundOrders = useCallback(async () => {
+    if (!token || !accountId) return
+    setFundOrdersLoading(true)
+    setApiError(null)
+    try {
+      setFundOrders(await getFundOrders(accountId, token))
+    } catch (error) {
+      setApiError(formatApiError(error))
+    } finally {
+      setFundOrdersLoading(false)
+    }
+  }, [accountId, token])
+
+  useEffect(() => {
+    void loadFundOrders()
+  }, [loadFundOrders])
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!token || !accountId) return
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    setNotice(null)
+    setApiError(null)
+    try {
+      const createdFundOrder = await createFundOrder(
+        {
+          accountId,
+          orderType: form.get('orderType') === 'WITHDRAWAL' ? 'WITHDRAWAL' : 'RECHARGE',
+          amount: String(form.get('amount') ?? ''),
+          currency: String(form.get('currency') ?? currency),
+          paymentMethodId: nullableString(form.get('paymentMethodId')),
+          note: String(form.get('note') ?? '')
+        },
+        token
+      )
+      setFundOrders((current) => [createdFundOrder, ...current.filter((order) => order.id !== createdFundOrder.id)])
+      formElement.reset()
+      setFundOrderType('RECHARGE')
+      setNotice('Funding request submitted.')
+      await loadFundOrders()
+    } catch (error) {
+      setApiError(formatApiError(error))
+    }
+  }
+
+  return (
+    <AccountShell
+      account={account}
+      title="Funding records"
+      summary="Deposit and withdrawal requests are read from the finance backend."
+    >
+      <AccountPageState
+        loginRequired={loginRequired}
+        redirect="/account/orders/funding"
+        retrySession={retrySession}
+        sessionError={sessionError}
+        sessionMode={sessionMode}
+      />
+      {apiError ? <ApiErrorState error={apiError} onAction={() => void loadFundOrders()} /> : null}
+      {notice ? <div className="user-page__notice">{notice}</div> : null}
+
+      <form className="user-page__form" onSubmit={handleSubmit}>
+        <label>
+          <span>Type</span>
+          <select name="orderType" value={fundOrderType} onChange={(event) => setFundOrderType(event.target.value === 'WITHDRAWAL' ? 'WITHDRAWAL' : 'RECHARGE')}>
+            <option value="RECHARGE">RECHARGE</option>
+            <option value="WITHDRAWAL">WITHDRAWAL</option>
+          </select>
+        </label>
+        <label>
+          <span>Amount</span>
+          <input name="amount" type="number" min="0.01" step="0.01" required />
+        </label>
+        <label>
+          <span>Currency</span>
+          <select name="currency" defaultValue={currency}>
+            <option value={currency}>{currency}</option>
+            <option value="USDT">USDT</option>
+            <option value="USD">USD</option>
+          </select>
+        </label>
+        <label>
+          <span>Payment method ID</span>
+          <input name="paymentMethodId" placeholder="Optional" />
+        </label>
+        <label>
+          <span>Note</span>
+          <input name="note" placeholder="Optional request note" />
+        </label>
+        <button
+          className={`table-action ${fundOrderType === 'WITHDRAWAL' ? 'table-action--danger' : 'table-action--primary'}`}
+          disabled={!token || !accountId}
+          type="submit"
+        >
+          {fundOrderType === 'WITHDRAWAL' ? 'Submit withdrawal' : 'Submit deposit'}
+        </button>
+      </form>
+
+      <div className="account-filter-row">
+        {fundOrderTypes.map((type) => (
+          <button key={type} type="button" aria-pressed={typeFilter === type} onClick={() => setTypeFilter(type)}>
+            {type}
+          </button>
+        ))}
+        <select aria-label="Funding status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+          {fundOrderStatuses.map((status) => (
+            <option key={status} value={status}>
+              {status}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {fundOrdersLoading ? <LoadingState message="Loading funding records." /> : null}
+      <DataTable
+        rows={visibleFundOrders}
+        columns={fundOrderColumns}
+        rowKey={(order) => order.id}
+        emptyMessage="No funding records"
+        emptyAction={{ label: 'Create funding request', href: '/account/orders/funding' }}
+      />
+      <DataTable
+        rows={ledgerEntries}
+        columns={ledgerColumns}
+        rowKey={(entry) => entry.id}
+        emptyMessage="No ledger entries"
+        pageSize={6}
+      />
+    </AccountShell>
+  )
+}
+
+export function TradeOrdersPage() {
+  const { account, loginRequired, orders, retrySession, sessionError, sessionMode } = useTradingSession()
+  const [activeTab, setActiveTab] = useState<TradeOrderTab>('OPEN')
+  const [sideFilter, setSideFilter] = useState('ALL')
+  const [query, setQuery] = useState('')
+  const tradeColumns = useMemo(() => createTradeOrderColumns(), [])
+  const visibleOrders = useMemo(() => {
+    return orders
+      .filter((order) => matchesTradeTab(order, activeTab))
+      .filter((order) => sideFilter === 'ALL' || order.side === sideFilter)
+      .filter((order) => !query.trim() || order.symbol.toLowerCase().includes(query.trim().toLowerCase()))
+  }, [activeTab, orders, query, sideFilter])
+
+  return (
+    <AccountShell account={account} title="Trade orders" summary="Current and historical orders from the trading backend.">
+      <AccountPageState
+        loginRequired={loginRequired}
+        redirect="/account/orders/trades"
+        retrySession={retrySession}
+        sessionError={sessionError}
+        sessionMode={sessionMode}
+      />
+      <div className="account-filter-row">
+        {tradeOrderTabs.map((tab) => (
+          <button key={tab.value} type="button" aria-pressed={activeTab === tab.value} onClick={() => setActiveTab(tab.value)}>
+            {tab.label}
+          </button>
+        ))}
+        <input aria-label="Symbol" placeholder="BTCUSDT" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <select aria-label="Side" value={sideFilter} onChange={(event) => setSideFilter(event.target.value)}>
+          <option value="ALL">ALL</option>
+          <option value="BUY">BUY</option>
+          <option value="SELL">SELL</option>
+        </select>
+      </div>
+      <DataTable
+        rows={visibleOrders}
+        columns={tradeColumns}
+        rowKey={(order) => order.id}
+        emptyMessage="No trade orders"
+        emptyAction={{ label: 'Go trading', href: '/trading' }}
+      />
+    </AccountShell>
+  )
+}
+
+export function KycPage() {
+  const { account, loginRequired, retrySession, sessionError, sessionMode } = useTradingSession()
+
+  return (
+    <AccountShell account={account} title="Identity verification" summary="Verification status and the next account action.">
+      <AccountPageState
+        loginRequired={loginRequired}
+        redirect="/account/security/kyc"
+        retrySession={retrySession}
+        sessionError={sessionError}
+        sessionMode={sessionMode}
+      />
+      <section className="account-panel account-panel--kyc">
+        <ShieldCheck size={28} aria-hidden="true" />
+        <div>
+          <h2>Complete identity verification</h2>
+          <p>Complete KYC before enabling higher funding and trading limits.</p>
+          <button className="table-action table-action--primary" type="button">
+            Start verification
+          </button>
+        </div>
+      </section>
+    </AccountShell>
+  )
+}
+
+export function AccountSettingsPage() {
+  const { account, loginRequired, retrySession, sessionError, sessionMode } = useTradingSession()
+
+  return (
+    <AccountShell account={account} title="Settings" summary="Basic profile, notifications and trading preferences.">
+      <AccountPageState
+        loginRequired={loginRequired}
+        redirect="/account/settings"
+        retrySession={retrySession}
+        sessionError={sessionError}
+        sessionMode={sessionMode}
+      />
+      <div className="settings-list">
+        <PreferenceRows icon={<UserRound size={19} aria-hidden="true" />} title="Nickname and avatar" value="FX member" />
+        <PreferenceRows icon={<Bell size={19} aria-hidden="true" />} title="Notification language" value="Simplified Chinese" />
+        <PreferenceRows icon={<Settings size={19} aria-hidden="true" />} title="Trading preferences" value="Open the latest trading symbol by default" />
       </div>
     </AccountShell>
   )
 }
 
-function AccountProfileSummary() {
+function AccountPageState({ loginRequired, redirect, retrySession, sessionError, sessionMode }: AccountStateProps) {
+  const navigate = useNavigate()
+
+  if (loginRequired) {
+    return <LoginRequiredState message="Log in to view account data." onLogin={() => navigate(`/login?redirect=${redirect}`)} />
+  }
+  if (sessionMode === 'loading') {
+    return <LoadingState message="Loading account data." />
+  }
+  if (sessionMode === 'error') {
+    return (
+      <ApiErrorState
+        error={formatApiError(new Error(sessionError ?? 'Account data unavailable'))}
+        onAction={() => void retrySession()}
+      />
+    )
+  }
+  return null
+}
+
+function AccountShell({
+  account,
+  title,
+  summary,
+  children
+}: {
+  account?: AccountSummary
+  title: string
+  summary: string
+  children: ReactNode
+}) {
   return (
-    <section className="account-profile-summary" aria-label="账户资料摘要">
+    <section className="user-page account-shell" aria-labelledby="account-page-title">
+      <aside className="account-sidebar" aria-label="Account center navigation">
+        <div className="account-sidebar__profile">
+          <span>{account?.baseCurrency?.slice(0, 2) ?? 'FX'}</span>
+          <div>
+            <strong>{account?.accountType ?? 'Trading account'}</strong>
+            <small>{account?.id ? `UID ${shortId(account.id)}` : 'Login required'}</small>
+          </div>
+        </div>
+        <nav>
+          {accountNav.map((item) => (
+            <NavLink key={item.to} to={item.to} aria-label={'nativeLabel' in item ? `${item.label} ${item.nativeLabel}` : item.label}>
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+      </aside>
+      <main className="account-main">
+        <header className="user-page__header">
+          <div>
+            <h1 id="account-page-title">{title}</h1>
+            <p>{summary}</p>
+          </div>
+        </header>
+        {children}
+      </main>
+    </section>
+  )
+}
+
+function AccountProfileSummary({ account, positions }: { account?: AccountSummary; positions: PositionResponse[] }) {
+  return (
+    <section className="account-profile-summary" aria-label="Account profile summary">
       <div className="account-profile-summary__identity">
-        <span>FX</span>
+        <span>{account?.baseCurrency?.slice(0, 2) ?? 'FX'}</span>
         <div>
-          <strong>fx***@example.com</strong>
-          <small>UID 829341 · Lv.1 现货用户</small>
+          <strong>{account?.accountType ?? 'Trading account'}</strong>
+          <small>{account?.id ? `UID ${shortId(account.id)} · ${account.status}` : 'No active session'}</small>
         </div>
       </div>
       <div className="account-profile-summary__stats">
-        <AccountProfileStat label="账户状态" value="待验证" />
-        <AccountProfileStat label="可用入口" value="6 个" />
-        <AccountProfileStat label="安全提醒" value="1 项" />
+        <AccountProfileStat label="Equity" value={formatAmount(account?.equity, account?.baseCurrency)} />
+        <AccountProfileStat label="Open positions" value={String(positions.length)} />
+        <AccountProfileStat label="Margin level" value={account?.marginLevel ? `${account.marginLevel}%` : '-'} />
       </div>
     </section>
   )
@@ -64,25 +455,25 @@ function AccountProfileStat({ label, value }: { label: string; value: string }) 
   )
 }
 
-function AccountOnboardingSteps() {
+function AccountOnboardingSteps({ account }: { account?: AccountSummary }) {
   const steps = [
     {
-      title: '身份认证',
-      note: '完成基础认证后开放充值、提现和更高交易限额。',
-      action: '立即验证',
+      title: 'Identity verification',
+      note: account?.status === 'ACTIVE' ? 'Account is active. Keep verification details current.' : 'Complete verification to unlock funding and trading limits.',
+      action: 'Verify now',
       to: '/account/security/kyc',
-      active: true
+      active: account?.status !== 'ACTIVE'
     },
     {
-      title: '充值资产',
-      note: '查看钱包结构、近期流水和可用资金。',
-      action: '查看钱包',
+      title: 'Fund account',
+      note: 'Review wallet balances and create deposit or withdrawal requests.',
+      action: 'View assets',
       to: '/account/assets'
     },
     {
-      title: '开始交易',
-      note: '进入交易页选择 BTCUSDT、ETHUSDT 或外汇品种。',
-      action: '去交易',
+      title: 'Start trading',
+      note: 'Open the trading terminal and use the selected backend account.',
+      action: 'Go trading',
       to: '/trading'
     }
   ]
@@ -91,8 +482,8 @@ function AccountOnboardingSteps() {
     <section className="account-onboarding-section">
       <div className="account-panel__head">
         <div>
-          <h2>新手任务</h2>
-          <p>按认证、资金、交易的顺序推进，减少第一次使用时的跳转成本。</p>
+          <h2>Account workflow</h2>
+          <p>Verification, funding and trading stay under the same authenticated account.</p>
         </div>
       </div>
       <div className="account-onboarding-grid">
@@ -113,51 +504,64 @@ function AccountOnboardingSteps() {
   )
 }
 
-function AccountAssetActionPanel() {
+function AccountAssetActionPanel({ account, walletBalances }: { account?: AccountSummary; walletBalances: WalletBalance[] }) {
+  const totalWallet = walletBalances.reduce((total, balance) => total + (toNumber(balance.total) ?? 0), 0)
+  const currency = account?.baseCurrency ?? walletBalances[0]?.asset ?? 'USDT'
+
   return (
     <section className="account-asset-panel">
       <div>
-        <span>总资产估值</span>
-        <strong>12,842.30 USDT</strong>
-        <small>今日变化 +1.82%</small>
+        <span>Total assets</span>
+        <strong>{formatAmount(totalWallet || account?.balance, currency)}</strong>
+        <small>Available {formatAmount(account?.freeMargin, currency)}</small>
       </div>
-      <div className="account-action-strip" aria-label="资产快捷操作">
+      <div className="account-action-strip" aria-label="Asset shortcuts">
         <Link className="table-action table-action--primary" to="/account/orders/funding">
           <ArrowDownCircle size={16} aria-hidden="true" />
-          充值
+          Deposit
         </Link>
-        <button className="table-action table-action--secondary" type="button">
+        <Link className="table-action table-action--secondary" to="/account/orders/funding">
           <ArrowUpCircle size={16} aria-hidden="true" />
-          提现
-        </button>
+          Withdraw
+        </Link>
         <Link className="table-action table-action--secondary" to="/trading">
           <CircleDollarSign size={16} aria-hidden="true" />
-          交易
+          Trade
         </Link>
       </div>
     </section>
   )
 }
 
-function AccountDashboardInsights() {
+function AccountDashboardInsights({
+  account,
+  ledgerEntries,
+  orders,
+  positions
+}: {
+  account?: AccountSummary
+  ledgerEntries: LedgerEntry[]
+  orders: OrderResponse[]
+  positions: PositionResponse[]
+}) {
   const insights = [
     {
       icon: <ShieldCheck size={20} aria-hidden="true" />,
-      title: '风险与安全',
-      value: '1 项待处理',
-      note: '完成身份认证后可提升资金权限。'
+      title: 'Risk status',
+      value: account?.warning ?? account?.status ?? '-',
+      note: `Used margin ${formatAmount(account?.usedMargin, account?.baseCurrency)}`
     },
     {
       icon: <CheckCircle2 size={20} aria-hidden="true" />,
-      title: '资产结构',
-      value: '现货 65%',
-      note: '合约和资金账户保持轻量占比。'
+      title: 'Open exposure',
+      value: formatAmount(account?.positionValue ?? positions.length, account?.positionValue ? account?.baseCurrency : undefined),
+      note: `${positions.length} open positions`
     },
     {
       icon: <Bell size={20} aria-hidden="true" />,
-      title: '近期活动',
-      value: '3 条流水',
-      note: '充值、交易、提现记录集中在资金流水页。'
+      title: 'Recent activity',
+      value: `${ledgerEntries.length} ledger rows`,
+      note: `${orders.length} trade orders are available`
     }
   ]
 
@@ -177,187 +581,11 @@ function AccountDashboardInsights() {
   )
 }
 
-export function AccountAssetsPage() {
-  return (
-    <AccountShell title="钱包总览" summary="资产曲线、近期流水和账户卡片保持在同一屏。">
-      <div className="account-split-grid">
-        <AssetSummaryChartCard />
-        <RecentLedgerPanel />
-      </div>
-      <AssetAccountCards />
-    </AccountShell>
-  )
-}
-
-export function FundingRecordsPage() {
-  return (
-    <AccountShell title="资金流水" summary="只展示总览、充值和提现三类资金记录。">
-      <div className="account-filter-row">
-        <button type="button" aria-pressed="true">总览</button>
-        <button type="button">充值</button>
-        <button type="button">提现</button>
-        <select aria-label="资产">
-          <option>全部资产</option>
-          <option>USDT</option>
-          <option>BTC</option>
-        </select>
-      </div>
-      <AccountTable
-        headers={['时间(UTC+8)', '类别', '资产', '数量', '备注']}
-        rows={ledgers.map((row) => [row.time, row.type, row.asset, row.amount, row.note])}
-      />
-    </AccountShell>
-  )
-}
-
-export function TradeOrdersPage() {
-  return (
-    <AccountShell title="交易订单" summary="当前委托、历史委托和历史成交保持轻量筛选。">
-      <div className="account-filter-row">
-        <button type="button" aria-pressed="true">当前委托</button>
-        <button type="button">历史委托</button>
-        <button type="button">历史成交</button>
-        <input aria-label="交易对" placeholder="BTCUSDT" />
-        <select aria-label="方向">
-          <option>全部方向</option>
-          <option>买入</option>
-          <option>卖出</option>
-        </select>
-      </div>
-      <AccountTable
-        headers={['交易对', '方向', '状态', '价格', '数量', '时间']}
-        rows={tradeOrders.map((row) => [row.pair, row.side, row.status, row.price, row.quantity, row.time])}
-      />
-    </AccountShell>
-  )
-}
-
-export function KycPage() {
-  return (
-    <AccountShell title="身份认证" summary="认证状态和下一步操作放在同一个清晰面板。">
-      <section className="account-panel account-panel--kyc">
-        <ShieldCheck size={28} aria-hidden="true" />
-        <div>
-          <h2>完成身份认证</h2>
-          <p>提交基础身份信息后开启充值、提现和更高交易限额。</p>
-          <button className="table-action table-action--primary" type="button">
-            立即验证
-          </button>
-        </div>
-      </section>
-    </AccountShell>
-  )
-}
-
-export function AccountSettingsPage() {
-  return (
-    <AccountShell title="设置" summary="只保留第一版需要的昵称、通知语言和偏好设置。">
-      <div className="settings-list">
-        <PreferenceRows icon={<UserRound size={19} aria-hidden="true" />} title="昵称和头像" value="FX member" />
-        <PreferenceRows icon={<Bell size={19} aria-hidden="true" />} title="通知语言" value="简体中文" />
-        <PreferenceRows icon={<Settings size={19} aria-hidden="true" />} title="交易偏好" value="默认进入最近交易品种" />
-      </div>
-    </AccountShell>
-  )
-}
-
-function AccountShell({ title, summary, children }: { title: string; summary: string; children: ReactNode }) {
-  return (
-    <section className="user-page account-shell" aria-labelledby="account-page-title">
-      <aside className="account-sidebar" aria-label="个人中心导航">
-        <div className="account-sidebar__profile">
-          <span>FX</span>
-          <div>
-            <strong>fx***@example.com</strong>
-            <small>UID 829341</small>
-          </div>
-        </div>
-        <nav>
-          {accountNav.map((item) => (
-            <NavLink key={item.to} to={item.to}>
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-      </aside>
-      <main className="account-main">
-        <header className="user-page__header">
-          <div>
-            <h1 id="account-page-title">{title}</h1>
-            <p>{summary}</p>
-          </div>
-        </header>
-        {children}
-      </main>
-    </section>
-  )
-}
-
-function AssetSummaryChartCard() {
-  return (
-    <section className="account-panel asset-chart-card">
-      <div className="account-panel__head">
-        <div>
-          <h2>资产估值</h2>
-          <p>12,842.30 USDT</p>
-        </div>
-        <AssetRangeTabs />
-      </div>
-      <svg viewBox="0 0 420 180" role="img" aria-label="资产曲线">
-        <path d="M12 144 C84 112 120 128 168 92 C226 48 266 86 314 58 C360 32 386 44 408 28" />
-        <path d="M12 144 C84 112 120 128 168 92 C226 48 266 86 314 58 C360 32 386 44 408 28 L408 168 L12 168 Z" />
-      </svg>
-      <div className="asset-action-row">
-        <Link className="table-action table-action--primary" to="/account/orders/funding">
-          <ArrowDownCircle size={16} aria-hidden="true" />
-          充值
-        </Link>
-        <button className="table-action table-action--secondary" type="button">
-          <ArrowUpCircle size={16} aria-hidden="true" />
-          提现
-        </button>
-      </div>
-    </section>
-  )
-}
-
-function AssetRangeTabs() {
-  return (
-    <div className="asset-range-tabs" aria-label="资产区间">
-      {['1日', '1周', '1月', '半年', '1年'].map((range, index) => (
-        <button key={range} type="button" aria-pressed={index === 2}>
-          {range}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-function RecentLedgerPanel() {
-  return (
-    <section className="account-panel">
-      <div className="account-panel__head">
-        <h2>近期流水</h2>
-        <Link to="/account/orders/funding">全部</Link>
-      </div>
-      <ul className="ledger-list">
-        {ledgers.map((row) => (
-          <li key={`${row.time}-${row.type}`}>
-            <span>{row.type}</span>
-            <strong>{row.amount} {row.asset}</strong>
-            <small>{row.time}</small>
-          </li>
-        ))}
-      </ul>
-    </section>
-  )
-}
-
-function AssetAccountCards() {
+function AssetAccountCards({ account, rows }: { account?: AccountSummary; rows: AssetRow[] }) {
   const cards = [
-    { title: '现货账户', value: '8,420.10 USDT', note: '可用资金' },
-    { title: '合约账户', value: '3,120.44 USDT', note: '保证金余额' },
-    { title: '资金账户', value: '1,301.76 USDT', note: '充值提现' }
+    { title: 'Cash account', value: formatAmount(account?.balance, account?.baseCurrency), note: 'Backend account balance' },
+    { title: 'Wallet assets', value: String(rows.length), note: 'Assets returned from wallet balances' },
+    { title: 'Available margin', value: formatAmount(account?.marginAvailable ?? account?.freeMargin, account?.baseCurrency), note: 'Available for trading' }
   ]
   return (
     <div className="account-overview-grid">
@@ -375,28 +603,33 @@ function AssetAccountCards() {
   )
 }
 
-function AccountTable({ headers, rows }: { headers: string[]; rows: string[][] }) {
+function RecentLedgerPanel({ entries }: { entries: LedgerEntry[] }) {
   return (
-    <div className="account-table">
-      <table>
-        <thead>
-          <tr>
-            {headers.map((header) => (
-              <th key={header}>{header}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.join('|')}>
-              {row.map((cell) => (
-                <td key={cell}>{cell}</td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <section className="account-panel">
+      <div className="account-panel__head">
+        <h2>Recent ledger</h2>
+        <Link to="/account/orders/funding">All</Link>
+      </div>
+      <ul className="ledger-list">
+        {entries.length ? (
+          entries.map((entry) => (
+            <li key={entry.id}>
+              <span>{entry.entryType}</span>
+              <strong>
+                {entry.amount} {entry.currency}
+              </strong>
+              <small>{formatTime(entry.createdAt)}</small>
+            </li>
+          ))
+        ) : (
+          <li>
+            <span>No ledger entries</span>
+            <strong>-</strong>
+            <small>Create a funding request or trade to generate entries.</small>
+          </li>
+        )}
+      </ul>
+    </section>
   )
 }
 
@@ -408,7 +641,140 @@ function PreferenceRows({ icon, title, value }: { icon: ReactNode; title: string
         <strong>{title}</strong>
         <span>{value}</span>
       </div>
-      <button type="button">编辑</button>
+      <button type="button">Edit</button>
     </section>
   )
+}
+
+function createAssetColumns(): Array<DataTableColumn<AssetRow>> {
+  return [
+    {
+      key: 'currency',
+      label: 'Asset',
+      sortable: true,
+      render: (asset) => (
+        <span className="asset-symbol-cell">
+          <AssetMark symbol={asset.currency} size="sm" />
+          <strong>{asset.currency}</strong>
+        </span>
+      )
+    },
+    { key: 'balance', label: 'Total', sortable: true },
+    { key: 'available', label: 'Available', sortable: true },
+    { key: 'frozen', label: 'Locked', sortable: true },
+    { key: 'activityCount', label: 'Activity', sortable: true }
+  ]
+}
+
+function createFundOrderColumns(): Array<DataTableColumn<FundOrder>> {
+  return [
+    { key: 'createdAt', label: 'Time', sortable: true, render: (order) => formatTime(order.createdAt) },
+    { key: 'orderType', label: 'Type', sortable: true },
+    { key: 'amount', label: 'Amount', sortable: true },
+    { key: 'currency', label: 'Currency', sortable: true },
+    { key: 'status', label: 'Status', sortable: true, render: (order) => <StatusChip status={order.status} /> },
+    { key: 'paymentMethodId', label: 'Payment method', render: (order) => order.paymentMethodId ?? '-' },
+    { key: 'note', label: 'Note', render: (order) => order.note ?? '-' }
+  ]
+}
+
+function createLedgerColumns(): Array<DataTableColumn<LedgerEntry>> {
+  return [
+    { key: 'createdAt', label: 'Time', sortable: true, render: (entry) => formatTime(entry.createdAt) },
+    { key: 'entryType', label: 'Type', sortable: true },
+    { key: 'amount', label: 'Amount', sortable: true },
+    { key: 'balanceAfter', label: 'Balance after', sortable: true },
+    { key: 'currency', label: 'Currency', sortable: true },
+    { key: 'description', label: 'Description', render: (entry) => entry.description ?? '-' }
+  ]
+}
+
+function createTradeOrderColumns(): Array<DataTableColumn<OrderResponse>> {
+  return [
+    { key: 'createdAt', label: 'Time', sortable: true, render: (order) => formatTime(order.createdAt) },
+    { key: 'symbol', label: 'Symbol', sortable: true },
+    { key: 'side', label: 'Side', sortable: true },
+    { key: 'orderType', label: 'Type', sortable: true },
+    { key: 'status', label: 'Status', sortable: true, render: (order) => <StatusChip status={order.status} /> },
+    { key: 'price', label: 'Price', sortable: true, render: (order) => order.price ?? order.executionPrice ?? '-' },
+    { key: 'quantity', label: 'Quantity', sortable: true, render: (order) => order.quantity ?? order.lots ?? '-' }
+  ]
+}
+
+function StatusChip({ status }: { status: string }) {
+  const tone =
+    status === 'APPROVED' || status === 'FILLED'
+      ? 'positive'
+      : status === 'PENDING_REVIEW' || status === 'PENDING' || status === 'NEW'
+        ? 'warning'
+        : status === 'REJECTED' || status === 'CANCELED'
+          ? 'negative'
+          : ''
+  return <span className={`status-chip${tone ? ` status-chip--${tone}` : ''}`}>{status}</span>
+}
+
+function getAssetRows(
+  account: Pick<AccountSummary, 'baseCurrency' | 'balance' | 'freeMargin'> | null | undefined,
+  balances: WalletBalance[],
+  entries: LedgerEntry[],
+  frozenAmount: number
+): AssetRow[] {
+  const rows = new Map<string, AssetRow>()
+
+  balances.forEach((balance) => {
+    rows.set(balance.asset, {
+      currency: balance.asset,
+      balance: balance.total,
+      available: balance.available,
+      frozen: balance.locked,
+      activityCount: entries.filter((entry) => entry.currency === balance.asset).length
+    })
+  })
+
+  if (account && !rows.has(account.baseCurrency)) {
+    rows.set(account.baseCurrency, {
+      currency: account.baseCurrency,
+      balance: account.balance,
+      available: account.freeMargin,
+      frozen: frozenAmount.toFixed(2),
+      activityCount: entries.filter((entry) => entry.currency === account.baseCurrency).length
+    })
+  }
+
+  entries.forEach((entry) => {
+    if (rows.has(entry.currency)) return
+    rows.set(entry.currency, {
+      currency: entry.currency,
+      balance: '-',
+      available: '-',
+      frozen: '-',
+      activityCount: entries.filter((item) => item.currency === entry.currency).length
+    })
+  })
+
+  return Array.from(rows.values())
+}
+
+function matchesTradeTab(order: OrderResponse, activeTab: TradeOrderTab) {
+  if (activeTab === 'OPEN') return !['FILLED', 'CANCELED', 'REJECTED'].includes(order.status)
+  if (activeTab === 'FILLED') return order.status === 'FILLED'
+  return ['FILLED', 'CANCELED', 'REJECTED'].includes(order.status)
+}
+
+function formatAmount(value: Amount | null | undefined, currency?: string) {
+  if (value === null || value === undefined || value === '') return '-'
+  return currency ? `${value} ${currency}` : String(value)
+}
+
+function formatTime(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleString() : '-'
+}
+
+function nullableString(value: FormDataEntryValue | null) {
+  const stringValue = String(value ?? '').trim()
+  return stringValue ? stringValue : null
+}
+
+function shortId(value: string) {
+  return value.length > 8 ? value.slice(0, 8) : value
 }

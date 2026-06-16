@@ -10,7 +10,7 @@ import { ApiErrorState, LoadingState, LoginRequiredState } from '../../component
 import { filterByStatus, formatApiError, toNumber } from '../../components/user-page/userPageModels'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
 import { createFundOrder, getFundOrders } from '../../services/financeApi'
-import type { Amount, FundOrder, LedgerEntry } from '../../types/trading'
+import type { Amount, FundOrder, LedgerEntry, WalletBalance } from '../../types/trading'
 
 const fundOrderStatuses = ['ALL', 'PENDING_REVIEW', 'PENDING', 'APPROVED', 'REJECTED']
 const fundOrderTypes = ['ALL', 'RECHARGE', 'WITHDRAWAL']
@@ -26,7 +26,7 @@ type AssetRow = {
 export function WalletPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { token, account, accountId, ledgerEntries, sessionMode, sessionError, loginRequired, retrySession } =
+  const { token, account, accountId, ledgerEntries, walletBalances, sessionMode, sessionError, loginRequired, retrySession } =
     useTradingSession()
   const [fundOrders, setFundOrders] = useState<FundOrder[]>([])
   const [fundOrdersLoading, setFundOrdersLoading] = useState(false)
@@ -54,7 +54,10 @@ export function WalletPage() {
   const visibleFundOrders = useMemo(() => {
     return filterByStatus(fundOrders, statusFilter).filter((order) => typeFilter === 'ALL' || order.orderType === typeFilter)
   }, [fundOrders, statusFilter, typeFilter])
-  const assetRows = useMemo(() => getAssetRows(account, ledgerEntries, frozenAmount), [account, frozenAmount, ledgerEntries])
+  const assetRows = useMemo(
+    () => getAssetRows(account, walletBalances, ledgerEntries, frozenAmount),
+    [account, frozenAmount, ledgerEntries, walletBalances]
+  )
   const selectedAssetRow = useMemo(
     () => assetRows.find((asset) => asset.currency === (selectedAsset ?? currency)) ?? assetRows[0],
     [assetRows, currency, selectedAsset]
@@ -506,9 +509,25 @@ function formatTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : '-'
 }
 
-function getAssetRows(account: { baseCurrency: string; balance: Amount; freeMargin: Amount } | null | undefined, entries: LedgerEntry[], frozenAmount: number): AssetRow[] {
+function getAssetRows(
+  account: { baseCurrency: string; balance: Amount; freeMargin: Amount } | null | undefined,
+  balances: WalletBalance[],
+  entries: LedgerEntry[],
+  frozenAmount: number
+): AssetRow[] {
   const rows = new Map<string, AssetRow>()
-  if (account) {
+
+  balances.forEach((balance) => {
+    rows.set(balance.asset, {
+      currency: balance.asset,
+      balance: balance.total,
+      available: balance.available,
+      frozen: balance.locked,
+      activityCount: entries.filter((entry) => entry.currency === balance.asset).length
+    })
+  })
+
+  if (account && !rows.has(account.baseCurrency)) {
     rows.set(account.baseCurrency, {
       currency: account.baseCurrency,
       balance: account.balance,

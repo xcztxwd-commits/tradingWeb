@@ -46,6 +46,12 @@ export type AccountSummary = {
   marginLevel: Amount | null
   leverage: number
   status: string
+  openFloatingPnl?: Amount | null
+  maintenanceMargin?: Amount | null
+  positionValue?: Amount | null
+  marginAvailable?: Amount | null
+  lastSnapshotAt?: string | null
+  warning?: string | null
 }
 
 export type WalletBalance = {
@@ -55,6 +61,19 @@ export type WalletBalance = {
   total: Amount
   available: Amount
   locked: Amount
+}
+
+export type AssetLedgerEntry = {
+  id: string
+  accountId: string
+  asset: string
+  amount: Amount
+  balanceAfter: Amount
+  entryType: string
+  referenceType: string | null
+  referenceId: string | null
+  description: string | null
+  createdAt: string | null
 }
 
 export type OrderPayload = {
@@ -83,6 +102,7 @@ export type UpdateOrderPayload = {
 export type UpdatePositionProtectionPayload = {
   stopLoss?: string
   takeProfit?: string
+  allowImmediateTrigger?: boolean
 }
 
 export type OrderEventResponse = {

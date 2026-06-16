@@ -8,6 +8,7 @@ import java.util.UUID;
 public record AssetLedgerEntryResponse(
     UUID id,
     UUID accountId,
+    String walletType,
     String asset,
     BigDecimal amount,
     BigDecimal balanceAfter,
@@ -22,6 +23,7 @@ public record AssetLedgerEntryResponse(
     return new AssetLedgerEntryResponse(
         entry.getId(),
         entry.getAccountId(),
+        entry.getWalletType(),
         entry.getAsset(),
         entry.getAmount(),
         entry.getBalanceAfter(),

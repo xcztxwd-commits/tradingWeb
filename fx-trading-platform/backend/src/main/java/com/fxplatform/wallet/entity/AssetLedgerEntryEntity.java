@@ -21,6 +21,7 @@ public class AssetLedgerEntryEntity {
   @TableId(value = "id", type = IdType.INPUT)
   private UUID id;
   private UUID accountId;
+  private String walletType = "SPOT";
   private String asset;
   private BigDecimal amount;
   private BigDecimal balanceAfter;

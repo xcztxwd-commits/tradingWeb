@@ -13,6 +13,7 @@ import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.service.SpotSettlementService;
 import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
+import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
@@ -44,15 +45,15 @@ class Step05SpotWalletSettlementAuditTest {
 
   @BeforeEach
   void setUpRepositories() {
-    when(walletBalanceRepository.findByAccountIdAndAsset(any(UUID.class), any(String.class)))
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(any(UUID.class), any(String.class), any(String.class)))
         .thenAnswer(invocation -> Optional.ofNullable(
-            balances.get(key(invocation.getArgument(0), invocation.getArgument(1)))));
+            balances.get(key(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)))));
     when(walletBalanceRepository.save(any(WalletBalanceEntity.class))).thenAnswer(invocation -> {
       WalletBalanceEntity balance = invocation.getArgument(0);
       if (balance.getId() == null) {
         balance.setId(UUID.randomUUID());
       }
-      balances.put(key(balance.getAccountId(), balance.getAsset()), balance);
+      balances.put(key(balance.getAccountId(), balance.getWalletType(), balance.getAsset()), balance);
       return balance;
     });
     when(assetLedgerEntryRepository.save(any(AssetLedgerEntryEntity.class))).thenAnswer(invocation -> {
@@ -73,8 +74,8 @@ class Step05SpotWalletSettlementAuditTest {
         btcUsdt(),
         account);
 
-    AuditAssertions.assertAmountClose(balance(account.getId(), "USDT").getAvailable(), "5000.00000000");
-    AuditAssertions.assertBtcClose(balance(account.getId(), "BTC").getAvailable(), "0.09990000");
+    AuditAssertions.assertAmountClose(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable(), "5000.00000000");
+    AuditAssertions.assertBtcClose(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable(), "0.09990000");
     AuditAssertions.assertAmountClose(account.getUsedMargin(), "0.00000000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
@@ -93,8 +94,8 @@ class Step05SpotWalletSettlementAuditTest {
         btcUsdt(),
         account);
 
-    AuditAssertions.assertBtcClose(balance(account.getId(), "BTC").getAvailable(), "0.00000000");
-    AuditAssertions.assertAmountClose(balance(account.getId(), "USDT").getAvailable(), "5494.50000000");
+    AuditAssertions.assertBtcClose(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable(), "0.00000000");
+    AuditAssertions.assertAmountClose(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable(), "5494.50000000");
     AuditAssertions.assertAmountClose(account.getUsedMargin(), "0.00000000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
@@ -105,23 +106,24 @@ class Step05SpotWalletSettlementAuditTest {
     return new SpotSettlementService(new WalletService(walletBalanceRepository, assetLedgerEntryRepository));
   }
 
-  private WalletBalanceEntity balance(UUID accountId, String asset) {
-    return balances.get(key(accountId, asset));
+  private WalletBalanceEntity balance(UUID accountId, WalletType walletType, String asset) {
+    return balances.get(key(accountId, walletType.code(), asset));
   }
 
   private void putBalance(UUID accountId, String asset, String total, String available, String locked) {
     WalletBalanceEntity balance = new WalletBalanceEntity();
     balance.setId(UUID.randomUUID());
     balance.setAccountId(accountId);
+    balance.setWalletType(WalletType.SPOT.code());
     balance.setAsset(asset);
     balance.setTotal(new BigDecimal(total));
     balance.setAvailable(new BigDecimal(available));
     balance.setLocked(new BigDecimal(locked));
-    balances.put(key(accountId, asset), balance);
+    balances.put(key(accountId, WalletType.SPOT.code(), asset), balance);
   }
 
-  private static String key(UUID accountId, String asset) {
-    return accountId + ":" + asset;
+  private static String key(UUID accountId, String walletType, String asset) {
+    return accountId + ":" + walletType + ":" + asset;
   }
 
   private static TradingAccountEntity account() {

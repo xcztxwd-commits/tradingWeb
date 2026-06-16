@@ -2,12 +2,17 @@ package com.fxplatform.account.service;
 
 import com.fxplatform.account.dto.AccountResponse;
 import com.fxplatform.account.dto.AccountSnapshot;
+import com.fxplatform.account.dto.AssetConversionRequest;
+import com.fxplatform.account.dto.AssetConversionResponse;
 import com.fxplatform.account.dto.AssetLedgerEntryResponse;
 import com.fxplatform.account.dto.WalletBalanceResponse;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.wallet.enums.AssetLedgerEntryType;
+import com.fxplatform.wallet.enums.WalletType;
+import com.fxplatform.wallet.service.AssetConversionService;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -28,18 +33,30 @@ public class AccountService {
   private final LedgerService ledgerService;
   private final AccountSnapshotService accountSnapshotService;
   private final WalletService walletService;
+  private final AssetConversionService assetConversionService;
 
   @Autowired
   public AccountService(
       TradingAccountRepository accountRepository,
       LedgerService ledgerService,
       AccountSnapshotService accountSnapshotService,
-      WalletService walletService
+      WalletService walletService,
+      AssetConversionService assetConversionService
   ) {
     this.accountRepository = accountRepository;
     this.ledgerService = ledgerService;
     this.accountSnapshotService = accountSnapshotService;
     this.walletService = walletService;
+    this.assetConversionService = assetConversionService;
+  }
+
+  public AccountService(
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      AccountSnapshotService accountSnapshotService,
+      WalletService walletService
+  ) {
+    this(accountRepository, ledgerService, accountSnapshotService, walletService, null);
   }
 
   public AccountService(
@@ -47,7 +64,7 @@ public class AccountService {
       LedgerService ledgerService,
       AccountSnapshotService accountSnapshotService
   ) {
-    this(accountRepository, ledgerService, accountSnapshotService, null);
+    this(accountRepository, ledgerService, accountSnapshotService, null, null);
   }
 
   @Value("${trading.default-demo-balance}")
@@ -73,13 +90,15 @@ public class AccountService {
     // 所有资金初始化都必须落 Ledger，避免出现无法审计的余额变化。
     ledgerService.recordDemoDeposit(account, defaultDemoBalance, "Initial DEMO balance");
     if (walletService != null) {
-      walletService.creditAvailable(
+      walletService.creditAvailableWithEntryType(
           account.getId(),
+          WalletType.FX_MARGIN,
           account.getBaseCurrency(),
           defaultDemoBalance,
           "DEMO_ACCOUNT",
           account.getId(),
-          "Initial DEMO wallet balance");
+          "Initial DEMO wallet balance",
+          AssetLedgerEntryType.CREDIT_AVAILABLE.code());
     }
     return account;
   }
@@ -108,6 +127,7 @@ public class AccountService {
   public List<AssetLedgerEntryResponse> assetLedger(
       UUID userId,
       UUID accountId,
+      String walletType,
       String asset,
       String entryType,
       UUID referenceId,
@@ -119,9 +139,30 @@ public class AccountService {
     if (walletService == null) {
       return List.of();
     }
-    return walletService.assetLedgerEntries(accountId, asset, entryType, referenceId, from, to).stream()
+    return walletService.assetLedgerEntries(accountId, walletType, asset, entryType, referenceId, from, to).stream()
         .map(AssetLedgerEntryResponse::from)
         .toList();
+  }
+
+  public AssetConversionResponse convertAsset(
+      UUID userId,
+      UUID accountId,
+      AssetConversionRequest request
+  ) {
+    accountRepository.findByIdAndUserId(accountId, userId)
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    if (assetConversionService == null) {
+      throw new BusinessException("ASSET_CONVERSION_UNAVAILABLE", "Asset conversion is unavailable");
+    }
+    UUID conversionId = request.conversionId() == null ? UUID.randomUUID() : request.conversionId();
+    return AssetConversionResponse.from(assetConversionService.convert(
+        accountId,
+        WalletType.fromCode(request.fromWalletType()),
+        request.fromAsset(),
+        WalletType.fromCode(request.toWalletType()),
+        request.toAsset(),
+        request.amount(),
+        conversionId));
   }
 
   public AccountResponse toResponse(TradingAccountEntity account) {

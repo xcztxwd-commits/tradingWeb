@@ -4,6 +4,7 @@ import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
 import com.fxplatform.wallet.enums.AssetLedgerEntryType;
+import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import java.math.BigDecimal;
@@ -23,12 +24,20 @@ import org.springframework.util.StringUtils;
 public class WalletService {
 
   private static final int MONEY_SCALE = 8;
+  private static final WalletType DEFAULT_WALLET_TYPE = WalletType.SPOT;
 
   private final WalletBalanceRepository walletBalanceRepository;
   private final AssetLedgerEntryRepository assetLedgerEntryRepository;
 
   public Optional<WalletBalanceEntity> getBalance(UUID accountId, String asset) {
-    return walletBalanceRepository.findByAccountIdAndAsset(accountId, normalizeAsset(asset));
+    return getBalance(accountId, DEFAULT_WALLET_TYPE, asset);
+  }
+
+  public Optional<WalletBalanceEntity> getBalance(UUID accountId, WalletType walletType, String asset) {
+    return walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(
+        accountId,
+        normalizeWalletType(walletType),
+        normalizeAsset(asset));
   }
 
   public List<WalletBalanceEntity> balances(UUID accountId) {
@@ -43,8 +52,21 @@ public class WalletService {
       Instant from,
       Instant to
   ) {
+    return assetLedgerEntries(accountId, null, asset, entryType, referenceId, from, to);
+  }
+
+  public List<AssetLedgerEntryEntity> assetLedgerEntries(
+      UUID accountId,
+      String walletType,
+      String asset,
+      String entryType,
+      UUID referenceId,
+      Instant from,
+      Instant to
+  ) {
     return assetLedgerEntryRepository.findByFilters(
         accountId,
+        normalizeOptionalWalletType(walletType),
         normalizeOptional(asset),
         normalizeOptional(entryType),
         referenceId,
@@ -54,9 +76,15 @@ public class WalletService {
 
   @Transactional
   public WalletBalanceEntity getOrCreateBalance(UUID accountId, String asset) {
+    return getOrCreateBalance(accountId, DEFAULT_WALLET_TYPE, asset);
+  }
+
+  @Transactional
+  public WalletBalanceEntity getOrCreateBalance(UUID accountId, WalletType walletType, String asset) {
     String normalizedAsset = normalizeAsset(asset);
-    return walletBalanceRepository.findByAccountIdAndAsset(accountId, normalizedAsset)
-        .orElseGet(() -> walletBalanceRepository.save(newBalance(accountId, normalizedAsset)));
+    String normalizedWalletType = normalizeWalletType(walletType);
+    return walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, normalizedWalletType, normalizedAsset)
+        .orElseGet(() -> walletBalanceRepository.save(newBalance(accountId, normalizedWalletType, normalizedAsset)));
   }
 
   @Transactional
@@ -82,8 +110,23 @@ public class WalletService {
       String description,
       String entryType
   ) {
+    return creditAvailableWithEntryType(
+        accountId, DEFAULT_WALLET_TYPE, asset, amount, referenceType, referenceId, description, entryType);
+  }
+
+  @Transactional
+  public WalletBalanceEntity creditAvailableWithEntryType(
+      UUID accountId,
+      WalletType walletType,
+      String asset,
+      BigDecimal amount,
+      String referenceType,
+      UUID referenceId,
+      String description,
+      String entryType
+  ) {
     BigDecimal normalizedAmount = positiveAmount(amount);
-    WalletBalanceEntity balance = getOrCreateBalance(accountId, asset);
+    WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
     balance.setTotal(scale(balance.getTotal().add(normalizedAmount)));
     balance.setAvailable(scale(balance.getAvailable().add(normalizedAmount)));
     persist(balance, normalizedAmount, entryType, referenceType, referenceId, description);
@@ -127,8 +170,37 @@ public class WalletService {
       String description,
       String entryType
   ) {
+    return debitAvailableWithEntryType(
+        accountId, DEFAULT_WALLET_TYPE, asset, amount, referenceType, referenceId, description, entryType);
+  }
+
+  @Transactional
+  public WalletBalanceEntity debitAvailable(
+      UUID accountId,
+      WalletType walletType,
+      String asset,
+      BigDecimal amount,
+      String referenceType,
+      UUID referenceId,
+      String description
+  ) {
+    return debitAvailableWithEntryType(
+        accountId, walletType, asset, amount, referenceType, referenceId, description, AssetLedgerEntryType.DEBIT_AVAILABLE.code());
+  }
+
+  @Transactional
+  public WalletBalanceEntity debitAvailableWithEntryType(
+      UUID accountId,
+      WalletType walletType,
+      String asset,
+      BigDecimal amount,
+      String referenceType,
+      UUID referenceId,
+      String description,
+      String entryType
+  ) {
     BigDecimal normalizedAmount = positiveAmount(amount);
-    WalletBalanceEntity balance = getOrCreateBalance(accountId, asset);
+    WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
     ensureEnough(balance.getAvailable(), normalizedAmount, "AVAILABLE_BALANCE_NOT_ENOUGH",
         "Available balance is not enough");
     balance.setTotal(scale(balance.getTotal().subtract(normalizedAmount)));
@@ -174,8 +246,23 @@ public class WalletService {
       String description,
       String entryType
   ) {
+    return lockAvailableWithEntryType(
+        accountId, DEFAULT_WALLET_TYPE, asset, amount, referenceType, referenceId, description, entryType);
+  }
+
+  @Transactional
+  public WalletBalanceEntity lockAvailableWithEntryType(
+      UUID accountId,
+      WalletType walletType,
+      String asset,
+      BigDecimal amount,
+      String referenceType,
+      UUID referenceId,
+      String description,
+      String entryType
+  ) {
     BigDecimal normalizedAmount = positiveAmount(amount);
-    WalletBalanceEntity balance = getOrCreateBalance(accountId, asset);
+    WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
     ensureEnough(balance.getAvailable(), normalizedAmount, "AVAILABLE_BALANCE_NOT_ENOUGH",
         "Available balance is not enough");
     balance.setAvailable(scale(balance.getAvailable().subtract(normalizedAmount)));
@@ -221,8 +308,23 @@ public class WalletService {
       String description,
       String entryType
   ) {
+    return debitLockedWithEntryType(
+        accountId, DEFAULT_WALLET_TYPE, asset, amount, referenceType, referenceId, description, entryType);
+  }
+
+  @Transactional
+  public WalletBalanceEntity debitLockedWithEntryType(
+      UUID accountId,
+      WalletType walletType,
+      String asset,
+      BigDecimal amount,
+      String referenceType,
+      UUID referenceId,
+      String description,
+      String entryType
+  ) {
     BigDecimal normalizedAmount = positiveAmount(amount);
-    WalletBalanceEntity balance = getOrCreateBalance(accountId, asset);
+    WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
     ensureEnough(balance.getLocked(), normalizedAmount, "LOCKED_BALANCE_NOT_ENOUGH",
         "Locked balance is not enough");
     balance.setTotal(scale(balance.getTotal().subtract(normalizedAmount)));
@@ -255,8 +357,23 @@ public class WalletService {
       String description,
       String entryType
   ) {
+    return releaseLockedWithEntryType(
+        accountId, DEFAULT_WALLET_TYPE, asset, amount, referenceType, referenceId, description, entryType);
+  }
+
+  @Transactional
+  public WalletBalanceEntity releaseLockedWithEntryType(
+      UUID accountId,
+      WalletType walletType,
+      String asset,
+      BigDecimal amount,
+      String referenceType,
+      UUID referenceId,
+      String description,
+      String entryType
+  ) {
     BigDecimal normalizedAmount = positiveAmount(amount);
-    WalletBalanceEntity balance = getOrCreateBalance(accountId, asset);
+    WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
     ensureEnough(balance.getLocked(), normalizedAmount, "LOCKED_BALANCE_NOT_ENOUGH",
         "Locked balance is not enough");
     balance.setAvailable(scale(balance.getAvailable().add(normalizedAmount)));
@@ -290,6 +407,7 @@ public class WalletService {
     walletBalanceRepository.save(balance);
     AssetLedgerEntryEntity entry = new AssetLedgerEntryEntity();
     entry.setAccountId(balance.getAccountId());
+    entry.setWalletType(balance.getWalletType());
     entry.setAsset(balance.getAsset());
     entry.setAmount(scale(ledgerAmount));
     entry.setBalanceAfter(scale(balance.getAvailable()));
@@ -300,14 +418,26 @@ public class WalletService {
     assetLedgerEntryRepository.save(entry);
   }
 
-  private static WalletBalanceEntity newBalance(UUID accountId, String asset) {
+  private static WalletBalanceEntity newBalance(UUID accountId, String walletType, String asset) {
     WalletBalanceEntity balance = new WalletBalanceEntity();
     balance.setAccountId(accountId);
+    balance.setWalletType(walletType);
     balance.setAsset(asset);
     balance.setTotal(BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.HALF_UP));
     balance.setAvailable(BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.HALF_UP));
     balance.setLocked(BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.HALF_UP));
     return balance;
+  }
+
+  private static String normalizeWalletType(WalletType walletType) {
+    return (walletType == null ? DEFAULT_WALLET_TYPE : walletType).code();
+  }
+
+  private static String normalizeOptionalWalletType(String walletType) {
+    if (!StringUtils.hasText(walletType)) {
+      return null;
+    }
+    return WalletType.fromCode(walletType).code();
   }
 
   private static String normalizeAsset(String asset) {

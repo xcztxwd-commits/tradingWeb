@@ -21,6 +21,7 @@ public class WalletBalanceEntity {
   @TableId(value = "id", type = IdType.INPUT)
   private UUID id;
   private UUID accountId;
+  private String walletType = "SPOT";
   private String asset;
   private BigDecimal total = BigDecimal.ZERO;
   private BigDecimal available = BigDecimal.ZERO;

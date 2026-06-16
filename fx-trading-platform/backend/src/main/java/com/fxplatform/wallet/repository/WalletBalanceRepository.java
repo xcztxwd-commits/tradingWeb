@@ -10,14 +10,24 @@ import java.util.UUID;
 public interface WalletBalanceRepository extends FxBaseMapper<WalletBalanceEntity> {
 
   default Optional<WalletBalanceEntity> findByAccountIdAndAsset(UUID accountId, String asset) {
+    return findByAccountIdAndWalletTypeAndAsset(accountId, "SPOT", asset);
+  }
+
+  default Optional<WalletBalanceEntity> findByAccountIdAndWalletTypeAndAsset(
+      UUID accountId,
+      String walletType,
+      String asset
+  ) {
     return Optional.ofNullable(selectOne(new LambdaQueryWrapper<WalletBalanceEntity>()
         .eq(WalletBalanceEntity::getAccountId, accountId)
+        .eq(WalletBalanceEntity::getWalletType, walletType)
         .eq(WalletBalanceEntity::getAsset, asset)));
   }
 
   default List<WalletBalanceEntity> findByAccountIdOrderByAssetAsc(UUID accountId) {
     return selectList(new LambdaQueryWrapper<WalletBalanceEntity>()
         .eq(WalletBalanceEntity::getAccountId, accountId)
+        .orderByAsc(WalletBalanceEntity::getWalletType)
         .orderByAsc(WalletBalanceEntity::getAsset));
   }
 }

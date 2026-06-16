@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -44,7 +45,7 @@ class AccountWalletInitializationTest {
         });
     AccountService service = new AccountService(accountRepository, ledgerService, accountSnapshotService, walletService);
     ReflectionTestUtils.setField(service, "defaultDemoBalance", defaultBalance);
-    ReflectionTestUtils.setField(service, "defaultCurrency", "USDT");
+    ReflectionTestUtils.setField(service, "defaultCurrency", "USD");
     ReflectionTestUtils.setField(service, "defaultLeverage", 100);
 
     TradingAccountEntity account = service.createDemoAccount(userId);
@@ -52,12 +53,14 @@ class AccountWalletInitializationTest {
     assertThat(account.getBalance()).isEqualByComparingTo(defaultBalance);
     assertThat(account.getEquity()).isEqualByComparingTo(defaultBalance);
     assertThat(account.getFreeMargin()).isEqualByComparingTo(defaultBalance);
-    verify(walletService).creditAvailable(
+    verify(walletService).creditAvailableWithEntryType(
         eq(account.getId()),
-        eq("USDT"),
+        eq(WalletType.FX_MARGIN),
+        eq("USD"),
         eq(defaultBalance),
         eq("DEMO_ACCOUNT"),
         eq(account.getId()),
-        eq("Initial DEMO wallet balance"));
+        eq("Initial DEMO wallet balance"),
+        eq("CREDIT_AVAILABLE"));
   }
 }

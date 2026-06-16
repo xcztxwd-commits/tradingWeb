@@ -7,6 +7,7 @@ import java.util.UUID;
 public record WalletBalanceResponse(
     UUID id,
     UUID accountId,
+    String walletType,
     String asset,
     BigDecimal total,
     BigDecimal available,
@@ -17,6 +18,7 @@ public record WalletBalanceResponse(
     return new WalletBalanceResponse(
         balance.getId(),
         balance.getAccountId(),
+        balance.getWalletType(),
         balance.getAsset(),
         balance.getTotal(),
         balance.getAvailable(),

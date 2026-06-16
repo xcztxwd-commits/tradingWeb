@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
+import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import java.math.BigDecimal;
@@ -30,11 +31,39 @@ class WalletServiceTest {
   private AssetLedgerEntryRepository assetLedgerEntryRepository;
 
   @Test
+  void walletTypeSeparatesSameAssetBalances() {
+    UUID accountId = UUID.randomUUID();
+    UUID referenceId = UUID.randomUUID();
+    WalletBalanceEntity spot = balance(accountId, WalletType.SPOT, "USDT", "100.00000000", "100.00000000", "0");
+    WalletBalanceEntity perp = balance(accountId, WalletType.USDT_PERP, "USDT", "50.00000000", "50.00000000", "0");
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.USDT_PERP.code(), "USDT"))
+        .thenReturn(Optional.of(perp));
+    when(walletBalanceRepository.save(any(WalletBalanceEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(assetLedgerEntryRepository.save(any(AssetLedgerEntryEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    WalletService service = service();
+
+    service.debitAvailable(
+        accountId,
+        WalletType.USDT_PERP,
+        "USDT",
+        new BigDecimal("10.00000000"),
+        "TEST",
+        referenceId,
+        "Perp wallet debit");
+
+    assertThat(spot.getAvailable()).isEqualByComparingTo("100.00000000");
+    assertThat(perp.getAvailable()).isEqualByComparingTo("40.00000000");
+  }
+
+  @Test
   void creditDebitLockAndReleaseUpdateWalletBalanceAndWriteAssetLedgerEntries() {
     UUID accountId = UUID.randomUUID();
     UUID referenceId = UUID.randomUUID();
     WalletBalanceEntity balance = balance(accountId, "USDT", "0", "0", "0");
-    when(walletBalanceRepository.findByAccountIdAndAsset(accountId, "USDT"))
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "USDT"))
         .thenReturn(Optional.of(balance));
     when(walletBalanceRepository.save(any(WalletBalanceEntity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
@@ -69,7 +98,7 @@ class WalletServiceTest {
     UUID accountId = UUID.randomUUID();
     UUID orderId = UUID.randomUUID();
     WalletBalanceEntity balance = balance(accountId, "USDT", "10000.00000000", "10000.00000000", "0");
-    when(walletBalanceRepository.findByAccountIdAndAsset(accountId, "USDT"))
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "USDT"))
         .thenReturn(Optional.of(balance));
     when(walletBalanceRepository.save(any(WalletBalanceEntity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
@@ -108,7 +137,8 @@ class WalletServiceTest {
   @Test
   void getOrCreateBalanceCreatesZeroBalanceWhenMissing() {
     UUID accountId = UUID.randomUUID();
-    when(walletBalanceRepository.findByAccountIdAndAsset(accountId, "USD")).thenReturn(Optional.empty());
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "USD"))
+        .thenReturn(Optional.empty());
     when(walletBalanceRepository.save(any(WalletBalanceEntity.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -126,7 +156,7 @@ class WalletServiceTest {
   void debitAvailableRejectsInsufficientAvailableBalance() {
     UUID accountId = UUID.randomUUID();
     WalletBalanceEntity balance = balance(accountId, "USD", "10.00000000", "5.00000000", "5.00000000");
-    when(walletBalanceRepository.findByAccountIdAndAsset(accountId, "USD"))
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "USD"))
         .thenReturn(Optional.of(balance));
 
     assertThatThrownBy(() -> service().debitAvailable(accountId, "USD", new BigDecimal("6.00000000"), "TEST", UUID.randomUUID(), "Too much"))
@@ -138,7 +168,7 @@ class WalletServiceTest {
   void lockAvailableRejectsInsufficientAvailableBalance() {
     UUID accountId = UUID.randomUUID();
     WalletBalanceEntity balance = balance(accountId, "BTC", "1.00000000", "0.10000000", "0.90000000");
-    when(walletBalanceRepository.findByAccountIdAndAsset(accountId, "BTC"))
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "BTC"))
         .thenReturn(Optional.of(balance));
 
     assertThatThrownBy(() -> service().lockAvailable(accountId, "BTC", new BigDecimal("0.20000000"), "ORDER", UUID.randomUUID(), "Lock too much"))
@@ -157,9 +187,21 @@ class WalletServiceTest {
       String available,
       String locked
   ) {
+    return balance(accountId, WalletType.SPOT, asset, total, available, locked);
+  }
+
+  private static WalletBalanceEntity balance(
+      UUID accountId,
+      WalletType walletType,
+      String asset,
+      String total,
+      String available,
+      String locked
+  ) {
     WalletBalanceEntity balance = new WalletBalanceEntity();
     balance.setId(UUID.randomUUID());
     balance.setAccountId(accountId);
+    balance.setWalletType(walletType.code());
     balance.setAsset(asset);
     balance.setTotal(new BigDecimal(total));
     balance.setAvailable(new BigDecimal(available));

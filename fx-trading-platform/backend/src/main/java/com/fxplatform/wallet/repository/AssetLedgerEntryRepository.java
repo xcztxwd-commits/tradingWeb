@@ -18,6 +18,7 @@ public interface AssetLedgerEntryRepository extends FxBaseMapper<AssetLedgerEntr
 
   default List<AssetLedgerEntryEntity> findByFilters(
       UUID accountId,
+      String walletType,
       String asset,
       String entryType,
       UUID referenceId,
@@ -26,6 +27,9 @@ public interface AssetLedgerEntryRepository extends FxBaseMapper<AssetLedgerEntr
   ) {
     LambdaQueryWrapper<AssetLedgerEntryEntity> query = new LambdaQueryWrapper<AssetLedgerEntryEntity>()
         .eq(AssetLedgerEntryEntity::getAccountId, accountId);
+    if (StringUtils.hasText(walletType)) {
+      query.eq(AssetLedgerEntryEntity::getWalletType, walletType);
+    }
     if (StringUtils.hasText(asset)) {
       query.eq(AssetLedgerEntryEntity::getAsset, asset);
     }
