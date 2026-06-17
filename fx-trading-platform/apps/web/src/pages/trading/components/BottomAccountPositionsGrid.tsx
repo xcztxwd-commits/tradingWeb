@@ -25,6 +25,7 @@ export function PositionsGrid({ positions, emptyLabel, mode = 'current', onClose
           <th>{t('positions.positionSize')}</th>
           <th>{t('positions.markPrice')}</th>
           <th>{t('positions.openAveragePrice')}</th>
+          <th>{t('positions.notional')}</th>
           <th>{t('positions.estimatedLiquidationPrice')}</th>
           <th>{t('positions.breakEvenPrice')}</th>
           <th>{mode === 'history' ? t('positions.realizedPnl') : t('positions.floatingPnl')}</th>
@@ -55,6 +56,7 @@ export function PositionsGrid({ positions, emptyLabel, mode = 'current', onClose
               <td>{row.quantity}</td>
               <td>{row.markPrice}</td>
               <td>{row.openPrice}</td>
+              <td>{row.notional}</td>
               <td>{row.liquidationPrice}</td>
               <td>{row.breakEvenPrice}</td>
               <td className={pnlClass}>{pnlValue}</td>

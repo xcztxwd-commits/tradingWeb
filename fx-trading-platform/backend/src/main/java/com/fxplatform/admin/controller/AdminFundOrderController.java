@@ -58,6 +58,7 @@ public class AdminFundOrderController {
   }
 
   /** 审核资金订单。 */
+  @PreAuthorize("hasAnyAuthority('finance:fund-order:approve','finance:fund-order:reject')")
   @PostMapping("/{orderId}/review")
   public ApiResponse<AdminFundOrderResponse> reviewOrder(
       @AuthenticationPrincipal UserPrincipal principal,

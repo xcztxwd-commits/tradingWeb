@@ -1,10 +1,12 @@
 package com.fxplatform.admin.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.admin.dto.request.AdminFundOrderRequest;
@@ -21,12 +23,51 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 class AdminFundOrderServiceTest {
 
   private final FundOrderRepository fundOrderRepository = Mockito.mock(FundOrderRepository.class);
   private final AdminFinanceCommandService financeCommandService = Mockito.mock(AdminFinanceCommandService.class);
   private final AuditLogService auditLogService = Mockito.mock(AuditLogService.class);
+
+  @Test
+  void approvedFundReviewRequiresConfirmationBeforeRepositoryLookup() {
+    AdminFundOrderService service = new AdminFundOrderService(fundOrderRepository, financeCommandService, auditLogService);
+
+    assertThatThrownBy(() -> service.reviewOrder(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            new AdminFundOrderReviewRequest("APPROVED", "approve")))
+        .isInstanceOf(com.fxplatform.common.exception.BusinessException.class)
+        .extracting("code")
+        .isEqualTo("ADMIN_CONFIRMATION_REQUIRED");
+
+    verifyNoInteractions(fundOrderRepository, financeCommandService, auditLogService);
+  }
+
+  @Test
+  void approvingFundOrderRequiresApproveAuthorityWhenAuthenticated() {
+    UUID actorUserId = UUID.randomUUID();
+    UUID orderId = UUID.randomUUID();
+    authenticateAs("ROLE_ADMIN", "finance:fund-order:reject");
+    AdminFundOrderService service = new AdminFundOrderService(fundOrderRepository, financeCommandService, auditLogService);
+
+    try {
+      assertThatThrownBy(() -> service.reviewOrder(
+              actorUserId,
+              orderId,
+              new AdminFundOrderReviewRequest("APPROVED", "approve")))
+          .isInstanceOf(AccessDeniedException.class)
+          .hasMessageContaining("finance:fund-order:approve");
+      verifyNoInteractions(fundOrderRepository, financeCommandService, auditLogService);
+    } finally {
+      SecurityContextHolder.clearContext();
+    }
+  }
 
   @Test
   void createsAndApprovesRechargeOrderThroughDeposit() {
@@ -83,7 +124,7 @@ class AdminFundOrderServiceTest {
         "USD",
         null,
         "测试充值"));
-    var approved = service.reviewOrder(actorUserId, orderId, new AdminFundOrderReviewRequest("APPROVED", "审核通过"));
+    var approved = service.reviewOrder(actorUserId, orderId, new AdminFundOrderReviewRequest("APPROVED", "审核通过", "CONFIRM_APPROVE"));
 
     assertThat(created.status()).isEqualTo("PENDING_REVIEW");
     assertThat(approved.status()).isEqualTo("APPROVED");
@@ -177,8 +218,8 @@ class AdminFundOrderServiceTest {
             Instant.now()));
     AdminFundOrderService service = new AdminFundOrderService(fundOrderRepository, financeCommandService, auditLogService);
 
-    var first = service.reviewOrder(actorUserId, orderId, new AdminFundOrderReviewRequest("APPROVED", "approve once"));
-    var replay = service.reviewOrder(actorUserId, orderId, new AdminFundOrderReviewRequest("APPROVED", "approve once"));
+    var first = service.reviewOrder(actorUserId, orderId, new AdminFundOrderReviewRequest("APPROVED", "approve once", "CONFIRM_APPROVE"));
+    var replay = service.reviewOrder(actorUserId, orderId, new AdminFundOrderReviewRequest("APPROVED", "approve once", "CONFIRM_APPROVE"));
 
     assertThat(replay.fundOperationId()).isEqualTo(first.fundOperationId());
     ArgumentCaptor<AdminFundOperationRequest> requestCaptor = ArgumentCaptor.forClass(AdminFundOperationRequest.class);
@@ -199,5 +240,12 @@ class AdminFundOrderServiceTest {
     order.setStatus("PENDING_REVIEW");
     order.setCreatedAt(Instant.now());
     return order;
+  }
+
+  private void authenticateAs(String... authorities) {
+    SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+        "admin",
+        null,
+        java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toList()));
   }
 }

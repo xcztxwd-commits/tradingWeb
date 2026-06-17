@@ -28,8 +28,6 @@ public class SimulatedExecutionAdapter implements ExecutionAdapter {
 
   private static final BigDecimal SLIPPAGE_RATE = new BigDecimal("0.0001");
   private static final BigDecimal FEE_RATE = new BigDecimal("0.0010");
-  private static final BigDecimal PARTIAL_FILL_THRESHOLD = new BigDecimal("1.00");
-  private static final BigDecimal HALF = new BigDecimal("0.5");
 
   private final QuoteService quoteService;
   private final SymbolRepository symbolRepository;
@@ -62,10 +60,8 @@ public class SimulatedExecutionAdapter implements ExecutionAdapter {
         ? referencePrice.add(slippage)
         : referencePrice.subtract(slippage);
     BigDecimal quantity = request.quantity();
-    BigDecimal filledQuantity = quantity.compareTo(PARTIAL_FILL_THRESHOLD) > 0
-        ? quantity.multiply(HALF).setScale(4, RoundingMode.HALF_UP)
-        : quantity;
-    BigDecimal remainingQuantity = quantity.subtract(filledQuantity).max(BigDecimal.ZERO);
+    BigDecimal filledQuantity = quantity;
+    BigDecimal remainingQuantity = BigDecimal.ZERO;
     InstrumentProfile profile = profileFor(request.symbol());
     BigDecimal fee = feeFor(profile, filledQuantity, filledPrice);
 

@@ -69,7 +69,7 @@ describe('trading page models', () => {
     assert.deepEqual(filterMarkets(markets, '', 'favorites').map((item) => item.symbol), ['EURUSD'])
   })
 
-  it('limits realtime quote subscriptions to selected, favorite, and first-screen markets', () => {
+  it('limits trading page realtime quote subscriptions to the selected market', () => {
     const markets = Array.from({ length: 10 }, (_, index) => ({
       symbol: `SYM${index}USD`,
       base: `SYM${index}`,
@@ -80,8 +80,8 @@ describe('trading page models', () => {
     }))
 
     assert.deepEqual(
-      getRealtimeQuoteMarkets(markets, 'SYM9USD', 4).map((market) => market.symbol),
-      ['SYM0USD', 'SYM1USD', 'SYM2USD', 'SYM3USD', 'SYM8USD', 'SYM9USD']
+      getRealtimeQuoteMarkets(markets, 'SYM9USD').map((market) => market.symbol),
+      ['SYM9USD']
     )
   })
 
@@ -94,8 +94,8 @@ describe('trading page models', () => {
     ]
 
     assert.deepEqual(
-      getRealtimeQuoteMarkets(markets, 'EURUSD', 4).map((market) => market.symbol),
-      ['BTCUSDT', 'ETHUSDT']
+      getRealtimeQuoteMarkets(markets, 'EURUSD').map((market) => market.symbol),
+      []
     )
   })
 

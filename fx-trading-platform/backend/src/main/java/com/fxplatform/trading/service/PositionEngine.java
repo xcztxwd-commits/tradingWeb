@@ -21,6 +21,7 @@ import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -37,6 +38,7 @@ public class PositionEngine {
   private final PnLCalculator pnlCalculator;
   private final PerpMarginCalculator perpMarginCalculator;
 
+  @Autowired
   public PositionEngine(
       PositionRepository positionRepository,
       TradingAccountRepository accountRepository,

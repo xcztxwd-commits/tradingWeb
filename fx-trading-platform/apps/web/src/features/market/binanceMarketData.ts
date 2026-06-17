@@ -1,4 +1,5 @@
 import type { TradingMarket } from './tradingModels'
+import { apiGet } from '../../services/apiClient.ts'
 
 type NumberLike = string | number | null | undefined
 
@@ -123,57 +124,24 @@ export type BinanceFuturesDashboard = {
 }
 
 type BinanceProductResponse = {
-  code?: string
-  data?: BinanceProduct[]
+  products?: BinanceProduct[]
+  fearGreed?: BinanceFearGreed
 }
-
-type AlternativeFearGreedResponse = {
-  data?: Array<{
-    value?: string
-    value_classification?: string
-    timestamp?: string
-  }>
-}
-
-const binanceProductsUrl = 'https://www.binance.com/bapi/asset/v2/public/asset-service/product/get-products?includeEtf=true'
-const fearGreedUrl = 'https://api.alternative.me/fng/?limit=1&format=json'
-const futuresRestBase = 'https://fapi.binance.com'
-const futuresDataBase = `${futuresRestBase}/futures/data`
-const dashboardPointLimit = 14
+const binanceOverviewSourcePath = '/api/market/binance/overview-source'
+const binanceFuturesDashboardSourcePath = '/api/market/binance/futures-dashboard-source'
 const leveragedTokenPattern = /(UP|DOWN|BULL|BEAR)USDT$/u
 
 export async function fetchBinanceMarketOverview(): Promise<BinanceMarketOverview> {
-  const [products, fearGreed] = await Promise.all([
-    fetchBinanceProducts(),
-    fetchBinanceFearGreed().catch(() => undefined)
-  ])
-  return mapBinanceProductOverview(products, fearGreed)
+  const payload = await apiGet<BinanceProductResponse>(binanceOverviewSourcePath)
+  return mapBinanceProductOverview(Array.isArray(payload.products) ? payload.products : [], payload.fearGreed)
 }
 
 export async function fetchBinanceFuturesDashboard(symbol = 'BTCUSDT', period: BinanceFuturesPeriod = '5m'): Promise<BinanceFuturesDashboard> {
   const normalizedSymbol = normalizeSymbol(symbol)
   const safePeriod = normalizeFuturesPeriod(period)
-  const ticker = await fetchJson<BinanceFuturesTicker>(`${futuresRestBase}/fapi/v1/ticker/24hr?symbol=${encodeURIComponent(normalizedSymbol)}`)
-  const [openInterest, topAccountRatio, topPositionRatio, globalLongShortRatio, takerBuySell, basis, fundingRates] = await Promise.all([
-    fetchJsonArray<BinanceOpenInterestPoint>(`${futuresDataBase}/openInterestHist?symbol=${encodeURIComponent(normalizedSymbol)}&period=${safePeriod}&limit=${dashboardPointLimit}`),
-    fetchJsonArray<BinanceLongShortPoint>(`${futuresDataBase}/topLongShortAccountRatio?symbol=${encodeURIComponent(normalizedSymbol)}&period=${safePeriod}&limit=${dashboardPointLimit}`),
-    fetchJsonArray<BinanceLongShortPoint>(`${futuresDataBase}/topLongShortPositionRatio?symbol=${encodeURIComponent(normalizedSymbol)}&period=${safePeriod}&limit=${dashboardPointLimit}`),
-    fetchJsonArray<BinanceLongShortPoint>(`${futuresDataBase}/globalLongShortAccountRatio?symbol=${encodeURIComponent(normalizedSymbol)}&period=${safePeriod}&limit=${dashboardPointLimit}`),
-    fetchJsonArray<BinanceTakerBuySellPoint>(`${futuresDataBase}/takerlongshortRatio?symbol=${encodeURIComponent(normalizedSymbol)}&period=${safePeriod}&limit=${dashboardPointLimit}`),
-    fetchJsonArray<BinanceBasisPoint>(`${futuresDataBase}/basis?pair=${encodeURIComponent(normalizedSymbol)}&contractType=PERPETUAL&period=${safePeriod}&limit=${dashboardPointLimit}`),
-    fetchJsonArray<BinanceFundingRatePoint>(`${futuresRestBase}/fapi/v1/fundingRate?symbol=${encodeURIComponent(normalizedSymbol)}&limit=${dashboardPointLimit}`)
-  ])
-
-  return buildBinanceFuturesDashboard({
-    ticker,
-    openInterest,
-    topAccountRatio,
-    topPositionRatio,
-    globalLongShortRatio,
-    takerBuySell,
-    basis,
-    fundingRates
-  })
+  const params = new URLSearchParams({ symbol: normalizedSymbol, period: safePeriod })
+  const payload = await apiGet<BinanceFuturesDashboardPayload>(`${binanceFuturesDashboardSourcePath}?${params.toString()}`)
+  return buildBinanceFuturesDashboard(payload)
 }
 
 export function mapBinanceProductOverview(products: BinanceProduct[], fearGreed?: BinanceFearGreed): BinanceMarketOverview {
@@ -243,37 +211,6 @@ export function buildBinanceFuturesDashboard(payload: BinanceFuturesDashboardPay
     ],
     updatedAt: Date.now()
   }
-}
-
-async function fetchBinanceProducts() {
-  const payload = await fetchJson<BinanceProductResponse>(binanceProductsUrl)
-  return Array.isArray(payload.data) ? payload.data : []
-}
-
-async function fetchBinanceFearGreed(): Promise<BinanceFearGreed | undefined> {
-  const payload = await fetchJson<AlternativeFearGreedResponse>(fearGreedUrl)
-  const latest = payload.data?.[0]
-  if (!latest) return undefined
-  const value = numberValue(latest.value)
-  if (value <= 0) return undefined
-  return {
-    value,
-    label: latest.value_classification || classifyFearGreed(value),
-    updatedAt: numberValue(latest.timestamp) * 1000 || undefined,
-    source: 'alternative.me'
-  }
-}
-
-async function fetchJsonArray<T>(url: string): Promise<T[]> {
-  return fetchJson<T[]>(url).catch(() => [])
-}
-
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, { headers: { Accept: 'application/json' } })
-  if (!response.ok) {
-    throw new Error(`Binance request failed: ${response.status}`)
-  }
-  return (await response.json()) as T
 }
 
 type ProductMarketRow = {
@@ -441,14 +378,6 @@ function formatTimestampLabel(timestamp: number) {
     minute: '2-digit',
     hour12: false
   }).format(new Date(timestamp))
-}
-
-function classifyFearGreed(value: number) {
-  if (value <= 24) return 'Extreme Fear'
-  if (value <= 49) return 'Fear'
-  if (value <= 50) return 'Neutral'
-  if (value <= 74) return 'Greed'
-  return 'Extreme Greed'
 }
 
 function formatFundingPercent(value: number) {

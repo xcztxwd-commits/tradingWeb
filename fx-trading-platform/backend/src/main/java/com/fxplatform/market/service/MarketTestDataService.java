@@ -6,10 +6,9 @@ import com.fxplatform.market.dto.MarketDepthResponse;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
 import com.fxplatform.market.entity.SymbolEntity;
-import com.fxplatform.market.repository.RealtimeCandleRepository;
 import com.fxplatform.market.repository.SymbolRepository;
-import com.fxplatform.market.websocket.MarketWsPublisher;
-import java.math.BigDecimal;
+import com.fxplatform.market.realtime.DemoRealtimeEventFactory;
+import com.fxplatform.market.realtime.RealtimeQuoteSink;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.List;
@@ -33,10 +32,9 @@ public class MarketTestDataService {
   private static final int MAX_RECENT_TRADES = 100;
 
   private final SymbolRepository symbolRepository;
-  private final QuoteService quoteService;
-  private final MarketWsPublisher marketWsPublisher;
-  private final RealtimeCandleRepository realtimeCandleRepository;
+  private final RealtimeQuoteSink realtimeQuoteSink;
   private final DemoMarketDataGenerator generator = new DemoMarketDataGenerator();
+  private final DemoRealtimeEventFactory eventFactory = new DemoRealtimeEventFactory(generator);
   private final AtomicLong tick = new AtomicLong();
   private final Map<String, MarketDepthResponse> depthBySymbol = new ConcurrentHashMap<>();
   private final Map<String, ArrayDeque<RecentTradeResponse>> tradesBySymbol = new ConcurrentHashMap<>();
@@ -81,14 +79,11 @@ public class MarketTestDataService {
     QuoteResponse quote = generator.quote(normalizedSymbol, nextTick, now);
     MarketDepthResponse depth = generator.depth(normalizedSymbol, quote);
     RecentTradeResponse trade = generator.trade(normalizedSymbol, nextTick, quote);
-    List<RecentTradeResponse> recentTrades = addTrade(normalizedSymbol, trade);
 
     depthBySymbol.put(normalizedSymbol, depth);
-    cacheQuote(quote);
-    persistRealtimeCandles(normalizedSymbol, quote, trade);
-    marketWsPublisher.publishQuote(quote);
-    marketWsPublisher.publishOrderBook(depth);
-    marketWsPublisher.publishRecentTrades(normalizedSymbol, recentTrades);
+    addTrade(normalizedSymbol, trade);
+    eventFactory.events(quote, depth, trade, REALTIME_TIMEFRAMES, nextTick)
+        .forEach(realtimeQuoteSink::acceptDemo);
   }
 
   private MarketDepthResponse createInitialDepth(String symbol) {
@@ -114,22 +109,4 @@ public class MarketTestDataService {
     }
   }
 
-  private void cacheQuote(QuoteResponse quote) {
-    try {
-      quoteService.cache(quote);
-    } catch (RuntimeException ignored) {
-      // WebSocket test data should continue even when local Redis is not running.
-    }
-  }
-
-  private void persistRealtimeCandles(String symbol, QuoteResponse quote, RecentTradeResponse trade) {
-    for (String timeframe : REALTIME_TIMEFRAMES) {
-      Instant openTime = generator.candleOpenTime(Instant.ofEpochMilli(quote.timestamp()), timeframe);
-      upsertCandle(symbol, timeframe, openTime, quote.mid(), trade.amount());
-    }
-  }
-
-  private void upsertCandle(String symbol, String timeframe, Instant openTime, BigDecimal price, BigDecimal volume) {
-    realtimeCandleRepository.upsert(symbol, timeframe, openTime, price, volume);
-  }
 }

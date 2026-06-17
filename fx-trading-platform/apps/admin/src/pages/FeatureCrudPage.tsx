@@ -15,7 +15,7 @@ import {
 } from 'lucide-react'
 
 import { getFeaturePage, getTableColumnPreference, runFeatureAction, saveTableColumnPreference } from '../services/adminApi'
-import { getValidAdminToken } from '../services/adminToken'
+import { getAdminAuthorities, getValidAdminToken } from '../services/adminToken'
 import type { AdminFeatureAction, AdminFeatureField, AdminFeaturePage } from '../types'
 import { StateBlock, useAdminData } from './adminPageUtils'
 
@@ -25,6 +25,32 @@ type DialogState = {
 }
 
 type TableSize = 'mini' | 'small' | 'middle' | 'large'
+
+const ACTION_PERMISSION_MAP: Record<string, string> = {
+  'products:create': 'market:symbol:create',
+  'products:edit': 'market:symbol:update',
+  'products:risk': 'market:symbol:update',
+  'products:delete': 'market:symbol:disable',
+  'price-schedules:create': 'finance:adjustment:create',
+  'price-schedules:cancel': 'finance:adjustment:create',
+  'recharge-orders:review': 'finance:fund-order:approve',
+  'withdrawal-orders:review': 'finance:fund-order:approve',
+  'order-history:cancel': 'trading:order:cancel',
+  'order-history:close-position': 'trading:position:force-close',
+  'members:edit': 'user:update',
+  'members:kick-offline': 'user:force-logout',
+  'members:real-name': 'user:update',
+  'members:remark': 'user:update',
+  'members:one-click-profit': 'user:update',
+  'members:one-click-normal': 'user:update',
+  'members:send-message': 'user:update'
+}
+
+const ACTION_CONFIRMATION_MAP: Record<string, string> = {
+  'recharge-orders:review': 'CONFIRM_APPROVE',
+  'withdrawal-orders:review': 'CONFIRM_APPROVE',
+  'order-history:close-position': 'CONFIRM_FORCE_CLOSE'
+}
 
 export function FeatureCrudPage({ pageKey }: { pageKey: string }) {
   const [filters, setFilters] = useState<Record<string, string>>({})
@@ -42,6 +68,7 @@ export function FeatureCrudPage({ pageKey }: { pageKey: string }) {
   const [showBorder, setShowBorder] = useState(false)
   const [zebra, setZebra] = useState(true)
   const [preferenceReady, setPreferenceReady] = useState(false)
+  const authorities = useMemo(() => new Set(getAdminAuthorities()), [])
   const { data, loading, error, reload } = useAdminData<AdminFeaturePage>(
     (token) =>
       getFeaturePage(token, pageKey, {
@@ -111,13 +138,21 @@ export function FeatureCrudPage({ pageKey }: { pageKey: string }) {
     return (data?.columns ?? []).filter((column) => !hiddenColumns.has(column.key))
   }, [data?.columns, hiddenColumns])
 
+  const visibleToolbarActions = useMemo(() => {
+    return (data?.toolbarActions ?? []).filter((action) => canRunAction(pageKey, action, undefined, authorities))
+  }, [authorities, data?.toolbarActions, pageKey])
+
+  const visibleRowActions = (row: Record<string, unknown>) => {
+    return (data?.rowActions ?? []).filter((action) => canRunAction(pageKey, action, row, authorities))
+  }
+
   const openDialog = (action: AdminFeatureAction, row?: Record<string, unknown>) => {
-    if (action.type === 'confirm' || action.type === 'download' || action.type === 'toggle' || action.type === 'reset') {
+    if (isImmediateAction(action) && !mayRequireConfirmation(pageKey, action, row)) {
       void executeAction(action, row)
       return
     }
     setDialog({ action, row })
-    setFormValues(initialFormValues(actionFields(action.key, data?.fields ?? []), row))
+    setFormValues(initialFormValues(actionFields(action.key, data?.fields ?? []), row, mayRequireConfirmation(pageKey, action, row)))
   }
 
   const executeAction = async (action: AdminFeatureAction, row?: Record<string, unknown>, payload?: Record<string, unknown>) => {
@@ -144,7 +179,12 @@ export function FeatureCrudPage({ pageKey }: { pageKey: string }) {
 
   const submitDialog = () => {
     if (!dialog) return
-    void executeAction(dialog.action, dialog.row, formValues)
+    const requiredText = requiredConfirmationText(pageKey, dialog.action, dialog.row, formValues)
+    if (requiredText && formValues.confirmationText?.trim() !== requiredText) {
+      setMessage(`请输入确认码 ${requiredText}`)
+      return
+    }
+    void executeAction(dialog.action, dialog.row, actionPayload(formValues, requiredText))
   }
 
   if (loading) return <StateBlock tone="loading">正在加载数据</StateBlock>
@@ -155,6 +195,7 @@ export function FeatureCrudPage({ pageKey }: { pageKey: string }) {
   const totalRows = data.total ?? rows.length
   const totalPages = Math.max(1, data.totalPages ?? 1)
   const dialogFields = dialog ? actionFields(dialog.action.key, data.fields) : []
+  const dialogRequiresConfirmation = dialog ? mayRequireConfirmation(pageKey, dialog.action, dialog.row) : false
 
   return (
     <section className="feature-page">
@@ -224,7 +265,7 @@ export function FeatureCrudPage({ pageKey }: { pageKey: string }) {
 
       <div className="feature-toolbar">
         <div className="feature-toolbar-left">
-          {data.toolbarActions.map((action) => (
+          {visibleToolbarActions.map((action) => (
             <button
               key={action.key}
               type="button"
@@ -311,7 +352,7 @@ export function FeatureCrudPage({ pageKey }: { pageKey: string }) {
                     <td key={column.key}>{formatCell(row[column.key])}</td>
                   ))}
                   <td className="row-actions">
-                    {data.rowActions.map((action) => (
+                    {visibleRowActions(row).map((action) => (
                       <button key={action.key} type="button" title={`执行${action.label}，支持审核、编辑、删除`} onClick={() => openDialog(action, row)}>
                         {action.label}
                       </button>
@@ -381,6 +422,16 @@ export function FeatureCrudPage({ pageKey }: { pageKey: string }) {
                   />
                 </label>
               ))}
+              {dialogRequiresConfirmation ? (
+                <label className="feature-field">
+                  <span>确认码</span>
+                  <input
+                    value={formValues.confirmationText ?? ''}
+                    placeholder="请输入确认码"
+                    onChange={(event) => setFormValues((current) => ({ ...current, confirmationText: event.target.value }))}
+                  />
+                </label>
+              ) : null}
             </div>
             <footer>
               <button type="button" className="ghost-button" onClick={() => setDialog(undefined)}>
@@ -467,6 +518,58 @@ export function FeatureCrudPage({ pageKey }: { pageKey: string }) {
   )
 }
 
+function canRunAction(
+  pageKey: string,
+  action: AdminFeatureAction,
+  row: Record<string, unknown> | undefined,
+  authorities: Set<string>
+) {
+  const permission = requiredActionPermission(pageKey, action, row)
+  return !permission || authorities.has(permission)
+}
+
+function requiredActionPermission(pageKey: string, action: AdminFeatureAction, row?: Record<string, unknown>) {
+  if (pageKey === 'members' && action.key === 'edit' && row?.status === 'DISABLED') return 'user:disable'
+  return ACTION_PERMISSION_MAP[`${pageKey}:${action.key}`]
+}
+
+function mayRequireConfirmation(pageKey: string, action: AdminFeatureAction, row?: Record<string, unknown>) {
+  if (ACTION_CONFIRMATION_MAP[`${pageKey}:${action.key}`]) return true
+  if (pageKey === 'products' && action.key === 'risk') return true
+  if (pageKey === 'products' && action.key === 'edit' && row?.leverage !== undefined) return true
+  if (pageKey === 'members' && action.key === 'edit') return true
+  return false
+}
+
+function requiredConfirmationText(
+  pageKey: string,
+  action: AdminFeatureAction,
+  row: Record<string, unknown> | undefined,
+  payload: Record<string, string>
+) {
+  const mapped = ACTION_CONFIRMATION_MAP[`${pageKey}:${action.key}`]
+  if (mapped) return mapped
+  if (pageKey === 'products' && action.key === 'risk') {
+    return payload.enabled === 'false' || payload.status === 'false' ? 'CONFIRM_DISABLE_SYMBOL' : ''
+  }
+  if (pageKey === 'products' && action.key === 'edit' && row?.leverage !== undefined) {
+    return String(payload.leverage ?? '') !== String(row.leverage ?? '') ? 'CONFIRM_LEVERAGE_CHANGE' : ''
+  }
+  if (pageKey === 'members' && action.key === 'edit') {
+    return payload.status === 'DISABLED' ? 'CONFIRM_DISABLE_USER' : ''
+  }
+  return ''
+}
+
+function actionPayload(values: Record<string, string>, requiredConfirmationText: string) {
+  const { confirmationText, ...payload } = values
+  return requiredConfirmationText ? { ...payload, confirmationText: confirmationText?.trim() } : payload
+}
+
+function isImmediateAction(action: AdminFeatureAction) {
+  return action.type === 'confirm' || action.type === 'download' || action.type === 'toggle' || action.type === 'reset'
+}
+
 function FieldControl({
   field,
   value,
@@ -543,11 +646,14 @@ function actionFields(actionKey: string, fields: AdminFeatureField[]) {
   return fields
 }
 
-function initialFormValues(fields: AdminFeatureField[], row?: Record<string, unknown>) {
+function initialFormValues(fields: AdminFeatureField[], row?: Record<string, unknown>, includeConfirmation = false) {
   const values: Record<string, string> = {}
   for (const field of fields) {
     const value = row?.[field.key]
     values[field.key] = value === null || value === undefined ? '' : String(value)
+  }
+  if (includeConfirmation) {
+    values.confirmationText = ''
   }
   return values
 }

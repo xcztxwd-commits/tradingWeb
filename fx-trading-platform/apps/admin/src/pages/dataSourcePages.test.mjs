@@ -64,4 +64,31 @@ describe('data source admin pages', () => {
   it('matches the provider instrument response shape returned by the backend', () => {
     assert.match(typesSource, /rawJson: string/)
   })
+
+  it('shows provider health telemetry beyond the basic status field', () => {
+    for (const field of [
+      'lastSuccessAt',
+      'lastFailureAt',
+      'failureCount',
+      'avgLatencyMs',
+      'quoteStalenessMs',
+      'lastQuoteSuccessAt',
+      'lastInstrumentSyncAt',
+      'lastInstrumentSyncCount',
+      'capabilityStatuses'
+    ]) {
+      assert.match(typesSource, new RegExp(`${field}:`))
+      assert.match(dataProvidersSource, new RegExp(field))
+    }
+  })
+
+  it('requires confirmation before toggling provider status', () => {
+    assert.match(typesSource, /confirmationText\?: string/)
+    assert.match(dataProvidersSource, /getAdminAuthorities/)
+    assert.match(dataProvidersSource, /canUpdateProvider/)
+    assert.match(dataProvidersSource, /market:data-provider:update/)
+    assert.match(dataProvidersSource, /CONFIRM_PROVIDER_STATUS/)
+    assert.match(dataProvidersSource, /providerStatusChanged/)
+    assert.match(dataProvidersSource, /toProviderPayload\(form,\s*confirmationText\)/)
+  })
 })

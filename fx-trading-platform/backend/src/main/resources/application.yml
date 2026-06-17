@@ -4,7 +4,7 @@ server:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:}
-    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:}
 
 admin:
   bootstrap:
@@ -19,7 +19,7 @@ spring:
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/fx_platform}
     username: ${DATABASE_USERNAME:postgres}
-    password: ${DATABASE_PASSWORD:password}
+    password: ${DATABASE_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
   flyway:
@@ -35,9 +35,11 @@ spring:
 
 security:
   jwt:
-    secret: ${JWT_SECRET:change_me_to_long_random_secret_at_least_32_chars}
+    secret: ${JWT_SECRET}
     access-token-expire-minutes: ${JWT_ACCESS_EXPIRE_MINUTES:30}
     refresh-token-expire-days: ${JWT_REFRESH_EXPIRE_DAYS:7}
+  config:
+    encryption-key: ${CONFIG_ENCRYPTION_KEY}
 
 massive:
   api-key: ${MASSIVE_API_KEY:}
@@ -53,10 +55,34 @@ massive:
 
 binance:
   rest-base-url: ${BINANCE_REST_BASE_URL:https://api.binance.com}
+  web-base-url: ${BINANCE_WEB_BASE_URL:https://www.binance.com}
+  futures-base-url: ${BINANCE_FUTURES_BASE_URL:https://fapi.binance.com}
+  websocket-base-url: ${BINANCE_WS_BASE_URL:wss://stream.binance.com:9443/ws}
 
 market:
+  fear-greed-url: ${MARKET_FEAR_GREED_URL:https://api.alternative.me/fng/?limit=1&format=json}
+  quote-stale-ms: ${MARKET_QUOTE_STALE_MS:3000}
   demo-quotes:
     enabled: ${MARKET_DEMO_QUOTES_ENABLED:false}
+  realtime:
+    enabled: ${MARKET_REALTIME_ENABLED:false}
+    provider: ${MARKET_REALTIME_PROVIDER:binance}
+    websocket-base-url: ${BINANCE_WS_BASE_URL:wss://stream.binance.com:9443/ws}
+    symbols: ${MARKET_REALTIME_SYMBOLS:BTCUSDT,ETHUSDT}
+    quote-stale: ${MARKET_REALTIME_QUOTE_STALE:3s}
+    reconnect-initial: ${MARKET_REALTIME_RECONNECT_INITIAL:1s}
+    reconnect-max: ${MARKET_REALTIME_RECONNECT_MAX:30s}
+    reconnect-jitter: ${MARKET_REALTIME_RECONNECT_JITTER:250ms}
+    unsubscribe-grace: ${MARKET_REALTIME_UNSUBSCRIBE_GRACE:10s}
+    binance-command-per-second: ${MARKET_BINANCE_COMMAND_PER_SECOND:4}
+    backfill-enabled: ${MARKET_REALTIME_BACKFILL_ENABLED:true}
+    backfill-lookback: ${MARKET_REALTIME_BACKFILL_LOOKBACK:60m}
+    kline-intervals: ${MARKET_REALTIME_KLINE_INTERVALS:1s,1m,5m,15m,1h,4h,1d}
+    order-book-levels: ${MARKET_REALTIME_ORDER_BOOK_LEVELS:20}
+    order-book-fast: ${MARKET_REALTIME_ORDER_BOOK_FAST:true}
+    max-streams-per-connection: ${MARKET_REALTIME_MAX_STREAMS_PER_CONNECTION:1024}
+    max-active-symbols: ${MARKET_REALTIME_MAX_ACTIVE_SYMBOLS:80}
+    dynamic-symbols-enabled: ${MARKET_REALTIME_DYNAMIC_SYMBOLS_ENABLED:true}
   provider-instrument-sync:
     enabled: ${MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED:true}
     initial-delay-ms: ${MARKET_PROVIDER_INSTRUMENT_SYNC_INITIAL_DELAY_MS:60000}
@@ -70,9 +96,24 @@ market:
     enabled: ${MARKET_TEST_DATA_ENABLED:false}
     realtime-ms: ${MARKET_TEST_DATA_REALTIME_MS:1000}
     symbols: ${MARKET_TEST_DATA_SYMBOLS:}
+  test-control:
+    enabled: ${MARKET_TEST_CONTROL_ENABLED:false}
+    max-ttl: ${MARKET_TEST_CONTROL_MAX_TTL:5m}
 
 execution:
-  mode: ${EXECUTION_MODE:broker}
+  mode: ${EXECUTION_MODE:disabled}
+  broker:
+    endpoint: ${EXECUTION_BROKER_ENDPOINT:}
+    api-key: ${EXECUTION_BROKER_API_KEY:}
+    account-id: ${EXECUTION_BROKER_ACCOUNT_ID:}
+  fix:
+    endpoint: ${EXECUTION_FIX_ENDPOINT:}
+    api-key: ${EXECUTION_FIX_API_KEY:}
+    account-id: ${EXECUTION_FIX_ACCOUNT_ID:}
+  lp:
+    endpoint: ${EXECUTION_LP_ENDPOINT:}
+    api-key: ${EXECUTION_LP_API_KEY:}
+    account-id: ${EXECUTION_LP_ACCOUNT_ID:}
 
 trading:
   default-demo-balance: ${DEFAULT_DEMO_BALANCE:10000}
@@ -108,6 +149,3 @@ mybatis-plus:
   global-config:
     db-config:
       id-type: input
-
-knife4j:
-  enable: true

@@ -8,6 +8,9 @@ import net from 'node:net'
 
 const apiBaseUrl = process.env.API_BASE_URL ?? 'http://localhost:8080'
 const webBaseUrl = process.env.WEB_BASE_URL ?? 'http://localhost:5173'
+const webUrl = new URL(webBaseUrl)
+const webHost = webUrl.hostname || '127.0.0.1'
+const webPort = webUrl.port || '5173'
 const projectRoot = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
 const runId = process.env.USER_PAGES_SMOKE_RUN_ID ?? String(Date.now())
 const userEmail = process.env.USER_PAGES_SMOKE_EMAIL ?? `user-pages-${runId}@example.com`
@@ -97,7 +100,7 @@ try {
     ]
     const observed = []
     for (const check of checks) {
-      await setAuthToken(page, context.accessToken)
+      await setAuthToken(page, context.accessToken, context.refreshToken)
       let heldCount = 0
       await withFetchHandler(
         page,
@@ -127,16 +130,18 @@ try {
       { route: '/orders', fail: '/api/accounts' },
       { route: '/positions', fail: '/api/accounts' },
       { route: '/wallet', fail: '/api/accounts' },
-      { route: '/markets', fail: '/api/market/symbols' }
+      { route: '/markets', fail: ['/api/market/symbols', '/api/market/binance/overview-source'] }
     ]
     const observed = []
     for (const check of checks) {
-      await setAuthToken(page, context.accessToken)
+      await setAuthToken(page, context.accessToken, context.refreshToken)
       let failedCount = 0
       await withFetchHandler(
         page,
         async (event) => {
-          if (event.request.url.includes(check.fail)) {
+          const failPaths = Array.isArray(check.fail) ? check.fail : [check.fail]
+          const matchedFailPath = failPaths.find((path) => event.request.url.includes(path))
+          if (matchedFailPath) {
             failedCount += 1
             return {
               responseCode: 500,
@@ -176,7 +181,7 @@ try {
   })
 
   await step('dashboard loads real account, orders, positions and ledger APIs', async () => {
-    await setAuthToken(page, context.accessToken)
+    await setAuthToken(page, context.accessToken, context.refreshToken)
     const network = collectNetwork(page)
     await page.navigate(`${webBaseUrl}/dashboard`)
     await waitForPageReady(page, '/dashboard')
@@ -189,10 +194,12 @@ try {
   await step('markets loads real symbols and quotes, supports favorites and trading navigation', async () => {
     await clearBrowserSession(page)
     const network = collectNetwork(page)
-    await page.navigate(`${webBaseUrl}/markets`)
+    await page.navigate(`${webBaseUrl}/markets?real=${runId}`)
     await waitForPageReady(page, '/markets')
+    await openMarketsOverviewTab(page)
     await page.waitForFunction(() => document.querySelectorAll('tbody tr button').length >= 2, 'markets real table rows')
-    assertNetwork(network, ['/api/market/symbols', '/api/market/quotes/'])
+    await waitFor(() => network.requests.some((url) => url.includes('/api/market/quotes')), 'markets quote request', 30000)
+    assertNetwork(network, ['/api/market/symbols', '/api/market/quotes'])
     await page.evaluate(() => {
       const firstActionGroup = document.querySelector('tbody tr')
       if (!firstActionGroup) throw new Error('market row not found')
@@ -218,7 +225,7 @@ try {
   })
 
   await step('orders page shows real orders, event timeline, modify, and cancel actions work', async () => {
-    await setAuthToken(page, context.accessToken)
+    await setAuthToken(page, context.accessToken, context.refreshToken)
     const network = collectNetwork(page)
     await page.navigate(`${webBaseUrl}/orders`)
     await waitForPageReady(page, '/orders')
@@ -281,7 +288,7 @@ try {
   })
 
   await step('positions page shows real positions, updates TP/SL, and closes a position', async () => {
-    await setAuthToken(page, context.accessToken)
+    await setAuthToken(page, context.accessToken, context.refreshToken)
     const network = collectNetwork(page)
     await page.navigate(`${webBaseUrl}/positions`)
     await waitForPageReady(page, '/positions')
@@ -385,17 +392,20 @@ try {
   })
 
   await step('wallet page loads real ledger/fund orders and submits a fund request', async () => {
-    await setAuthToken(page, context.accessToken)
+    await setAuthToken(page, context.accessToken, context.refreshToken)
     const network = collectNetwork(page)
     await page.navigate(`${webBaseUrl}/wallet`)
     await waitForPageReady(page, '/wallet')
     await page.waitForFunction(() => document.querySelectorAll('.metric').length >= 4, 'wallet metrics')
+    await waitFor(() => network.requests.some((url) => url.includes('/api/finance/fund-orders')), 'wallet fund orders request', 30000)
     assertNetwork(network, ['/api/auth/session', '/api/accounts', '/api/ledger', '/api/finance/fund-orders'])
 
     await page.evaluate((note) => {
-      const amount = document.querySelector('input[name="amount"]')
-      const noteInput = document.querySelector('input[name="note"]')
-      const submit = document.querySelector('form button[type="submit"]')
+      const form = document.querySelector('#wallet-funding form')
+      if (!(form instanceof HTMLFormElement)) throw new Error('fund order form not found')
+      const amount = form.querySelector('input[name="amount"]')
+      const noteInput = form.querySelector('input[name="note"]')
+      const submit = form.querySelector('button[type="submit"]')
       if (!(amount instanceof HTMLInputElement)) throw new Error('fund order amount input not found')
       if (!(noteInput instanceof HTMLInputElement)) throw new Error('fund order note input not found')
       if (!(submit instanceof HTMLButtonElement)) throw new Error('fund order submit button not found')
@@ -425,6 +435,7 @@ async function seedUserData() {
     body: { email: userEmail, phone: null, password: userPassword }
   })
   assert(auth.accessToken, 'register must return accessToken')
+  assert(auth.refreshToken, 'register must return refreshToken')
 
   const accounts = await api('/api/accounts', { token: auth.accessToken })
   assert(Array.isArray(accounts) && accounts.length > 0, 'registered user must have an account')
@@ -454,6 +465,7 @@ async function seedUserData() {
 
   return {
     accessToken: auth.accessToken,
+    refreshToken: auth.refreshToken,
     accountId: account.id,
     symbol: symbol.symbol,
     marketOrderId: marketOrder.id,
@@ -526,11 +538,11 @@ async function ensureWebServer() {
   const command = process.platform === 'win32' ? 'cmd.exe' : 'npm'
   const args =
     process.platform === 'win32'
-      ? ['/d', '/s', '/c', 'npm.cmd --workspace apps/web run dev -- --host 127.0.0.1 --port 5173']
-      : ['--workspace', 'apps/web', 'run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173']
+      ? ['/d', '/s', '/c', `npm.cmd --workspace apps/web run dev -- --host ${webHost} --port ${webPort}`]
+      : ['--workspace', 'apps/web', 'run', 'dev', '--', '--host', webHost, '--port', webPort]
   const child = spawn(command, args, {
     cwd: projectRoot,
-    env: process.env,
+    env: { ...process.env, VITE_API_BASE_URL: apiBaseUrl },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true
   })
@@ -750,6 +762,15 @@ async function waitForPageReady(page, route) {
   )
 }
 
+async function openMarketsOverviewTab(page) {
+  await page.waitForFunction(() => Boolean(document.querySelector('.market-shell__tabs button')), 'markets tabs')
+  await page.evaluate(() => {
+    const button = document.querySelector('.market-shell__tabs button')
+    if (!(button instanceof HTMLButtonElement)) throw new Error('markets overview tab not found')
+    if (button.getAttribute('aria-selected') !== 'true') button.click()
+  })
+}
+
 async function clearBrowserSession(page) {
   await page.navigate(`${webBaseUrl}/markets?clear=${runId}`)
   await page.evaluate(() => {
@@ -758,11 +779,13 @@ async function clearBrowserSession(page) {
   })
 }
 
-async function setAuthToken(page, token) {
+async function setAuthToken(page, token, refreshToken) {
   await page.navigate(`${webBaseUrl}/markets?auth=${runId}`)
-  await page.evaluate((value) => {
-    localStorage.setItem('fx-platform-auth-token', value)
-  }, token)
+  await page.evaluate((accessToken, refreshToken) => {
+    localStorage.setItem('fx-platform-auth-token', accessToken)
+    localStorage.setItem('fx-platform-auth-refresh-token', refreshToken)
+    window.dispatchEvent(new Event('fx-platform-auth-session-changed'))
+  }, token, refreshToken)
 }
 
 async function withFetchHandler(page, handler, action) {

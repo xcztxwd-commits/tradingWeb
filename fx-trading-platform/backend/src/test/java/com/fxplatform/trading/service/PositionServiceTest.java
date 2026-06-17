@@ -23,10 +23,13 @@ import com.fxplatform.risk.service.PnLCalculator;
 import com.fxplatform.trading.dto.request.UpdatePositionProtectionRequest;
 import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.entity.PositionEntity;
+import com.fxplatform.trading.entity.SpotPositionEntity;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.PositionRepository;
+import com.fxplatform.trading.repository.SpotPositionRepository;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.List;
 import java.util.UUID;
@@ -55,6 +58,9 @@ class PositionServiceTest {
 
   @Mock
   private SymbolRepository symbolRepository;
+
+  @Mock
+  private SpotPositionRepository spotPositionRepository;
 
   @Test
   void openPositionsRefreshFloatingPnlFromLatestQuote() {
@@ -103,6 +109,7 @@ class PositionServiceTest {
     position.setOpenPrice(new BigDecimal("63874.8"));
     position.setCurrentPrice(new BigDecimal("63874.8"));
     position.setMarginHeld(new BigDecimal("0.07"));
+    position.setNotional(new BigDecimal("638.74800000"));
     position.setMaintenanceMargin(new BigDecimal("250.00000000"));
 
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
@@ -145,6 +152,7 @@ class PositionServiceTest {
     assertThat(response.leverage()).isEqualTo(20);
     assertThat(response.positionUnit()).isEqualTo("CONTRACT");
     assertThat(response.markPrice()).isEqualByComparingTo("63876.9");
+    assertThat(response.notional()).isEqualByComparingTo("638.74800000");
     assertThat(response.liquidationPrice()).isEqualByComparingTo("63867.80000000");
     assertThat(response.maintenanceMargin()).isEqualByComparingTo("250.00000000");
     assertThat(response.floatingPnl()).isEqualByComparingTo("0.020");
@@ -376,6 +384,7 @@ class PositionServiceTest {
     position.setStatus(PositionStatus.CLOSED);
     position.setFloatingPnl(BigDecimal.ZERO);
     position.setRealizedPnl(new BigDecimal("15.00000000"));
+    position.setFundingPnl(new BigDecimal("-0.10000000"));
 
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.CLOSED))
@@ -388,8 +397,97 @@ class PositionServiceTest {
     assertThat(responses).hasSize(1);
     assertThat(responses.get(0).status()).isEqualTo("CLOSED");
     assertThat(responses.get(0).realizedPnl()).isEqualByComparingTo("15.00000000");
+    assertThat(responses.get(0).fundingPnl()).isEqualByComparingTo("-0.10000000");
     assertThat(responses.get(0).stopLoss()).isEqualByComparingTo("1.09000");
     assertThat(responses.get(0).takeProfit()).isEqualByComparingTo("1.12000");
+    verify(quoteService, never()).freshQuote(any());
+  }
+
+  @Test
+  void openPositionsIncludesSpotWalletHoldings() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    SpotPositionEntity spotPosition = spotPosition(accountId, "BTC", "USDT");
+    spotPosition.setQuantity(new BigDecimal("0.19980000"));
+    spotPosition.setAverageCost(new BigDecimal("50050.05005000"));
+
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
+        .thenReturn(List.of());
+    when(spotPositionRepository.findOpenByAccountId(accountId)).thenReturn(List.of(spotPosition));
+    when(quoteService.freshQuote("BTCUSDT")).thenReturn(new QuoteResponse(
+        "quote",
+        "BTCUSDT",
+        new BigDecimal("55000.00000000"),
+        new BigDecimal("55000.20000000"),
+        new BigDecimal("55000.10000000"),
+        new BigDecimal("0.20000000"),
+        "test",
+        1780660000000L));
+    when(pnlCalculator.floatingPnl(
+        InstrumentKind.SPOT,
+        OrderSide.BUY,
+        new BigDecimal("0.19980000"),
+        new BigDecimal("50050.05005000"),
+        new BigDecimal("55000.00000000"),
+        BigDecimal.ONE))
+        .thenReturn(new BigDecimal("989.00000000"));
+
+    PositionService service = service();
+
+    List<PositionResponse> responses = service.openPositions(userId, accountId);
+
+    assertThat(responses).hasSize(1);
+    PositionResponse response = responses.get(0);
+    assertThat(response.id()).isEqualTo(spotPosition.getId());
+    assertThat(response.symbol()).isEqualTo("BTCUSDT");
+    assertThat(response.side()).isEqualTo("BUY");
+    assertThat(response.instrumentType()).isEqualTo("SPOT");
+    assertThat(response.marginMode()).isEqualTo("CASH");
+    assertThat(response.leverage()).isNull();
+    assertThat(response.positionUnit()).isEqualTo("BTC");
+    assertThat(response.lots()).isEqualByComparingTo("0.19980000");
+    assertThat(response.openPrice()).isEqualByComparingTo("50050.05005000");
+    assertThat(response.markPrice()).isEqualByComparingTo("55000.10000000");
+    assertThat(response.currentPrice()).isEqualByComparingTo("55000.00000000");
+    assertThat(response.floatingPnl()).isEqualByComparingTo("989.00000000");
+    assertThat(response.marginHeld()).isEqualByComparingTo("9999.99999999");
+    assertThat(response.maintenanceMargin()).isNull();
+    assertThat(response.status()).isEqualTo("OPEN");
+  }
+
+  @Test
+  void positionHistoryIncludesClosedSpotWalletHoldingsWithoutRefreshingQuotes() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    SpotPositionEntity spotPosition = spotPosition(accountId, "ETH", "USDT");
+    spotPosition.setQuantity(BigDecimal.ZERO);
+    spotPosition.setAverageCost(new BigDecimal("3200.00000000"));
+    spotPosition.setRealizedPnl(new BigDecimal("125.00000000"));
+    spotPosition.setUpdatedAt(Instant.parse("2026-06-16T10:00:00Z"));
+
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.CLOSED))
+        .thenReturn(List.of());
+    when(spotPositionRepository.findClosedWithRealizedPnlByAccountId(accountId)).thenReturn(List.of(spotPosition));
+
+    PositionService service = service();
+
+    List<PositionResponse> responses = service.positionHistory(userId, accountId);
+
+    assertThat(responses).hasSize(1);
+    PositionResponse response = responses.get(0);
+    assertThat(response.id()).isEqualTo(spotPosition.getId());
+    assertThat(response.symbol()).isEqualTo("ETHUSDT");
+    assertThat(response.instrumentType()).isEqualTo("SPOT");
+    assertThat(response.marginMode()).isEqualTo("CASH");
+    assertThat(response.lots()).isEqualByComparingTo("0");
+    assertThat(response.openPrice()).isEqualByComparingTo("3200.00000000");
+    assertThat(response.currentPrice()).isEqualByComparingTo("3200.00000000");
+    assertThat(response.floatingPnl()).isEqualByComparingTo("0");
+    assertThat(response.realizedPnl()).isEqualByComparingTo("125.00000000");
+    assertThat(response.status()).isEqualTo("CLOSED");
+    assertThat(response.closedAt()).isEqualTo(Instant.parse("2026-06-16T10:00:00Z"));
     verify(quoteService, never()).freshQuote(any());
   }
 
@@ -867,7 +965,24 @@ class PositionServiceTest {
         quoteService,
         pnlCalculator,
         ledgerService,
-        symbolRepository);
+        symbolRepository,
+        spotPositionRepository);
+  }
+
+  private static SpotPositionEntity spotPosition(UUID accountId, String asset, String costAsset) {
+    SpotPositionEntity position = new SpotPositionEntity();
+    position.setId(UUID.randomUUID());
+    position.setAccountId(accountId);
+    position.setWalletType("SPOT");
+    position.setAsset(asset);
+    position.setCostAsset(costAsset);
+    position.setQuantity(BigDecimal.ZERO);
+    position.setAverageCost(BigDecimal.ZERO);
+    position.setRealizedPnl(BigDecimal.ZERO);
+    position.setUnrealizedPnl(BigDecimal.ZERO);
+    position.setFeeCost(BigDecimal.ZERO);
+    position.setUpdatedAt(Instant.parse("2026-06-16T00:00:00Z"));
+    return position;
   }
 
   private static SymbolEntity symbol(

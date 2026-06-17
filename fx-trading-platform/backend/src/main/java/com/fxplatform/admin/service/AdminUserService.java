@@ -13,7 +13,9 @@ import com.fxplatform.audit.service.AuditDetailsBuilder;
 import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.auth.entity.UserEntity;
 import com.fxplatform.auth.enums.KycStatus;
+import com.fxplatform.auth.enums.UserStatus;
 import com.fxplatform.auth.repository.UserRepository;
+import com.fxplatform.auth.service.AuthSessionService;
 import com.fxplatform.common.exception.BusinessException;
 import java.util.Map;
 import java.util.UUID;
@@ -34,6 +36,7 @@ public class AdminUserService {
   private final AdminUserNoteRepository userNoteRepository;
   /** 审计服务，用于记录所有后台用户写操作。 */
   private final AuditLogService auditLogService;
+  private final AuthSessionService authSessionService;
 
   /** 分页查询后台用户列表。 */
   public AdminPageResponse<AdminUserResponse> users(int page, int size) {
@@ -45,10 +48,19 @@ public class AdminUserService {
   /** 更新用户状态并写入审计。 */
   @Transactional
   public AdminUserResponse updateStatus(UUID actorUserId, UUID userId, AdminUserStatusRequest request) {
+    AdminActionAuthorization.requireAuthority(request.status() == UserStatus.DISABLED
+        ? AdminPermissionCatalog.USER_DISABLE
+        : AdminPermissionCatalog.USER_UPDATE);
+    if (request.status() == UserStatus.DISABLED) {
+      AdminActionConfirmation.require(request.confirmationText(), AdminActionConfirmation.CONFIRM_DISABLE_USER);
+    }
     UserEntity user = findUser(userId);
     String before = user.getStatus().name();
     user.setStatus(request.status());
     userRepository.save(user);
+    if (request.status() != UserStatus.ACTIVE) {
+      authSessionService.revokeAllUserSessions(userId, "USER_STATUS_" + request.status().name());
+    }
     auditLogService.record(
         actorUserId,
         "ADMIN_USER_STATUS_UPDATE",
@@ -116,6 +128,7 @@ public class AdminUserService {
    */
   public void forceLogout(UUID actorUserId, UUID userId, String reason) {
     findUser(userId);
+    authSessionService.revokeAllUserSessions(userId, "ADMIN_FORCE_LOGOUT");
     auditLogService.record(
         actorUserId,
         "ADMIN_USER_FORCE_LOGOUT",

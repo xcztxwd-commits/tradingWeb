@@ -7,7 +7,7 @@ import {
   testDataProvider,
   updateDataProvider
 } from '../services/adminApi'
-import { getValidAdminToken } from '../services/adminToken'
+import { getAdminAuthorities, getValidAdminToken } from '../services/adminToken'
 import type { DataProviderPayload, DataProviderRow } from '../types'
 import { DataTable, display, formatDateTime, PageHeader, StateBlock, useAdminData } from './adminPageUtils'
 
@@ -46,18 +46,32 @@ export function DataProvidersPage() {
   const [form, setForm] = useState<ProviderForm>(emptyProviderForm)
   const [message, setMessage] = useState('')
   const [actionError, setActionError] = useState('')
+  const canUpdateProvider = getAdminAuthorities().includes('market:data-provider:update')
 
   const saveProvider = async (event: FormEvent) => {
     event.preventDefault()
+    if (!canUpdateProvider) {
+      setActionError('Missing market:data-provider:update')
+      return
+    }
     await runAction(async (token) => {
-      const payload = toProviderPayload(form)
+      let confirmationText: string | undefined
+      if (providerStatusChanged(form, data ?? [])) {
+        const entered = window.prompt('CONFIRM_PROVIDER_STATUS')
+        if (entered !== 'CONFIRM_PROVIDER_STATUS') {
+          setActionError('Provider status change confirmation failed')
+          return
+        }
+        confirmationText = entered
+      }
+      const payload = toProviderPayload(form, confirmationText)
       if (form.id) {
         await updateDataProvider(token, form.id, payload)
       } else {
         await createDataProvider(token, payload)
       }
       setForm(emptyProviderForm)
-      setMessage('数据源已保存')
+      setMessage('Provider saved')
       await reload()
     })
   }
@@ -70,13 +84,14 @@ export function DataProvidersPage() {
 
   const syncProvider = (providerId: string) => runAction(async (token) => {
     const result = await syncProviderInstruments(token, providerId)
-    setMessage(`已同步 ${result.syncedCount} 个品种`)
+    setMessage(`Synced ${result.syncedCount} instruments`)
+    await reload()
   })
 
   const runAction = async (handler: (token: string) => Promise<void>) => {
     const token = getValidAdminToken()
     if (!token) {
-      setActionError('登录状态已失效，请重新登录')
+      setActionError('Admin session expired. Please sign in again.')
       return
     }
     setActionError('')
@@ -84,13 +99,16 @@ export function DataProvidersPage() {
     try {
       await handler(token)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '操作失败')
+      setActionError(err instanceof Error ? err.message : 'Action failed')
     }
   }
 
   return (
     <>
-      <PageHeader title="行情数据源" description="配置 Massive、Binance、OKX、Demo 等数据源，并执行健康检查和品种同步。" />
+      <PageHeader
+        title="Market Data Providers"
+        description="Configure Massive, Binance, OKX, Demo providers and review quote health."
+      />
       {message ? <div className="feature-message">{message}</div> : null}
       {actionError ? <StateBlock tone="error">{actionError}</StateBlock> : null}
 
@@ -152,34 +170,43 @@ export function DataProvidersPage() {
           </label>
         </div>
         <div className="admin-action-row">
-          <button type="submit">{form.id ? '保存数据源' : '新增数据源'}</button>
-          <button type="button" onClick={() => setForm(emptyProviderForm)}>清空</button>
+          {canUpdateProvider ? <button type="submit">{form.id ? 'Save Provider' : 'Add Provider'}</button> : null}
+          <button type="button" onClick={() => setForm(emptyProviderForm)}>Clear</button>
         </div>
       </form>
 
-      {loading ? <StateBlock tone="loading">正在加载数据源</StateBlock> : null}
+      {loading ? <StateBlock tone="loading">Loading providers...</StateBlock> : null}
       {error ? <StateBlock tone="error">{error}</StateBlock> : null}
       {!loading && !error ? (
         <DataTable
           rows={data ?? []}
-          emptyText="暂无数据源"
+          emptyText="No providers"
           columns={[
             { title: 'Code', render: (row) => row.code },
             { title: 'Name', render: (row) => row.name },
             { title: 'Asset Classes', render: (row) => row.assetClasses.join(', ') },
             { title: 'Capabilities', render: (row) => row.capabilities.join(', ') || '-' },
+            { title: 'Capability Status', render: (row) => formatCapabilityStatuses(row.capabilityStatuses) },
             { title: 'Health', render: (row) => row.healthStatus },
             { title: 'Enabled', render: (row) => display(row.enabled) },
             { title: 'Last Check', render: (row) => formatDateTime(row.lastHealthCheckAt) },
+            { title: 'Last Success', render: (row) => formatDateTime(row.lastSuccessAt) },
+            { title: 'Last Failure', render: (row) => formatDateTime(row.lastFailureAt) },
+            { title: 'Failures', render: (row) => String(row.failureCount ?? 0) },
+            { title: 'Avg Latency', render: (row) => formatMs(row.avgLatencyMs) },
+            { title: 'Quote Success', render: (row) => formatDateTime(row.lastQuoteSuccessAt) },
+            { title: 'Quote Staleness', render: (row) => formatMs(row.quoteStalenessMs) },
+            { title: 'Last Sync', render: (row) => formatDateTime(row.lastInstrumentSyncAt) },
+            { title: 'Synced', render: (row) => String(row.lastInstrumentSyncCount ?? 0) },
             {
               title: 'Actions',
-              render: (row) => (
+              render: (row) => canUpdateProvider ? (
                 <div className="admin-inline-actions">
-                  <button type="button" onClick={() => setForm(providerToForm(row))}>编辑</button>
-                  <button type="button" onClick={() => void testProvider(row.id)}>测试</button>
-                  <button type="button" onClick={() => void syncProvider(row.id)}>同步</button>
+                  <button type="button" onClick={() => setForm(providerToForm(row))}>Edit</button>
+                  <button type="button" onClick={() => void testProvider(row.id)}>Test</button>
+                  <button type="button" onClick={() => void syncProvider(row.id)}>Sync</button>
                 </div>
-              )
+              ) : '-'
             }
           ]}
         />
@@ -209,7 +236,13 @@ function providerToForm(row: DataProviderRow): ProviderForm {
   }
 }
 
-function toProviderPayload(form: ProviderForm): DataProviderPayload {
+function providerStatusChanged(form: ProviderForm, providers: DataProviderRow[]) {
+  if (!form.id) return false
+  const current = providers.find((provider) => provider.id === form.id)
+  return current ? current.enabled !== form.enabled : false
+}
+
+function toProviderPayload(form: ProviderForm, confirmationText?: string): DataProviderPayload {
   return {
     code: form.code.trim(),
     name: form.name.trim(),
@@ -221,7 +254,8 @@ function toProviderPayload(form: ProviderForm): DataProviderPayload {
     priority: form.priority,
     timeoutMs: form.timeoutMs,
     rateLimitPerMinute: form.rateLimitPerMinute,
-    configJson: form.configJson.trim() || '{}'
+    configJson: form.configJson.trim() || '{}',
+    confirmationText
   }
 }
 
@@ -232,4 +266,13 @@ function splitCsv(value: string) {
 function blankToNull(value: string) {
   const text = value.trim()
   return text ? text : null
+}
+
+function formatMs(value: number | null | undefined) {
+  return value == null ? '-' : `${value} ms`
+}
+
+function formatCapabilityStatuses(statuses: DataProviderRow['capabilityStatuses']) {
+  if (!statuses || statuses.length === 0) return '-'
+  return statuses.map((item) => `${item.capability}:${item.status}`).join(', ')
 }

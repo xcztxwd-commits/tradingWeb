@@ -1,0 +1,94 @@
+name: FX API Contract
+
+on:
+  pull_request:
+    paths:
+      - 'fx-trading-platform/**'
+      - '.github/workflows/fx-contract.yml'
+  push:
+    branches: [ "main" ]
+    paths:
+      - 'fx-trading-platform/**'
+      - '.github/workflows/fx-contract.yml'
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: fx_platform
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d fx_platform"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: fx-trading-platform
+
+    env:
+      SPRING_PROFILES_ACTIVE: dev
+      DATABASE_URL: jdbc:postgresql://localhost:5432/fx_platform
+      DATABASE_USERNAME: postgres
+      DATABASE_PASSWORD: postgres
+      REDIS_HOST: localhost
+      REDIS_PORT: 6379
+      JWT_SECRET: ci-jwt-secret-value-at-least-32-chars
+      CONFIG_ENCRYPTION_KEY: ci-config-encryption-key-32chars
+      MARKET_DEMO_QUOTES_ENABLED: true
+      MARKET_TEST_DATA_ENABLED: true
+      MARKET_REALTIME_ENABLED: false
+      API_BASE_URL: http://localhost:8080
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: fx-trading-platform/package-lock.json
+
+      - run: npm ci
+
+      - name: Start backend
+        run: |
+          mvn -q -DskipTests -f backend/pom.xml spring-boot:run > backend.log 2>&1 &
+          for attempt in {1..90}; do
+            if curl -fsS http://localhost:8080/actuator/health > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat backend.log
+          exit 1
+
+      - run: npm run contract:export
+      - run: npm run contract:check
+      - run: npm run web:test
+      - run: npm run web:build
+      - run: npm run admin:build
+      - run: npm run smoke:backend

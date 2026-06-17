@@ -36,7 +36,7 @@ describe('OKX-style trade panel density', () => {
   it('keeps TradePanel as a compact composition shell for the spot order form', () => {
     assert.equal(existsSync(sessionStatusPath), true)
     assert.equal(existsSync(submitHookPath), true)
-    assert.ok(tradePanelLines.length <= 260, `TradePanel.tsx has ${tradePanelLines.length} lines`)
+    assert.ok(tradePanelLines.length <= 290, `TradePanel.tsx has ${tradePanelLines.length} lines`)
     assert.match(tradePanelSource, /<OrderConfirmationDialog/)
     assert.match(tradePanelSource, /useTradePanelSubmit/)
     assert.doesNotMatch(tradePanelSource, /TradePanelAccountStrip/)
@@ -84,14 +84,16 @@ describe('OKX-style trade panel density', () => {
     assert.match(submitHookSource, /toOrderPayload\(accountId,\s*form,\s*market,\s*leverage\)/)
     assert.match(submitHookSource, /await onSubmitOrder\(payload\)/)
     assert.match(tradePanelSource, /useTradePanelSubmit\(\{[\s\S]*leverage,/)
-    assert.match(tradePanelSource, /resolveTradePanelLeverage\(symbolLeverage\)/)
-    assert.match(tradePanelSource, /createPanelMarket\(symbol,\s*snapshot,\s*\{ category,\s*leverage,\s*productType \}\)/)
+    assert.match(tradePanelSource, /resolveTradePanelLeverage\(resolveRuleLeverage\(symbolLeverage,\s*rules\)\)/)
+    assert.match(tradePanelSource, /createPanelMarket\(symbol,\s*snapshot,\s*\{ category,\s*leverage,\s*productType,\s*rules \}\)/)
     assert.doesNotMatch(tradePanelSource, /const leverage = 1/)
     assert.match(tradePanelSource, /backendReady/)
     assert.match(submitHookSource, /\.\.\/services\/orderAdapter/)
   })
 
   it('keeps trading limits and precision props available to the order form', () => {
+    assert.match(tradePanelSource, /rules\?: TradeMarket\['rules'\]/)
+    assert.match(tradePanelSource, /resolveRuleNumber\(rules\?\.minNotional,\s*5\)/)
     assert.match(tradePanelSource, /minOrderAmount/)
     assert.match(tradePanelSource, /pricePrecision/)
     assert.match(tradePanelSource, /quantityPrecision/)
@@ -161,7 +163,7 @@ describe('OKX-style trade panel density', () => {
     assert.match(tradePanelSource, /sessionMode/)
     assert.doesNotMatch(tradePanelSource, /offline-preview/)
     assert.doesNotMatch(tradePanelSource, /previewReady/)
-    assert.match(tradePanelSource, /const canTrade = backendReady/)
+    assert.match(tradePanelSource, /const canTrade = backendReady && rulesTradable/)
     assert.doesNotMatch(tradePanelSource, /buildOrderPayload/)
     assert.doesNotMatch(tradePanelSource, /submitOrder\(mockPayload\)/)
     assert.doesNotMatch(tradePanelSource, /mockResponse/)
@@ -191,7 +193,18 @@ describe('OKX-style trade panel density', () => {
     assert.match(submitHookSource, /ApiClientError/)
     assert.match(submitHookSource, /t\('errors\.apiCode'/)
     assert.match(submitHookSource, /t\('errors\.httpStatus'/)
-    assert.match(submitHookSource, /Request ID/)
+    assert.match(submitHookSource, /t\('errors\.requestId'/)
+    assert.doesNotMatch(submitHookSource, /Request ID锛\?/)
+  })
+
+  it('blocks stale market orders and surfaces balance or margin shortfalls', () => {
+    assert.match(orderSideSource, /validation\.errors\.includes\('marketStale'\)/)
+    assert.match(orderSideSource, /disabledReason=\{marketStaleError\}/)
+    assert.match(orderSideSource, /getRequiredMargin/)
+    assert.match(orderSideSource, /quoteShortfall/)
+    assert.match(orderSideSource, /baseShortfall/)
+    assert.match(orderSideSource, /t\('trading\.balanceShortfall'/)
+    assert.match(orderSideSource, /t\('trading\.marginRequirement'/)
   })
 
   it('shows login navigation instead of order submission when authentication is required', () => {

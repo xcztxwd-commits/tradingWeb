@@ -1,9 +1,13 @@
 package com.fxplatform.trading.service;
 
 import com.fxplatform.trading.dto.response.OrderEventResponse;
+import com.fxplatform.trading.dto.response.TradingSessionEventResponse;
 import com.fxplatform.trading.entity.OrderEventEntity;
+import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.repository.OrderEventRepository;
+import com.fxplatform.trading.repository.OrderRepository;
+import com.fxplatform.trading.websocket.TradingWsPublisher;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +21,8 @@ import org.springframework.stereotype.Service;
 public class OrderEventService {
 
   private final OrderEventRepository orderEventRepository;
+  private final OrderRepository orderRepository;
+  private final TradingWsPublisher tradingWsPublisher;
 
   public OrderEventEntity record(
       UUID orderId,
@@ -33,7 +39,9 @@ public class OrderEventService {
     event.setToStatus(toStatus);
     event.setReasonCode(reasonCode);
     event.setMessage(message);
-    return orderEventRepository.save(event);
+    OrderEventEntity saved = orderEventRepository.save(event);
+    publishTradingSessionEvent(saved);
+    return saved;
   }
 
   public List<OrderEventResponse> events(UUID orderId) {
@@ -53,5 +61,20 @@ public class OrderEventService {
         event.getReasonCode(),
         event.getMessage(),
         event.getCreatedAt());
+  }
+
+  private void publishTradingSessionEvent(OrderEventEntity event) {
+    OrderEntity order = orderRepository.selectById(event.getOrderId());
+    if (order == null) {
+      return;
+    }
+    tradingWsPublisher.publishAccountEvent(order.getAccountId(), new TradingSessionEventResponse(
+        "ORDER_EVENT",
+        order.getAccountId(),
+        order.getId(),
+        event.getId(),
+        event.getEventType(),
+        event.getToStatus().name(),
+        event.getCreatedAt()));
   }
 }

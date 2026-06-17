@@ -3,6 +3,7 @@ package com.fxplatform.risk.repository;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.risk.entity.RiskConfigEntity;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -17,5 +18,17 @@ public interface RiskConfigRepository extends FxBaseMapper<RiskConfigEntity> {
         .last("LIMIT 1"))
         .stream()
         .findFirst();
+  }
+
+  default Optional<RiskConfigEntity> findEnabledBySymbolOrGlobal(String symbol) {
+    List<RiskConfigEntity> configs = selectList(new LambdaQueryWrapper<RiskConfigEntity>()
+        .eq(RiskConfigEntity::getEnabled, true)
+        .and(query -> query
+            .eq(RiskConfigEntity::getSymbol, symbol)
+            .or()
+            .isNull(RiskConfigEntity::getSymbol))
+        .orderByDesc(RiskConfigEntity::getSymbol)
+        .last("LIMIT 1"));
+    return configs.stream().findFirst();
   }
 }

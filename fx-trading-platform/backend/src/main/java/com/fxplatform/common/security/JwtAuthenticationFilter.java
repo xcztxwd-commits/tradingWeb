@@ -1,12 +1,14 @@
 package com.fxplatform.common.security;
 
+import com.fxplatform.auth.enums.UserStatus;
 import com.fxplatform.auth.repository.UserRepository;
+import com.fxplatform.auth.service.AuthSessionService;
+import com.fxplatform.admin.service.AdminAuthorityService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -26,6 +28,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
   private final JwtService jwtService;
   private final UserRepository userRepository;
+  private final TokenRevocationService tokenRevocationService;
+  private final AuthSessionService authSessionService;
+  private final AdminAuthorityService adminAuthorityService;
 
   /**
 //   * 处理 doFilterInternal 安全认证逻辑。
@@ -52,14 +57,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     if (SecurityContextHolder.getContext().getAuthentication() != null) {
       return true;
     }
-    UUID userId;
+    JwtTokenClaims claims;
     try {
-      userId = jwtService.parseUserId(token);
+      claims = jwtService.parseAccessToken(token);
     } catch (RuntimeException ex) {
       return false;
     }
-    return userRepository.findById(userId).map(user -> {
-      UserPrincipal principal = UserPrincipal.from(user);
+    if (tokenRevocationService.isAccessTokenRevoked(claims) || !authSessionService.isAccessSessionActive(claims)) {
+      return false;
+    }
+    return userRepository.findById(claims.userId()).map(user -> {
+      if (user.getStatus() != UserStatus.ACTIVE) {
+        return false;
+      }
+      UserPrincipal principal = UserPrincipal.from(user, adminAuthorityService.authoritiesFor(user));
       UsernamePasswordAuthenticationToken authentication =
           new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
       authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));

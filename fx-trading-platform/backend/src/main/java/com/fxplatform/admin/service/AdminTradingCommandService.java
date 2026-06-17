@@ -108,6 +108,7 @@ public class AdminTradingCommandService {
       UUID positionId,
       AdminForceClosePositionRequest request
   ) {
+    AdminActionConfirmation.require(request.confirmationText(), AdminActionConfirmation.CONFIRM_FORCE_CLOSE);
     PositionResponse response = positionService.closeSystemPosition(request.accountId(), positionId);
     auditLogService.record(
         actorUserId,

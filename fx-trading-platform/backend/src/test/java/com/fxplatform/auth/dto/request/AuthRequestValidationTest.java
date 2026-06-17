@@ -10,30 +10,45 @@ import org.junit.jupiter.api.Test;
 class AuthRequestValidationTest {
 
   @Test
-  void registerAcceptsArbitraryIdentifierAndPasswordInput() {
+  void registerRequiresIdentifierAndStrongPassword() {
     Validator validator = validator();
 
-    var violations = validator.validate(new RegisterRequest("not an email", null, "1"));
+    var violations = validator.validate(new RegisterRequest("", null, "short"));
+
+    assertThat(violations)
+        .extracting(violation -> violation.getPropertyPath().toString())
+        .contains("identifierPresent", "password");
+  }
+
+  @Test
+  void registerRejectsInvalidEmailWhenEmailIsProvided() {
+    Validator validator = validator();
+
+    var violations = validator.validate(new RegisterRequest("not an email", null, "Password123!"));
+
+    assertThat(violations)
+        .extracting(violation -> violation.getPropertyPath().toString())
+        .contains("email");
+  }
+
+  @Test
+  void registerAcceptsPhoneOnlyInputWithStrongPassword() {
+    Validator validator = validator();
+
+    var violations = validator.validate(new RegisterRequest(null, "+60123456789", "Password123!"));
 
     assertThat(violations).isEmpty();
   }
 
   @Test
-  void registerAcceptsBlankFormInputSoTheServiceCanPersistIt() {
+  void loginRequiresIdentifierAndPassword() {
     Validator validator = validator();
 
-    var violations = validator.validate(new RegisterRequest("", null, ""));
+    var violations = validator.validate(new LoginRequest("", ""));
 
-    assertThat(violations).isEmpty();
-  }
-
-  @Test
-  void loginAcceptsArbitraryIdentifierAndPasswordInput() {
-    Validator validator = validator();
-
-    var violations = validator.validate(new LoginRequest("+60 123", ""));
-
-    assertThat(violations).isEmpty();
+    assertThat(violations)
+        .extracting(violation -> violation.getPropertyPath().toString())
+        .contains("email", "password");
   }
 
   private static Validator validator() {

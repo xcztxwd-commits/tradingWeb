@@ -7,6 +7,7 @@ import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
 import com.fxplatform.market.dto.SymbolResponse;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -37,6 +38,13 @@ public interface MarketDataProviderAdapter extends MarketDataProvider {
   @Override
   default Optional<QuoteResponse> fetchIndicativeQuote(String symbol, String providerSymbol, Instant to) {
     return Optional.empty();
+  }
+
+  default Map<String, QuoteResponse> fetchLatestQuotes(Map<String, String> providerSymbolsBySymbol) {
+    LinkedHashMap<String, QuoteResponse> quotes = new LinkedHashMap<>();
+    providerSymbolsBySymbol.forEach((symbol, providerSymbol) ->
+        fetchLatestQuote(symbol, providerSymbol).ifPresent(quote -> quotes.put(symbol, quote)));
+    return quotes;
   }
 
   @Override

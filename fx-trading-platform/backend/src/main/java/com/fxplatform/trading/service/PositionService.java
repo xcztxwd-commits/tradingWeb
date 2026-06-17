@@ -23,12 +23,15 @@ import com.fxplatform.risk.service.TradingInstrumentClassifier;
 import com.fxplatform.trading.dto.request.UpdatePositionProtectionRequest;
 import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.entity.PositionEntity;
+import com.fxplatform.trading.entity.SpotPositionEntity;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.PositionRepository;
+import com.fxplatform.trading.repository.SpotPositionRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -47,6 +50,7 @@ public class PositionService {
   private final PnLCalculator pnlCalculator;
   private final LedgerService ledgerService;
   private final SymbolRepository symbolRepository;
+  private final SpotPositionRepository spotPositionRepository;
   private final TradingInstrumentClassifier instrumentClassifier = new TradingInstrumentClassifier();
   private final TradingAlgorithmEngine tradingAlgorithmEngine = new TradingAlgorithmEngine();
   private final PerpMarginCalculator perpMarginCalculator = new PerpMarginCalculator();
@@ -58,7 +62,8 @@ public class PositionService {
       QuoteService quoteService,
       PnLCalculator pnlCalculator,
       LedgerService ledgerService,
-      SymbolRepository symbolRepository
+      SymbolRepository symbolRepository,
+      SpotPositionRepository spotPositionRepository
   ) {
     this.positionRepository = positionRepository;
     this.accountRepository = accountRepository;
@@ -66,6 +71,18 @@ public class PositionService {
     this.pnlCalculator = pnlCalculator;
     this.ledgerService = ledgerService;
     this.symbolRepository = symbolRepository;
+    this.spotPositionRepository = spotPositionRepository;
+  }
+
+  public PositionService(
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      QuoteService quoteService,
+      PnLCalculator pnlCalculator,
+      LedgerService ledgerService,
+      SymbolRepository symbolRepository
+  ) {
+    this(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService, symbolRepository, null);
   }
 
   public PositionService(
@@ -75,7 +92,7 @@ public class PositionService {
       PnLCalculator pnlCalculator,
       LedgerService ledgerService
   ) {
-    this(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService, null);
+    this(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService, null, null);
   }
 
   /**
@@ -83,18 +100,30 @@ public class PositionService {
    */
   public List<PositionResponse> openPositions(UUID userId, UUID accountId) {
     TradingAccountEntity account = requireOwnedAccount(userId, accountId);
-    return positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN)
+    List<PositionResponse> responses = new ArrayList<>(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN)
         .stream()
         .map(position -> toRealtimeResponse(position, account))
-        .toList();
+        .toList());
+    if (spotPositionRepository != null) {
+      spotPositionRepository.findOpenByAccountId(accountId).stream()
+          .map(this::toRealtimeSpotResponse)
+          .forEach(responses::add);
+    }
+    return responses;
   }
 
   public List<PositionResponse> positionHistory(UUID userId, UUID accountId) {
     TradingAccountEntity account = requireOwnedAccount(userId, accountId);
-    return positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.CLOSED)
+    List<PositionResponse> responses = new ArrayList<>(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.CLOSED)
         .stream()
         .map(position -> toResponse(position, account))
-        .toList();
+        .toList());
+    if (spotPositionRepository != null) {
+      spotPositionRepository.findClosedWithRealizedPnlByAccountId(accountId).stream()
+          .map(this::toClosedSpotResponse)
+          .forEach(responses::add);
+    }
+    return responses;
   }
 
   /**
@@ -268,6 +297,7 @@ public class PositionService {
         position.getOpenPrice(),
         markPrice,
         currentPrice,
+        position.getNotional(),
         liquidationPrice(position, profile),
         position.getOpenPrice(),
         position.getStopLoss(),
@@ -275,6 +305,7 @@ public class PositionService {
         floatingPnl,
         floatingPnlRatio(floatingPnl, position.getMarginHeld()),
         position.getRealizedPnl(),
+        position.getFundingPnl(),
         position.getMarginHeld(),
         maintenanceMargin(position, profile, markPrice, positionLeverage(position, account)),
         maintenanceMarginRate(profile),
@@ -308,6 +339,7 @@ public class PositionService {
         position.getOpenPrice(),
         markPrice,
         currentPrice,
+        position.getNotional(),
         liquidationPrice(position, profile),
         position.getOpenPrice(),
         position.getStopLoss(),
@@ -315,6 +347,7 @@ public class PositionService {
         floatingPnl,
         floatingPnlRatio(floatingPnl, position.getMarginHeld()),
         position.getRealizedPnl(),
+        position.getFundingPnl(),
         position.getMarginHeld(),
         maintenanceMargin(position, profile, markPrice, positionLeverage(position, account)),
         maintenanceMarginRate(profile),
@@ -322,6 +355,107 @@ public class PositionService {
         position.getStatus().name(),
         position.getOpenedAt(),
         position.getClosedAt());
+  }
+
+  private PositionResponse toRealtimeSpotResponse(SpotPositionEntity position) {
+    String symbol = spotSymbol(position);
+    QuoteResponse quote = quoteService.freshQuote(symbol);
+    BigDecimal currentPrice = quote.bid();
+    BigDecimal markPrice = markPrice(quote, currentPrice);
+    BigDecimal quantity = orZero(position.getQuantity());
+    BigDecimal averageCost = orZero(position.getAverageCost());
+    BigDecimal costBasis = spotCostBasis(position);
+    BigDecimal floatingPnl = pnlCalculator.floatingPnl(
+        InstrumentKind.SPOT,
+        OrderSide.BUY,
+        quantity,
+        averageCost,
+        currentPrice,
+        BigDecimal.ONE);
+    return spotResponse(
+        position,
+        symbol,
+        quantity,
+        averageCost,
+        markPrice,
+        currentPrice,
+        floatingPnl,
+        floatingPnlRatio(floatingPnl, costBasis),
+        costBasis,
+        PositionStatus.OPEN.name(),
+        position.getUpdatedAt(),
+        null);
+  }
+
+  private PositionResponse toClosedSpotResponse(SpotPositionEntity position) {
+    BigDecimal averageCost = orZero(position.getAverageCost());
+    return spotResponse(
+        position,
+        spotSymbol(position),
+        orZero(position.getQuantity()),
+        averageCost,
+        averageCost,
+        averageCost,
+        BigDecimal.ZERO,
+        null,
+        spotCostBasis(position),
+        PositionStatus.CLOSED.name(),
+        null,
+        position.getUpdatedAt());
+  }
+
+  private PositionResponse spotResponse(
+      SpotPositionEntity position,
+      String symbol,
+      BigDecimal quantity,
+      BigDecimal averageCost,
+      BigDecimal markPrice,
+      BigDecimal currentPrice,
+      BigDecimal floatingPnl,
+      BigDecimal floatingPnlRatio,
+      BigDecimal marginHeld,
+      String status,
+      Instant openedAt,
+      Instant closedAt
+  ) {
+    return new PositionResponse(
+        position.getId(),
+        symbol,
+        OrderSide.BUY.name(),
+        "SPOT",
+        "CASH",
+        null,
+        normalize(position.getAsset()),
+        quantity,
+        averageCost,
+        markPrice,
+        currentPrice,
+        null,
+        null,
+        averageCost,
+        null,
+        null,
+        floatingPnl,
+        floatingPnlRatio,
+        orZero(position.getRealizedPnl()),
+        BigDecimal.ZERO,
+        marginHeld,
+        null,
+        null,
+        null,
+        status,
+        openedAt,
+        closedAt);
+  }
+
+  private BigDecimal spotCostBasis(SpotPositionEntity position) {
+    return orZero(position.getQuantity())
+        .multiply(orZero(position.getAverageCost()))
+        .setScale(8, RoundingMode.HALF_UP);
+  }
+
+  private String spotSymbol(SpotPositionEntity position) {
+    return normalize(position.getAsset()) + normalize(position.getCostAsset());
   }
 
   private BigDecimal floatingPnlRatio(BigDecimal floatingPnl, BigDecimal marginHeld) {

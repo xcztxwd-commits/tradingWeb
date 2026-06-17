@@ -24,4 +24,5 @@ export type OrderBookSide = 'bid' | 'ask'
 
 export type MarketDataSnapshot = OrderBookState & {
   recentTrades: TradeItem[]
+  updatedAt?: number
 }

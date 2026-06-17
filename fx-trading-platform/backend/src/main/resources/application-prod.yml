@@ -5,7 +5,7 @@ market:
     enabled: ${MARKET_TEST_DATA_ENABLED:false}
 
 execution:
-  mode: ${EXECUTION_MODE:broker}
+  mode: ${EXECUTION_MODE:disabled}
 
 logging:
   level:

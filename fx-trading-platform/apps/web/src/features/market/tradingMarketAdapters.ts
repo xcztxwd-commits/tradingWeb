@@ -1,4 +1,4 @@
-import type { ProductType, TradingCandle, TradingMarket, TradingPeriod, TradingQuote } from './tradingModels'
+import type { ProductType, TradingCandle, TradingInstrumentRules, TradingMarket, TradingPeriod, TradingQuote } from './tradingModels'
 import type { MarketDataSnapshot, TradeItem } from './marketDataTypes'
 
 export type BackendSymbol = {
@@ -31,6 +31,36 @@ export type BackendSymbol = {
   spread?: string | number | null
   quoteTimestamp?: string | number | null
   quoteSource?: string | null
+  rules?: BackendInstrumentRules | null
+}
+
+export type BackendInstrumentRules = {
+  symbol: string
+  exists: boolean
+  enabled: boolean
+  tradable: boolean
+  quoteEnabled: boolean
+  chartEnabled: boolean
+  orderBookEnabled: boolean
+  orderEnabled: boolean
+  productType?: ProductType | string | null
+  tickSize?: string | number | null
+  stepSize?: string | number | null
+  minQty?: string | number | null
+  maxQty?: string | number | null
+  minNotional?: string | number | null
+  maxNotional?: string | number | null
+  minLot?: string | number | null
+  maxLot?: string | number | null
+  maxLeverage?: string | number | null
+  defaultLeverage?: string | number | null
+  marginAsset?: string | null
+  settlementAsset?: string | null
+  contractSize?: string | number | null
+  riskTier?: string | null
+  tradingSession?: string | null
+  kycRequirement?: string | null
+  userRiskLevelRestriction?: string | null
 }
 
 export type BackendQuote = {
@@ -94,6 +124,7 @@ export const tradingMarketEndpoints = {
   symbols: '/api/market/symbols',
   favorites: '/api/market/favorites',
   status: '/api/market/status',
+  symbolRules: '/api/market/symbol-rules',
   candles: '/api/chart/candles',
   orderBook: '/api/market/order-book',
   recentTrades: '/api/market/trades'
@@ -127,9 +158,24 @@ export function buildMarketQuotePath(symbol: string) {
   return `/api/market/quotes/${encodeURIComponent(symbol)}`
 }
 
+export function buildMarketQuotesPath(symbols: string[]) {
+  const normalizedSymbols = Array.from(new Set(symbols.map(normalizeMarketSymbol).filter(Boolean)))
+  const params = new URLSearchParams({ symbols: normalizedSymbols.join(',') })
+  return `/api/market/quotes?${params.toString()}`
+}
+
 export function buildMarketSymbolsPath(limit = defaultMarketSymbolLimit) {
   const params = new URLSearchParams({ limit: String(limit) })
   return `${tradingMarketEndpoints.symbols}?${params.toString()}`
+}
+
+export function buildMarketSymbolRulesPath(symbol: string) {
+  return `${tradingMarketEndpoints.symbols}/${encodeURIComponent(normalizeMarketSymbol(symbol))}/rules`
+}
+
+export function buildMarketSymbolRulesBatchPath(symbols: string[]) {
+  const params = new URLSearchParams({ symbols: symbols.map(normalizeMarketSymbol).join(',') })
+  return `${tradingMarketEndpoints.symbolRules}?${params.toString()}`
 }
 
 export function buildMarketFavoritesPath() {
@@ -203,7 +249,39 @@ export function mapSymbolToTradingMarket(symbol: BackendSymbol): TradingMarket {
     pricePrecision: getSymbolPricePrecision(symbol),
     quantityPrecision: getSymbolQuantityPrecision(symbol),
     marketCap,
-    quoteTimestamp
+    quoteTimestamp,
+    rules: symbol.rules ? mapInstrumentRulesToTradingRules(symbol.rules) : undefined
+  }
+}
+
+export function mapInstrumentRulesToTradingRules(rules: BackendInstrumentRules): TradingInstrumentRules {
+  return {
+    symbol: rules.symbol,
+    exists: rules.exists,
+    enabled: rules.enabled,
+    tradable: rules.tradable,
+    quoteEnabled: rules.quoteEnabled,
+    chartEnabled: rules.chartEnabled,
+    orderBookEnabled: rules.orderBookEnabled,
+    orderEnabled: rules.orderEnabled,
+    productType: optionalProductType(rules.productType),
+    tickSize: optionalNumber(rules.tickSize),
+    stepSize: optionalNumber(rules.stepSize),
+    minQty: optionalNumber(rules.minQty),
+    maxQty: optionalNumber(rules.maxQty),
+    minNotional: optionalNumber(rules.minNotional),
+    maxNotional: optionalNumber(rules.maxNotional),
+    minLot: optionalNumber(rules.minLot),
+    maxLot: optionalNumber(rules.maxLot),
+    maxLeverage: optionalPositiveInteger(rules.maxLeverage),
+    defaultLeverage: optionalPositiveInteger(rules.defaultLeverage),
+    marginAsset: optionalText(rules.marginAsset),
+    settlementAsset: optionalText(rules.settlementAsset),
+    contractSize: optionalNumber(rules.contractSize),
+    riskTier: optionalText(rules.riskTier),
+    tradingSession: optionalText(rules.tradingSession),
+    kycRequirement: optionalText(rules.kycRequirement),
+    userRiskLevelRestriction: optionalText(rules.userRiskLevelRestriction)
   }
 }
 
@@ -393,6 +471,10 @@ function optionalProductType(value: string | null | undefined): ProductType | un
     return value
   }
   return undefined
+}
+
+function normalizeMarketSymbol(symbol: string) {
+  return symbol.trim().toUpperCase().replace(/[-_/]/g, '')
 }
 
 function formatCompactVolume(value: number) {

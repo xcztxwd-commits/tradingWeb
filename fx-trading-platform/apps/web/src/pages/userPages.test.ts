@@ -63,6 +63,26 @@ describe('prototype markets page', () => {
     assert.doesNotMatch(markets, /Bid\/Ask|high24h|low24h|sourceStatus/)
   })
 
+  it('shows the market loading state before tab-specific content renders', () => {
+    const tabsIndex = markets.indexOf('<div className="market-shell__tabs"')
+    const overviewIndex = markets.indexOf("{pageTab === 'overview'")
+    const loadingIndex = markets.indexOf('{loading ? <LoadingState', tabsIndex)
+
+    assert.ok(tabsIndex > 0)
+    assert.ok(overviewIndex > tabsIndex)
+    assert.ok(loadingIndex > tabsIndex && loadingIndex < overviewIndex)
+  })
+
+  it('shows the market API error state before tab-specific content renders', () => {
+    const tabsIndex = markets.indexOf('<div className="market-shell__tabs"')
+    const overviewIndex = markets.indexOf("{pageTab === 'overview'")
+    const errorIndex = markets.indexOf('{apiError ? (', tabsIndex)
+
+    assert.ok(tabsIndex > 0)
+    assert.ok(overviewIndex > tabsIndex)
+    assert.ok(errorIndex > tabsIndex && errorIndex < overviewIndex)
+  })
+
   it('uses readable Binance-like market labels for the visible market surface', () => {
     assert.match(markets, /加密货币市场/)
     assert.match(markets, /总览/)
@@ -107,7 +127,9 @@ describe('prototype markets page', () => {
     assert.match(markets, /Promise\.allSettled\(\[fetchMarketSymbols\(\), fetchBinanceMarketOverview\(\)\]\)/)
     assert.match(markets, /const initialMarkets = mergeBinanceOverviewMarkets\(symbols, nextBinanceOverview\?\.markets \?\? \[\]\)/)
     assert.match(markets, /setMarkets\(nextMarkets\)/)
-    assert.match(markets, /nextMarkets\.filter\(canHydrateMarketQuote\)\.slice\(0, marketQuoteHydrationLimit\)\.map\(\(market\) => loadQuotedMarket\(market\)\)/)
+    assert.match(markets, /loadQuotedMarkets\(nextMarkets\.filter\(canHydrateMarketQuote\)\.slice\(0, marketQuoteHydrationLimit\)\)/)
+    assert.match(markets, /fetchMarketQuotes/)
+    assert.doesNotMatch(markets, /Promise\.all\([\s\S]*loadQuotedMarket/)
     assert.match(markets, /visibleMarkets\.filter\(canHydrateMarketQuote\)\.slice\(0, marketQuoteHydrationLimit\)/)
     assert.match(markets, /function canHydrateMarketQuote\(market: TradingMarket\)/)
     assert.match(markets, /market\.source !== 'binance-market-overview'/)
@@ -218,9 +240,9 @@ describe('prototype auth and account center', () => {
   it('uses a Binance-style authentication shell while preserving login and registration APIs', () => {
     assert.match(login, /login\(email\.trim\(\), password\)/)
     assert.match(login, /type="text"/)
-    assert.match(login, /writeStoredAuthToken\(auth\.accessToken\)/)
-    assert.match(authSupport, /finishAuth\(auth\.accessToken, auth\.email \|\| normalizedIdentifier\)/)
-    assert.match(authSupport, /writeStoredAuthToken\(token\)/)
+    assert.match(login, /writeStoredAuthTokens\(auth\.accessToken,\s*auth\.refreshToken\)/)
+    assert.match(authSupport, /finishAuth\(auth\.accessToken,\s*auth\.refreshToken,\s*auth\.email \|\| normalizedIdentifier\)/)
+    assert.match(authSupport, /writeStoredAuthTokens\(accessToken,\s*refreshToken\)/)
     assert.match(authSupport, /register\(normalizedIdentifier, password, channel\)/)
     assert.match(authStyles, /\.page\s*{[\s\S]*background:\s*var\(--auth-bg\)/)
     assert.match(authStyles, /\.shell\s*{[\s\S]*grid-template-columns:\s*minmax\(0,\s*520px\) 425px/)
@@ -285,6 +307,15 @@ describe('prototype auth and account center', () => {
     assert.match(accountPages, /Notification language/)
   })
 
+  it('marks KYC as coming soon for internal testing instead of exposing a live-looking entry', () => {
+    const kycPage = accountPages.slice(accountPages.indexOf('export function KycPage'), accountPages.indexOf('export function AccountSettingsPage'))
+
+    assert.match(kycPage, /Coming soon/)
+    assert.match(kycPage, /Internal test/)
+    assert.match(kycPage, /disabled/)
+    assert.doesNotMatch(kycPage, /Start verification/)
+  })
+
   it('remodels account overview into a Binance-style dashboard flow', () => {
     assert.match(accountPages, /AccountProfileSummary/)
     assert.match(accountPages, /AccountOnboardingSteps/)
@@ -320,8 +351,10 @@ describe('prototype auth and account center', () => {
     assert.match(wallet, /getFundOrders/)
     assert.match(wallet, /createFundOrder/)
     assert.match(wallet, /walletBalances/)
-    assert.match(wallet, /getAssetRows\(account,\s*walletBalances,\s*ledgerEntries,\s*frozenAmount\)/)
+    assert.match(wallet, /assetLedgerEntries/)
+    assert.match(wallet, /getAssetRows\(account,\s*walletBalances,\s*assetLedgerEntries,\s*frozenAmount\)/)
     assert.match(wallet, /balances:\s*WalletBalance\[\]/)
+    assert.match(wallet, /entries:\s*AssetLedgerEntry\[\]/)
     assert.match(wallet, /walletType/)
     assert.match(wallet, /walletKey\(balance\.walletType,\s*balance\.asset\)/)
     assert.match(wallet, /ledgerWalletTypeFilter/)

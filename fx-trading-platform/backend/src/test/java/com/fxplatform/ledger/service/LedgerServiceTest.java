@@ -18,6 +18,7 @@ import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -140,6 +141,81 @@ class LedgerServiceTest {
     assertThat(entry.getCurrency()).isEqualTo("USD");
     assertThat(entry.getReferenceType()).isEqualTo("POSITION");
     assertThat(entry.getReferenceId()).isEqualTo(positionId);
+  }
+
+  @Test
+  void recordFundingFeeSettlementIsIdempotentForSameBusinessOperation() {
+    UUID accountId = UUID.randomUUID();
+    UUID settlementId = UUID.randomUUID();
+    TradingAccountEntity account = new TradingAccountEntity();
+    account.setId(accountId);
+    account.setBaseCurrency("USD");
+    account.setBalance(new BigDecimal("9995.00000000"));
+    List<LedgerEntryEntity> savedEntries = new ArrayList<>();
+
+    when(ledgerEntryRepository.findByBusinessOperation(accountId, "FUNDING_SETTLEMENT", settlementId, "FUNDING_FEE"))
+        .thenAnswer(invocation -> savedEntries.stream().findFirst().orElse(null));
+    when(ledgerEntryRepository.save(any(LedgerEntryEntity.class)))
+        .thenAnswer(invocation -> {
+          LedgerEntryEntity entry = invocation.getArgument(0);
+          savedEntries.add(entry);
+          return entry;
+        });
+
+    LedgerService service = new LedgerService(ledgerEntryRepository, accountRepository);
+
+    service.recordFundingFeeSettlement(
+        account,
+        new BigDecimal("-5.00000000"),
+        settlementId,
+        "Perpetual funding fee");
+    service.recordFundingFeeSettlement(
+        account,
+        new BigDecimal("-5.00000000"),
+        settlementId,
+        "Perpetual funding fee");
+
+    verify(ledgerEntryRepository, org.mockito.Mockito.times(1)).save(any(LedgerEntryEntity.class));
+  }
+
+  @Test
+  void orderHoldAndReleaseDeltasAreRecordedForEachPendingOrderLifecycleStep() {
+    UUID accountId = UUID.randomUUID();
+    UUID orderId = UUID.randomUUID();
+    TradingAccountEntity account = new TradingAccountEntity();
+    account.setId(accountId);
+    account.setBaseCurrency("USDT");
+    account.setBalance(new BigDecimal("10000.00000000"));
+    List<LedgerEntryEntity> savedEntries = new ArrayList<>();
+
+    when(ledgerEntryRepository.save(any(LedgerEntryEntity.class)))
+        .thenAnswer(invocation -> {
+          LedgerEntryEntity entry = invocation.getArgument(0);
+          savedEntries.add(entry);
+          return entry;
+        });
+
+    LedgerService service = new LedgerService(ledgerEntryRepository, accountRepository);
+
+    service.recordOrderHold(account, new BigDecimal("20.00000000"), orderId, "Pending order margin reserved");
+    service.recordOrderHold(account, new BigDecimal("20.00000000"), orderId, "Pending order margin increased");
+    service.recordOrderRelease(account, new BigDecimal("30.00000000"), orderId, "Pending order margin decreased");
+    service.recordOrderRelease(account, new BigDecimal("10.00000000"), orderId, "Pending order canceled");
+
+    assertThat(savedEntries)
+        .extracting(LedgerEntryEntity::getEntryType)
+        .containsExactly(
+            LedgerEntryType.ORDER_HOLD,
+            LedgerEntryType.ORDER_HOLD,
+            LedgerEntryType.ORDER_RELEASE,
+            LedgerEntryType.ORDER_RELEASE);
+    assertThat(savedEntries)
+        .extracting(LedgerEntryEntity::getAmount)
+        .containsExactly(
+            new BigDecimal("20.00000000"),
+            new BigDecimal("20.00000000"),
+            new BigDecimal("30.00000000"),
+            new BigDecimal("10.00000000"));
   }
 
   @Test

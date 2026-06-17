@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.SymbolResponse;
+import com.fxplatform.market.model.ProductType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -88,6 +90,179 @@ class BinanceSpotMarketDataProviderTest {
     assertThat(sol.providerSymbol()).isEqualTo("SOLUSDT");
     assertThat(sol.assetClass()).isEqualTo("CRYPTO");
     assertThat(sol.tradable()).isTrue();
+  }
+
+  @Test
+  void fetchLatestQuotesUsesBinanceBatchTickerEndpoint() throws IOException {
+    AtomicReference<String> query = new AtomicReference<>();
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.createContext("/api/v3/ticker/24hr", exchange -> {
+      query.set(exchange.getRequestURI().getQuery());
+      byte[] body = """
+          [
+            {
+              "symbol": "BTCUSDT",
+              "bidPrice": "65000.10000000",
+              "askPrice": "65000.20000000",
+              "lastPrice": "65000.15000000",
+              "priceChangePercent": "1.250",
+              "highPrice": "66000.00000000",
+              "lowPrice": "64000.00000000",
+              "volume": "1234.56000000",
+              "closeTime": 1781462400000
+            },
+            {
+              "symbol": "ETHUSDT",
+              "bidPrice": "3400.10000000",
+              "askPrice": "3400.20000000",
+              "lastPrice": "3400.15000000",
+              "priceChangePercent": "-0.500",
+              "highPrice": "3500.00000000",
+              "lowPrice": "3300.00000000",
+              "volume": "2222.00000000",
+              "closeTime": 1781462401000
+            }
+          ]
+          """.getBytes(StandardCharsets.UTF_8);
+      exchange.getResponseHeaders().set("Content-Type", "application/json");
+      exchange.sendResponseHeaders(200, body.length);
+      exchange.getResponseBody().write(body);
+      exchange.close();
+    });
+    server.start();
+    try {
+      BinanceSpotMarketDataProvider provider = new BinanceSpotMarketDataProvider(
+          "http://127.0.0.1:" + server.getAddress().getPort());
+
+      Map<String, QuoteResponse> quotes = provider.fetchLatestQuotes(Map.of(
+          "BTCUSDT", "BTCUSDT",
+          "ETHUSDT", "ETHUSDT"));
+
+      assertThat(quotes).containsOnlyKeys("BTCUSDT", "ETHUSDT");
+      assertThat(quotes.get("BTCUSDT").mid()).isEqualByComparingTo("65000.15000000");
+      assertThat(quotes.get("ETHUSDT").changePercent()).isEqualByComparingTo("-0.500");
+      assertThat(query.get()).contains("symbols=");
+      assertThat(query.get()).contains("BTCUSDT");
+      assertThat(query.get()).contains("ETHUSDT");
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void fetchSymbolsUsesBinanceExchangeInfoSpotUniverseAndKeepsCryptoSpotProductType() throws IOException {
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.createContext("/api/v3/exchangeInfo", exchange -> writeJson(exchange, """
+        {
+          "symbols": [
+            {
+              "symbol": "BTCUSDT",
+              "status": "TRADING",
+              "baseAsset": "BTC",
+              "quoteAsset": "USDT",
+              "isSpotTradingAllowed": true,
+              "isMarginTradingAllowed": true,
+              "filters": [
+                { "filterType": "PRICE_FILTER", "tickSize": "0.01000000" },
+                { "filterType": "LOT_SIZE", "minQty": "0.00001000", "maxQty": "9000.00000000", "stepSize": "0.00001000" },
+                { "filterType": "NOTIONAL", "minNotional": "5.00000000" }
+              ]
+            },
+            {
+              "symbol": "ETHUSDT",
+              "status": "TRADING",
+              "baseAsset": "ETH",
+              "quoteAsset": "USDT",
+              "isSpotTradingAllowed": true,
+              "filters": []
+            },
+            {
+              "symbol": "SOLUSDT",
+              "status": "TRADING",
+              "baseAsset": "SOL",
+              "quoteAsset": "USDT",
+              "isSpotTradingAllowed": true,
+              "filters": []
+            },
+            {
+              "symbol": "XRPUSDT",
+              "status": "TRADING",
+              "baseAsset": "XRP",
+              "quoteAsset": "USDT",
+              "isSpotTradingAllowed": true,
+              "filters": []
+            },
+            {
+              "symbol": "BCHUSDT",
+              "status": "TRADING",
+              "baseAsset": "BCH",
+              "quoteAsset": "USDT",
+              "isSpotTradingAllowed": true,
+              "filters": []
+            },
+            {
+              "symbol": "UNIUSDT",
+              "status": "TRADING",
+              "baseAsset": "UNI",
+              "quoteAsset": "USDT",
+              "isSpotTradingAllowed": true,
+              "filters": []
+            },
+            {
+              "symbol": "JTOUSDT",
+              "status": "TRADING",
+              "baseAsset": "JTO",
+              "quoteAsset": "USDT",
+              "isSpotTradingAllowed": true,
+              "filters": []
+            },
+            {
+              "symbol": "BNBBTC",
+              "status": "TRADING",
+              "baseAsset": "BNB",
+              "quoteAsset": "BTC",
+              "isSpotTradingAllowed": true,
+              "filters": []
+            },
+            {
+              "symbol": "OLDUSDT",
+              "status": "BREAK",
+              "baseAsset": "OLD",
+              "quoteAsset": "USDT",
+              "isSpotTradingAllowed": true,
+              "filters": []
+            }
+          ]
+        }
+        """));
+    server.start();
+    try {
+      BinanceSpotMarketDataProvider provider = new BinanceSpotMarketDataProvider(
+          "http://127.0.0.1:" + server.getAddress().getPort());
+
+      List<SymbolResponse> symbols = provider.fetchSymbols("CRYPTO", 2000);
+
+      assertThat(symbols).extracting(SymbolResponse::symbol)
+          .contains("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "BCHUSDT", "UNIUSDT", "JTOUSDT")
+          .doesNotContain("BNBBTC", "OLDUSDT");
+      assertThat(symbols)
+          .filteredOn(symbol -> List.of("BTCUSDT", "BCHUSDT", "UNIUSDT", "JTOUSDT").contains(symbol.symbol()))
+          .allSatisfy(symbol -> {
+            assertThat(symbol.assetClass()).isEqualTo("CRYPTO");
+            assertThat(symbol.productType()).isEqualTo(ProductType.CRYPTO_SPOT);
+            assertThat(symbol.provider()).isEqualTo("binance");
+            assertThat(symbol.providerSymbol()).isEqualTo(symbol.symbol());
+            assertThat(symbol.quoteCurrency()).isEqualTo("USDT");
+          });
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
   }
 
   @Test
@@ -202,5 +377,13 @@ class BinanceSpotMarketDataProviderTest {
       thread.setDaemon(true);
       return thread;
     });
+  }
+
+  private void writeJson(com.sun.net.httpserver.HttpExchange exchange, String json) throws IOException {
+    byte[] body = json.getBytes(StandardCharsets.UTF_8);
+    exchange.getResponseHeaders().set("Content-Type", "application/json");
+    exchange.sendResponseHeaders(200, body.length);
+    exchange.getResponseBody().write(body);
+    exchange.close();
   }
 }

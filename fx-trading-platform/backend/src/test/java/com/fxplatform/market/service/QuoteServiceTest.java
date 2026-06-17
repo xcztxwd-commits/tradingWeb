@@ -10,11 +10,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.provider.MarketDataRouter;
+import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -32,6 +36,14 @@ class QuoteServiceTest {
   private ValueOperations<String, String> valueOperations;
 
   private final ObjectMapper objectMapper = new ObjectMapper();
+
+  @Test
+  void quoteStaleWindowPrefersSharedMarketConfigWithMassiveFallback() throws NoSuchFieldException {
+    Field field = QuoteService.class.getDeclaredField("quoteStaleMs");
+    Value value = field.getAnnotation(Value.class);
+
+    assertThat(value.value()).isEqualTo("${market.quote-stale-ms:${massive.quote-stale-ms:3000}}");
+  }
 
   @Test
   void latestQuoteNormalizesCommonSymbolSeparatorsBeforeRouting() {
@@ -79,6 +91,43 @@ class QuoteServiceTest {
     QuoteResponse quote = service.latestQuote("EURUSD");
 
     assertThat(quote).isEqualTo(cachedProviderQuote);
+  }
+
+  @Test
+  void latestQuotesUsesFreshCacheAndFetchesMissingSymbolsInOneBatch() throws Exception {
+    QuoteResponse cached = new QuoteResponse(
+        "quote",
+        "EURUSD",
+        new BigDecimal("1.1"),
+        new BigDecimal("1.2"),
+        new BigDecimal("1.15"),
+        new BigDecimal("0.1"),
+        "massive-snapshot",
+        System.currentTimeMillis());
+    QuoteResponse fetched = new QuoteResponse(
+        "quote",
+        "BTCUSDT",
+        new BigDecimal("65000"),
+        new BigDecimal("65001"),
+        new BigDecimal("65000.5"),
+        new BigDecimal("1"),
+        "binance-spot",
+        System.currentTimeMillis());
+
+    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+    when(valueOperations.get("quote:EURUSD")).thenReturn(objectMapper.writeValueAsString(cached));
+    when(valueOperations.get("quote:BTCUSDT")).thenReturn(null);
+    when(marketDataRouter.snapshots(List.of("BTCUSDT"))).thenReturn(Map.of("BTCUSDT", fetched));
+
+    QuoteService service = service(false);
+    ReflectionTestUtils.setField(service, "quoteStaleMs", 600_000);
+
+    Map<String, QuoteResponse> quotes = service.latestQuotes(List.of("eur-usd", "BTCUSDT", "EURUSD"));
+
+    assertThat(quotes.keySet()).containsExactly("EURUSD", "BTCUSDT");
+    assertThat(quotes.get("EURUSD")).isEqualTo(cached);
+    assertThat(quotes.get("BTCUSDT")).isSameAs(fetched);
+    verify(marketDataRouter).snapshots(List.of("BTCUSDT"));
   }
 
   @Test

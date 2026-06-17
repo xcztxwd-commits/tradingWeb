@@ -10,6 +10,26 @@ import org.springframework.util.StringUtils;
 
 public interface AssetLedgerEntryRepository extends FxBaseMapper<AssetLedgerEntryEntity> {
 
+  default AssetLedgerEntryEntity findByBusinessOperation(
+      UUID accountId,
+      String walletType,
+      String asset,
+      String referenceType,
+      UUID referenceId,
+      String operationType
+  ) {
+    if (!StringUtils.hasText(referenceType) || referenceId == null || !StringUtils.hasText(operationType)) {
+      return null;
+    }
+    return selectOne(new LambdaQueryWrapper<AssetLedgerEntryEntity>()
+        .eq(AssetLedgerEntryEntity::getAccountId, accountId)
+        .eq(AssetLedgerEntryEntity::getWalletType, walletType)
+        .eq(AssetLedgerEntryEntity::getAsset, asset)
+        .eq(AssetLedgerEntryEntity::getReferenceType, referenceType)
+        .eq(AssetLedgerEntryEntity::getReferenceId, referenceId)
+        .eq(AssetLedgerEntryEntity::getOperationType, operationType));
+  }
+
   default List<AssetLedgerEntryEntity> findByAccountIdOrderByCreatedAtDesc(UUID accountId) {
     return selectList(new LambdaQueryWrapper<AssetLedgerEntryEntity>()
         .eq(AssetLedgerEntryEntity::getAccountId, accountId)

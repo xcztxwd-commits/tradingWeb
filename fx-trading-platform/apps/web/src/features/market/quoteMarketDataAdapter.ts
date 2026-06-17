@@ -49,7 +49,7 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
   const applyQuote = (quote: TradingQuote) => {
     latestQuote = quote
     if (backendDepthReady) {
-      store.setLastPrice(quote.mid)
+      store.setLastPrice(quote.mid, quote.timestamp)
     } else {
       store.reset(createQuoteMarketDataSnapshot(quote))
     }
@@ -61,7 +61,7 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
       ...orderBook.bids.map((level) => ({ ...level, side: 'bid' as const })),
       ...orderBook.asks.map((level) => ({ ...level, side: 'ask' as const }))
     ])
-    store.setLastPrice(latestQuote?.mid ?? orderBook.lastPrice)
+    store.setLastPrice(latestQuote?.mid ?? orderBook.lastPrice, latestQuote?.timestamp)
   }
 
   void fetchMarketQuote(symbol).then(applyQuote).catch(() => {

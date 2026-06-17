@@ -53,6 +53,12 @@ public interface OrderRepository extends FxBaseMapper<OrderEntity> {
         .eq(OrderEntity::getStatus, status));
   }
 
+  default List<OrderEntity> findByAccountIdAndStatusIn(UUID accountId, List<OrderStatus> statuses) {
+    return selectList(new LambdaQueryWrapper<OrderEntity>()
+        .eq(OrderEntity::getAccountId, accountId)
+        .in(OrderEntity::getStatus, statuses));
+  }
+
   default long countCreatedAtSince(Instant createdAt) {
     return selectCount(new LambdaQueryWrapper<OrderEntity>()
         .ge(OrderEntity::getCreatedAt, createdAt));

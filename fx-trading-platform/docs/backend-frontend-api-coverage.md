@@ -2,13 +2,19 @@
 
 评估日期：2026-06-08
 
+2026-06-16 校准：
+
+- 主前端 `apps/web` 的 `authApi.ts` 只保留 `POST /api/auth/register`、`POST /api/auth/login`、`GET /api/auth/session`；`identity-check` 和 `verification-code` service 封装已删除，当前后端也没有对应 public auth endpoint。
+- `/api/admin/**` 和 `/api/admin/market/data-providers/**`、`/api/admin/market/symbols/{symbolId}/provider-bindings/**` 属于独立后台 `apps/admin` 与后端 provider 治理链路，主前端不消费是预期行为，不应按“接口没用”判 bug。
+- 本文是 2026-06-08 的覆盖快照；`GET /api/admin/trading/trades` 和 `/api/admin/risk/configs` 后续已补齐，下面相关行已按当前代码校准。
+
 ## 结论
 
 当前 Java 后端业务 REST 接口共 51 个，另有 1 个 STOMP WebSocket 入口 `/ws` 和 3 类行情推送 topic。
 
 独立后台 `apps/admin` 已经接上了现有 Java 后台的主要查询接口：登录、首页统计、用户、账户、订单、持仓、资金流水、支付方式、品种、行情状态、消息、公告、字典、系统设置、审计日志，以及用户状态更新。通过前端端口 `5174` 的 `/api` 代理做了 26 个安全 GET 联调检查，全部返回 `200 + success=true`。
 
-但独立后台还不是完整运营后台：后台写操作大部分还没有迁移到 `apps/admin` 页面里，只在 `apps/web` 的旧 `/admin` 页面和 `apps/web/src/services/adminApi.ts` 中接入。`成交记录` 和 `风控配置` 两个独立后台菜单目前没有对应 Java 接口，仍是占位。
+但独立后台还不是完整运营后台：后台写操作仍有一部分没有迁移到 `apps/admin` 页面里。`成交记录` 和 `风控配置` 当前已有 Java 后端接口；其中成交记录已由独立后台读取，风控配置当前以只读页面接入。
 
 ## 评估口径
 
@@ -39,12 +45,12 @@
 | `/accounts` | 已接入只读 | `GET /api/admin/accounts` | 入金、出金、余额调整在财务接口里，未迁移到独立后台表单 |
 | `/trading/orders` | 已接入只读 | `GET /api/admin/trading/orders` | 后台取消订单未迁移 |
 | `/trading/positions` | 已接入只读 | `GET /api/admin/trading/positions` | 后台强制平仓未迁移 |
-| `/trading/trades` | 未接入 | 无对应 Java 接口 | 建议新增 `GET /api/admin/trading/trades?page=&size=` |
+| `/trading/trades` | 已接入只读 | `GET /api/admin/trading/trades?page=&size=` | 无 |
 | `/finance/ledger` | 已接入只读 | `GET /api/admin/finance/ledger` | 财务写操作未迁移 |
 | `/finance/payment-methods` | 已接入只读 | `GET /api/admin/finance/payment-methods` | 创建/更新支付方式未迁移 |
 | `/market/symbols` | 已接入只读 | `GET /api/admin/market/symbols` | 品种启停、价格调整未迁移 |
 | `/market/status` | 已接入 | `GET /api/admin/market/status` | 无 |
-| `/risk` | 未接入 | 无对应 Java 接口 | 建议新增 `GET/PUT /api/admin/risk/configs` |
+| `/risk` | 已接入只读 | `GET /api/admin/risk/configs` | 创建/更新/删除接口已在后端，独立后台页面当前只读 |
 | `/content/messages` | 已接入只读 | `GET /api/admin/content/messages` | 创建站内消息未迁移 |
 | `/content/articles` | 已接入只读 | `GET /api/admin/content/articles` | 创建公告/新闻未迁移 |
 | `/config/dictionaries` | 已接入只读 | `GET /api/admin/config/dictionaries` | 创建/更新字典未迁移 |
@@ -129,7 +135,7 @@
 | GET | `/api/admin/trading/positions?page=&size=` | 已实现 | 已接入独立后台、旧 Web 管理页 | 后台持仓列表 |
 | POST | `/api/admin/trading/orders/{orderId}/cancel` | 已实现 | 已接入旧 Web 管理页 | 独立后台未迁移 |
 | POST | `/api/admin/trading/positions/{positionId}/force-close` | 已实现 | 已接入旧 Web 管理页 | 独立后台未迁移 |
-| GET | `/api/admin/trading/trades?page=&size=` | 不存在 | 未接入 | 独立后台 `成交记录` 需要新增后端接口 |
+| GET | `/api/admin/trading/trades?page=&size=` | 已实现 | 已接入独立后台 | 后台成交记录列表 |
 
 ### 后台财务管理 `/api/admin/finance`
 
@@ -182,8 +188,8 @@
 
 ## 当前独立后台的主要缺口
 
-1. 交易管理缺 `GET /api/admin/trading/trades?page=&size=`，所以 `成交记录` 只能占位。
-2. 风控配置缺 `GET/PUT /api/admin/risk/configs`，所以 `风险配置` 只能占位。
+1. `GET /api/admin/trading/trades?page=&size=` 已补齐，`成交记录` 不再是后端缺口。
+2. `GET/POST/PUT/DELETE /api/admin/risk/configs` 已在后端；独立后台当前只读消费 `GET /api/admin/risk/configs`。
 3. 独立后台只迁移了一个写操作：`PATCH /api/admin/users/{userId}/status`。
 4. 以下后端写操作还未迁移到独立后台页面：
    - KYC 审核、风险等级、用户备注、强制退出。
@@ -199,7 +205,7 @@
 
 ## 建议的下一步顺序
 
-1. 优先补后端缺口：`/api/admin/trading/trades` 和 `/api/admin/risk/configs`，让所有独立后台菜单都有真实数据来源。
+1. 继续把已存在的后台写操作迁移到 `apps/admin` 页面，尤其是风控配置创建/更新/删除、后台取消订单和强制平仓。
 2. 把旧 `apps/web /admin` 中已经接好的后台写操作，按模块迁移到 `apps/admin` 独立后台。
 3. 为独立后台补 `logout` 调用；如果后续做长会话，再实现并接入 `refresh`。
 4. 迁移完成后删除或降级旧 `apps/web /admin`，避免两个后台入口并存导致权限和 token 来源混乱。

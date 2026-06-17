@@ -8,6 +8,7 @@ import com.fxplatform.config.entity.SystemDictionaryEntity;
 import com.fxplatform.config.entity.SystemSettingEntity;
 import com.fxplatform.config.repository.SystemDictionaryRepository;
 import com.fxplatform.config.repository.SystemSettingRepository;
+import com.fxplatform.config.service.SensitiveSettingService;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,7 @@ public class AdminConfigQueryService {
   private final SystemDictionaryRepository dictionaryRepository;
   /** 设置 Mapper，用于分页读取系统设置。 */
   private final SystemSettingRepository settingRepository;
+  private final SensitiveSettingService sensitiveSettingService;
 
   /** 分页查询字典项。 */
   public AdminPageResponse<AdminDictionaryResponse> dictionaries(int page, int size) {
@@ -55,7 +57,7 @@ public class AdminConfigQueryService {
   public AdminPageResponse<AdminSystemSettingResponse> settings(int page, int size) {
     return AdminPageResponse.from(settingRepository
         .findAll(AdminPageRequests.page(page, size), Map.of("settingKey", "setting_key"), "settingKey", true)
-        .convert(AdminSystemSettingResponse::from));
+        .convert(setting -> AdminSystemSettingResponse.from(setting, sensitiveSettingService)));
   }
 
   /** 按截图管理配置列表协议分页筛选系统配置。 */
@@ -75,6 +77,6 @@ public class AdminConfigQueryService {
         "updatedAt", "updated_at"), "setting_key", true);
     return AdminPageResponse.from(settingRepository
         .selectPage(AdminFeatureQuerySupport.page(query), wrapper)
-        .convert(AdminSystemSettingResponse::from));
+        .convert(setting -> AdminSystemSettingResponse.from(setting, sensitiveSettingService)));
   }
 }

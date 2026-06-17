@@ -3,7 +3,9 @@ package com.fxplatform.risk.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
 
 import com.fxplatform.account.dto.AccountSnapshot;
 import com.fxplatform.account.entity.TradingAccountEntity;
@@ -41,6 +43,9 @@ class RiskCheckServiceTest {
 
   @Mock
   private WalletService walletService;
+
+  @Mock
+  private InstrumentRulesEngine instrumentRulesEngine;
 
   @Test
   void btcUsdtUsesSymbolLotSizeAndLeverageForMargin() {
@@ -240,6 +245,24 @@ class RiskCheckServiceTest {
     verify(accountSnapshotService).snapshot(account);
   }
 
+  @Test
+  void delegatesInstrumentRuleValidationBeforeQuoteLookup() {
+    TradingAccountEntity account = demoAccount(new BigDecimal("10000.00000000"), 100);
+    CreateOrderRequest request = marketOrder(account.getId(), "EURUSD", "0.01");
+    SymbolEntity symbol = symbol("EURUSD", "100000", 100);
+
+    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(symbol));
+    doThrow(new BusinessException("SYMBOL_NOT_TRADABLE", "Symbol is not tradable"))
+        .when(instrumentRulesEngine)
+        .validateOrderRules(request, symbol);
+
+    assertThatThrownBy(() -> serviceWithRules().checkOrder(account, request))
+        .isInstanceOf(BusinessException.class)
+        .hasMessageContaining("Symbol is not tradable");
+
+    verifyNoInteractions(quoteService);
+  }
+
   private RiskCheckService service() {
     return new RiskCheckService(quoteService, symbolRepository, new MarginCalculator());
   }
@@ -250,6 +273,16 @@ class RiskCheckServiceTest {
 
   private RiskCheckService serviceWithWallet() {
     return new RiskCheckService(quoteService, symbolRepository, new MarginCalculator(), accountSnapshotService, walletService);
+  }
+
+  private RiskCheckService serviceWithRules() {
+    return new RiskCheckService(
+        quoteService,
+        symbolRepository,
+        new MarginCalculator(),
+        accountSnapshotService,
+        walletService,
+        instrumentRulesEngine);
   }
 
   private TradingAccountEntity demoAccount(BigDecimal freeMargin, int leverage) {

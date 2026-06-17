@@ -1,10 +1,13 @@
 package com.fxplatform.auth.controller;
 
 import com.fxplatform.auth.dto.request.LoginRequest;
+import com.fxplatform.auth.dto.request.LogoutRequest;
+import com.fxplatform.auth.dto.request.RefreshTokenRequest;
 import com.fxplatform.auth.dto.request.RegisterRequest;
 import com.fxplatform.auth.dto.response.AuthResponse;
 import com.fxplatform.auth.dto.response.MeResponse;
 import com.fxplatform.auth.dto.response.SessionStatusResponse;
+import com.fxplatform.auth.service.AuthSessionContext;
 import com.fxplatform.auth.service.AuthService;
 import com.fxplatform.common.response.ApiResponse;
 import com.fxplatform.common.security.JwtAuthenticationFilter;
@@ -33,24 +36,24 @@ public class AuthController {
    * 处理 register 提交接口请求。
    */
   @PostMapping("/register")
-  public ApiResponse<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
-    return ApiResponse.success(authService.register(request));
+  public ApiResponse<AuthResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest servletRequest) {
+    return ApiResponse.success(authService.register(request, AuthSessionContext.from(servletRequest)));
   }
 
   /**
    * 处理 login 提交接口请求。
    */
   @PostMapping("/login")
-  public ApiResponse<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-    return ApiResponse.success(authService.login(request));
+  public ApiResponse<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest servletRequest) {
+    return ApiResponse.success(authService.login(request, AuthSessionContext.from(servletRequest)));
   }
 
   /**
    * 处理 refresh 提交接口请求。
    */
   @PostMapping("/refresh")
-  public ApiResponse<Void> refresh() {
-    return ApiResponse.fail("NOT_IMPLEMENTED", "Refresh token storage is reserved for the next iteration");
+  public ApiResponse<AuthResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
+    return ApiResponse.success(authService.refresh(request.refreshToken()));
   }
 
   /**
@@ -74,7 +77,11 @@ public class AuthController {
    * 处理 logout 提交接口请求。
    */
   @PostMapping("/logout")
-  public ApiResponse<Void> logout() {
+  public ApiResponse<Void> logout(
+      @RequestBody(required = false) LogoutRequest logoutRequest,
+      HttpServletRequest servletRequest
+  ) {
+    authService.logout(bearerToken(servletRequest), logoutRequest == null ? null : logoutRequest.refreshToken());
     return ApiResponse.success(null);
   }
 
@@ -84,5 +91,12 @@ public class AuthController {
   @GetMapping("/me")
   public ApiResponse<MeResponse> me(@AuthenticationPrincipal UserPrincipal principal) {
     return ApiResponse.success(authService.me(principal));
+  }
+
+  private String bearerToken(HttpServletRequest request) {
+    String authorization = request.getHeader("Authorization");
+    return authorization != null && authorization.startsWith("Bearer ")
+        ? authorization.substring(7)
+        : null;
   }
 }

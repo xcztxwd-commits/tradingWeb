@@ -37,6 +37,7 @@ public class AdminMarketDataProviderController {
   }
 
   @PostMapping("/data-providers")
+  @PreAuthorize("hasAuthority('market:data-provider:update')")
   public ApiResponse<AdminDataProviderResponse> createProvider(
       @Valid @RequestBody AdminDataProviderRequest request
   ) {
@@ -44,6 +45,7 @@ public class AdminMarketDataProviderController {
   }
 
   @PutMapping("/data-providers/{providerId}")
+  @PreAuthorize("hasAuthority('market:data-provider:update')")
   public ApiResponse<AdminDataProviderResponse> updateProvider(
       @PathVariable UUID providerId,
       @Valid @RequestBody AdminDataProviderRequest request
@@ -52,11 +54,13 @@ public class AdminMarketDataProviderController {
   }
 
   @PostMapping("/data-providers/{providerId}/test")
+  @PreAuthorize("hasAuthority('market:data-provider:update')")
   public ApiResponse<AdminDataProviderResponse> testProvider(@PathVariable UUID providerId) {
     return ApiResponse.success(providerService.testProvider(providerId));
   }
 
   @PostMapping("/data-providers/{providerId}/sync-instruments")
+  @PreAuthorize("hasAuthority('market:data-provider:update')")
   public ApiResponse<AdminProviderSyncResponse> syncInstruments(@PathVariable UUID providerId) {
     return ApiResponse.success(providerService.syncInstruments(providerId));
   }

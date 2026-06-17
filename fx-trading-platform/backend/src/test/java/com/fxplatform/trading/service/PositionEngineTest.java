@@ -186,6 +186,99 @@ class PositionEngineTest {
   }
 
   @Test
+  void linearPerpetualLongAddReduceAndCloseKeepsWeightedAverageAndRealizedPnl() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, new BigDecimal("10000.00000000"), BigDecimal.ZERO, 20);
+    PositionEngine engine = engine();
+    when(accountRepository.reserveMarginIfAvailable(eq(accountId), any(BigDecimal.class))).thenReturn(1);
+    when(positionRepository.save(any(PositionEntity.class))).thenAnswer(invocation -> withId(invocation.getArgument(0)));
+
+    when(positionRepository.findOpenNetPosition(accountId, "ETHUSDT")).thenReturn(Optional.empty());
+    PositionEntity first = engine.applyFill(
+        account,
+        order(accountId, "ETHUSDT", OrderSide.BUY, new BigDecimal("1.00"), 20),
+        fill(new BigDecimal("3000.00000000"), new BigDecimal("1.00")),
+        linearWithMaintenance()).position();
+
+    assertThat(first.getStatus()).isEqualTo(PositionStatus.OPEN);
+    assertThat(first.getSide()).isEqualTo(OrderSide.BUY);
+    assertThat(first.getLots()).isEqualByComparingTo("1.00");
+    assertThat(first.getOpenPrice()).isEqualByComparingTo("3000.00000000");
+    assertThat(first.getMarginHeld()).isEqualByComparingTo("150.00000000");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("150.00000000");
+
+    when(positionRepository.findOpenNetPosition(accountId, "ETHUSDT")).thenReturn(Optional.of(first));
+    PositionEntity second = engine.applyFill(
+        account,
+        order(accountId, "ETHUSDT", OrderSide.BUY, new BigDecimal("1.00"), 20),
+        fill(new BigDecimal("3200.00000000"), new BigDecimal("1.00")),
+        linearWithMaintenance()).position();
+
+    assertThat(second.getId()).isEqualTo(first.getId());
+    assertThat(second.getStatus()).isEqualTo(PositionStatus.OPEN);
+    assertThat(second.getLots()).isEqualByComparingTo("2.00");
+    assertThat(second.getOpenPrice()).isEqualByComparingTo("3100.00000000");
+    assertThat(second.getMarginHeld()).isEqualByComparingTo("320.00000000");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("320.00000000");
+
+    when(positionRepository.findOpenNetPosition(accountId, "ETHUSDT")).thenReturn(Optional.of(second));
+    PositionEntity third = engine.applyFill(
+        account,
+        order(accountId, "ETHUSDT", OrderSide.BUY, new BigDecimal("2.00"), 20),
+        fill(new BigDecimal("2800.00000000"), new BigDecimal("2.00")),
+        linearWithMaintenance()).position();
+
+    assertThat(third.getId()).isEqualTo(first.getId());
+    assertThat(third.getStatus()).isEqualTo(PositionStatus.OPEN);
+    assertThat(third.getLots()).isEqualByComparingTo("4.00");
+    assertThat(third.getOpenPrice()).isEqualByComparingTo("2950.00000000");
+    assertThat(third.getMarkPrice()).isEqualByComparingTo("2800.00000000");
+    assertThat(third.getNotional()).isEqualByComparingTo("11200.00000000");
+    assertThat(third.getInitialMargin()).isEqualByComparingTo("560.00000000");
+    assertThat(third.getMarginHeld()).isEqualByComparingTo("560.00000000");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("560.00000000");
+
+    when(positionRepository.findOpenNetPosition(accountId, "ETHUSDT")).thenReturn(Optional.of(third));
+    PositionEntity halfClosed = engine.applyFill(
+        account,
+        order(accountId, "ETHUSDT", OrderSide.SELL, new BigDecimal("2.00"), 20),
+        fill(new BigDecimal("3300.00000000"), new BigDecimal("2.00")),
+        linearWithMaintenance()).position();
+
+    assertThat(halfClosed.getStatus()).isEqualTo(PositionStatus.OPEN);
+    assertThat(halfClosed.getLots()).isEqualByComparingTo("2.00");
+    assertThat(halfClosed.getOpenPrice()).isEqualByComparingTo("2950.00000000");
+    assertThat(halfClosed.getRealizedPnl()).isEqualByComparingTo("700.00000000");
+    assertThat(halfClosed.getMarginHeld()).isEqualByComparingTo("280.00000000");
+    assertThat(halfClosed.getMarkPrice()).isEqualByComparingTo("3300.00000000");
+    assertThat(account.getBalance()).isEqualByComparingTo("10700.00000000");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("280.00000000");
+
+    when(positionRepository.findOpenNetPosition(accountId, "ETHUSDT")).thenReturn(Optional.of(halfClosed));
+    PositionEntity fullyClosed = engine.applyFill(
+        account,
+        order(accountId, "ETHUSDT", OrderSide.SELL, new BigDecimal("2.00"), 20),
+        fill(new BigDecimal("3100.00000000"), new BigDecimal("2.00")),
+        linearWithMaintenance()).position();
+
+    assertThat(fullyClosed.getId()).isEqualTo(first.getId());
+    assertThat(fullyClosed.getStatus()).isEqualTo(PositionStatus.CLOSED);
+    assertThat(fullyClosed.getClosedAt()).isEqualTo(FILLED_AT);
+    assertThat(fullyClosed.getLots()).isEqualByComparingTo("2.00");
+    assertThat(fullyClosed.getRealizedPnl()).isEqualByComparingTo("1000.00000000");
+    assertThat(fullyClosed.getFloatingPnl()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(fullyClosed.getMarginHeld()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(fullyClosed.getNotional()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(fullyClosed.getInitialMargin()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(fullyClosed.getMaintenanceMargin()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(fullyClosed.getMarkPrice()).isEqualByComparingTo("3100.00000000");
+    assertThat(account.getBalance()).isEqualByComparingTo("11000.00000000");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo(BigDecimal.ZERO);
+    verify(ledgerService).recordTradePnl(account, new BigDecimal("700.00000000"), first.getId(), "Position realized PnL");
+    verify(ledgerService).recordTradePnl(account, new BigDecimal("300.00000000"), first.getId(), "Position realized PnL");
+  }
+
+  @Test
   void linearPerpetualOppositeFillReducesPositionAndRealizesPnl() {
     UUID accountId = UUID.randomUUID();
     PositionEntity existing = openPosition(accountId, "BTCUSDT", OrderSide.BUY, "2.00", "100.00000000", "20.00000000", 10);

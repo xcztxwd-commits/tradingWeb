@@ -1,8 +1,12 @@
+import type { TradingInstrumentRules } from '../../market/tradingModels'
+
 export type TradeSide = 'buy' | 'sell'
 
 export type TradeProductType = 'FX_MARGIN' | 'CRYPTO_SPOT' | 'LINEAR_PERP' | 'INVERSE_PERP'
 
 export type PrimaryOrderType = 'limit' | 'market'
+
+export type TradeInstrumentRules = TradingInstrumentRules
 
 export type StrategyType =
   | 'none'
@@ -31,6 +35,8 @@ export type TradeMarket = {
   quantityMode?: 'quantity' | 'quote-budget' | 'contracts'
   leverage?: number
   productType?: TradeProductType
+  quoteTimestamp?: number
+  rules?: TradeInstrumentRules
 }
 
 export type TradeBalances = Record<string, number>
@@ -69,6 +75,7 @@ export type OrderValidationErrorKey =
   | 'minNotional'
   | 'quoteBalance'
   | 'baseBalance'
+  | 'marketStale'
   | 'takeProfitTriggerPrice'
   | 'stopLossTriggerPrice'
   | 'trailingCallbackRatio'

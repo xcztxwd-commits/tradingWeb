@@ -16,6 +16,15 @@ public record AdminBalanceAdjustmentRequest(
     @NotNull BigDecimal delta,
     @NotBlank String reason,
     String note,
-    String idempotencyKey
+    String idempotencyKey,
+    String confirmationText
 ) {
+  public AdminBalanceAdjustmentRequest(
+      BigDecimal delta,
+      String reason,
+      String note,
+      String idempotencyKey
+  ) {
+    this(delta, reason, note, idempotencyKey, null);
+  }
 }

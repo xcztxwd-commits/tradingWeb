@@ -38,6 +38,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 @ExtendWith(MockitoExtension.class)
 class AdminFeatureOperationServiceTest {
@@ -111,6 +115,25 @@ class AdminFeatureOperationServiceTest {
         });
 
     verifyNoInteractions(recordRepository, auditLogService);
+  }
+
+  @Test
+  void mappedDomainActionRequiresMatchingAuthorityWhenAuthenticated() {
+    UUID actorUserId = UUID.randomUUID();
+    UUID orderId = UUID.randomUUID();
+    authenticateAs("ROLE_ADMIN");
+    AdminFeatureOperationService service = service();
+
+    assertThatThrownBy(() -> service.performAction(actorUserId, "order-history", new AdminFeatureOperationRequest(
+            "cancel",
+            orderId.toString(),
+            "cancel order",
+            Map.of("reason", "client requested"))))
+        .isInstanceOf(AccessDeniedException.class)
+        .hasMessageContaining("trading:order:cancel");
+
+    verifyNoInteractions(tradingCommandService, recordRepository, auditLogService);
+    SecurityContextHolder.clearContext();
   }
 
   @Test
@@ -476,5 +499,13 @@ class AdminFeatureOperationServiceTest {
             new TradingFeatureActionHandler(tradingCommandService),
             new FundReviewFeatureActionHandler(financeCommandService),
             new ContentFeatureActionHandler(contentCommandService)));
+  }
+
+  private void authenticateAs(String... authorities) {
+    SecurityContextHolder.clearContext();
+    SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+        "admin",
+        null,
+        java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toList()));
   }
 }

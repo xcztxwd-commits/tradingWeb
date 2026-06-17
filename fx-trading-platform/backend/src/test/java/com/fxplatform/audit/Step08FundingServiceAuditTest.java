@@ -1,6 +1,7 @@
 package com.fxplatform.audit;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -83,7 +84,11 @@ class Step08FundingServiceAuditTest {
     AuditAssertions.assertAmountClose(cashflow, expectedCashflow);
     AuditAssertions.assertAmountClose(account.getBalance(), expectedBalance);
     AuditAssertions.assertAmountClose(position.getFundingPnl(), expectedCashflow);
-    verify(ledgerService).recordFundingFee(account, new BigDecimal(expectedCashflow), position.getId(), "Perpetual funding fee");
+    verify(ledgerService).recordFundingFeeSettlement(
+        eq(account),
+        eq(new BigDecimal(expectedCashflow)),
+        any(UUID.class),
+        eq("Perpetual funding fee"));
   }
 
   @Test
@@ -109,7 +114,42 @@ class Step08FundingServiceAuditTest {
 
     AuditAssertions.assertBtcClose(cashflow, "-0.00002000");
     AuditAssertions.assertBtcClose(account.getBalance(), "0.99998000");
-    verify(ledgerService).recordFundingFee(account, new BigDecimal("-0.00002000"), position.getId(), "Perpetual funding fee");
+    verify(ledgerService).recordFundingFeeSettlement(
+        eq(account),
+        eq(new BigDecimal("-0.00002000")),
+        any(UUID.class),
+        eq("Perpetual funding fee"));
+  }
+
+  @Test
+  void inverseShortPositiveFundingReceivesCoinFunding() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "1.00000000");
+    account.setBaseCurrency("BTC");
+    PositionEntity position = position(accountId, "BTCUSD", OrderSide.SELL, "100", "50000");
+
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    when(symbolRepository.findBySymbol("BTCUSD")).thenReturn(Optional.of(perpSymbol(
+        "BTCUSD",
+        "INVERSE_PERPETUAL",
+        "BTC",
+        "USD",
+        "100",
+        "BTC")));
+    when(fundingSettlementRepository.insertIfAbsent(any(FundingSettlementEntity.class))).thenReturn(true);
+    when(fundingRateRepository.findLatestBySymbol("BTCUSD"))
+        .thenReturn(Optional.of(fundingRate("BTCUSD", "0.0001", "50000")));
+
+    BigDecimal cashflow = service().settleFundingForPosition(position);
+
+    AuditAssertions.assertBtcClose(cashflow, "0.00002000");
+    AuditAssertions.assertBtcClose(account.getBalance(), "1.00002000");
+    AuditAssertions.assertBtcClose(position.getFundingPnl(), "0.00002000");
+    verify(ledgerService).recordFundingFeeSettlement(
+        eq(account),
+        eq(new BigDecimal("0.00002000")),
+        any(UUID.class),
+        eq("Perpetual funding fee"));
   }
 
   private FundingService service() {

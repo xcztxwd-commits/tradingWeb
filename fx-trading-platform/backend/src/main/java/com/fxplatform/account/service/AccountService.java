@@ -99,6 +99,15 @@ public class AccountService {
           account.getId(),
           "Initial DEMO wallet balance",
           AssetLedgerEntryType.CREDIT_AVAILABLE.code());
+      walletService.creditAvailableWithEntryType(
+          account.getId(),
+          WalletType.SPOT,
+          "USDT",
+          defaultDemoBalance,
+          "DEMO_ACCOUNT",
+          account.getId(),
+          "Initial DEMO spot wallet balance",
+          AssetLedgerEntryType.CREDIT_AVAILABLE.code());
     }
     return account;
   }

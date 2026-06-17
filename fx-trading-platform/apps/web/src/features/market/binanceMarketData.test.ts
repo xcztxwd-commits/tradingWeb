@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import {
   buildBinanceFuturesDashboard,
@@ -9,6 +12,14 @@ import {
 } from './binanceMarketData.ts'
 
 describe('binance market data mappers', () => {
+  it('keeps Binance network access behind backend market APIs', () => {
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'binanceMarketData.ts'), 'utf8')
+
+    assert.doesNotMatch(source, /https:\/\/www\.binance\.com|https:\/\/fapi\.binance\.com/)
+    assert.match(source, /\/api\/market\/binance\/overview-source/)
+    assert.match(source, /\/api\/market\/binance\/futures-dashboard-source/)
+  })
+
   it('maps Binance product overview into live market rows, aggregate volume, market cap and hot tokens', () => {
     const products: BinanceProduct[] = [
       {

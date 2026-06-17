@@ -96,7 +96,7 @@ export function useTradePanelSubmit({
 function formatOrderError(error: unknown, t: TFunction) {
   if (error instanceof ApiClientError) {
     const details = [t('errors.apiCode', { code: error.code }), t('errors.httpStatus', { status: error.status })]
-    if (error.requestId) details.push(`Request ID：${error.requestId}`)
+    if (error.requestId) details.push(t('errors.requestId', { requestId: error.requestId }))
     return `${error.message} (${details.join(', ')})`
   }
 

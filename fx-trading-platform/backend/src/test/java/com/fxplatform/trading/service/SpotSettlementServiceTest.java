@@ -80,7 +80,7 @@ class SpotSettlementServiceTest {
     assertThat(account.getUsedMargin()).isEqualByComparingTo("0");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
-        .containsExactly("SPOT_BUY_QUOTE_OUT", "SPOT_BUY_BASE_IN", "SPOT_FEE_BASE");
+        .containsExactly("SPOT_BUY_DEBIT", "SPOT_BUY_CREDIT", "TRADE_FEE");
   }
 
   @Test
@@ -103,7 +103,7 @@ class SpotSettlementServiceTest {
     assertThat(account.getUsedMargin()).isEqualByComparingTo("0");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
-        .containsExactly("SPOT_SELL_BASE_OUT", "SPOT_SELL_QUOTE_IN", "SPOT_FEE_QUOTE");
+        .containsExactly("SPOT_SELL_DEBIT", "SPOT_SELL_CREDIT", "TRADE_FEE");
   }
 
   @Test
@@ -124,7 +124,7 @@ class SpotSettlementServiceTest {
     assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable()).isEqualByComparingTo("0.03996000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
-        .containsExactly("SPOT_BUY_QUOTE_OUT", "SPOT_ORDER_RELEASE", "SPOT_BUY_BASE_IN", "SPOT_FEE_BASE");
+        .containsExactly("SPOT_BUY_DEBIT", "ORDER_RELEASE", "SPOT_BUY_CREDIT", "TRADE_FEE");
   }
 
   @Test
@@ -146,7 +146,7 @@ class SpotSettlementServiceTest {
     assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable()).isEqualByComparingTo("1958.04000000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
-        .containsExactly("SPOT_SELL_BASE_OUT", "SPOT_ORDER_RELEASE", "SPOT_SELL_QUOTE_IN", "SPOT_FEE_QUOTE");
+        .containsExactly("SPOT_SELL_DEBIT", "ORDER_RELEASE", "SPOT_SELL_CREDIT", "TRADE_FEE");
   }
 
   private SpotSettlementService service() {

@@ -10,13 +10,30 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @ConditionalOnProperty(prefix = "execution", name = "mode", havingValue = "lp")
-public class LpExecutionAdapter implements ExecutionAdapter {
+public class LpExecutionAdapter implements ExecutionAdapter, ExecutionAdapterReadiness {
+
+  private static final String NOT_READY_MESSAGE = "LP execution is reserved for future integration";
 
   /**
    * 执行 execute 适配器逻辑。
    */
   @Override
   public ExecutionResult execute(CreateOrderRequest request) {
-    throw new BusinessException("LP_NOT_ENABLED", "LP execution is reserved for future integration");
+    throw new BusinessException("LP_NOT_ENABLED", NOT_READY_MESSAGE);
+  }
+
+  @Override
+  public ExecutionMode mode() {
+    return ExecutionMode.LP;
+  }
+
+  @Override
+  public boolean readyForLiveTrading() {
+    return false;
+  }
+
+  @Override
+  public String notReadyMessage() {
+    return NOT_READY_MESSAGE;
   }
 }

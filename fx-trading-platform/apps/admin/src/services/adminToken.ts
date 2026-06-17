@@ -1,4 +1,6 @@
 export const tokenStorageKey = 'fx-platform-admin-token'
+export const refreshTokenStorageKey = 'fx-platform-admin-refresh-token'
+export const authorityStorageKey = 'fx-platform-admin-authorities'
 
 export function getAdminToken() {
   return localStorage.getItem(tokenStorageKey)
@@ -8,18 +10,45 @@ export function getValidAdminToken() {
   const token = getAdminToken()
   if (!token) return null
   if (isJwtExpired(token)) {
+    if (getAdminRefreshToken()) return token
     clearAdminToken()
     return null
   }
   return token
 }
 
+export function getAdminRefreshToken() {
+  return localStorage.getItem(refreshTokenStorageKey)
+}
+
+export function getAdminAuthorities() {
+  const stored = localStorage.getItem(authorityStorageKey)
+  if (!stored) return []
+  try {
+    const values = JSON.parse(stored)
+    return Array.isArray(values) ? values.map(String).filter(Boolean) : []
+  } catch {
+    localStorage.removeItem(authorityStorageKey)
+    return []
+  }
+}
+
 export function setAdminToken(token: string) {
   localStorage.setItem(tokenStorageKey, token)
+  localStorage.removeItem(refreshTokenStorageKey)
+  localStorage.removeItem(authorityStorageKey)
+}
+
+export function setAdminAuthTokens(accessToken: string, refreshToken: string, authorities: string[] = []) {
+  localStorage.setItem(tokenStorageKey, accessToken)
+  localStorage.setItem(refreshTokenStorageKey, refreshToken)
+  localStorage.setItem(authorityStorageKey, JSON.stringify(authorities))
 }
 
 export function clearAdminToken() {
   localStorage.removeItem(tokenStorageKey)
+  localStorage.removeItem(refreshTokenStorageKey)
+  localStorage.removeItem(authorityStorageKey)
 }
 
 function isJwtExpired(token: string) {

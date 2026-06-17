@@ -10,6 +10,7 @@ export type PositionDisplayRow = {
   quantity: string
   markPrice: string
   openPrice: string
+  notional: string
   liquidationPrice: string
   breakEvenPrice: string
   floatingPnl: string
@@ -34,6 +35,7 @@ const defaultTranslate: Translate = (key) => key
 
 export function createPositionDisplayRow(position: PositionResponse, t: Translate = defaultTranslate): PositionDisplayRow {
   const showMaintenanceMargin = !isSpotPosition(position)
+  const canClose = position.status.toUpperCase() !== 'CLOSED' && !isSpotPosition(position)
 
   return {
     id: position.id,
@@ -42,6 +44,7 @@ export function createPositionDisplayRow(position: PositionResponse, t: Translat
     quantity: `${formatDecimal(position.lots)} ${unitLabel(position.positionUnit, t)}`,
     markPrice: formatDecimal(position.markPrice ?? position.currentPrice),
     openPrice: formatDecimal(position.openPrice),
+    notional: formatNotional(position),
     liquidationPrice: formatDecimal(position.liquidationPrice),
     breakEvenPrice: formatDecimal(position.breakEvenPrice ?? position.openPrice),
     floatingPnl: formatFloatingPnl(position),
@@ -57,7 +60,7 @@ export function createPositionDisplayRow(position: PositionResponse, t: Translat
     takeProfit: formatDecimal(position.takeProfit),
     adlLevel: typeof position.adlLevel === 'number' ? position.adlLevel : null,
     status: position.status,
-    canClose: position.status.toUpperCase() !== 'CLOSED'
+    canClose
   }
 }
 
@@ -95,6 +98,13 @@ function formatFloatingPnl(position: PositionResponse) {
 
 function formatPnlAmount(value: Amount, position: PositionResponse) {
   return `${formatDecimal(value)} ${settlementCurrency(position)}`
+}
+
+function formatNotional(position: PositionResponse) {
+  const amount = formatDecimal(position.notional)
+  if (amount === '--') return amount
+  const currency = settlementCurrency(position)
+  return currency ? `${amount} ${currency}` : amount
 }
 
 function formatMaintenanceMargin(value: Amount | null | undefined, position: PositionResponse) {

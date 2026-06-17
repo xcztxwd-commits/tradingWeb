@@ -1,25 +1,23 @@
 package com.fxplatform.market.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.market.dto.MarketDepthResponse;
-import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
 import com.fxplatform.market.entity.SymbolEntity;
-import com.fxplatform.market.repository.RealtimeCandleRepository;
 import com.fxplatform.market.repository.SymbolRepository;
-import com.fxplatform.market.websocket.MarketWsPublisher;
-import java.math.BigDecimal;
-import java.time.Instant;
+import com.fxplatform.market.realtime.RealtimeMarketEvent;
+import com.fxplatform.market.realtime.RealtimeQuoteSink;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -31,13 +29,7 @@ class MarketTestDataServiceTest {
   private SymbolRepository symbolRepository;
 
   @Mock
-  private QuoteService quoteService;
-
-  @Mock
-  private MarketWsPublisher marketWsPublisher;
-
-  @Mock
-  private RealtimeCandleRepository realtimeCandleRepository;
+  private RealtimeQuoteSink realtimeQuoteSink;
 
   @Test
   void normalizesMarketDepthAndRecentTradesSymbols() {
@@ -64,13 +56,19 @@ class MarketTestDataServiceTest {
 
     service.publishRealtimeTestData();
 
-    verify(quoteService).cache(argThat(quote -> "USDJPY".equals(quote.symbol())));
-    verify(marketWsPublisher).publishQuote(argThat(quote -> "USDJPY".equals(quote.symbol())));
-    verify(marketWsPublisher).publishOrderBook(argThat(depth -> "USDJPY".equals(depth.symbol())));
-    verify(marketWsPublisher).publishRecentTrades(
-        eq("USDJPY"),
-        argThat(trades -> !trades.isEmpty() && "USDJPY".equals(trades.get(0).symbol())));
-    verify(realtimeCandleRepository).upsert(eq("USDJPY"), eq("1s"), any(Instant.class), any(BigDecimal.class), any(BigDecimal.class));
+    ArgumentCaptor<RealtimeMarketEvent> events = ArgumentCaptor.forClass(RealtimeMarketEvent.class);
+    verify(realtimeQuoteSink, times(7)).acceptDemo(events.capture());
+    assertThat(events.getAllValues()).allMatch(event -> "USDJPY".equals(event.symbol()));
+    assertThat(events.getAllValues()).anyMatch(RealtimeMarketEvent.Quote.class::isInstance);
+    assertThat(events.getAllValues()).anyMatch(RealtimeMarketEvent.OrderBook.class::isInstance);
+    assertThat(events.getAllValues()).anyMatch(RealtimeMarketEvent.Trade.class::isInstance);
+    assertThat(events.getAllValues().stream()
+        .filter(RealtimeMarketEvent.Candle.class::isInstance)
+        .map(RealtimeMarketEvent.Candle.class::cast)
+        .map(RealtimeMarketEvent.Candle::interval)
+        .toList())
+        .containsExactlyInAnyOrder("1s", "5m", "15m", "1h");
+    verifyNoMoreInteractions(realtimeQuoteSink);
   }
 
   @Test
@@ -86,13 +84,11 @@ class MarketTestDataServiceTest {
 
     service.publishRealtimeTestData();
 
-    verify(marketWsPublisher).publishQuote(argThat(quote -> quote != null && "EURUSD".equals(quote.symbol())));
-    verify(marketWsPublisher, never()).publishQuote(argThat(quote -> quote != null && "USDJPY".equals(quote.symbol())));
-    verify(realtimeCandleRepository).upsert(eq("EURUSD"), eq("1s"), any(Instant.class), any(BigDecimal.class), any(BigDecimal.class));
-    verify(realtimeCandleRepository, never()).upsert(eq("USDJPY"), any(), any(Instant.class), any(BigDecimal.class), any(BigDecimal.class));
+    verify(realtimeQuoteSink, times(7)).acceptDemo(argThat(event -> event != null && "EURUSD".equals(event.symbol())));
+    verify(realtimeQuoteSink, never()).acceptDemo(argThat(event -> event != null && "USDJPY".equals(event.symbol())));
   }
 
   private MarketTestDataService service() {
-    return new MarketTestDataService(symbolRepository, quoteService, marketWsPublisher, realtimeCandleRepository);
+    return new MarketTestDataService(symbolRepository, realtimeQuoteSink);
   }
 }

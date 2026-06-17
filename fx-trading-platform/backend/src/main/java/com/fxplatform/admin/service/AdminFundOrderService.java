@@ -92,13 +92,19 @@ public class AdminFundOrderService {
   /** 审核资金订单，只有通过时才调用真实入金/出金服务。 */
   @Transactional
   public AdminFundOrderResponse reviewOrder(UUID actorUserId, UUID orderId, AdminFundOrderReviewRequest request) {
+    FundOrderStatus status = FundOrderStatus.fromReviewCode(request.status());
+    AdminActionAuthorization.requireAuthority(status.isApproved()
+        ? AdminPermissionCatalog.FINANCE_FUND_ORDER_APPROVE
+        : AdminPermissionCatalog.FINANCE_FUND_ORDER_REJECT);
+    if (status.isApproved()) {
+      AdminActionConfirmation.require(request.confirmationText(), AdminActionConfirmation.CONFIRM_APPROVE);
+    }
     FundOrderEntity order = fundOrderRepository.findById(orderId)
         .orElseThrow(() -> new BusinessException("FUND_ORDER_NOT_FOUND", "Fund order not found"));
     if (!isPendingReview(order.getStatus())) {
       throw new BusinessException("FUND_ORDER_ALREADY_REVIEWED", "Fund order already reviewed");
     }
 
-    FundOrderStatus status = FundOrderStatus.fromReviewCode(request.status());
     order.setStatus(status);
     order.setReviewReason(request.reason());
     order.setReviewedBy(actorUserId);

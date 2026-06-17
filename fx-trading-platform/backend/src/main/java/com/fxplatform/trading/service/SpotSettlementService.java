@@ -6,21 +6,35 @@ import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.model.SymbolAssets;
 import com.fxplatform.market.service.SymbolAssetResolver;
 import com.fxplatform.trading.entity.OrderEntity;
+import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import lombok.RequiredArgsConstructor;
+import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@RequiredArgsConstructor
 public class SpotSettlementService {
 
   private static final BigDecimal DEFAULT_FEE_RATE = new BigDecimal("0.0010");
   private static final int SCALE = 8;
+  private static final String TRADE_REFERENCE = "TRADE";
+  private static final String ORDER_REFERENCE = "ORDER";
 
   private final WalletService walletService;
+  private final SpotPositionService spotPositionService;
+
+  public SpotSettlementService(WalletService walletService) {
+    this(walletService, null);
+  }
+
+  @Autowired
+  public SpotSettlementService(WalletService walletService, SpotPositionService spotPositionService) {
+    this.walletService = walletService;
+    this.spotPositionService = spotPositionService;
+  }
 
   @Transactional
   public void settleBuyFill(
@@ -29,28 +43,77 @@ public class SpotSettlementService {
       SymbolEntity symbolProfile,
       TradingAccountEntity account
   ) {
+    settleBuyFill(order, fill, symbolProfile, account, ORDER_REFERENCE, order.getId());
+  }
+
+  @Transactional
+  public void settleBuyFill(
+      OrderEntity order,
+      ExecutionResult fill,
+      SymbolEntity symbolProfile,
+      TradingAccountEntity account,
+      UUID tradeId
+  ) {
+    settleBuyFill(order, fill, symbolProfile, account, TRADE_REFERENCE, tradeId);
+  }
+
+  private void settleBuyFill(
+      OrderEntity order,
+      ExecutionResult fill,
+      SymbolEntity symbolProfile,
+      TradingAccountEntity account,
+      String referenceType,
+      UUID referenceId
+  ) {
     SymbolAssets assets = SymbolAssetResolver.resolve(symbolProfile);
+    if (walletService.hasBusinessOperation(
+        account.getId(),
+        WalletType.SPOT,
+        assets.baseAsset(),
+        referenceType,
+        referenceId,
+        "SPOT_BUY_CREDIT")) {
+      return;
+    }
     BigDecimal filledBase = scaled(fillQuantity(order, fill));
     BigDecimal grossQuote = scaled(filledBase.multiply(fill.filledPrice()));
     BigDecimal feeBase = scaled(filledBase.multiply(feeRate(fill, grossQuote)));
+    BigDecimal netBase = scaled(filledBase.subtract(feeBase));
 
-    debitSpentAsset(order, account, assets.quoteAsset(), grossQuote, "Spot buy quote spent", "SPOT_BUY_QUOTE_OUT");
+    debitSpentAsset(
+        order,
+        account,
+        assets.quoteAsset(),
+        grossQuote,
+        referenceType,
+        referenceId,
+        "Spot buy quote spent",
+        "SPOT_BUY_DEBIT");
     walletService.creditAvailableWithEntryType(
         account.getId(),
         assets.baseAsset(),
         filledBase,
-        "ORDER",
-        order.getId(),
+        referenceType,
+        referenceId,
         "Spot buy base received",
-        "SPOT_BUY_BASE_IN");
+        "SPOT_BUY_CREDIT");
     walletService.debitAvailableWithEntryType(
         account.getId(),
         assets.baseAsset(),
         feeBase,
-        "ORDER",
-        order.getId(),
+        referenceType,
+        referenceId,
         "Spot buy fee charged in base asset",
-        "SPOT_FEE_BASE");
+        "TRADE_FEE");
+    if (spotPositionService != null) {
+      spotPositionService.applyBuy(
+          account.getId(),
+          assets.baseAsset(),
+          assets.quoteAsset(),
+          netBase,
+          grossQuote,
+          scaled(feeBase.multiply(fill.filledPrice())));
+    }
   }
 
   @Transactional
@@ -60,28 +123,76 @@ public class SpotSettlementService {
       SymbolEntity symbolProfile,
       TradingAccountEntity account
   ) {
+    settleSellFill(order, fill, symbolProfile, account, ORDER_REFERENCE, order.getId());
+  }
+
+  @Transactional
+  public void settleSellFill(
+      OrderEntity order,
+      ExecutionResult fill,
+      SymbolEntity symbolProfile,
+      TradingAccountEntity account,
+      UUID tradeId
+  ) {
+    settleSellFill(order, fill, symbolProfile, account, TRADE_REFERENCE, tradeId);
+  }
+
+  private void settleSellFill(
+      OrderEntity order,
+      ExecutionResult fill,
+      SymbolEntity symbolProfile,
+      TradingAccountEntity account,
+      String referenceType,
+      UUID referenceId
+  ) {
     SymbolAssets assets = SymbolAssetResolver.resolve(symbolProfile);
+    if (walletService.hasBusinessOperation(
+        account.getId(),
+        WalletType.SPOT,
+        assets.quoteAsset(),
+        referenceType,
+        referenceId,
+        "SPOT_SELL_CREDIT")) {
+      return;
+    }
     BigDecimal soldBase = scaled(fillQuantity(order, fill));
     BigDecimal grossQuote = scaled(soldBase.multiply(fill.filledPrice()));
     BigDecimal feeQuote = scaled(grossQuote.multiply(feeRate(fill, grossQuote)));
 
-    debitSpentAsset(order, account, assets.baseAsset(), soldBase, "Spot sell base spent", "SPOT_SELL_BASE_OUT");
+    debitSpentAsset(
+        order,
+        account,
+        assets.baseAsset(),
+        soldBase,
+        referenceType,
+        referenceId,
+        "Spot sell base spent",
+        "SPOT_SELL_DEBIT");
     walletService.creditAvailableWithEntryType(
         account.getId(),
         assets.quoteAsset(),
         grossQuote,
-        "ORDER",
-        order.getId(),
+        referenceType,
+        referenceId,
         "Spot sell quote received",
-        "SPOT_SELL_QUOTE_IN");
+        "SPOT_SELL_CREDIT");
     walletService.debitAvailableWithEntryType(
         account.getId(),
         assets.quoteAsset(),
         feeQuote,
-        "ORDER",
-        order.getId(),
+        referenceType,
+        referenceId,
         "Spot sell fee charged in quote asset",
-        "SPOT_FEE_QUOTE");
+        "TRADE_FEE");
+    if (spotPositionService != null) {
+      spotPositionService.applySell(
+          account.getId(),
+          assets.baseAsset(),
+          assets.quoteAsset(),
+          soldBase,
+          grossQuote,
+          feeQuote);
+    }
   }
 
   private void debitSpentAsset(
@@ -89,6 +200,8 @@ public class SpotSettlementService {
       TradingAccountEntity account,
       String asset,
       BigDecimal amount,
+      String referenceType,
+      UUID referenceId,
       String description,
       String entryType
   ) {
@@ -97,8 +210,8 @@ public class SpotSettlementService {
           account.getId(),
           asset,
           amount,
-          "ORDER",
-          order.getId(),
+          referenceType,
+          referenceId,
           description,
           entryType);
       releaseRemainingHold(order, account, asset, amount);
@@ -108,8 +221,8 @@ public class SpotSettlementService {
         account.getId(),
         asset,
         amount,
-        "ORDER",
-        order.getId(),
+        referenceType,
+        referenceId,
         description,
         entryType);
   }
@@ -128,10 +241,10 @@ public class SpotSettlementService {
         account.getId(),
         asset,
         remainingHold,
-        "ORDER",
+        ORDER_REFERENCE,
         order.getId(),
         "Spot pending order remaining hold released",
-        "SPOT_ORDER_RELEASE");
+        "ORDER_RELEASE");
   }
 
   private boolean usesLockedHold(OrderEntity order, String asset) {

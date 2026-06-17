@@ -11,7 +11,7 @@ import { filterByStatus, formatApiError, toNumber } from '../../components/user-
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
 import { convertAsset } from '../../services/accountApi'
 import { createFundOrder, getFundOrders } from '../../services/financeApi'
-import type { Amount, FundOrder, LedgerEntry, WalletBalance } from '../../types/trading'
+import type { Amount, AssetLedgerEntry, FundOrder, LedgerEntry, WalletBalance } from '../../types/trading'
 
 const fundOrderStatuses = ['ALL', 'PENDING_REVIEW', 'PENDING', 'APPROVED', 'REJECTED']
 const fundOrderTypes = ['ALL', 'RECHARGE', 'WITHDRAWAL']
@@ -29,7 +29,7 @@ type AssetRow = {
 export function WalletPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { token, account, accountId, ledgerEntries, walletBalances, sessionMode, sessionError, loginRequired, refreshAccountData, retrySession } =
+  const { token, account, accountId, ledgerEntries, assetLedgerEntries, walletBalances, sessionMode, sessionError, loginRequired, refreshAccountData, retrySession } =
     useTradingSession()
   const [fundOrders, setFundOrders] = useState<FundOrder[]>([])
   const [fundOrdersLoading, setFundOrdersLoading] = useState(false)
@@ -60,8 +60,8 @@ export function WalletPage() {
     return filterByStatus(fundOrders, statusFilter).filter((order) => typeFilter === 'ALL' || order.orderType === typeFilter)
   }, [fundOrders, statusFilter, typeFilter])
   const assetRows = useMemo(
-    () => getAssetRows(account, walletBalances, ledgerEntries, frozenAmount),
-    [account, frozenAmount, ledgerEntries, walletBalances]
+    () => getAssetRows(account, walletBalances, assetLedgerEntries, frozenAmount),
+    [account, assetLedgerEntries, frozenAmount, walletBalances]
   )
   const selectedAssetRow = useMemo(
     () => assetRows.find((asset) => asset.key === selectedAsset) ?? assetRows[0],
@@ -601,7 +601,7 @@ function formatTime(value: string | null | undefined) {
 function getAssetRows(
   account: { baseCurrency: string; balance: Amount; freeMargin: Amount } | null | undefined,
   balances: WalletBalance[],
-  entries: LedgerEntry[],
+  entries: AssetLedgerEntry[],
   frozenAmount: number
 ): AssetRow[] {
   const rows = new Map<string, AssetRow>()
@@ -616,7 +616,7 @@ function getAssetRows(
       available: balance.available,
       frozen: balance.locked,
       activityCount: entries.filter(
-        (entry) => entry.walletType === balance.walletType && entry.currency === balance.asset
+        (entry) => entry.walletType === balance.walletType && entry.asset === balance.asset
       ).length
     })
   })
@@ -631,23 +631,23 @@ function getAssetRows(
       available: account.freeMargin,
       frozen: frozenAmount.toFixed(2),
       activityCount: entries.filter(
-        (entry) => entry.walletType === 'FX_MARGIN' && entry.currency === account.baseCurrency
+        (entry) => entry.walletType === 'FX_MARGIN' && entry.asset === account.baseCurrency
       ).length
     })
   }
 
   entries.forEach((entry) => {
-    const key = walletKey(entry.walletType, entry.currency)
+    const key = walletKey(entry.walletType, entry.asset)
     if (rows.has(key)) return
     rows.set(key, {
       key,
       walletType: entry.walletType ?? 'UNKNOWN',
-      currency: entry.currency,
+      currency: entry.asset,
       balance: '-',
       available: '-',
       frozen: '-',
       activityCount: entries.filter(
-        (item) => item.walletType === entry.walletType && item.currency === entry.currency
+        (item) => item.walletType === entry.walletType && item.asset === entry.asset
       ).length
     })
   })

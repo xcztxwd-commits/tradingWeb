@@ -12,6 +12,10 @@ import jakarta.validation.constraints.NotNull;
  */
 public record AdminUserStatusRequest(
     @NotNull UserStatus status,
-    @NotBlank String reason
+    @NotBlank String reason,
+    String confirmationText
 ) {
+  public AdminUserStatusRequest(UserStatus status, String reason) {
+    this(status, reason, null);
+  }
 }

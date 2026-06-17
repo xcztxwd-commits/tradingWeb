@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
@@ -49,6 +50,25 @@ class AdminFinanceCommandServiceTest {
 
   @Mock
   private AuditLogService auditLogService;
+
+  @Test
+  void adjustmentRequiresConfirmationBeforeAccountLookup() {
+    AdminFinanceCommandService service = service();
+
+    assertThatThrownBy(() -> service.adjustBalance(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            new AdminBalanceAdjustmentRequest(
+                new BigDecimal("-10.00"),
+                "manual correction",
+                "ticket",
+                "adjust-confirm")))
+        .isInstanceOf(BusinessException.class)
+        .extracting("code")
+        .isEqualTo("ADMIN_CONFIRMATION_REQUIRED");
+
+    verifyNoInteractions(accountRepository, ledgerService, fundOperationRepository, auditLogService);
+  }
 
   @Test
   void depositIncreasesAccountBalanceAndWritesLedgerAndAudit() {
@@ -262,7 +282,8 @@ class AdminFinanceCommandServiceTest {
         new BigDecimal("-150.00"),
         "chargeback correction",
         "chargeback proof",
-        "adjust-1");
+        "adjust-1",
+        "CONFIRM_ADJUSTMENT");
     when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
     when(fundOperationRepository.findByAccountIdAndOperationTypeAndIdempotencyKey(
         account.getId(), "ADJUSTMENT", "adjust-1")).thenReturn(Optional.empty());
@@ -300,7 +321,8 @@ class AdminFinanceCommandServiceTest {
         new BigDecimal("-125.00"),
         "chargeback correction",
         "retry-safe adjustment",
-        "adjust-retry-1");
+        "adjust-retry-1",
+        "CONFIRM_ADJUSTMENT");
     AtomicReference<AdminFundOperationEntity> storedOperation = new AtomicReference<>();
     when(fundOperationRepository.findByAccountIdAndOperationTypeAndIdempotencyKey(
         account.getId(), "ADJUSTMENT", "adjust-retry-1"))

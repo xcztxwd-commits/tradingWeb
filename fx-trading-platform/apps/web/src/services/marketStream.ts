@@ -2,6 +2,16 @@ import type { Quote } from '../types/trading'
 import { Client } from '@stomp/stompjs'
 import type { IMessage, StompSubscription } from '@stomp/stompjs'
 
+export type TradingSessionStreamEvent = {
+  type: 'ORDER_EVENT' | 'WALLET_EVENT' | string
+  accountId?: string
+  orderId?: string
+  eventId?: string
+  eventType?: string
+  status?: string
+  createdAt?: string
+}
+
 type TopicHandler = (message: unknown) => void
 type MarketStreamLocation = Pick<Location, 'protocol' | 'host'>
 
@@ -138,15 +148,23 @@ function getApiBaseUrl() {
 let activeMarketStreamSession: MarketStreamSession | undefined
 
 export function subscribeQuote(symbol: string, token: string | null, onQuote: (quote: Quote) => void) {
-  return subscribeMarketTopic(`/topic/market/quotes/${symbol}`, token, onQuote)
+  return subscribeMarketTopic(`/topic/market/quotes/${normalizeMarketStreamSymbol(symbol)}`, token, onQuote)
 }
 
 export function subscribeOrderBook<T>(symbol: string, token: string | null, onOrderBook: (orderBook: T) => void) {
-  return subscribeMarketTopic(`/topic/market/order-book/${symbol}`, token, onOrderBook)
+  return subscribeMarketTopic(`/topic/market/order-book/${normalizeMarketStreamSymbol(symbol)}`, token, onOrderBook)
 }
 
 export function subscribeRecentTrades<T>(symbol: string, token: string | null, onTrades: (trades: T) => void) {
-  return subscribeMarketTopic(`/topic/market/trades/${symbol}`, token, onTrades)
+  return subscribeMarketTopic(`/topic/market/trades/${normalizeMarketStreamSymbol(symbol)}`, token, onTrades)
+}
+
+export function subscribeTradingSessionEvents(
+  accountId: string,
+  token: string,
+  onEvent: (event: TradingSessionStreamEvent) => void
+) {
+  return subscribeMarketTopic(`/topic/trading/accounts/${accountId}/events`, token, onEvent)
 }
 
 function subscribeMarketTopic<T>(topic: string, token: string | null, onMessage: (message: T) => void) {
@@ -161,6 +179,10 @@ function subscribeMarketTopic<T>(topic: string, token: string | null, onMessage:
     disposed = true
     session.unsubscribe(topic, onMessage)
   }
+}
+
+function normalizeMarketStreamSymbol(symbol: string) {
+  return symbol.replace(/[-_/]/g, '').toUpperCase()
 }
 
 function ensureMarketStreamSession(token: string | null) {

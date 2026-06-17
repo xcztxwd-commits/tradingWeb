@@ -2,6 +2,7 @@ package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -350,6 +351,28 @@ class LiquidationServiceTest {
 
     assertThat(closed).isEqualTo(1);
     verify(positionService).closeSystemPosition(accountId, position.getId(), "PERP_MAINTENANCE_MARGIN");
+  }
+
+  @Test
+  void shouldLiquidateUsesFreshPerpRiskIncludingLiquidationFeeBuffer() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "25.00000000");
+    PositionEntity position = openPerpPosition(accountId, UUID.randomUUID(), "BTCUSDT", "0.00000000", "0.00000000");
+    position.setLots(BigDecimal.ONE);
+    position.setOpenPrice(new BigDecimal("1000.00000000"));
+
+    lenient().when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    lenient().when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
+    lenient().when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
+        .thenReturn(List.of(position));
+    lenient().when(symbolRepository.findBySymbol("BTCUSDT"))
+        .thenReturn(Optional.of(linearPerpSymbol("BTCUSDT", new BigDecimal("0.02000000"))));
+    lenient().when(quoteService.freshQuote("BTCUSDT"))
+        .thenReturn(quote("BTCUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
+
+    AccountSnapshot staleSnapshot = snapshot(accountId, "25.00000000", "10.00000000", BigDecimal.ZERO);
+
+    assertThat(service().shouldLiquidate(staleSnapshot)).isTrue();
   }
 
   @Test

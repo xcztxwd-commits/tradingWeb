@@ -2,6 +2,7 @@ package com.fxplatform.audit;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -137,7 +138,11 @@ class Step10FxFinancingConversionAuditTest {
     AuditAssertions.assertAmountClose(settled, "-10.00000000");
     AuditAssertions.assertAmountClose(account.getBalance(), "9990.00000000");
     AuditAssertions.assertAmountClose(position.getFinancingAccrued(), "-10.00000000");
-    verify(ledgerService).recordFinancing(account, new BigDecimal("-10.00000000"), position.getId(), "FX rollover financing");
+    verify(ledgerService).recordFinancingSettlement(
+        eq(account),
+        eq(new BigDecimal("-10.00000000")),
+        any(UUID.class),
+        eq("FX rollover financing"));
   }
 
   @Test
@@ -162,7 +167,11 @@ class Step10FxFinancingConversionAuditTest {
     AuditAssertions.assertAmountClose(settled, "-10.00000000");
     AuditAssertions.assertAmountClose(account.getBalance(), "9990.00000000");
     AuditAssertions.assertAmountClose(position.getFinancingAccrued(), "-10.00000000");
-    verify(ledgerService).recordFinancing(account, new BigDecimal("-10.00000000"), position.getId(), "FX rollover financing");
+    verify(ledgerService).recordFinancingSettlement(
+        eq(account),
+        eq(new BigDecimal("-10.00000000")),
+        any(UUID.class),
+        eq("FX rollover financing"));
   }
 
   private ForexFinancingService financingService() {

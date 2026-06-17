@@ -113,10 +113,18 @@ const pendingOrder = await step('limit order starts as pending then demo tick ex
 })
 
 await step('TP/SL executor closes a protected position and writes ledger', async () => {
+  const protectedAccount = await api('/api/accounts/demo', {
+    method: 'POST',
+    token: userAccessToken,
+    body: {}
+  })
+  context.protectedAccountId = protectedAccount.id
+
   const order = await api('/api/trading/orders', {
     method: 'POST',
     token: userAccessToken,
     body: orderPayload({
+      accountId: protectedAccount.id,
       side: 'BUY',
       orderType: 'MARKET',
       quantity: '0.01',
@@ -125,20 +133,22 @@ await step('TP/SL executor closes a protected position and writes ledger', async
     })
   })
   assert(order.status === 'FILLED' || order.status === 'PARTIALLY_FILLED', 'Protected market order must fill first')
-  const positionsBefore = await api(`/api/trading/positions?accountId=${encodeURIComponent(account.accountId)}`, {
+  const positionsBefore = await api(`/api/trading/positions?accountId=${encodeURIComponent(protectedAccount.id)}`, {
     token: userAccessToken
   })
-  const protectedPosition = positionsBefore.find((item) => item.takeProfit !== null && item.status === 'OPEN')
+  const protectedPosition = positionsBefore.find(
+    (item) => item.symbol === symbol.symbol && item.status === 'OPEN' && item.takeProfit !== null
+  )
   assert(protectedPosition, 'Protected order must create an open position with takeProfit')
 
   await waitFor(async () => {
-    const positions = await api(`/api/trading/positions?accountId=${encodeURIComponent(account.accountId)}`, {
+    const positions = await api(`/api/trading/positions?accountId=${encodeURIComponent(protectedAccount.id)}`, {
       token: userAccessToken
     })
     return !positions.some((item) => item.id === protectedPosition.id)
   }, 'TP/SL executor closes position', 10000)
 
-  const ledger = await api(`/api/ledger?accountId=${encodeURIComponent(account.accountId)}`, {
+  const ledger = await api(`/api/ledger?accountId=${encodeURIComponent(protectedAccount.id)}`, {
     token: userAccessToken
   })
   assert(
@@ -149,7 +159,7 @@ await step('TP/SL executor closes a protected position and writes ledger', async
     ledger.some((entry) => entry.entryType === 'TRADE_PNL' && entry.referenceId === protectedPosition.id),
     'TP/SL close must write PnL ledger'
   )
-  return { positionId: protectedPosition.id }
+  return { accountId: protectedAccount.id, positionId: protectedPosition.id }
 })
 
 await step('user cancel syncs pending order to canceled state', async () => {
@@ -217,7 +227,8 @@ await step('optional admin sees user cancel state and can force close', async ()
     body: {
       accountId: account.accountId,
       reason: 'real trading loop smoke',
-      idempotencyKey: `force-close-${runId}`
+      idempotencyKey: `force-close-${runId}`,
+      confirmationText: 'CONFIRM_FORCE_CLOSE'
     }
   })
   assert(closed.status === 'CLOSED', 'Admin force close must close the position')
@@ -261,10 +272,10 @@ async function step(name, fn) {
   }
 }
 
-function orderPayload({ side, orderType, quantity, requestedPrice, stopLoss, takeProfit, suffix }) {
+function orderPayload({ accountId = account.accountId, side, orderType, quantity, requestedPrice, stopLoss, takeProfit, suffix }) {
   const key = `real-loop-${suffix}-${runId}`
   return {
-    accountId: account.accountId,
+    accountId,
     symbol: symbol.symbol,
     side,
     orderType,

@@ -5,7 +5,13 @@ import { describe, it } from 'node:test'
 
 import { createLocalPreviewOrder, deriveTradingBalances } from './tradingSessionModels.ts'
 import { repriceOpenPositionsForQuote } from './tradingSessionPositions.ts'
-import { clearStoredAuthToken, readStoredAuthToken, writeStoredAuthToken } from './tradingSessionStorage.ts'
+import {
+  clearStoredAuthToken,
+  readStoredAuthToken,
+  readStoredRefreshToken,
+  writeStoredAuthToken,
+  writeStoredAuthTokens
+} from './tradingSessionStorage.ts'
 import type { PositionResponse } from '../../components/tables/types.ts'
 import type { AccountSummary, OrderPayload, Quote, WalletBalance } from '../../types/trading.ts'
 
@@ -35,6 +41,24 @@ describe('trading session models', () => {
     assert.equal(values.has('fx-platform-demo-token'), false)
     clearStoredAuthToken(storage)
     assert.equal(readStoredAuthToken(storage), null)
+  })
+
+  it('stores and clears the refresh token with the auth session', () => {
+    const { storage, values } = makeAuthTokenStorage()
+
+    writeStoredAuthTokens('access-1', 'refresh-1', storage)
+
+    assert.equal(readStoredAuthToken(storage), 'access-1')
+    assert.equal(readStoredRefreshToken(storage), 'refresh-1')
+    assert.equal(values.get('fx-platform-auth-token'), 'access-1')
+    assert.equal(values.get('fx-platform-auth-refresh-token'), 'refresh-1')
+
+    clearStoredAuthToken(storage)
+
+    assert.equal(readStoredAuthToken(storage), null)
+    assert.equal(readStoredRefreshToken(storage), null)
+    assert.equal(values.has('fx-platform-auth-token'), false)
+    assert.equal(values.has('fx-platform-auth-refresh-token'), false)
   })
 
   it('migrates an existing demo token into the formal auth token key', () => {
@@ -282,7 +306,7 @@ describe('trading session submit mode', () => {
       loginRequired: true
     }), 'login-required')
     assert.match(authApiSource, /getSessionStatus/)
-    assert.match(authApiSource, /status:\s*'guest' \| 'valid_token' \| 'invalid_token'/)
+    assert.match(authApiSource, /export type SessionAuthStatus = SessionStatus\['status'\]/)
     assert.match(authApiSource, /apiGet<SessionStatus>\('\/api\/auth\/session'/)
     assert.match(hookSource, /getSessionStatus/)
     assert.match(hookSource, /sessionAuthStatus/)
@@ -327,6 +351,30 @@ describe('trading session submit mode', () => {
     assert.doesNotMatch(pollingBlock, /setOrders\(\[\]\)/)
   })
 
+  it('reduces REST polling frequency while the page is hidden', async () => {
+    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+    const { getTradingSessionRefreshMs } = await import('./useTradingSession.ts')
+
+    assert.equal(getTradingSessionRefreshMs(2000, 'visible'), 2000)
+    assert.equal(getTradingSessionRefreshMs(2000, 'hidden'), 15000)
+    assert.equal(getTradingSessionRefreshMs(5000, 'hidden'), 30000)
+    assert.match(source, /document\.addEventListener\('visibilitychange',\s*syncVisibility\)/)
+    assert.match(source, /document\.removeEventListener\('visibilitychange',\s*syncVisibility\)/)
+    assert.match(source, /const effectiveRefreshMs = getTradingSessionRefreshMs\(refreshMs,\s*visibilityState\)/)
+    assert.match(source, /}, effectiveRefreshMs\)/)
+  })
+
+  it('refreshes the authoritative account snapshot after trading-session stream events', () => {
+    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+    const streamSource = readFileSync(new URL('../../services/marketStream.ts', import.meta.url), 'utf8')
+
+    assert.match(source, /subscribeTradingSessionEvents/)
+    assert.match(source, /subscribeTradingSessionEvents\(accountId,\s*token,\s*\(\) => \{/)
+    assert.match(source, /refreshAccountData\(token,\s*accountId,\s*\(\) => active\)/)
+    assert.match(streamSource, /subscribeTradingSessionEvents/)
+    assert.match(streamSource, /`\/topic\/trading\/accounts\/\$\{accountId\}\/events`/)
+  })
+
   it('uses backend position refresh as the authoritative open-position PnL source', () => {
     const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
 
@@ -337,14 +385,14 @@ describe('trading session submit mode', () => {
     assert.doesNotMatch(source, /positionQuoteSymbolsKey/)
   })
 
-  it('loads account asset ledger rows for wallet conversion refreshes', () => {
+  it('loads merged ledger rows while keeping account asset ledger details available', () => {
     const source = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
 
+    assert.match(source, /getLedgerEntries/)
     assert.match(source, /getAssetLedger/)
-    assert.match(source, /mapAssetLedgerEntry/)
-    assert.match(source, /currency:\s*entry\.asset/)
-    assert.match(source, /walletType:\s*entry\.walletType/)
-    assert.doesNotMatch(source, /getLedgerEntries/)
+    assert.match(source, /assetLedgerEntries:\s*AssetLedgerEntry\[\]/)
+    assert.match(source, /return \{ account, orders, positions, positionHistory, ledgerEntries, assetLedgerEntries, walletBalances \}/)
+    assert.doesNotMatch(source, /mapAssetLedgerEntry/)
   })
 })
 

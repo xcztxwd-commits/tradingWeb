@@ -182,7 +182,7 @@ class ArchitectureRulesTest {
     String securityConfig = Files.readString(Path.of("src/main/java/com/fxplatform/common/security/SecurityConfig.java"));
 
     assertThat(application)
-        .contains("allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}");
+        .contains("allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:}");
     assertThat(securityConfig).contains("setAllowedOriginPatterns");
     assertThat(securityConfig).contains("\"PUT\"");
   }
@@ -337,10 +337,18 @@ class ArchitectureRulesTest {
     String marketCommand = Files.readString(Path.of(
         "src/main/java/com/fxplatform/admin/service/AdminMarketCommandService.java"));
 
-    assertThat(financeCommand).contains(
-        "非空幂等键必须先抢占资金操作记录，抢占成功后才允许改账户余额和写流水。\n"
-            + "   */\n"
-            + "  private AdminFundOperationResponse applyBalanceChange(");
+    int applyBalanceChangeIndex = financeCommand.indexOf(
+        "private AdminFundOperationResponse applyBalanceChange(");
+    assertThat(applyBalanceChangeIndex).isGreaterThan(0);
+    assertThat(financeCommand.substring(Math.max(0, applyBalanceChangeIndex - 240), applyBalanceChangeIndex))
+        .contains("后台资金写操作以 accountId + operationType + idempotencyKey 作为命令幂等边界。")
+        .contains("非空幂等键必须先抢占资金操作记录，抢占成功后才允许改账户余额和写流水。");
+
+    int detailsIndex = financeCommand.indexOf("private String details(");
+    assertThat(detailsIndex).isGreaterThan(0);
+    assertThat(financeCommand.substring(Math.max(0, detailsIndex - 200), detailsIndex))
+        .contains("构造审计 JSON 明细。")
+        .doesNotContain("空金额按零处理，避免老数据导致空指针。");
     assertThat(marketCommand).doesNotContain("*/\n  /** 创建产品分类，并写入审计日志。 */");
     assertThat(marketCommand).doesNotContain("*/\n  /** 取消尚未完成的涨跌/价格调整任务。 */");
   }

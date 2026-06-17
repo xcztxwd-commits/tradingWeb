@@ -21,7 +21,7 @@ class SecurityErrorResponseWriterTest {
     assertThat(response.getStatus()).isEqualTo(401);
     assertThat(response.getContentType()).startsWith(MediaType.APPLICATION_JSON_VALUE);
     assertThat(response.getContentAsString()).contains("\"success\":false");
-    assertThat(response.getContentAsString()).contains("\"code\":\"UNAUTHORIZED\"");
+    assertThat(response.getContentAsString()).contains("\"code\":\"AUTH_TOKEN_EXPIRED\"");
     assertThat(response.getContentAsString()).contains("登录已过期或未登录，请重新登录");
   }
 

@@ -91,6 +91,7 @@ public class AdminFinanceCommandService {
     if (request.delta().compareTo(BigDecimal.ZERO) == 0) {
       throw new BusinessException("ZERO_ADJUSTMENT_NOT_ALLOWED", "Adjustment delta must not be zero");
     }
+    AdminActionConfirmation.require(request.confirmationText(), AdminActionConfirmation.CONFIRM_ADJUSTMENT);
     return applyBalanceChange(
         actorUserId,
         accountId,
@@ -270,9 +271,6 @@ public class AdminFinanceCommandService {
     }
   }
 
-  /**
-   * 空金额按零处理，避免老数据导致空指针。
-   */
   /**
    * 构造审计 JSON 明细。
    */

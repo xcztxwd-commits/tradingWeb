@@ -51,6 +51,7 @@ public class AdminUserController {
   /**
    * 修改用户状态。
    */
+  @PreAuthorize("hasAnyAuthority('user:update','user:disable')")
   @PatchMapping("/{userId}/status")
   public ApiResponse<AdminUserResponse> updateStatus(
       @AuthenticationPrincipal UserPrincipal principal,
@@ -99,6 +100,7 @@ public class AdminUserController {
   /**
    * 强制用户退出登录。
    */
+  @PreAuthorize("hasAuthority('user:force-logout')")
   @PostMapping("/{userId}/force-logout")
   public ApiResponse<Void> forceLogout(
       @AuthenticationPrincipal UserPrincipal principal,

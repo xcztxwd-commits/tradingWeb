@@ -1,21 +1,7 @@
 import { apiGet, apiPost } from './apiClient'
+import type { AuthResponse, SessionStatus } from '@fx-platform/shared-types'
 
-export type AuthResponse = {
-  userId: string
-  email: string
-  role: string
-  accessToken: string
-}
-
-export type SessionStatus = {
-  status: 'guest' | 'valid_token' | 'invalid_token'
-  authenticated: boolean
-  userId: string | null
-  email: string | null
-  role: string | null
-  kycStatus?: 'UNVERIFIED' | 'PENDING' | 'APPROVED' | 'REJECTED'
-  loginPath: string
-}
+export type { AuthResponse, SessionStatus }
 
 export type SessionAuthStatus = SessionStatus['status']
 
@@ -34,25 +20,14 @@ export function login(email: string, password: string) {
   })
 }
 
+export function refreshAuth(refreshToken: string) {
+  return apiPost<AuthResponse>('/api/auth/refresh', { refreshToken })
+}
+
+export function logoutAuth(accessToken?: string | null, refreshToken?: string | null) {
+  return apiPost<null>('/api/auth/logout', { refreshToken: refreshToken ?? null }, accessToken ?? undefined)
+}
+
 export function getSessionStatus(token?: string | null) {
   return apiGet<SessionStatus>('/api/auth/session', token ?? undefined)
-}
-
-export type AuthIdentityCheck = {
-  exists: boolean
-  channel: 'email' | 'phone'
-}
-
-export function checkAuthIdentity(identifier: string, channel: 'email' | 'phone') {
-  return apiPost<AuthIdentityCheck>('/api/auth/identity-check', {
-    identifier,
-    channel
-  })
-}
-
-export function sendAuthVerificationCode(identifier: string, channel: 'email' | 'phone') {
-  return apiPost<{ sent: boolean }>('/api/auth/verification-code', {
-    identifier,
-    channel
-  })
 }

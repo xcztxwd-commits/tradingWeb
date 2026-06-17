@@ -14,6 +14,10 @@ import java.util.UUID;
 public record AdminForceClosePositionRequest(
     @NotNull UUID accountId,
     @NotBlank String reason,
-    String idempotencyKey
+    String idempotencyKey,
+    String confirmationText
 ) {
+  public AdminForceClosePositionRequest(UUID accountId, String reason, String idempotencyKey) {
+    this(accountId, reason, idempotencyKey, null);
+  }
 }

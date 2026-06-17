@@ -26,6 +26,7 @@ type Props = {
   balances?: TradeBalances
   leverage?: number
   productType?: TradeMarket['productType']
+  rules?: TradeMarket['rules']
   minOrderAmount?: number
   pricePrecision?: number
   quantityPrecision?: number
@@ -47,7 +48,7 @@ export function TradePanel({
   compact = false,
   accountId,
   balances: externalBalances = emptyBalances,
-  leverage: symbolLeverage, productType,
+  leverage: symbolLeverage, productType, rules,
   minOrderAmount = 0.0001,
   pricePrecision = 2,
   quantityPrecision = 6,
@@ -62,12 +63,16 @@ export function TradePanel({
 }: Props) {
   const { t } = useTranslation()
   const snapshot = useMarketDataSnapshot()
-  const leverage = resolveTradePanelLeverage(symbolLeverage)
-  const market = useMemo(() => createPanelMarket(symbol, snapshot, { category, leverage, productType }), [category, leverage, productType, snapshot, symbol])
+  const leverage = resolveTradePanelLeverage(resolveRuleLeverage(symbolLeverage, rules))
+  const market = useMemo(() => createPanelMarket(symbol, snapshot, { category, leverage, productType, rules }), [category, leverage, productType, rules, snapshot, symbol])
   const mockBalances = useMockBalances()
   const balances = useMemo(() => ({ ...mockBalances, ...externalBalances }), [externalBalances, mockBalances])
-  const buyForm = useTradeForm('buy', market, balances, 5, minOrderAmount)
-  const sellForm = useTradeForm('sell', market, balances, 5, minOrderAmount)
+  const effectiveMinOrderAmount = resolveRuleNumber(rules?.minQty ?? rules?.minLot, minOrderAmount)
+  const minNotional = resolveRuleNumber(rules?.minNotional, 5)
+  const effectivePricePrecision = resolvePrecision(rules?.tickSize, pricePrecision)
+  const effectiveQuantityPrecision = resolvePrecision(rules?.stepSize, quantityPrecision)
+  const buyForm = useTradeForm('buy', market, balances, minNotional, effectiveMinOrderAmount)
+  const sellForm = useTradeForm('sell', market, balances, minNotional, effectiveMinOrderAmount)
   const [mobileSide, setMobileSide] = useState<TradeSide>('buy')
   const [skipConfirm, setSkipConfirm] = useState(readSkipConfirmPreference)
   const [confirmation, setConfirmation] = useState<{
@@ -77,7 +82,8 @@ export function TradePanel({
   } | null>(null)
   const backendReady = !loginRequired && Boolean(accountId && sessionReady && onSubmitOrder)
   const sessionState = getTradePanelSessionState({ backendReady, loginRequired, sessionError, sessionMode, t })
-  const canTrade = backendReady
+  const rulesTradable = rules ? rules.enabled && rules.tradable && rules.orderEnabled : true
+  const canTrade = backendReady && rulesTradable
   const { attempted, handleSubmit, notice, setNotice, submittingSide } = useTradePanelSubmit({
     accountId,
     backendReady,
@@ -178,9 +184,9 @@ export function TradePanel({
           form={buyForm.form}
           market={market}
           balances={balances}
-          minOrderAmount={minOrderAmount}
-          pricePrecision={pricePrecision}
-          quantityPrecision={quantityPrecision}
+          minOrderAmount={effectiveMinOrderAmount}
+          pricePrecision={effectivePricePrecision}
+          quantityPrecision={effectiveQuantityPrecision}
           validation={buyForm.validation}
           showErrors={attempted.buy}
           canTrade={canTrade}
@@ -196,9 +202,9 @@ export function TradePanel({
           form={sellForm.form}
           market={market}
           balances={balances}
-          minOrderAmount={minOrderAmount}
-          pricePrecision={pricePrecision}
-          quantityPrecision={quantityPrecision}
+          minOrderAmount={effectiveMinOrderAmount}
+          pricePrecision={effectivePricePrecision}
+          quantityPrecision={effectiveQuantityPrecision}
           validation={sellForm.validation}
           showErrors={attempted.sell}
           canTrade={canTrade}
@@ -256,4 +262,20 @@ function writeSkipConfirmPreference(value: boolean) {
 export function resolveTradePanelLeverage(leverage?: number) {
   if (leverage === undefined || !Number.isFinite(leverage) || leverage <= 0) return 1
   return Math.round(leverage)
+}
+
+function resolveRuleLeverage(leverage?: number, rules?: TradeMarket['rules']) {
+  const requested = leverage ?? rules?.defaultLeverage
+  if (!rules?.maxLeverage || !requested) return requested
+  return Math.min(requested, rules.maxLeverage)
+}
+
+function resolveRuleNumber(value: number | undefined, fallback: number) {
+  return value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback
+}
+
+function resolvePrecision(step: number | undefined, fallback: number) {
+  if (!step || !Number.isFinite(step) || step <= 0) return fallback
+  const text = String(step)
+  return text.includes('.') ? text.split('.')[1]?.replace(/0+$/, '').length ?? fallback : 0
 }

@@ -10,13 +10,30 @@ import org.springframework.stereotype.Component;
  */
 @Component
 @ConditionalOnProperty(prefix = "execution", name = "mode", havingValue = "broker")
-public class BrokerExecutionAdapter implements ExecutionAdapter {
+public class BrokerExecutionAdapter implements ExecutionAdapter, ExecutionAdapterReadiness {
+
+  private static final String NOT_READY_MESSAGE = "Broker execution is reserved for future LIVE trading";
 
   /**
    * 执行 execute 适配器逻辑。
    */
   @Override
   public ExecutionResult execute(CreateOrderRequest request) {
-    throw new BusinessException("BROKER_NOT_ENABLED", "Broker execution is reserved for future LIVE trading");
+    throw new BusinessException("BROKER_NOT_ENABLED", NOT_READY_MESSAGE);
+  }
+
+  @Override
+  public ExecutionMode mode() {
+    return ExecutionMode.BROKER;
+  }
+
+  @Override
+  public boolean readyForLiveTrading() {
+    return false;
+  }
+
+  @Override
+  public String notReadyMessage() {
+    return NOT_READY_MESSAGE;
   }
 }

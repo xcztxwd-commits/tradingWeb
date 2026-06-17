@@ -9,6 +9,7 @@ import com.fxplatform.market.repository.SymbolRepository;
 import java.util.List;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -20,6 +21,9 @@ public class SymbolService {
 
   private final SymbolRepository symbolRepository;
   private final ProviderResolver providerResolver;
+
+  @Value("${market.demo-quotes.enabled:false}")
+  private boolean demoQuotesEnabled;
 
   public List<SymbolResponse> enabledSymbols() {
     return enabledSymbols(null, 2000);
@@ -73,7 +77,13 @@ public class SymbolService {
   }
 
   private boolean capabilityEnabled(SymbolEntity entity, Boolean symbolEnabled, MarketDataCapability capability) {
-    return Boolean.TRUE.equals(symbolEnabled) && providerResolver.canResolve(entity, capability);
+    if (!Boolean.TRUE.equals(symbolEnabled)) {
+      return false;
+    }
+    if (capability == MarketDataCapability.QUOTE && demoQuotesEnabled) {
+      return true;
+    }
+    return providerResolver.canResolve(entity, capability);
   }
 
   private String normalizeAssetClass(String assetClass) {

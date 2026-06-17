@@ -22,6 +22,12 @@ public interface PositionRepository extends FxBaseMapper<PositionEntity> {
         .orderByDesc(PositionEntity::getOpenedAt));
   }
 
+  default List<PositionEntity> findByAccountIdOrderByOpenedAtDesc(UUID accountId) {
+    return selectList(new LambdaQueryWrapper<PositionEntity>()
+        .eq(PositionEntity::getAccountId, accountId)
+        .orderByDesc(PositionEntity::getOpenedAt));
+  }
+
   default Optional<PositionEntity> findOpenNetPosition(UUID accountId, String symbol) {
     String normalizedSymbol = symbol == null ? "" : symbol.trim().toUpperCase();
     return selectList(new LambdaQueryWrapper<PositionEntity>()

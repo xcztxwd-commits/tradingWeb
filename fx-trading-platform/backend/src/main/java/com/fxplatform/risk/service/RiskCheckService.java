@@ -32,6 +32,7 @@ public class RiskCheckService {
   private final MarginCalculator marginCalculator;
   private final AccountSnapshotService accountSnapshotService;
   private final WalletService walletService;
+  private final InstrumentRulesEngine instrumentRulesEngine;
   private final TradingInstrumentClassifier instrumentClassifier = new TradingInstrumentClassifier();
 
   @Autowired
@@ -40,13 +41,25 @@ public class RiskCheckService {
       SymbolRepository symbolRepository,
       MarginCalculator marginCalculator,
       AccountSnapshotService accountSnapshotService,
-      WalletService walletService
+      WalletService walletService,
+      InstrumentRulesEngine instrumentRulesEngine
   ) {
     this.quoteService = quoteService;
     this.symbolRepository = symbolRepository;
     this.marginCalculator = marginCalculator;
     this.accountSnapshotService = accountSnapshotService;
     this.walletService = walletService;
+    this.instrumentRulesEngine = instrumentRulesEngine;
+  }
+
+  public RiskCheckService(
+      QuoteService quoteService,
+      SymbolRepository symbolRepository,
+      MarginCalculator marginCalculator,
+      AccountSnapshotService accountSnapshotService,
+      WalletService walletService
+  ) {
+    this(quoteService, symbolRepository, marginCalculator, accountSnapshotService, walletService, null);
   }
 
   public RiskCheckService(
@@ -73,8 +86,10 @@ public class RiskCheckService {
 
     SymbolEntity symbol = symbolRepository.findBySymbol(request.symbol())
         .orElseThrow(() -> new BusinessException("SYMBOL_NOT_FOUND", "Symbol not found"));
+    validateInstrumentRules(request, symbol);
     QuoteResponse quote = quoteService.freshQuote(request.symbol());
     BigDecimal price = request.side() == OrderSide.BUY ? quote.ask() : quote.bid();
+    validateInstrumentNotional(request, symbol, price);
     InstrumentProfile profile = instrumentClassifier.profile(symbol);
     if (profile.kind() == InstrumentKind.SPOT) {
       return checkSpotOrder(account, request, symbol, price, profile.unitSize());
@@ -126,6 +141,18 @@ public class RiskCheckService {
       return requestedOrAccountLeverage;
     }
     return Math.min(requestedOrAccountLeverage, symbolLeverage);
+  }
+
+  private void validateInstrumentRules(CreateOrderRequest request, SymbolEntity symbol) {
+    if (instrumentRulesEngine != null) {
+      instrumentRulesEngine.validateOrderRules(request, symbol);
+    }
+  }
+
+  private void validateInstrumentNotional(CreateOrderRequest request, SymbolEntity symbol, BigDecimal price) {
+    if (instrumentRulesEngine != null) {
+      instrumentRulesEngine.validateOrderNotional(request, symbol, price);
+    }
   }
 
   private BigDecimal availableFreeMargin(TradingAccountEntity account) {

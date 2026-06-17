@@ -93,7 +93,11 @@ public class FundingService {
     applyCashflow(account, position, cashflow);
     accountRepository.save(account);
     positionRepository.save(position);
-    LedgerEntryEntity ledgerEntry = ledgerService.recordFundingFee(account, cashflow, position.getId(), LEDGER_DESCRIPTION);
+    LedgerEntryEntity ledgerEntry = ledgerService.recordFundingFeeSettlement(
+        account,
+        cashflow,
+        settlement.getId(),
+        LEDGER_DESCRIPTION);
     if (ledgerEntry != null) {
       settlement.setLedgerEntryId(ledgerEntry.getId());
       fundingSettlementRepository.updateById(settlement);

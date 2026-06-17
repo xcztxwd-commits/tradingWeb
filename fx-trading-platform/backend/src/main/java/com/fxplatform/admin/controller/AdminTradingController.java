@@ -80,6 +80,7 @@ public class AdminTradingController {
   }
 
   /** 后台取消订单，并写入审计日志。 */
+  @PreAuthorize("hasAuthority('trading:order:cancel')")
   @PostMapping("/orders/{orderId}/cancel")
   public ApiResponse<AdminOrderResponse> cancelOrder(
       @AuthenticationPrincipal UserPrincipal principal,
@@ -90,6 +91,7 @@ public class AdminTradingController {
   }
 
   /** 后台强制平仓，并写入审计日志。 */
+  @PreAuthorize("hasAuthority('trading:position:force-close')")
   @PostMapping("/positions/{positionId}/force-close")
   public ApiResponse<PositionResponse> forceClosePosition(
       @AuthenticationPrincipal UserPrincipal principal,

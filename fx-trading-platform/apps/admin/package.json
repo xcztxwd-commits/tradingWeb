@@ -10,6 +10,7 @@
     "preview": "vite preview --host 0.0.0.0 --port 4174"
   },
   "dependencies": {
+    "@fx-platform/shared-types": "0.1.0",
     "@vitejs/plugin-react": "^5.0.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

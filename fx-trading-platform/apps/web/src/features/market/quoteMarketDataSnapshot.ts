@@ -12,7 +12,8 @@ export function createQuoteMarketDataSnapshot(quote: TradingQuote): MarketDataSn
     bids: createLevels(quote.bid, tickSize, 'bid'),
     lastPrice: quote.mid,
     lastPriceDirection: 'flat',
-    recentTrades: [createTrade(quote)]
+    recentTrades: [createTrade(quote)],
+    updatedAt: quote.timestamp
   }
 }
 

@@ -4,9 +4,21 @@ admin:
     email: ${ADMIN_BOOTSTRAP_EMAIL:admin-smoke@example.com}
     password: ${ADMIN_BOOTSTRAP_PASSWORD:Password123!}
 
+app:
+  cors:
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:dev-local-jwt-secret-value-at-least-32-chars}
+  config:
+    encryption-key: ${CONFIG_ENCRYPTION_KEY:dev-local-config-encryption-key-32chars}
+
 market:
   demo-quotes:
     enabled: ${MARKET_DEMO_QUOTES_ENABLED:false}
+  realtime:
+    enabled: ${MARKET_REALTIME_ENABLED:false}
   test-data:
     enabled: ${MARKET_TEST_DATA_ENABLED:true}
 

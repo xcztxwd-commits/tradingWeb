@@ -114,6 +114,26 @@ public class MassiveRestClient implements MarketDataProviderAdapter {
   }
 
   @Override
+  public Map<String, QuoteResponse> fetchLatestQuotes(Map<String, String> providerSymbolsBySymbol) {
+    if (!isConfigured() || providerSymbolsBySymbol == null || providerSymbolsBySymbol.isEmpty()) {
+      return Map.of();
+    }
+    Map<String, QuoteResponse> snapshots = fetchMarketSnapshots("FOREX", Integer.MAX_VALUE);
+    Map<String, QuoteResponse> quotes = new LinkedHashMap<>();
+    providerSymbolsBySymbol.forEach((symbol, providerSymbol) -> {
+      String normalizedSymbol = toNormalizedForexSymbol(providerSymbol)
+          .orElseGet(() -> toNormalizedForexSymbol(symbol).orElse(""));
+      QuoteResponse snapshot = snapshots.get(normalizedSymbol);
+      if (snapshot != null) {
+        quotes.put(symbol, snapshot);
+        return;
+      }
+      fetchLatestQuote(symbol, providerSymbol).ifPresent(quote -> quotes.put(quote.symbol(), quote));
+    });
+    return Map.copyOf(quotes);
+  }
+
+  @Override
   public Map<String, QuoteResponse> fetchMarketSnapshots(String assetClass, int limit) {
     if (!isConfigured() || !"FOREX".equals(normalizeAssetClass(assetClass)) || limit <= 0) {
       return Map.of();

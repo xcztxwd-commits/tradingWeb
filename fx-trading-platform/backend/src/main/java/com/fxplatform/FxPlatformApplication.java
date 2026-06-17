@@ -1,6 +1,9 @@
 package com.fxplatform;
 
 import com.fxplatform.admin.service.AdminBootstrapProperties;
+import com.fxplatform.execution.ExecutionProperties;
+import com.fxplatform.market.realtime.MarketRealtimeProperties;
+import com.fxplatform.market.realtime.MarketTestControlProperties;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -16,7 +19,12 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * 启动 FX/CFD 交易平台后端应用，并启用调度任务和配置属性。
  */
 @EnableScheduling
-@EnableConfigurationProperties(AdminBootstrapProperties.class)
+@EnableConfigurationProperties({
+    AdminBootstrapProperties.class,
+    ExecutionProperties.class,
+    MarketRealtimeProperties.class,
+    MarketTestControlProperties.class
+})
 @SpringBootApplication
 @MapperScan("com.fxplatform.**.repository")
 public class FxPlatformApplication {

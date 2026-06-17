@@ -10,6 +10,7 @@ import com.fxplatform.config.entity.SystemDictionaryEntity;
 import com.fxplatform.config.entity.SystemSettingEntity;
 import com.fxplatform.config.repository.SystemDictionaryRepository;
 import com.fxplatform.config.repository.SystemSettingRepository;
+import com.fxplatform.config.service.SensitiveSettingService;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,7 @@ public class AdminConfigCommandService {
   private final SystemSettingRepository settingRepository;
   /** 审计服务，用于记录配置变更。 */
   private final AuditLogService auditLogService;
+  private final SensitiveSettingService sensitiveSettingService;
 
   /**
    * 按 groupKey + itemKey 创建或更新字典项。
@@ -61,8 +63,13 @@ public class AdminConfigCommandService {
     SystemSettingEntity setting = settingRepository
         .findBySettingKey(request.settingKey())
         .orElseGet(SystemSettingEntity::new);
+    String storedValue = sensitiveSettingService.storedValue(
+        request.settingKey(),
+        request.settingValue(),
+        setting.getSettingValue());
+    String responseValue = sensitiveSettingService.responseValue(request.settingKey(), storedValue);
     setting.setSettingKey(request.settingKey());
-    setting.setSettingValue(request.settingValue());
+    setting.setSettingValue(storedValue);
     setting.setValueType(request.valueType());
     setting.setDescription(request.description());
     setting.setEditable(request.editable());
@@ -72,8 +79,8 @@ public class AdminConfigCommandService {
         "ADMIN_SETTING_UPDATE",
         "SETTING",
         saved.getId().toString(),
-        details(request.settingKey(), request.settingValue()));
-    return AdminSystemSettingResponse.from(saved);
+        details(request.settingKey(), responseValue));
+    return AdminSystemSettingResponse.from(saved, sensitiveSettingService);
   }
 
   /**

@@ -1,17 +1,4 @@
-export type ApiResponse<T> = {
-  success: boolean
-  code: string
-  message: string
-  data: T
-  timestamp: string
-}
-
-export type AuthResponse = {
-  userId: string
-  email: string
-  role: string
-  accessToken: string
-}
+export type { ApiResponse, AuthResponse } from '@fx-platform/shared-types'
 
 export type AdminUser = {
   id: string
@@ -189,6 +176,7 @@ export type SymbolPayload = {
   featured: boolean
   displayGroup: string | null
   displayOrder: number
+  confirmationText?: string
 }
 
 export type DataProviderRow = {
@@ -205,10 +193,26 @@ export type DataProviderRow = {
   rateLimitPerMinute: number
   healthStatus: string
   lastHealthCheckAt: string | null
+  lastSuccessAt: string | null
+  lastFailureAt: string | null
+  failureCount: number
+  avgLatencyMs: number | null
+  lastQuoteSuccessAt: string | null
+  quoteStalenessMs: number | null
+  lastInstrumentSyncAt: string | null
+  lastInstrumentSyncCount: number
   configJson: string
   capabilities: string[]
+  capabilityStatuses: DataProviderCapabilityStatus[]
   createdAt: string | null
   updatedAt: string | null
+}
+
+export type DataProviderCapabilityStatus = {
+  capability: string
+  enabled: boolean
+  supported: boolean | null
+  status: string
 }
 
 export type DataProviderPayload = {
@@ -223,6 +227,7 @@ export type DataProviderPayload = {
   timeoutMs: number
   rateLimitPerMinute: number
   configJson: string
+  confirmationText?: string
 }
 
 export type ProviderInstrumentRow = {

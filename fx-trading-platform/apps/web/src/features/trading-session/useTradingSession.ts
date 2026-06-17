@@ -12,8 +12,9 @@ import {
 } from './tradingSession'
 import { getSessionStatus } from '../../services/authApi'
 import type { SessionAuthStatus } from '../../services/authApi'
+import { subscribeTradingSessionEvents } from '../../services/marketStream'
 import type { PositionResponse, OrderResponse } from '../../components/tables/types'
-import type { AccountSummary, LedgerEntry, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
+import type { AccountSummary, AssetLedgerEntry, LedgerEntry, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
 import { clearStoredAuthToken, readStoredAuthToken } from './tradingSessionStorage'
 
 type Options = {
@@ -21,6 +22,7 @@ type Options = {
 }
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
+type TradingSessionVisibility = 'visible' | 'hidden' | string
 
 const defaultTranslate: Translate = (key) => {
   if (key === 'trading.backendSessionFailed') return 'Backend session connection failed. Try again later.'
@@ -55,6 +57,18 @@ export function formatTradingSessionError(error: unknown, t: Translate = default
   return t('trading.backendSessionFailed')
 }
 
+export function getTradingSessionRefreshMs(
+  refreshMs: number,
+  visibilityState: TradingSessionVisibility = getDocumentVisibilityState()
+) {
+  return visibilityState === 'hidden' ? Math.max(refreshMs * 6, 15000) : refreshMs
+}
+
+function getDocumentVisibilityState(): TradingSessionVisibility {
+  if (typeof document === 'undefined') return 'visible'
+  return document.visibilityState
+}
+
 export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
   const { t } = useTranslation()
   const [token, setToken] = useState<string | null>(null)
@@ -63,13 +77,16 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
   const [positions, setPositions] = useState<PositionResponse[]>([])
   const [positionHistory, setPositionHistory] = useState<PositionResponse[]>([])
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([])
+  const [assetLedgerEntries, setAssetLedgerEntries] = useState<AssetLedgerEntry[]>([])
   const [walletBalances, setWalletBalances] = useState<WalletBalance[]>([])
   const [sessionReady, setSessionReady] = useState(false)
   const [sessionError, setSessionError] = useState<string | null>(null)
   const [sessionAuthStatus, setSessionAuthStatus] = useState<SessionAuthStatus>('guest')
   const [lastOrderError, setLastOrderError] = useState<unknown>(null)
   const [loginRequired, setLoginRequired] = useState(false)
+  const [visibilityState, setVisibilityState] = useState<TradingSessionVisibility>(() => getDocumentVisibilityState())
   const accountId = useMemo(() => account?.id, [account])
+  const effectiveRefreshMs = getTradingSessionRefreshMs(refreshMs, visibilityState)
 
   const markSessionError = useCallback((error: unknown) => {
     setSessionError(formatTradingSessionError(error, t))
@@ -82,6 +99,7 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
     setPositions(data.positions)
     setPositionHistory(data.positionHistory)
     setLedgerEntries(data.ledgerEntries)
+    setAssetLedgerEntries(data.assetLedgerEntries)
     setWalletBalances(data.walletBalances)
     setSessionError(null)
   }, [])
@@ -102,6 +120,7 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
     setPositions([])
     setPositionHistory([])
     setLedgerEntries([])
+    setAssetLedgerEntries([])
     setWalletBalances([])
     setSessionReady(false)
   }, [])
@@ -178,6 +197,36 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
   }, [loadSessionSnapshot, markSessionError, requireLogin])
 
   useEffect(() => {
+    if (typeof document === 'undefined') return
+
+    const syncVisibility = () => setVisibilityState(getDocumentVisibilityState())
+    syncVisibility()
+    document.addEventListener('visibilitychange', syncVisibility)
+
+    return () => {
+      document.removeEventListener('visibilitychange', syncVisibility)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (visibilityState !== 'visible' || !token || !accountId || !sessionReady) return
+    let active = true
+
+    void refreshAccountData(token, accountId, () => active).catch((error) => {
+      if (!active) return
+      if (isAuthSessionFailure(error)) {
+        requireLogin()
+        return
+      }
+      markSessionError(error)
+    })
+
+    return () => {
+      active = false
+    }
+  }, [accountId, markSessionError, refreshAccountData, requireLogin, sessionReady, token, visibilityState])
+
+  useEffect(() => {
     if (!token || !accountId || !sessionReady) return
     let active = true
     const interval = window.setInterval(() => {
@@ -189,13 +238,33 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
         }
         markSessionError(error)
       })
-    }, refreshMs)
+    }, effectiveRefreshMs)
 
     return () => {
       active = false
       window.clearInterval(interval)
     }
-  }, [accountId, markSessionError, refreshAccountData, refreshMs, requireLogin, sessionReady, token])
+  }, [accountId, effectiveRefreshMs, markSessionError, refreshAccountData, requireLogin, sessionReady, token])
+
+  useEffect(() => {
+    if (!token || !accountId || !sessionReady) return
+    let active = true
+    const unsubscribe = subscribeTradingSessionEvents(accountId, token, () => {
+      void refreshAccountData(token, accountId, () => active).catch((error) => {
+        if (!active) return
+        if (isAuthSessionFailure(error)) {
+          requireLogin()
+          return
+        }
+        markSessionError(error)
+      })
+    })
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [accountId, markSessionError, refreshAccountData, requireLogin, sessionReady, token])
 
   const submitOrder = useCallback(
     async (payload: OrderPayload) => {
@@ -250,6 +319,7 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
     positions,
     positionHistory,
     ledgerEntries,
+    assetLedgerEntries,
     walletBalances,
     sessionReady,
     sessionError,

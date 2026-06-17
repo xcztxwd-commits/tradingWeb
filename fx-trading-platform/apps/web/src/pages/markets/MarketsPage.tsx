@@ -19,7 +19,7 @@ import {
 import { mockTradingMarkets } from '../../features/market/mockTradingData'
 import { hydrateMarketFavorites } from '../../features/market/marketFavorites'
 import { mergeTradingQuoteIntoMarket } from '../../features/market/tradingMarketAdapters'
-import { fetchMarketQuote, fetchMarketSymbols } from '../../features/market/tradingMarketApi'
+import { fetchMarketQuotes, fetchMarketSymbols } from '../../features/market/tradingMarketApi'
 import { formatMarketPrice } from '../../features/market/tradingModels'
 import type { TradingMarket, TradingQuote } from '../../features/market/tradingModels'
 import { useMarketFavorites } from '../../features/market/useMarketFavorites'
@@ -172,9 +172,7 @@ export function MarketsPage() {
         setApiError(symbolsResult.status === 'rejected' && binanceOverviewResult.status === 'rejected' ? formatApiError(symbolsResult.reason) : null)
       }
 
-      const quotedMarkets = await Promise.all(
-        nextMarkets.filter(canHydrateMarketQuote).slice(0, marketQuoteHydrationLimit).map((market) => loadQuotedMarket(market))
-      )
+      const quotedMarkets = await loadQuotedMarkets(nextMarkets.filter(canHydrateMarketQuote).slice(0, marketQuoteHydrationLimit))
       if (active && quotedMarkets.length > 0) {
         setMarkets((current) => mergeQuotedMarkets(current, quotedMarkets))
       }
@@ -230,19 +228,19 @@ export function MarketsPage() {
         ))}
       </div>
 
+      {loading ? <LoadingState message="正在同步行情数据" /> : null}
+      {apiError ? (
+        <ApiErrorState
+          error={apiError}
+          onAction={() => {
+            setApiError(null)
+            setReloadKey((current) => current + 1)
+          }}
+        />
+      ) : null}
+
       {pageTab === 'overview' ? (
         <>
-          {loading ? <LoadingState message="正在同步行情数据" /> : null}
-          {apiError ? (
-            <ApiErrorState
-              error={apiError}
-              onAction={() => {
-                setApiError(null)
-                setReloadKey((current) => current + 1)
-              }}
-            />
-          ) : null}
-
           <MarketOverviewMetrics overview={binanceOverview} />
           <MarketSummaryDeck deck={summaryDeck} onOpen={onOpenMarket} />
 
@@ -1089,11 +1087,16 @@ function toTradingCategory(market: TradingMarket): TradingCategory {
   return 'contract'
 }
 
-async function loadQuotedMarket(market: TradingMarket) {
+async function loadQuotedMarkets(markets: TradingMarket[]) {
+  if (markets.length === 0) return []
   try {
-    return applyQuote(market, await fetchMarketQuote(market.symbol))
+    const quotes = await fetchMarketQuotes(markets.map((market) => market.symbol))
+    return markets.map((market) => {
+      const quote = quotes[market.symbol]
+      return quote ? applyQuote(market, quote) : market
+    })
   } catch {
-    return market
+    return markets
   }
 }
 

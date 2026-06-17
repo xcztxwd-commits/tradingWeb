@@ -50,6 +50,7 @@ type ValidationOptions = {
   market: TradeMarket
   minAmount: number
   minNotional: number
+  now?: number
 }
 
 const validationMessageKeys: Record<OrderValidationErrorKey, string> = {
@@ -59,6 +60,7 @@ const validationMessageKeys: Record<OrderValidationErrorKey, string> = {
   minNotional: 'validation.minNotional',
   quoteBalance: 'validation.quoteBalance',
   baseBalance: 'validation.baseBalance',
+  marketStale: 'validation.marketStale',
   takeProfitTriggerPrice: 'validation.takeProfitTriggerPrice',
   stopLossTriggerPrice: 'validation.stopLossTriggerPrice',
   trailingCallbackRatio: 'validation.trailingCallbackRatio',
@@ -336,6 +338,10 @@ export function validateOrder(form: TradeFormState, options: ValidationOptions, 
     return buildValidationResult(errors, t)
   }
 
+  if (form.orderType === 'market' && isMarketQuoteStale(options.market, options.now)) {
+    errors.push('marketStale')
+  }
+
   if (options.minAmount > 0 && amount < options.minAmount) {
     errors.push('minAmount')
   }
@@ -396,6 +402,12 @@ export function usesQuoteBudgetMarketBuy(form: Pick<TradeFormState, 'side' | 'or
 
 export function isMarginQuantityMarket(market?: TradeMarket) {
   return market?.quantityMode === 'quantity' || market?.quantityMode === 'contracts'
+}
+
+export function isMarketQuoteStale(market: TradeMarket, now = Date.now()) {
+  if (market.lastPrice <= 0) return true
+  if (market.quoteTimestamp === undefined) return false
+  return now - market.quoteTimestamp > 15_000
 }
 
 function getMarketUnitSize(market?: TradeMarket) {

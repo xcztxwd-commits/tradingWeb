@@ -1,9 +1,18 @@
-type ApiResponse<T> = {
-  success: boolean
-  code: string
-  message: string
-  data: T
-  requestId?: string
+import {
+  clearStoredAuthToken,
+  readStoredRefreshToken,
+  writeStoredAuthTokens
+} from '../features/trading-session/tradingSessionStorage.ts'
+import { friendlyApiErrorMessage } from '@fx-platform/shared-types'
+import type { ApiResponse } from '@fx-platform/shared-types'
+
+type RequestOptions = {
+  retryOnAuthFailure?: boolean
+}
+
+type AuthRefreshResponse = {
+  accessToken: string
+  refreshToken: string
 }
 
 export type ApiClientErrorInit = {
@@ -32,11 +41,13 @@ const API_BASE =
 
 export function parseApiErrorPayload(payload: unknown, status: number, requestId?: string): ApiClientErrorInit {
   const body = isRecord(payload) ? payload : {}
+  const code = typeof body.code === 'string' && body.code ? body.code : 'REQUEST_FAILED'
+  const backendMessage = typeof body.message === 'string' && body.message ? body.message : null
+  const fallbackMessage = `Request failed: ${status}`
   return {
     status,
-    code: typeof body.code === 'string' && body.code ? body.code : 'REQUEST_FAILED',
-    message:
-      typeof body.message === 'string' && body.message ? body.message : `Request failed: ${status}`,
+    code,
+    message: backendMessage ?? friendlyApiErrorMessage(code, fallbackMessage),
     requestId: requestId ?? (typeof body.requestId === 'string' ? body.requestId : undefined)
   }
 }
@@ -81,7 +92,7 @@ export async function apiPatch<T>(path: string, body: unknown, token?: string): 
   )
 }
 
-async function request<T>(path: string, init: RequestInit, token?: string): Promise<T> {
+async function request<T>(path: string, init: RequestInit, token?: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
@@ -92,10 +103,38 @@ async function request<T>(path: string, init: RequestInit, token?: string): Prom
   })
   const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null
   const requestId = response.headers.get('X-Request-Id') ?? payload?.requestId
+  if (response.status === 401 && options.retryOnAuthFailure !== false) {
+    const refreshedToken = await refreshStoredAuthSession()
+    if (refreshedToken) {
+      return request<T>(path, init, refreshedToken, { retryOnAuthFailure: false })
+    }
+  }
   if (!response.ok || !payload?.success) {
     throw new ApiClientError(parseApiErrorPayload(payload, response.status, requestId))
   }
   return payload.data
+}
+
+async function refreshStoredAuthSession() {
+  const refreshToken = readStoredRefreshToken()
+  if (!refreshToken) return null
+  try {
+    const auth = await request<AuthRefreshResponse>(
+      '/api/auth/refresh',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken })
+      },
+      undefined,
+      { retryOnAuthFailure: false }
+    )
+    writeStoredAuthTokens(auth.accessToken, auth.refreshToken)
+    return auth.accessToken
+  } catch {
+    clearStoredAuthToken()
+    return null
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

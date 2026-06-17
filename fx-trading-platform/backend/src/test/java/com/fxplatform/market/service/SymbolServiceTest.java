@@ -1,6 +1,8 @@
 package com.fxplatform.market.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.market.dto.SymbolResponse;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class SymbolServiceTest {
@@ -97,6 +100,25 @@ class SymbolServiceTest {
     assertThat(symbols.getFirst().quoteEnabled()).isFalse();
     assertThat(symbols.getFirst().chartEnabled()).isTrue();
     assertThat(symbols.getFirst().orderBookEnabled()).isFalse();
+  }
+
+  @Test
+  void enabledSymbolsReflectsDemoQuoteFallbackWhenProviderQuoteIsUnavailable() {
+    SymbolEntity symbol = symbol("EURUSD", "FOREX", true, true, 10);
+
+    when(symbolRepository.findVisibleSymbols(null)).thenReturn(List.of(symbol));
+    when(providerResolver.canResolve(symbol, MarketDataCapability.CANDLES)).thenReturn(false);
+    when(providerResolver.canResolve(symbol, MarketDataCapability.ORDER_BOOK)).thenReturn(false);
+
+    SymbolService service = new SymbolService(symbolRepository, providerResolver);
+    ReflectionTestUtils.setField(service, "demoQuotesEnabled", true);
+
+    List<SymbolResponse> symbols = service.enabledSymbols();
+
+    assertThat(symbols.getFirst().quoteEnabled()).isTrue();
+    assertThat(symbols.getFirst().chartEnabled()).isFalse();
+    assertThat(symbols.getFirst().orderBookEnabled()).isFalse();
+    verify(providerResolver, never()).canResolve(symbol, MarketDataCapability.QUOTE);
   }
 
   private void providerAvailable(SymbolEntity symbol) {

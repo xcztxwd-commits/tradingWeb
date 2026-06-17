@@ -26,6 +26,7 @@ public class LedgerEntryEntity {
   private UUID id;
   private UUID accountId;
   private LedgerEntryType entryType;
+  private String operationType;
   private BigDecimal amount;
   private BigDecimal balanceAfter;
   private String currency = "USD";

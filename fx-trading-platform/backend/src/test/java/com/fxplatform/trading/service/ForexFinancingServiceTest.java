@@ -93,7 +93,11 @@ class ForexFinancingServiceTest {
     verifyNoInteractions(conversionRateRepository);
     verify(accountRepository).save(account);
     verify(positionRepository).save(position);
-    verify(ledgerService).recordFinancing(account, new BigDecimal("-10.00000000"), position.getId(), "FX rollover financing");
+    verify(ledgerService).recordFinancingSettlement(
+        eq(account),
+        eq(new BigDecimal("-10.00000000")),
+        any(UUID.class),
+        eq("FX rollover financing"));
   }
 
   @Test
@@ -115,7 +119,11 @@ class ForexFinancingServiceTest {
     assertThat(settled).isEqualByComparingTo("5.00000000");
     assertThat(account.getBalance()).isEqualByComparingTo("10005.00000000");
     assertThat(position.getFinancingAccrued()).isEqualByComparingTo("5.00000000");
-    verify(ledgerService).recordFinancing(account, new BigDecimal("5.00000000"), position.getId(), "FX rollover financing");
+    verify(ledgerService).recordFinancingSettlement(
+        eq(account),
+        eq(new BigDecimal("5.00000000")),
+        any(UUID.class),
+        eq("FX rollover financing"));
   }
 
   @Test
@@ -143,7 +151,11 @@ class ForexFinancingServiceTest {
     verify(financingSettlementRepository).insertIfAbsent(argThat(settlement ->
         settlement.getAmount().compareTo(new BigDecimal("-10.00000000")) == 0
             && "USD".equals(settlement.getAsset())));
-    verify(ledgerService).recordFinancing(account, new BigDecimal("-10.00000000"), position.getId(), "FX rollover financing");
+    verify(ledgerService).recordFinancingSettlement(
+        eq(account),
+        eq(new BigDecimal("-10.00000000")),
+        any(UUID.class),
+        eq("FX rollover financing"));
   }
 
   @Test
@@ -188,10 +200,10 @@ class ForexFinancingServiceTest {
         .thenAnswer(invocation -> inserted.compareAndSet(false, true));
     LedgerEntryEntity ledgerEntry = new LedgerEntryEntity();
     ledgerEntry.setId(UUID.randomUUID());
-    when(ledgerService.recordFinancing(
+    when(ledgerService.recordFinancingSettlement(
         eq(account),
         eq(new BigDecimal("-10.00000000")),
-        eq(position.getId()),
+        any(UUID.class),
         eq("FX rollover financing")))
         .thenReturn(ledgerEntry);
 
@@ -204,7 +216,11 @@ class ForexFinancingServiceTest {
     assertThat(position.getFinancingAccrued()).isEqualByComparingTo("-10.00000000");
     verify(accountRepository).save(account);
     verify(positionRepository).save(position);
-    verify(ledgerService).recordFinancing(account, new BigDecimal("-10.00000000"), position.getId(), "FX rollover financing");
+    verify(ledgerService).recordFinancingSettlement(
+        eq(account),
+        eq(new BigDecimal("-10.00000000")),
+        any(UUID.class),
+        eq("FX rollover financing"));
   }
 
   @Test

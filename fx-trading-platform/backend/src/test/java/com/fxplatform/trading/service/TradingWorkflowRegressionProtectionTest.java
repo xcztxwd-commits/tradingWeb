@@ -132,7 +132,11 @@ class TradingWorkflowRegressionProtectionTest {
     assertThat(position.getMarginHeld()).isEqualByComparingTo(expectedMargin);
     verify(tradeRepository).save(any(TradeEntity.class));
     verify(ledgerService).recordMarginHold(eq(account), eq(expectedMargin), eq(position.getId()), eq("Market order margin hold"));
-    verify(ledgerService).recordTradeFee(eq(account), eq(expectedFee), eq(position.getId()), eq("Trade fee charged"));
+    verify(ledgerService).recordTradeFeeForTrade(
+        eq(account),
+        eq(expectedFee),
+        any(UUID.class),
+        eq("Trade fee charged"));
   }
 
   @Test
@@ -194,7 +198,8 @@ class TradingWorkflowRegressionProtectionTest {
         any(OrderEntity.class),
         any(ExecutionResult.class),
         any(SymbolEntity.class),
-        eq(account));
+        eq(account),
+        any(UUID.class));
     verify(positionRepository, never()).save(any(PositionEntity.class));
   }
 

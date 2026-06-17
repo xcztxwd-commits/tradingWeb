@@ -5,13 +5,26 @@ import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.ledger.entity.LedgerEntryEntity;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.util.StringUtils;
 
-/**
- * LedgerEntryRepository 通过 MyBatis-Plus 访问资金流水。
- */
 public interface LedgerEntryRepository extends FxBaseMapper<LedgerEntryEntity> {
 
-  /** 按账户倒序查询资金流水。 */
+  default LedgerEntryEntity findByBusinessOperation(
+      UUID accountId,
+      String referenceType,
+      UUID referenceId,
+      String operationType
+  ) {
+    if (!StringUtils.hasText(referenceType) || referenceId == null || !StringUtils.hasText(operationType)) {
+      return null;
+    }
+    return selectOne(new LambdaQueryWrapper<LedgerEntryEntity>()
+        .eq(LedgerEntryEntity::getAccountId, accountId)
+        .eq(LedgerEntryEntity::getReferenceType, referenceType)
+        .eq(LedgerEntryEntity::getReferenceId, referenceId)
+        .eq(LedgerEntryEntity::getOperationType, operationType));
+  }
+
   default List<LedgerEntryEntity> findByAccountIdOrderByCreatedAtDesc(UUID accountId) {
     return selectList(new LambdaQueryWrapper<LedgerEntryEntity>()
         .eq(LedgerEntryEntity::getAccountId, accountId)

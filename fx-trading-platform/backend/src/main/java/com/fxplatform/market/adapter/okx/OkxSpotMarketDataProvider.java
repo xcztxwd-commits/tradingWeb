@@ -95,6 +95,21 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
   }
 
   @Override
+  public Map<String, QuoteResponse> fetchLatestQuotes(Map<String, String> providerSymbolsBySymbol) {
+    if (!configured() || providerSymbolsBySymbol == null || providerSymbolsBySymbol.isEmpty()) {
+      return Map.of();
+    }
+    Map<String, String> platformSymbolByInstrument = new LinkedHashMap<>();
+    providerSymbolsBySymbol.forEach((symbol, providerSymbol) ->
+        platformSymbolByInstrument.put(
+            normalizeInstrument(StrUtil.blankToDefault(providerSymbol, symbol)),
+            normalizePlatformSymbol(symbol)));
+    return sendJson(tickersUri())
+        .map(body -> parseTickerBatch(body, platformSymbolByInstrument))
+        .orElse(Map.of());
+  }
+
+  @Override
   public Map<String, QuoteResponse> fetchMarketSnapshots(String assetClass, int limit) {
     if (!"CRYPTO".equals(normalizeAssetClass(assetClass)) || limit <= 0) {
       return Map.of();
@@ -151,6 +166,10 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
 
   private URI tickerUri(String instId) {
     return URI.create("%s/api/v5/market/ticker?instId=%s".formatted(baseUrl(), instId));
+  }
+
+  private URI tickersUri() {
+    return URI.create("%s/api/v5/market/tickers?instType=SPOT".formatted(baseUrl()));
   }
 
   private URI candlesUri(String instId, String timeframe, Instant from, Instant to) {
@@ -228,6 +247,23 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
         decimalValue(data, "high24h").orElse(mid),
         decimalValue(data, "low24h").orElse(mid),
         decimalValue(data, "vol24h").orElse(null)));
+  }
+
+  private Map<String, QuoteResponse> parseTickerBatch(JsonNode body, Map<String, String> platformSymbolByInstrument) {
+    JsonNode data = body.path("data");
+    if (!data.isArray()) {
+      return Map.of();
+    }
+    Map<String, QuoteResponse> quotes = new LinkedHashMap<>();
+    for (JsonNode item : data) {
+      String instId = normalizeInstrument(item.path("instId").asText(""));
+      String platformSymbol = platformSymbolByInstrument.get(instId);
+      if (platformSymbol == null) {
+        continue;
+      }
+      parseTicker(platformSymbol, item).ifPresent(quote -> quotes.put(quote.symbol(), quote));
+    }
+    return Map.copyOf(quotes);
   }
 
   private List<CandleResponse> parseCandles(JsonNode body) {

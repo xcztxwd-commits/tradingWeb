@@ -14,6 +14,22 @@ public record AdminDataProviderRequest(
     Integer priority,
     Integer timeoutMs,
     Integer rateLimitPerMinute,
-    String configJson
+    String configJson,
+    String confirmationText
 ) {
+  public AdminDataProviderRequest(
+      String code,
+      String name,
+      String providerType,
+      List<String> assetClasses,
+      String restBaseUrl,
+      String wsUrl,
+      Boolean enabled,
+      Integer priority,
+      Integer timeoutMs,
+      Integer rateLimitPerMinute,
+      String configJson
+  ) {
+    this(code, name, providerType, assetClasses, restBaseUrl, wsUrl, enabled, priority, timeoutMs, rateLimitPerMinute, configJson, null);
+  }
 }

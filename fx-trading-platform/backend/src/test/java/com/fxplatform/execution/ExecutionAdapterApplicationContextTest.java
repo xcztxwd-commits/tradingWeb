@@ -38,6 +38,20 @@ class ExecutionAdapterApplicationContextTest {
   }
 
   @Test
+  void disabledModeOnlyCreatesDisabledAdapter() {
+    contextRunner()
+        .withPropertyValues("execution.mode=disabled")
+        .run(context -> {
+          assertThat(context).hasSingleBean(ExecutionAdapter.class);
+          assertThat(context).hasSingleBean(DisabledExecutionAdapter.class);
+          assertThat(context).doesNotHaveBean(SimulatedExecutionAdapter.class);
+          assertThat(context).doesNotHaveBean(BrokerExecutionAdapter.class);
+          assertThat(context).doesNotHaveBean(FixExecutionAdapter.class);
+          assertThat(context).doesNotHaveBean(LpExecutionAdapter.class);
+        });
+  }
+
+  @Test
   void brokerModeOnlyCreatesBrokerAdapter() {
     contextRunner()
         .withPropertyValues("execution.mode=broker")
@@ -78,6 +92,7 @@ class ExecutionAdapterApplicationContextTest {
 
   @TestConfiguration(proxyBeanMethods = false)
   @Import({
+      DisabledExecutionAdapter.class,
       SimulatedExecutionAdapter.class,
       BrokerExecutionAdapter.class,
       FixExecutionAdapter.class,

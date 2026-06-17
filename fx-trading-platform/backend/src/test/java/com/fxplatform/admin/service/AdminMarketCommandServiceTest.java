@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.admin.dto.request.AdminPriceAdjustmentRequest;
@@ -30,6 +32,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 @ExtendWith(MockitoExtension.class)
 class AdminMarketCommandServiceTest {
@@ -50,6 +56,51 @@ class AdminMarketCommandServiceTest {
   private AuditLogService auditLogService;
 
   @Test
+  void disablingSymbolRequiresConfirmationBeforeRepositoryLookup() {
+    AdminMarketCommandService service = new AdminMarketCommandService(
+        symbolRepository,
+        symbolAdminEventRepository,
+        symbolCategoryRepository,
+        priceAdjustmentRepository,
+        auditLogService);
+
+    assertThatThrownBy(() -> service.updateStatus(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            new AdminSymbolStatusRequest(false, "maintenance")))
+        .isInstanceOf(BusinessException.class)
+        .extracting("code")
+        .isEqualTo("ADMIN_CONFIRMATION_REQUIRED");
+
+    verifyNoInteractions(symbolRepository, symbolAdminEventRepository, auditLogService);
+  }
+
+  @Test
+  void disablingSymbolRequiresDisableAuthorityWhenAuthenticated() {
+    UUID actorUserId = UUID.randomUUID();
+    UUID symbolId = UUID.randomUUID();
+    authenticateAs("ROLE_ADMIN", "market:symbol:update");
+    AdminMarketCommandService service = new AdminMarketCommandService(
+        symbolRepository,
+        symbolAdminEventRepository,
+        symbolCategoryRepository,
+        priceAdjustmentRepository,
+        auditLogService);
+
+    try {
+      assertThatThrownBy(() -> service.updateStatus(
+              actorUserId,
+              symbolId,
+              new AdminSymbolStatusRequest(false, "maintenance")))
+          .isInstanceOf(AccessDeniedException.class)
+          .hasMessageContaining("market:symbol:disable");
+      verifyNoInteractions(symbolRepository, symbolAdminEventRepository, auditLogService);
+    } finally {
+      SecurityContextHolder.clearContext();
+    }
+  }
+
+  @Test
   void updatesSymbolStatusWithEventAndAudit() {
     UUID actorUserId = UUID.randomUUID();
     SymbolEntity symbol = symbol(UUID.randomUUID());
@@ -62,7 +113,7 @@ class AdminMarketCommandServiceTest {
         priceAdjustmentRepository,
         auditLogService);
 
-    var response = service.updateStatus(actorUserId, symbol.getId(), new AdminSymbolStatusRequest(false, "maintenance"));
+    var response = service.updateStatus(actorUserId, symbol.getId(), new AdminSymbolStatusRequest(false, "maintenance", "CONFIRM_DISABLE_SYMBOL"));
 
     assertThat(response.enabled()).isFalse();
     verify(symbolRepository).save(symbol);
@@ -72,6 +123,30 @@ class AdminMarketCommandServiceTest {
     assertThat(eventCaptor.getValue().getBeforeValue()).isEqualTo("true");
     assertThat(eventCaptor.getValue().getAfterValue()).isEqualTo("false");
     verify(auditLogService).record(eq(actorUserId), eq("ADMIN_SYMBOL_STATUS_UPDATE"), eq("SYMBOL"), eq(symbol.getId().toString()), contains("maintenance"));
+  }
+
+  @Test
+  void leverageChangeRequiresConfirmationBeforeSaving() {
+    UUID actorUserId = UUID.randomUUID();
+    UUID symbolId = UUID.randomUUID();
+    when(symbolRepository.findById(symbolId)).thenReturn(Optional.of(symbol(symbolId)));
+    AdminMarketCommandService service = new AdminMarketCommandService(
+        symbolRepository,
+        symbolAdminEventRepository,
+        symbolCategoryRepository,
+        priceAdjustmentRepository,
+        auditLogService);
+
+    assertThatThrownBy(() -> service.updateSymbol(
+            actorUserId,
+            symbolId,
+            symbolRequest("EURUSD", "FOREX", ProductType.FX_MARGIN, 200)))
+        .isInstanceOf(BusinessException.class)
+        .extracting("code")
+        .isEqualTo("ADMIN_CONFIRMATION_REQUIRED");
+
+    verify(symbolRepository, never()).save(any(SymbolEntity.class));
+    verifyNoInteractions(symbolAdminEventRepository, auditLogService);
   }
 
   @Test
@@ -234,6 +309,10 @@ class AdminMarketCommandServiceTest {
   }
 
   private AdminSymbolRequest symbolRequest(String symbol, String assetClass, ProductType productType) {
+    return symbolRequest(symbol, assetClass, productType, 100);
+  }
+
+  private AdminSymbolRequest symbolRequest(String symbol, String assetClass, ProductType productType, int leverage) {
     return new AdminSymbolRequest(
         symbol,
         symbol + " display",
@@ -248,7 +327,7 @@ class AdminMarketCommandServiceTest {
         new BigDecimal("100000"),
         new BigDecimal("0.01"),
         new BigDecimal("100"),
-        100,
+        leverage,
         new BigDecimal("0.00002"),
         true,
         null,
@@ -260,5 +339,12 @@ class AdminMarketCommandServiceTest {
         false,
         "majors",
         10);
+  }
+
+  private void authenticateAs(String... authorities) {
+    SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+        "admin",
+        null,
+        java.util.Arrays.stream(authorities).map(SimpleGrantedAuthority::new).toList()));
   }
 }

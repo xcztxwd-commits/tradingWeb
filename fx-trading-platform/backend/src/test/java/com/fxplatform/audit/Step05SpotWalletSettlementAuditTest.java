@@ -79,7 +79,7 @@ class Step05SpotWalletSettlementAuditTest {
     AuditAssertions.assertAmountClose(account.getUsedMargin(), "0.00000000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
-        .containsExactly("SPOT_BUY_QUOTE_OUT", "SPOT_BUY_BASE_IN", "SPOT_FEE_BASE");
+        .containsExactly("SPOT_BUY_DEBIT", "SPOT_BUY_CREDIT", "TRADE_FEE");
   }
 
   @Test
@@ -99,7 +99,7 @@ class Step05SpotWalletSettlementAuditTest {
     AuditAssertions.assertAmountClose(account.getUsedMargin(), "0.00000000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
-        .containsExactly("SPOT_SELL_BASE_OUT", "SPOT_SELL_QUOTE_IN", "SPOT_FEE_QUOTE");
+        .containsExactly("SPOT_SELL_DEBIT", "SPOT_SELL_CREDIT", "TRADE_FEE");
   }
 
   private SpotSettlementService service() {

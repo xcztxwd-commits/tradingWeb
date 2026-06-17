@@ -15,4 +15,17 @@ describe('admin token storage', () => {
     assert.match(tokenSource, /clearAdminToken\(\)/)
     assert.match(tokenSource, /exp/)
   })
+
+  it('stores access and refresh tokens as a single admin session', () => {
+    assert.match(tokenSource, /refreshTokenStorageKey/)
+    assert.match(tokenSource, /authorityStorageKey/)
+    assert.match(tokenSource, /export function getAdminRefreshToken\(/)
+    assert.match(tokenSource, /export function getAdminAuthorities\(/)
+    assert.match(tokenSource, /export function setAdminAuthTokens\(/)
+    assert.match(tokenSource, /localStorage\.setItem\(tokenStorageKey,\s*accessToken\)/)
+    assert.match(tokenSource, /localStorage\.setItem\(refreshTokenStorageKey,\s*refreshToken\)/)
+    assert.match(tokenSource, /JSON\.stringify\(authorities\)/)
+    assert.match(tokenSource, /localStorage\.removeItem\(authorityStorageKey\)/)
+    assert.match(tokenSource, /localStorage\.removeItem\(refreshTokenStorageKey\)/)
+  })
 })

@@ -260,6 +260,59 @@ class MassiveRestClientTest {
   }
 
   @Test
+  void fetchLatestQuotesUsesForexMarketSnapshotAndFiltersRequestedSymbols() throws IOException {
+    AtomicInteger calls = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.createContext("/v2/snapshot/locale/global/markets/forex/tickers", exchange -> {
+      calls.incrementAndGet();
+      byte[] body = """
+          {
+            "status": "OK",
+            "tickers": [
+              {
+                "ticker": "C:EURUSD",
+                "day": { "c": 1.08320, "h": 1.09000, "l": 1.07000, "v": 12345 },
+                "lastQuote": { "b": 1.08318, "a": 1.08322, "t": 1710000000123 }
+              },
+              {
+                "ticker": "C:USDJPY",
+                "day": { "c": 156.420, "h": 157.000, "l": 155.000, "v": 22222 },
+                "lastQuote": { "b": 156.415, "a": 156.425, "t": 1710000000456 }
+              },
+              {
+                "ticker": "C:AUDUSD",
+                "day": { "c": 0.66000 },
+                "lastQuote": { "b": 0.65998, "a": 0.66002, "t": 1710000000789 }
+              }
+            ]
+          }
+          """.getBytes(StandardCharsets.UTF_8);
+      exchange.getResponseHeaders().set("Content-Type", "application/json");
+      exchange.sendResponseHeaders(200, body.length);
+      exchange.getResponseBody().write(body);
+      exchange.close();
+    });
+    server.start();
+    try {
+      MassiveRestClient client = new MassiveRestClient("test-key", "http://127.0.0.1:" + server.getAddress().getPort());
+
+      Map<String, QuoteResponse> quotes = client.fetchLatestQuotes(Map.of(
+          "EURUSD", "C:EURUSD",
+          "USDJPY", "C:USDJPY"));
+
+      assertThat(quotes).containsOnlyKeys("EURUSD", "USDJPY");
+      assertThat(quotes.get("EURUSD").mid()).isEqualByComparingTo("1.08320");
+      assertThat(quotes.get("USDJPY").mid()).isEqualByComparingTo("156.420");
+      assertThat(calls.get()).isEqualTo(1);
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
   void fetchMarketSnapshotsFallsBackToGroupedDailyForexSummary() throws IOException {
     List<String> paths = new ArrayList<>();
     HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);

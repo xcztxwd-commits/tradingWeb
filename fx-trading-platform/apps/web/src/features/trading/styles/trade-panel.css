@@ -2291,6 +2291,10 @@
   font-weight: 700;
 }
 
+.trade-panel__balance-alert strong {
+  color: var(--tp-sell);
+}
+
 .trade-panel__submit {
   min-height: 36px;
   border-radius: 4px;

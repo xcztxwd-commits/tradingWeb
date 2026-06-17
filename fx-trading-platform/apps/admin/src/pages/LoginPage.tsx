@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { login } from '../services/authApi'
-import { setAdminToken } from '../services/adminToken'
+import { setAdminAuthTokens } from '../services/adminToken'
 
 type RedirectState = {
   from?: {
@@ -28,7 +28,7 @@ export function LoginPage() {
         setError('当前账号不是管理员')
         return
       }
-      setAdminToken(auth.accessToken)
+      setAdminAuthTokens(auth.accessToken, auth.refreshToken, auth.authorities)
       const redirectTo = (location.state as RedirectState | null)?.from?.pathname ?? '/dashboard'
       navigate(redirectTo, { replace: true })
     } catch {

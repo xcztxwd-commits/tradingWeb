@@ -1,7 +1,11 @@
 package com.fxplatform.common.websocket;
 
+import com.fxplatform.auth.enums.UserStatus;
 import com.fxplatform.auth.repository.UserRepository;
+import com.fxplatform.auth.service.AuthSessionService;
 import com.fxplatform.common.security.JwtService;
+import com.fxplatform.common.security.JwtTokenClaims;
+import com.fxplatform.common.security.TokenRevocationService;
 import com.fxplatform.common.security.UserPrincipal;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +26,8 @@ public class WebSocketJwtChannelInterceptor implements ChannelInterceptor {
 
   private final JwtService jwtService;
   private final UserRepository userRepository;
+  private final TokenRevocationService tokenRevocationService;
+  private final AuthSessionService authSessionService;
 
   /**
    * 发布或处理 preSend WebSocket 消息。
@@ -31,11 +37,14 @@ public class WebSocketJwtChannelInterceptor implements ChannelInterceptor {
     StompHeaderAccessor accessor = StompHeaderAccessor.wrap(message);
     if (StompCommand.CONNECT.equals(accessor.getCommand())) {
       String token = bearerToken(accessor.getNativeHeader("Authorization"));
-      if (token != null) {
-        userRepository.findById(jwtService.parseUserId(token)).ifPresent(user -> {
-          UserPrincipal principal = UserPrincipal.from(user);
-          accessor.setUser(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
-        });
+      JwtTokenClaims claims = parseAccessToken(token);
+      if (claims != null && !tokenRevocationService.isAccessTokenRevoked(claims) && authSessionService.isAccessSessionActive(claims)) {
+        userRepository.findById(claims.userId())
+            .filter(user -> user.getStatus() == UserStatus.ACTIVE)
+            .ifPresent(user -> {
+              UserPrincipal principal = UserPrincipal.from(user);
+              accessor.setUser(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+            });
       }
     }
     return message;
@@ -50,5 +59,16 @@ public class WebSocketJwtChannelInterceptor implements ChannelInterceptor {
     }
     String header = authorization.getFirst();
     return header.startsWith("Bearer ") ? header.substring(7) : null;
+  }
+
+  private JwtTokenClaims parseAccessToken(String token) {
+    if (token == null) {
+      return null;
+    }
+    try {
+      return jwtService.parseAccessToken(token);
+    } catch (RuntimeException ex) {
+      return null;
+    }
   }
 }

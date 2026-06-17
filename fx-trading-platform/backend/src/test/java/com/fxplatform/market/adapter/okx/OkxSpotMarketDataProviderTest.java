@@ -10,6 +10,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -61,6 +62,68 @@ class OkxSpotMarketDataProviderTest {
       assertThat(quote.get().volume24h()).isEqualByComparingTo("1234.56");
       assertThat(quote.get().timestamp()).isEqualTo(1781462400000L);
       assertThat(query.get()).isEqualTo("instId=BTC-USDT");
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void fetchLatestQuotesUsesOkxSpotTickersAndFiltersRequestedSymbols() throws IOException {
+    AtomicReference<String> query = new AtomicReference<>();
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.createContext("/api/v5/market/tickers", exchange -> {
+      query.set(exchange.getRequestURI().getQuery());
+      writeJson(exchange, """
+          {
+            "code": "0",
+            "data": [
+              {
+                "instId": "BTC-USDT",
+                "last": "65000.15",
+                "bidPx": "65000.10",
+                "askPx": "65000.20",
+                "high24h": "66000",
+                "low24h": "64000",
+                "vol24h": "1234.56",
+                "ts": "1781462400000"
+              },
+              {
+                "instId": "ETH-USDT",
+                "last": "3400.15",
+                "bidPx": "3400.10",
+                "askPx": "3400.20",
+                "high24h": "3500",
+                "low24h": "3300",
+                "vol24h": "2222",
+                "ts": "1781462401000"
+              },
+              {
+                "instId": "DOGE-USDT",
+                "last": "0.16",
+                "bidPx": "0.15",
+                "askPx": "0.17",
+                "ts": "1781462402000"
+              }
+            ]
+          }
+          """);
+    });
+    server.start();
+    try {
+      OkxSpotMarketDataProvider provider = new OkxSpotMarketDataProvider(
+          "http://127.0.0.1:" + server.getAddress().getPort());
+
+      Map<String, QuoteResponse> quotes = provider.fetchLatestQuotes(Map.of(
+          "BTCUSDT", "BTC-USDT",
+          "ETHUSDT", "ETH-USDT"));
+
+      assertThat(quotes).containsOnlyKeys("BTCUSDT", "ETHUSDT");
+      assertThat(quotes.get("BTCUSDT").mid()).isEqualByComparingTo("65000.15");
+      assertThat(quotes.get("ETHUSDT").volume24h()).isEqualByComparingTo("2222");
+      assertThat(query.get()).isEqualTo("instType=SPOT");
     } finally {
       server.stop(0);
       executor.shutdownNow();

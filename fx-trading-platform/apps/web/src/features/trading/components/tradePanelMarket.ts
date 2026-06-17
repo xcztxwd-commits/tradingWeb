@@ -5,12 +5,14 @@ type Snapshot = {
   bids: Array<{ price: number }>
   asks: Array<{ price: number }>
   lastPrice: number
+  updatedAt?: number
 }
 
 type MarketProfile = {
   category?: 'fx' | 'crypto' | 'metals' | 'indices'
   leverage?: number
   productType?: TradeMarket['productType']
+  rules?: TradeMarket['rules']
 }
 
 export function createPanelMarket(symbol: string, snapshot: Snapshot, profile: MarketProfile = {}): TradeMarket {
@@ -30,18 +32,22 @@ export function createPanelMarket(symbol: string, snapshot: Snapshot, profile: M
     bestAsk,
     baseAsset,
     quoteAsset,
-    unitSize: resolveUnitSize(normalizedSymbol, profile.category, productType),
+    unitSize: resolveUnitSize(normalizedSymbol, profile.category, productType, profile.rules),
     quantityMode: resolveQuantityMode(productType, profile.category),
     leverage,
-    productType
+    productType,
+    quoteTimestamp: snapshot.updatedAt,
+    rules: profile.rules
   }
 }
 
 export function resolveUnitSize(
   symbol: string,
   category?: MarketProfile['category'],
-  productType?: TradeMarket['productType']
+  productType?: TradeMarket['productType'],
+  rules?: TradeMarket['rules']
 ) {
+  if (rules?.contractSize && rules.contractSize > 0) return rules.contractSize
   if (productType === 'FX_MARGIN' || category === 'fx' || isForexSymbol(symbol)) return 100_000
   return 1
 }

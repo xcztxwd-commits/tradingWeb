@@ -37,7 +37,8 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useLocation } from 'react-router-dom'
 
 import { adminMenuGroups, findAdminMenuItem } from './adminMenu'
-import { clearAdminToken } from '../services/adminToken'
+import { logoutAdminAuth } from '../services/authApi'
+import { clearAdminToken, getAdminRefreshToken, getAdminToken } from '../services/adminToken'
 
 type RouteTab = {
   to: string
@@ -96,6 +97,11 @@ export function AdminLayout() {
   }, [activeLabel, location.pathname])
 
   const logout = () => {
+    const accessToken = getAdminToken()
+    const refreshToken = getAdminRefreshToken()
+    if (accessToken || refreshToken) {
+      void logoutAdminAuth(accessToken, refreshToken).catch(() => undefined)
+    }
     clearAdminToken()
     navigate('/login', { replace: true })
   }

@@ -269,7 +269,7 @@ class OrderServiceTest {
     assertThat(positionCaptor.getValue().getLots()).isEqualByComparingTo("0.04");
     assertThat(positionCaptor.getValue().getMarginHeld()).isEqualByComparingTo("44.04000000");
     verify(ledgerService).recordMarginHold(eq(account), eq(new BigDecimal("44.04000000")), any(UUID.class), eq("Market order margin hold"));
-    verify(ledgerService).recordTradeFee(eq(account), eq(new BigDecimal("0.44")), any(UUID.class), eq("Trade fee charged"));
+    verify(ledgerService).recordTradeFeeForTrade(eq(account), eq(new BigDecimal("0.44")), any(UUID.class), eq("Trade fee charged"));
   }
 
   @Test
@@ -316,7 +316,7 @@ class OrderServiceTest {
     assertThat(account.getEquity()).isEqualByComparingTo("9999.56000000");
     assertThat(account.getUsedMargin()).isEqualByComparingTo("110.10000000");
     assertThat(account.getFreeMargin()).isEqualByComparingTo("9889.46000000");
-    verify(ledgerService).recordTradeFee(eq(account), eq(new BigDecimal("0.44")), any(UUID.class), eq("Trade fee charged"));
+    verify(ledgerService).recordTradeFeeForTrade(eq(account), eq(new BigDecimal("0.44")), any(UUID.class), eq("Trade fee charged"));
   }
 
   @Test

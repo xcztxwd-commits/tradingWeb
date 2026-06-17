@@ -108,6 +108,15 @@ public class LedgerService {
     return save(account, LedgerEntryType.TRADE_FEE, amount.negate(), account.getBalance(), "POSITION", tradeOrPositionId, description);
   }
 
+  public LedgerEntryEntity recordTradeFeeForTrade(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID tradeId,
+      String description
+  ) {
+    return saveIdempotent(account, LedgerEntryType.TRADE_FEE, amount.negate(), account.getBalance(), "TRADE", tradeId, description);
+  }
+
   public LedgerEntryEntity recordFundingFee(
       TradingAccountEntity account,
       BigDecimal amount,
@@ -115,6 +124,15 @@ public class LedgerService {
       String description
   ) {
     return save(account, LedgerEntryType.FUNDING_FEE, amount, account.getBalance(), "POSITION", positionId, description);
+  }
+
+  public LedgerEntryEntity recordFundingFeeSettlement(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID settlementId,
+      String description
+  ) {
+    return saveIdempotent(account, LedgerEntryType.FUNDING_FEE, amount, account.getBalance(), "FUNDING_SETTLEMENT", settlementId, description);
   }
 
   public LedgerEntryEntity recordLiquidationFee(
@@ -135,6 +153,15 @@ public class LedgerService {
     return save(account, LedgerEntryType.FINANCING, amount, account.getBalance(), "POSITION", positionId, description);
   }
 
+  public LedgerEntryEntity recordFinancingSettlement(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID settlementId,
+      String description
+  ) {
+    return saveIdempotent(account, LedgerEntryType.FINANCING, amount, account.getBalance(), "FX_FINANCING_SETTLEMENT", settlementId, description);
+  }
+
   public LedgerEntryEntity recordForcedClose(
       TradingAccountEntity account,
       UUID positionId,
@@ -152,13 +179,41 @@ public class LedgerService {
       UUID operationId,
       String description
   ) {
-    return save(
+    return saveIdempotent(
         account,
         LedgerEntryType.ADMIN_ADJUSTMENT,
         amount,
         account.getBalance(),
         "ADMIN_FUND_OPERATION",
         operationId,
+        description);
+  }
+
+  private LedgerEntryEntity saveIdempotent(
+      TradingAccountEntity account,
+      LedgerEntryType type,
+      BigDecimal amount,
+      BigDecimal balanceAfter,
+      String referenceType,
+      UUID referenceId,
+      String description
+  ) {
+    String operationType = type.name();
+    LedgerEntryEntity existing = ledgerEntryRepository.findByBusinessOperation(
+        account.getId(),
+        referenceType,
+        referenceId,
+        operationType);
+    if (existing != null) {
+      return existing;
+    }
+    return save(
+        account,
+        type,
+        amount,
+        balanceAfter,
+        referenceType,
+        referenceId,
         description);
   }
 
@@ -195,9 +250,11 @@ public class LedgerService {
       UUID referenceId,
       String description
   ) {
+    String operationType = type.name();
     LedgerEntryEntity entry = new LedgerEntryEntity();
     entry.setAccountId(account.getId());
     entry.setEntryType(type);
+    entry.setOperationType(operationType);
     entry.setAmount(amount);
     entry.setBalanceAfter(balanceAfter);
     entry.setCurrency(account.getBaseCurrency());

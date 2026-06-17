@@ -160,7 +160,12 @@ class OrderFillServiceTest {
     verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
     verify(ledgerService, never()).recordMarginHold(eq(account), any(), any(), any());
     verify(ledgerService, never()).recordTradeFee(eq(account), any(), any(), any());
-    verify(spotSettlementService).settleBuyFill(eq(order), any(ExecutionResult.class), any(SymbolEntity.class), eq(account));
+    verify(spotSettlementService).settleBuyFill(
+        eq(order),
+        any(ExecutionResult.class),
+        any(SymbolEntity.class),
+        eq(account),
+        any(UUID.class));
   }
 
   @Test
@@ -192,7 +197,12 @@ class OrderFillServiceTest {
     verify(positionRepository, never()).save(any(PositionEntity.class));
     assertThat(account.getUsedMargin()).isEqualByComparingTo(BigDecimal.ZERO);
     verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
-    verify(spotSettlementService).settleSellFill(eq(order), any(ExecutionResult.class), any(SymbolEntity.class), eq(account));
+    verify(spotSettlementService).settleSellFill(
+        eq(order),
+        any(ExecutionResult.class),
+        any(SymbolEntity.class),
+        eq(account),
+        any(UUID.class));
   }
 
   @Test
@@ -234,7 +244,12 @@ class OrderFillServiceTest {
     assertThat(order.getStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
     assertThat(order.getRemainingQuantity()).isEqualByComparingTo("0.06");
     assertThat(order.getHoldAmount()).isEqualByComparingTo("0");
-    verify(spotSettlementService).settleBuyFill(eq(order), any(ExecutionResult.class), any(SymbolEntity.class), eq(account));
+    verify(spotSettlementService).settleBuyFill(
+        eq(order),
+        any(ExecutionResult.class),
+        any(SymbolEntity.class),
+        eq(account),
+        any(UUID.class));
     verify(positionRepository, never()).save(any(PositionEntity.class));
     verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
   }
@@ -351,15 +366,19 @@ class OrderFillServiceTest {
 
     assertThat(btcBalance.getAvailable()).isEqualByComparingTo("0.99980000");
     assertThat(account.getBalance()).isEqualByComparingTo("0.99980000");
-    verify(ledgerService).recordTradeFee(eq(account), eq(new BigDecimal("0.00020000")), eq(savedPosition.get().getId()), eq("Trade fee charged"));
+    verify(ledgerService).recordTradeFeeForTrade(
+        eq(account),
+        eq(new BigDecimal("0.00020000")),
+        any(UUID.class),
+        eq("Trade fee charged"));
     ArgumentCaptor<AssetLedgerEntryEntity> assetEntry = ArgumentCaptor.forClass(AssetLedgerEntryEntity.class);
     verify(assetLedgerEntryRepository).save(assetEntry.capture());
     assertThat(assetEntry.getValue().getAsset()).isEqualTo("BTC");
     assertThat(assetEntry.getValue().getAmount()).isEqualByComparingTo("-0.00020000");
     assertThat(assetEntry.getValue().getBalanceAfter()).isEqualByComparingTo("0.99980000");
-    assertThat(assetEntry.getValue().getEntryType()).isEqualTo("INVERSE_PERP_FEE");
-    assertThat(assetEntry.getValue().getReferenceType()).isEqualTo("POSITION");
-    assertThat(assetEntry.getValue().getReferenceId()).isEqualTo(savedPosition.get().getId());
+    assertThat(assetEntry.getValue().getEntryType()).isEqualTo("TRADE_FEE");
+    assertThat(assetEntry.getValue().getReferenceType()).isEqualTo("TRADE");
+    assertThat(assetEntry.getValue().getReferenceId()).isNotNull();
   }
 
   private static TradingAccountEntity account(UUID accountId) {

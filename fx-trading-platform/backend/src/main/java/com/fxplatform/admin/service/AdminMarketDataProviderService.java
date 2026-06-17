@@ -44,7 +44,7 @@ public class AdminMarketDataProviderService {
 
   public List<AdminDataProviderResponse> providers() {
     return providerRepository.findAll().stream()
-        .map(provider -> AdminDataProviderResponse.from(provider, capabilities(provider.getId())))
+        .map(this::providerResponse)
         .toList();
   }
 
@@ -58,27 +58,39 @@ public class AdminMarketDataProviderService {
     provider.setCode(normalizeCode(request.code()));
     applyProvider(provider, request);
     DataProviderEntity saved = providerRepository.save(provider);
-    return AdminDataProviderResponse.from(saved, capabilities(saved.getId()));
+    return providerResponse(saved);
   }
 
   @Transactional
   public AdminDataProviderResponse updateProvider(UUID providerId, AdminDataProviderRequest request) {
     DataProviderEntity provider = findProvider(providerId);
+    if (request.enabled() != null && !request.enabled().equals(provider.getEnabled())) {
+      AdminActionConfirmation.require(request.confirmationText(), AdminActionConfirmation.CONFIRM_PROVIDER_STATUS);
+    }
     applyProvider(provider, request);
     DataProviderEntity saved = providerRepository.save(provider);
-    return AdminDataProviderResponse.from(saved, capabilities(saved.getId()));
+    return providerResponse(saved);
   }
 
   @Transactional
   public AdminDataProviderResponse testProvider(UUID providerId) {
     DataProviderEntity provider = findProvider(providerId);
+    long startedAt = System.currentTimeMillis();
     boolean configured = providerRegistry.find(provider.getCode())
         .map(MarketDataProviderAdapter::configured)
         .orElse(false);
+    Instant now = Instant.now();
     provider.setHealthStatus(ProviderHealthStatus.fromConfigured(configured));
-    provider.setLastHealthCheckAt(Instant.now());
+    provider.setLastHealthCheckAt(now);
+    provider.setAvgLatencyMs(System.currentTimeMillis() - startedAt);
+    if (configured) {
+      provider.setLastSuccessAt(now);
+    } else {
+      provider.setLastFailureAt(now);
+      provider.setFailureCount((provider.getFailureCount() == null ? 0 : provider.getFailureCount()) + 1);
+    }
     DataProviderEntity saved = providerRepository.save(provider);
-    return AdminDataProviderResponse.from(saved, capabilities(saved.getId()));
+    return providerResponse(saved);
   }
 
   @Transactional
@@ -96,12 +108,14 @@ public class AdminMarketDataProviderService {
       }
       try {
         count += syncProviderInstruments(provider).syncedCount();
-        provider.setHealthStatus(ProviderHealthStatus.UP);
       } catch (RuntimeException ex) {
+        Instant now = Instant.now();
         provider.setHealthStatus(ProviderHealthStatus.DOWN);
+        provider.setLastFailureAt(now);
+        provider.setFailureCount((provider.getFailureCount() == null ? 0 : provider.getFailureCount()) + 1);
+        provider.setLastHealthCheckAt(now);
+        providerRepository.save(provider);
       }
-      provider.setLastHealthCheckAt(Instant.now());
-      providerRepository.save(provider);
     }
     return count;
   }
@@ -116,6 +130,13 @@ public class AdminMarketDataProviderService {
         count++;
       }
     }
+    Instant now = Instant.now();
+    provider.setHealthStatus(ProviderHealthStatus.UP);
+    provider.setLastHealthCheckAt(now);
+    provider.setLastSuccessAt(now);
+    provider.setLastInstrumentSyncAt(now);
+    provider.setLastInstrumentSyncCount(count);
+    providerRepository.save(provider);
     return new AdminProviderSyncResponse(provider.getId(), count);
   }
 
@@ -166,6 +187,10 @@ public class AdminMarketDataProviderService {
     symbol.setDisplayGroup(request.displayGroup());
     symbol.setDisplayOrder(request.displayOrder() == null ? 0 : request.displayOrder());
     return AdminSymbolResponse.from(symbolRepository.save(symbol));
+  }
+
+  private AdminDataProviderResponse providerResponse(DataProviderEntity provider) {
+    return AdminDataProviderResponse.from(provider, capabilities(provider.getId()), providerRegistry);
   }
 
   private void upsertInstrument(UUID providerId, SymbolResponse symbol) {

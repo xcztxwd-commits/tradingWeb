@@ -1,0 +1,9 @@
+ALTER TABLE market.data_providers
+  ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS last_failure_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS failure_count BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS avg_latency_ms BIGINT,
+  ADD COLUMN IF NOT EXISTS last_quote_success_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS quote_staleness_ms BIGINT,
+  ADD COLUMN IF NOT EXISTS last_instrument_sync_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS last_instrument_sync_count INTEGER NOT NULL DEFAULT 0;

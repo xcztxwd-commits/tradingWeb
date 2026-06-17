@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-import { writeStoredAuthToken } from '../../features/trading-session/tradingSessionStorage'
+import { writeStoredAuthTokens } from '../../features/trading-session/tradingSessionStorage'
 import { register } from '../../services/authApi'
 import styles from './LoginPage.module.css'
 
@@ -39,7 +39,7 @@ function AuthEntryPage() {
 
     try {
       const auth = await register(normalizedIdentifier, password, channel)
-      finishAuth(auth.accessToken, auth.email || normalizedIdentifier)
+      finishAuth(auth.accessToken, auth.refreshToken, auth.email || normalizedIdentifier)
     } catch (nextError) {
       setError(formatSupportError(nextError))
     } finally {
@@ -47,8 +47,8 @@ function AuthEntryPage() {
     }
   }
 
-  const finishAuth = (token: string, email: string) => {
-    writeStoredAuthToken(token)
+  const finishAuth = (accessToken: string, refreshToken: string, email: string) => {
+    writeStoredAuthTokens(accessToken, refreshToken)
     writeStoredEmail(email)
     navigate('/account/overview', { replace: true })
   }

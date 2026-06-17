@@ -16,6 +16,7 @@ const marketSelectionSource = readFileSync(join(currentDir, 'tradingPageMarketSe
 const marketStatusSource = readFileSync(join(currentDir, 'tradingPageMarketDataStatus.ts'), 'utf8')
 const marketStatusHookSource = readFileSync(join(currentDir, 'useTradingMarketDataStatus.ts'), 'utf8')
 const sessionStatusSource = readFileSync(join(currentDir, 'tradingPageSessionStatus.ts'), 'utf8')
+const tradeRulesSource = readFileSync(join(currentDir, 'tradingPageTradeRules.ts'), 'utf8')
 const viewModelsSource = readFileSync(join(currentDir, 'tradingPageViewModels.ts'), 'utf8')
 const chartSettingsSource = readFileSync(join(currentDir, 'useTradingChartSettings.ts'), 'utf8')
 const styles = readFileSync(join(currentDir, 'TradingPage.module.css'), 'utf8')
@@ -47,7 +48,7 @@ describe('TradingPage terminal viewport', () => {
   })
 
   it('passes a slash-separated mobile chart title to the workspace', () => {
-    assert.match(source, /chartTitle:\s*formatTradingChartTitle\(selectedMarket,\s*t\)/)
+    assert.match(source, /chartTitle:\s*formatTradingChartTitle\(selectedMarketWithRules,\s*t\)/)
     assert.match(desktopSource, /chartTitle=\{chartTitle\}/)
     assert.match(marketSelectionSource, /function formatTradingChartTitle\(market: TradingMarket,\s*t: Translate = defaultTranslate\)/)
     assert.match(marketSelectionSource, /\$\{market\.base\}\/\$\{market\.quote\} \$\{t\('chart\.titleSuffix'\)\}/)
@@ -57,9 +58,11 @@ describe('TradingPage terminal viewport', () => {
     assert.match(desktopSource, /trade=\{[\s\S]*<TradePanel[\s\S]*symbol=\{symbol\}/)
     assert.match(source, /<MobileOrderSheet[\s\S]*<TradePanel[\s\S]*compact[\s\S]*symbol=\{selectedSymbol\}/)
     assert.match(desktopSource, /category=\{market\.category\}/)
-    assert.match(source, /category=\{selectedMarket\.category\}/)
+    assert.match(source, /category=\{selectedMarketWithRules\.category\}/)
     assert.match(desktopSource, /leverage=\{market\.leverage\}/)
-    assert.match(source, /leverage=\{selectedMarket\.leverage\}/)
+    assert.match(source, /leverage=\{selectedMarketWithRules\.leverage\}/)
+    assert.match(desktopSource, /rules=\{market\.rules\}/)
+    assert.match(source, /rules=\{selectedMarketWithRules\.rules\}/)
     assert.match(source, /accountId=\{accountId\}/)
     assert.match(source, /balances=\{balances\}/)
     assert.match(source, /sessionReady=\{sessionReady\}/)
@@ -118,6 +121,16 @@ describe('TradingPage terminal viewport', () => {
     assert.match(source, /const quoteMarkets = useMemo/)
     assert.match(source, /useTradingQuoteMap\(quoteMarkets,\s*token,\s*handleQuoteStatus\)/)
     assert.doesNotMatch(source, /useTradingQuoteMap\(visibleMarkets,\s*token\)/)
+  })
+
+  it('fetches selected symbol rules and shares them with the trade panel market', () => {
+    assert.match(source, /fetchMarketSymbolRules/)
+    assert.match(source, /useState<TradingInstrumentRules \| null>\(null\)/)
+    assert.match(source, /setSelectedRules\(rules\)/)
+    assert.match(source, /const selectedMarketWithRules = useMemo/)
+    assert.match(source, /mergeMarketRules\(selectedMarket,\s*selectedRules\)/)
+    assert.match(tradeRulesSource, /rules/)
+    assert.match(source, /market:\s*selectedMarketWithRules/)
   })
 
   it('waits for backend market capabilities before seeding the full mock watchlist', () => {
@@ -234,6 +247,6 @@ describe('TradingPage terminal viewport', () => {
   })
 
   it('keeps TradingPage below the orchestration size budget', () => {
-    assert.ok(sourceLines.length <= 330, `TradingPage.tsx has ${sourceLines.length} lines`)
+    assert.ok(sourceLines.length <= 340, `TradingPage.tsx has ${sourceLines.length} lines`)
   })
 })

@@ -67,6 +67,7 @@ public class AdminMarketController {
   }
 
   /** 新增产品品种，供产品列表新增弹窗调用。 */
+  @PreAuthorize("hasAuthority('market:symbol:create')")
   @PostMapping("/symbols")
   public ApiResponse<AdminSymbolResponse> createSymbol(
       @AuthenticationPrincipal UserPrincipal principal,
@@ -76,6 +77,7 @@ public class AdminMarketController {
   }
 
   /** 编辑产品品种，供产品列表编辑弹窗调用。 */
+  @PreAuthorize("hasAuthority('market:symbol:update')")
   @PutMapping("/symbols/{symbolId}")
   public ApiResponse<AdminSymbolResponse> updateSymbol(
       @AuthenticationPrincipal UserPrincipal principal,
@@ -86,6 +88,7 @@ public class AdminMarketController {
   }
 
   /** 删除产品采用下架语义，避免破坏历史交易数据。 */
+  @PreAuthorize("hasAuthority('market:symbol:disable')")
   @DeleteMapping("/symbols/{symbolId}")
   public ApiResponse<Void> deleteSymbol(
       @AuthenticationPrincipal UserPrincipal principal,
@@ -139,6 +142,7 @@ public class AdminMarketController {
   /**
    * 修改产品启停状态。
    */
+  @PreAuthorize("hasAnyAuthority('market:symbol:update','market:symbol:disable')")
   @PatchMapping("/symbols/{symbolId}/status")
   public ApiResponse<AdminSymbolResponse> updateStatus(
       @AuthenticationPrincipal UserPrincipal principal,

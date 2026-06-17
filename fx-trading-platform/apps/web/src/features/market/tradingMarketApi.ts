@@ -6,10 +6,14 @@ import {
   buildMarketFavoritesPath,
   buildMarketOrderBookPath,
   buildMarketQuotePath,
+  buildMarketQuotesPath,
   buildMarketRecentTradesPath,
+  buildMarketSymbolRulesBatchPath,
+  buildMarketSymbolRulesPath,
   buildMarketStatusPath,
   buildMarketSymbolsPath,
   mapCandleToTradingCandle,
+  mapInstrumentRulesToTradingRules,
   mapOrderBookToMarketData,
   mapQuoteToTradingQuote,
   mapRecentTradesToMarketData,
@@ -17,8 +21,8 @@ import {
   tradingMarketEndpoints
 } from './tradingMarketAdapters'
 import type { BackendCandle, BackendOrderBook, BackendQuote, BackendRecentTrade, BackendSymbol } from './tradingMarketAdapters'
-import type { BackendMarketStatus } from './tradingMarketAdapters'
-import type { TradingPeriod, TradingQuote } from './tradingModels'
+import type { BackendInstrumentRules, BackendMarketStatus } from './tradingMarketAdapters'
+import type { TradingInstrumentRules, TradingPeriod, TradingQuote } from './tradingModels'
 
 type FetchMarketCandlesOptions = {
   endTime?: Date | number
@@ -31,9 +35,13 @@ export {
   buildMarketFavoritesPath,
   buildMarketOrderBookPath,
   buildMarketQuotePath,
+  buildMarketQuotesPath,
   buildMarketRecentTradesPath,
+  buildMarketSymbolRulesBatchPath,
+  buildMarketSymbolRulesPath,
   buildMarketStatusPath,
   buildMarketSymbolsPath,
+  mapInstrumentRulesToTradingRules,
   tradingMarketEndpoints
 }
 
@@ -55,8 +63,28 @@ export function fetchMarketStatus() {
   return apiGet<BackendMarketStatus>(buildMarketStatusPath())
 }
 
+export function fetchMarketSymbolRules(symbol: string): Promise<TradingInstrumentRules> {
+  return apiGet<BackendInstrumentRules>(buildMarketSymbolRulesPath(symbol)).then(mapInstrumentRulesToTradingRules)
+}
+
+export function fetchMarketSymbolRulesBatch(symbols: string[]): Promise<TradingInstrumentRules[]> {
+  return apiGet<BackendInstrumentRules[]>(buildMarketSymbolRulesBatchPath(symbols)).then((rules) =>
+    rules.map(mapInstrumentRulesToTradingRules)
+  )
+}
+
 export function fetchMarketQuote(symbol: string, previous?: TradingQuote) {
   return apiGet<BackendQuote>(buildMarketQuotePath(symbol)).then((quote) => mapQuoteToTradingQuote(quote, previous))
+}
+
+export function fetchMarketQuotes(symbols: string[], previousBySymbol: Record<string, TradingQuote> = {}) {
+  return apiGet<Record<string, BackendQuote>>(buildMarketQuotesPath(symbols)).then((quotes) => {
+    const mappedQuotes: Record<string, TradingQuote> = {}
+    Object.entries(quotes).forEach(([symbol, quote]) => {
+      mappedQuotes[symbol] = mapQuoteToTradingQuote(quote, previousBySymbol[symbol])
+    })
+    return mappedQuotes
+  })
 }
 
 export function fetchMarketCandles(symbol: string, period: TradingPeriod, options: FetchMarketCandlesOptions = {}) {

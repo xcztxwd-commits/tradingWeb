@@ -9,10 +9,14 @@ import {
   buildMarketFavoritePath,
   buildMarketFavoritesPath,
   buildMarketOrderBookPath,
+  buildMarketQuotesPath,
   buildMarketRecentTradesPath,
+  buildMarketSymbolRulesBatchPath,
+  buildMarketSymbolRulesPath,
   buildMarketStatusPath,
   buildMarketSymbolsPath,
   createTradingMarketPlaceholder,
+  mapInstrumentRulesToTradingRules,
   mapOrderBookToMarketData,
   mapQuoteToTradingQuote,
   mapRecentTradesToMarketData,
@@ -37,6 +41,7 @@ describe('trading market API adapters', () => {
       '/api/market/symbols',
       '/api/market/favorites',
       '/api/market/status',
+      '/api/market/symbol-rules',
       '/api/chart/candles',
       '/api/market/order-book',
       '/api/market/trades'
@@ -75,9 +80,53 @@ describe('trading market API adapters', () => {
     assert.equal(buildMarketRecentTradesPath('BTCUSDT', 40), '/api/market/trades/BTCUSDT?limit=40')
   })
 
+  it('builds one backend request for batch quote hydration', () => {
+    assert.equal(buildMarketQuotesPath(['eur-usd', 'BTCUSDT', 'EURUSD']), '/api/market/quotes?symbols=EURUSD%2CBTCUSDT')
+  })
+
   it('requests enough symbols to keep provider forex rows from being truncated by local seed rows', () => {
     assert.equal(buildMarketSymbolsPath(), '/api/market/symbols?limit=2000')
     assert.equal(buildMarketSymbolsPath(1200), '/api/market/symbols?limit=1200')
+  })
+
+  it('builds backend instrument rules endpoints by symbol', () => {
+    assert.equal(buildMarketSymbolRulesPath('btcusdt'), '/api/market/symbols/BTCUSDT/rules')
+    assert.equal(buildMarketSymbolRulesBatchPath(['btcusdt', 'ethusdt']), '/api/market/symbol-rules?symbols=BTCUSDT%2CETHUSDT')
+  })
+
+  it('maps backend instrument rules to numeric frontend rules', () => {
+    const rules = mapInstrumentRulesToTradingRules({
+      symbol: 'BTCUSDT',
+      exists: true,
+      enabled: true,
+      tradable: true,
+      quoteEnabled: true,
+      chartEnabled: true,
+      orderBookEnabled: true,
+      orderEnabled: false,
+      productType: 'CRYPTO_SPOT',
+      tickSize: '0.01',
+      stepSize: '0.0001',
+      minQty: '0.0001',
+      maxQty: '100',
+      minNotional: '5',
+      maxNotional: '100000',
+      maxLeverage: 1,
+      defaultLeverage: 1,
+      marginAsset: 'USDT',
+      settlementAsset: 'USDT',
+      contractSize: '1',
+      riskTier: 'spot-default',
+      tradingSession: '24x7',
+      kycRequirement: 'STANDARD',
+      userRiskLevelRestriction: 'NONE'
+    })
+
+    assert.equal(rules.tickSize, 0.01)
+    assert.equal(rules.stepSize, 0.0001)
+    assert.equal(rules.minNotional, 5)
+    assert.equal(rules.orderEnabled, false)
+    assert.equal(rules.maxLeverage, 1)
   })
 
   it('maps backend symbols to the trading page market model', () => {

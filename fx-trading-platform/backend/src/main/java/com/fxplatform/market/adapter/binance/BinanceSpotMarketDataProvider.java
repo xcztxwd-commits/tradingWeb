@@ -19,6 +19,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -36,11 +38,14 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
   private static final BigDecimal DEFAULT_MIN_LOT = new BigDecimal("0.01");
   private static final BigDecimal DEFAULT_MAX_LOT = new BigDecimal("100");
   private static final int DEFAULT_LEVERAGE = 20;
-  private static final List<CryptoSymbol> CRYPTO_SYMBOLS = List.of(
+  private static final List<CryptoSymbol> FALLBACK_CRYPTO_SYMBOLS = List.of(
       new CryptoSymbol("BTCUSDT", "Bitcoin / Tether", "BTC", "USDT"),
       new CryptoSymbol("ETHUSDT", "Ethereum / Tether", "ETH", "USDT"),
       new CryptoSymbol("SOLUSDT", "Solana / Tether", "SOL", "USDT"),
-      new CryptoSymbol("XRPUSDT", "XRP / Tether", "XRP", "USDT"));
+      new CryptoSymbol("XRPUSDT", "XRP / Tether", "XRP", "USDT"),
+      new CryptoSymbol("BCHUSDT", "Bitcoin Cash / Tether", "BCH", "USDT"),
+      new CryptoSymbol("UNIUSDT", "Uniswap / Tether", "UNI", "USDT"),
+      new CryptoSymbol("JTOUSDT", "Jito / Tether", "JTO", "USDT"));
 
   private final String restBaseUrl;
   private final HttpClient httpClient;
@@ -100,6 +105,26 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
   }
 
   @Override
+  public Map<String, QuoteResponse> fetchLatestQuotes(Map<String, String> providerSymbolsBySymbol) {
+    if (!isConfigured() || providerSymbolsBySymbol == null || providerSymbolsBySymbol.isEmpty()) {
+      return Map.of();
+    }
+    Map<String, String> platformSymbolByTicker = new LinkedHashMap<>();
+    providerSymbolsBySymbol.forEach((symbol, providerSymbol) -> {
+      String ticker = normalizeTicker(StrUtil.blankToDefault(providerSymbol, symbol));
+      if (ticker.endsWith("USDT")) {
+        platformSymbolByTicker.put(ticker, normalizeTicker(symbol));
+      }
+    });
+    if (platformSymbolByTicker.isEmpty()) {
+      return Map.of();
+    }
+    return sendJson(ticker24hBatchUri(platformSymbolByTicker.keySet().stream().toList()))
+        .map(body -> parseTickerBatch(body, platformSymbolByTicker))
+        .orElse(Map.of());
+  }
+
+  @Override
   public Map<String, QuoteResponse> fetchMarketSnapshots(String assetClass, int limit) {
     if (!"CRYPTO".equals(normalizeAssetClass(assetClass)) || limit <= 0) {
       return Map.of();
@@ -118,8 +143,15 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
       return List.of();
     }
     Map<String, String> iconUrls = fetchAssetIconUrls();
-    Map<String, String> tradingRules = fetchTradingRules();
-    return CRYPTO_SYMBOLS.stream()
+    Optional<JsonNode> exchangeInfo = fetchExchangeInfo();
+    Map<String, String> tradingRules = exchangeInfo
+        .map(this::parseTradingRules)
+        .orElse(Map.of());
+    List<CryptoSymbol> symbols = exchangeInfo
+        .map(this::parseSpotSymbols)
+        .filter(items -> !items.isEmpty())
+        .orElse(FALLBACK_CRYPTO_SYMBOLS);
+    return symbols.stream()
         .limit(limit)
         .map(symbol -> toSymbol(symbol, iconUrls.get(symbol.baseCurrency()), tradingRules.get(symbol.symbol())))
         .toList();
@@ -161,6 +193,15 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
 
   private URI ticker24hUri(String symbol) {
     return URI.create("%s/api/v3/ticker/24hr?symbol=%s".formatted(baseUrl(), symbol));
+  }
+
+  private URI ticker24hBatchUri(List<String> symbols) {
+    String json = symbols.stream()
+        .map(symbol -> "\"" + symbol + "\"")
+        .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+    return URI.create("%s/api/v3/ticker/24hr?symbols=%s".formatted(
+        baseUrl(),
+        URLEncoder.encode(json, StandardCharsets.UTF_8)));
   }
 
   private URI klinesUri(String symbol, String timeframe, Instant from, Instant to) {
@@ -239,6 +280,22 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
         firstDecimal(body, "highPrice").orElse(mid),
         firstDecimal(body, "lowPrice").orElse(mid),
         firstDecimal(body, "volume").orElse(null)));
+  }
+
+  private Map<String, QuoteResponse> parseTickerBatch(JsonNode body, Map<String, String> platformSymbolByTicker) {
+    if (!body.isArray()) {
+      return Map.of();
+    }
+    Map<String, QuoteResponse> quotes = new LinkedHashMap<>();
+    for (JsonNode item : body) {
+      String ticker = normalizeTicker(item.path("symbol").asText(""));
+      String platformSymbol = platformSymbolByTicker.get(ticker);
+      if (platformSymbol == null) {
+        continue;
+      }
+      parseTicker(platformSymbol, item).ifPresent(quote -> quotes.put(quote.symbol(), quote));
+    }
+    return Map.copyOf(quotes);
   }
 
   private List<CandleResponse> parseCandles(JsonNode body) {
@@ -340,13 +397,59 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
         providerMetadataJson == null || providerMetadataJson.isBlank() ? "{}" : providerMetadataJson);
   }
 
-  private Map<String, String> fetchTradingRules() {
+  private Optional<JsonNode> fetchExchangeInfo() {
     if (!isConfigured()) {
-      return Map.of();
+      return Optional.empty();
     }
-    return sendJson(exchangeInfoUri())
-        .map(this::parseTradingRules)
-        .orElse(Map.of());
+    return sendJson(exchangeInfoUri());
+  }
+
+  private List<CryptoSymbol> parseSpotSymbols(JsonNode body) {
+    JsonNode symbols = body.path("symbols");
+    if (!symbols.isArray()) {
+      return List.of();
+    }
+    return java.util.stream.StreamSupport.stream(symbols.spliterator(), false)
+        .filter(symbol -> "TRADING".equalsIgnoreCase(symbol.path("status").asText("")))
+        .filter(symbol -> "USDT".equals(normalizeTicker(symbol.path("quoteAsset").asText(""))))
+        .filter(this::spotTradingAllowed)
+        .map(this::toCryptoSymbol)
+        .flatMap(Optional::stream)
+        .toList();
+  }
+
+  private boolean spotTradingAllowed(JsonNode symbol) {
+    if (symbol.has("isSpotTradingAllowed")) {
+      return symbol.path("isSpotTradingAllowed").asBoolean(false);
+    }
+    JsonNode permissions = symbol.path("permissions");
+    if (permissions.isArray()
+        && java.util.stream.StreamSupport.stream(permissions.spliterator(), false)
+            .anyMatch(permission -> "SPOT".equalsIgnoreCase(permission.asText("")))) {
+      return true;
+    }
+    JsonNode permissionSets = symbol.path("permissionSets");
+    if (!permissionSets.isArray()) {
+      return false;
+    }
+    return java.util.stream.StreamSupport.stream(permissionSets.spliterator(), false)
+        .filter(JsonNode::isArray)
+        .anyMatch(set -> java.util.stream.StreamSupport.stream(set.spliterator(), false)
+            .anyMatch(permission -> "SPOT".equalsIgnoreCase(permission.asText(""))));
+  }
+
+  private Optional<CryptoSymbol> toCryptoSymbol(JsonNode symbol) {
+    String symbolCode = normalizeTicker(symbol.path("symbol").asText(""));
+    String baseAsset = normalizeTicker(symbol.path("baseAsset").asText(""));
+    String quoteAsset = normalizeTicker(symbol.path("quoteAsset").asText(""));
+    if (symbolCode.isBlank() || baseAsset.isBlank() || quoteAsset.isBlank()) {
+      return Optional.empty();
+    }
+    return Optional.of(new CryptoSymbol(
+        symbolCode,
+        "%s / %s".formatted(baseAsset, quoteAsset),
+        baseAsset,
+        quoteAsset));
   }
 
   private Map<String, String> parseTradingRules(JsonNode body) {

@@ -97,8 +97,13 @@ public class LiquidationService {
     return closed;
   }
 
+  /**
+   * Uses the same liquidation gate as {@link #scanAccount(UUID)} without closing positions.
+   * Perpetual risk is recomputed from fresh marks and includes maintenance margin plus
+   * liquidation fee buffer.
+   */
   public boolean shouldLiquidate(AccountSnapshot snapshot) {
-    return fxMarginBreached(snapshot) || perpMarginBreached(snapshot, orZero(snapshot.maintenanceMargin()));
+    return highestRiskCandidate(freshRiskSnapshot(snapshot)).isPresent();
   }
 
   public boolean liquidatePosition(PositionEntity position, String reason) {
@@ -118,6 +123,11 @@ public class LiquidationService {
 
   private RiskSnapshot freshRiskSnapshot(UUID accountId) {
     AccountSnapshot accountSnapshot = accountSnapshotService.snapshot(accountId);
+    return freshRiskSnapshot(accountSnapshot);
+  }
+
+  private RiskSnapshot freshRiskSnapshot(AccountSnapshot accountSnapshot) {
+    UUID accountId = accountSnapshot.accountId();
     List<PositionEntity> openPositions = positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
         accountId,
         PositionStatus.OPEN);

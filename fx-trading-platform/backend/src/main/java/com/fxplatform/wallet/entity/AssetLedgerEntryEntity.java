@@ -26,6 +26,7 @@ public class AssetLedgerEntryEntity {
   private BigDecimal amount;
   private BigDecimal balanceAfter;
   private String entryType;
+  private String operationType;
   private String referenceType;
   private UUID referenceId;
   private String description;

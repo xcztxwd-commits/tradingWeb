@@ -3,7 +3,12 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import { TopbarToolIcon } from '../../components/TopbarToolIcon'
-import { clearStoredAuthToken } from '../../features/trading-session/tradingSessionStorage'
+import {
+  clearStoredAuthToken,
+  readStoredAuthToken,
+  readStoredRefreshToken
+} from '../../features/trading-session/tradingSessionStorage'
+import { logoutAuth } from '../../services/authApi'
 
 type AccountUserMenuProps = {
   email?: string | null
@@ -42,6 +47,11 @@ export function AccountUserMenu({ email, onLogout }: AccountUserMenuProps) {
   }, [open])
 
   const logout = () => {
+    const accessToken = readStoredAuthToken()
+    const refreshToken = readStoredRefreshToken()
+    if (accessToken || refreshToken) {
+      void logoutAuth(accessToken, refreshToken).catch(() => undefined)
+    }
     clearStoredAuthToken()
     onLogout()
     setOpen(false)

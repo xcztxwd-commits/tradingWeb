@@ -1,6 +1,7 @@
 package com.fxplatform.common.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.common.response.ApiResponse;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -22,7 +23,7 @@ public class SecurityErrorResponseWriter {
    * 写出未登录或 token 失效时的 JSON 响应。
    */
   public void writeUnauthorized(HttpServletResponse response) throws IOException {
-    write(response, HttpServletResponse.SC_UNAUTHORIZED, "UNAUTHORIZED", "登录已过期或未登录，请重新登录");
+    write(response, HttpServletResponse.SC_UNAUTHORIZED, ErrorCode.AUTH_TOKEN_EXPIRED, "登录已过期或未登录，请重新登录");
   }
 
   /**

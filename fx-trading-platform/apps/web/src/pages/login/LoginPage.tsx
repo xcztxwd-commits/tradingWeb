@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { login } from '../../services/authApi'
-import { writeStoredAuthToken } from '../../features/trading-session/tradingSessionStorage'
+import { writeStoredAuthTokens } from '../../features/trading-session/tradingSessionStorage'
 import styles from './LoginPage.module.css'
 
 export function LoginPage() {
@@ -25,7 +25,7 @@ export function LoginPage() {
 
     try {
       const auth = await login(email.trim(), password)
-      writeStoredAuthToken(auth.accessToken)
+      writeStoredAuthTokens(auth.accessToken, auth.refreshToken)
       writeStoredEmail(auth.email || email.trim())
       navigate(redirectPath, { replace: true })
     } catch (nextError) {

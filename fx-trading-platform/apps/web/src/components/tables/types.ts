@@ -39,6 +39,7 @@ export type PositionResponse = {
   openPrice: Amount
   markPrice?: Amount | null
   currentPrice: Amount
+  notional?: Amount | null
   liquidationPrice?: Amount | null
   breakEvenPrice?: Amount | null
   stopLoss?: Amount | null
@@ -46,6 +47,7 @@ export type PositionResponse = {
   floatingPnl: Amount
   floatingPnlRatio?: Amount | null
   realizedPnl: Amount
+  fundingPnl?: Amount | null
   marginHeld: Amount
   maintenanceMargin?: Amount | null
   maintenanceMarginRate?: Amount | null

@@ -11,7 +11,11 @@ import org.springframework.security.core.userdetails.UserDetails;
 /**
  * UserPrincipal 承载通用基础设施模块的数据结构。
  */
-public record UserPrincipal(UUID id, String email, String role) implements UserDetails {
+public record UserPrincipal(UUID id, String email, String role, List<String> authorityNames) implements UserDetails {
+
+  public UserPrincipal(UUID id, String email, String role) {
+    this(id, email, role, List.of("ROLE_" + role));
+  }
 
   /**
    * 处理 from 安全认证逻辑。
@@ -20,12 +24,18 @@ public record UserPrincipal(UUID id, String email, String role) implements UserD
     return new UserPrincipal(user.getId(), user.getEmail(), user.getRole().name());
   }
 
+  public static UserPrincipal from(UserEntity user, List<String> authorities) {
+    return new UserPrincipal(user.getId(), user.getEmail(), user.getRole().name(), List.copyOf(authorities));
+  }
+
   /**
    * 处理 getAuthorities 安全认证逻辑。
    */
   @Override
   public Collection<? extends GrantedAuthority> getAuthorities() {
-    return List.of(new SimpleGrantedAuthority("ROLE_" + role));
+    return authorityNames.stream()
+        .map(SimpleGrantedAuthority::new)
+        .toList();
   }
 
   /**

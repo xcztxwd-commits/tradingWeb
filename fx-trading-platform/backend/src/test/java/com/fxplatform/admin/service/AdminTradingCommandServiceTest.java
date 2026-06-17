@@ -1,11 +1,13 @@
 package com.fxplatform.admin.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.admin.dto.request.AdminCancelOrderRequest;
@@ -58,6 +60,29 @@ class AdminTradingCommandServiceTest {
 
   @Mock
   private WalletService walletService;
+
+  @Test
+  void forceCloseRequiresConfirmationBeforeDelegatingToPositionService() {
+    AdminTradingCommandService service = new AdminTradingCommandService(
+        orderRepository,
+        accountRepository,
+        ledgerService,
+        walletService,
+        riskCheckService,
+        orderEventService,
+        positionService,
+        auditLogService);
+
+    assertThatThrownBy(() -> service.forceClosePosition(
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            new AdminForceClosePositionRequest(UUID.randomUUID(), "risk threshold", "force-close-1")))
+        .isInstanceOf(com.fxplatform.common.exception.BusinessException.class)
+        .extracting("code")
+        .isEqualTo("ADMIN_CONFIRMATION_REQUIRED");
+
+    verifyNoInteractions(positionService, auditLogService);
+  }
 
   @Test
   void cancelsPendingOrderWithAudit() {
@@ -142,12 +167,14 @@ class AdminTradingCommandServiceTest {
         new BigDecimal("1.09100"),
         new BigDecimal("1.09100"),
         null,
+        null,
         new BigDecimal("1.09000"),
         null,
         null,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         new BigDecimal("1.00"),
+        BigDecimal.ZERO,
         BigDecimal.ZERO,
         null,
         null,
@@ -170,7 +197,7 @@ class AdminTradingCommandServiceTest {
     var response = service.forceClosePosition(
         actorUserId,
         positionId,
-        new AdminForceClosePositionRequest(accountId, "risk threshold", "force-close-1"));
+        new AdminForceClosePositionRequest(accountId, "risk threshold", "force-close-1", "CONFIRM_FORCE_CLOSE"));
 
     assertThat(response.status()).isEqualTo("CLOSED");
     verify(positionService).closeSystemPosition(accountId, positionId);

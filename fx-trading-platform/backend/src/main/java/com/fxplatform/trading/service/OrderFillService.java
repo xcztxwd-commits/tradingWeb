@@ -29,6 +29,7 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -206,12 +207,15 @@ public class OrderFillService {
     trade.setSide(order.getSide());
     trade.setLots(filledQuantity);
     trade.setPrice(execution.filledPrice());
+    if (trade.getId() == null) {
+      trade.setId(UUID.randomUUID());
+    }
     tradeRepository.save(trade);
 
     SymbolEntity symbol = symbolFor(order);
     InstrumentProfile profile = instrumentClassifier.profile(symbol);
     if (profile.kind() == InstrumentKind.SPOT) {
-      settleSpotFill(order, account, execution, symbol, filledQuantity);
+      settleSpotFill(order, account, execution, symbol, filledQuantity, trade.getId());
       if (existingOrderHold.compareTo(BigDecimal.ZERO) > 0) {
         order.setHoldAmount(BigDecimal.ZERO);
         orderRepository.save(order);
@@ -226,7 +230,7 @@ public class OrderFillService {
           normalizedFill,
           profile,
           marginDescription);
-      chargeTradeFee(account, fee, execution.feeAsset(), profile.kind(), update.position().getId());
+      chargeTradeFee(account, fee, execution.feeAsset(), profile.kind(), trade.getId());
       return order;
     }
 
@@ -265,7 +269,7 @@ public class OrderFillService {
     if (delta.compareTo(BigDecimal.ZERO) > 0) {
       ledgerService.recordMarginHold(account, delta, savedPosition.getId(), marginDescription);
     }
-    chargeTradeFee(account, fee, execution.feeAsset(), profile.kind(), savedPosition.getId());
+    chargeTradeFee(account, fee, execution.feeAsset(), profile.kind(), trade.getId());
 
     return order;
   }
@@ -302,7 +306,7 @@ public class OrderFillService {
       BigDecimal fee,
       String feeAsset,
       InstrumentKind kind,
-      java.util.UUID positionId
+      java.util.UUID tradeId
   ) {
     if (fee.compareTo(BigDecimal.ZERO) <= 0) {
       return;
@@ -313,10 +317,10 @@ public class OrderFillService {
           account.getId(),
           normalizedFeeAsset,
           fee,
-          "POSITION",
-          positionId,
+          "TRADE",
+          tradeId,
           "Inverse perpetual trade fee charged",
-          "INVERSE_PERP_FEE");
+          "TRADE_FEE");
     }
     BigDecimal balanceBeforeFee = orZero(account.getBalance());
     BigDecimal equityBeforeFee = accountEquity(account);
@@ -324,7 +328,7 @@ public class OrderFillService {
     account.setEquity(equityBeforeFee.subtract(fee));
     account.setFreeMargin(accountEquity(account).subtract(orZero(account.getUsedMargin())));
     accountRepository.save(account);
-    ledgerService.recordTradeFee(account, fee, positionId, "Trade fee charged");
+    ledgerService.recordTradeFeeForTrade(account, fee, tradeId, "Trade fee charged");
   }
 
   private BigDecimal proportionalMargin(BigDecimal fullMargin, BigDecimal filledQuantity, BigDecimal orderQuantity) {
@@ -363,14 +367,15 @@ public class OrderFillService {
       TradingAccountEntity account,
       ExecutionResult execution,
       SymbolEntity symbol,
-      BigDecimal filledQuantity
+      BigDecimal filledQuantity,
+      java.util.UUID tradeId
   ) {
     ExecutionResult fill = normalizeFill(execution, filledQuantity);
     if (spotSettlementService != null) {
       if (order.getSide() == com.fxplatform.trading.enums.OrderSide.BUY) {
-        spotSettlementService.settleBuyFill(order, fill, symbol, account);
+        spotSettlementService.settleBuyFill(order, fill, symbol, account, tradeId);
       } else {
-        spotSettlementService.settleSellFill(order, fill, symbol, account);
+        spotSettlementService.settleSellFill(order, fill, symbol, account, tradeId);
       }
     }
   }

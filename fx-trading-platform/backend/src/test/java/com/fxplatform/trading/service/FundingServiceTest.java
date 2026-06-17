@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -24,8 +25,10 @@ import com.fxplatform.trading.repository.FundingSettlementRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
@@ -107,11 +110,11 @@ class FundingServiceTest {
     assertThat(position.getFundingPnl()).isEqualByComparingTo(expectedCashflow);
     verify(accountRepository).save(account);
     verify(positionRepository).save(position);
-    verify(ledgerService).recordFundingFee(
-        account,
-        new BigDecimal(expectedCashflow),
-        position.getId(),
-        "Perpetual funding fee");
+    verify(ledgerService).recordFundingFeeSettlement(
+        eq(account),
+        eq(new BigDecimal(expectedCashflow)),
+        any(UUID.class),
+        eq("Perpetual funding fee"));
   }
 
   @Test
@@ -140,7 +143,11 @@ class FundingServiceTest {
     assertThat(cashflow).isEqualByComparingTo("-0.00002000");
     assertThat(account.getBalance()).isEqualByComparingTo("0.99998000");
     assertThat(position.getFundingPnl()).isEqualByComparingTo("-0.00002000");
-    verify(ledgerService).recordFundingFee(account, new BigDecimal("-0.00002000"), position.getId(), "Perpetual funding fee");
+    verify(ledgerService).recordFundingFeeSettlement(
+        eq(account),
+        eq(new BigDecimal("-0.00002000")),
+        any(UUID.class),
+        eq("Perpetual funding fee"));
   }
 
   @Test
@@ -198,10 +205,10 @@ class FundingServiceTest {
         .thenAnswer(invocation -> inserted.compareAndSet(false, true));
     LedgerEntryEntity ledgerEntry = new LedgerEntryEntity();
     ledgerEntry.setId(UUID.randomUUID());
-    when(ledgerService.recordFundingFee(
+    when(ledgerService.recordFundingFeeSettlement(
         eq(account),
         eq(new BigDecimal("-5.00000000")),
-        eq(position.getId()),
+        any(UUID.class),
         eq("Perpetual funding fee")))
         .thenReturn(ledgerEntry);
 
@@ -214,7 +221,84 @@ class FundingServiceTest {
     assertThat(position.getFundingPnl()).isEqualByComparingTo("-5.00000000");
     verify(accountRepository).save(account);
     verify(positionRepository).save(position);
-    verify(ledgerService).recordFundingFee(account, new BigDecimal("-5.00000000"), position.getId(), "Perpetual funding fee");
+    verify(ledgerService).recordFundingFeeSettlement(
+        eq(account),
+        eq(new BigDecimal("-5.00000000")),
+        any(UUID.class),
+        eq("Perpetual funding fee"));
+  }
+
+  @Test
+  void positiveFundingRateSettlesLongAndShortAccountsOnceForSameFundingTime() {
+    UUID longAccountId = UUID.randomUUID();
+    UUID shortAccountId = UUID.randomUUID();
+    TradingAccountEntity longAccount = account(longAccountId, "10000.00000000");
+    TradingAccountEntity shortAccount = account(shortAccountId, "10000.00000000");
+    longAccount.setUsedMargin(new BigDecimal("20.00000000"));
+    longAccount.setFreeMargin(new BigDecimal("9980.00000000"));
+    shortAccount.setUsedMargin(new BigDecimal("20.00000000"));
+    shortAccount.setFreeMargin(new BigDecimal("9980.00000000"));
+    PositionEntity longPosition = position(longAccountId, "BTCUSDT", OrderSide.BUY, "0.01", "100000.00000000");
+    PositionEntity shortPosition = position(shortAccountId, "BTCUSDT", OrderSide.SELL, "0.01", "100000.00000000");
+    FundingRateEntity rate = fundingRate("BTCUSDT", "0.0001", "100000.00000000");
+    Set<String> insertedSettlements = new HashSet<>();
+
+    when(accountRepository.findById(longAccountId)).thenReturn(Optional.of(longAccount));
+    when(accountRepository.findById(shortAccountId)).thenReturn(Optional.of(shortAccount));
+    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(perpSymbol(
+        "BTCUSDT",
+        "LINEAR_PERPETUAL",
+        "BTC",
+        "USDT",
+        "1",
+        "1",
+        "USDT",
+        "USDT")));
+    when(fundingSettlementRepository.insertIfAbsent(any(FundingSettlementEntity.class)))
+        .thenAnswer(invocation -> {
+          FundingSettlementEntity settlement = invocation.getArgument(0);
+          return insertedSettlements.add(settlement.getPositionId() + "|" + settlement.getFundingTime());
+        });
+
+    BigDecimal longFirst = service().settleFundingForPosition(longPosition, rate);
+    BigDecimal shortFirst = service().settleFundingForPosition(shortPosition, rate);
+    BigDecimal longRepeat = service().settleFundingForPosition(longPosition, rate);
+    BigDecimal shortRepeat = service().settleFundingForPosition(shortPosition, rate);
+
+    assertThat(longFirst).isEqualByComparingTo("-0.10000000");
+    assertThat(shortFirst).isEqualByComparingTo("0.10000000");
+    assertThat(longRepeat).isEqualByComparingTo("0.00000000");
+    assertThat(shortRepeat).isEqualByComparingTo("0.00000000");
+    assertThat(longPosition.getLots()).isEqualByComparingTo("0.01");
+    assertThat(shortPosition.getLots()).isEqualByComparingTo("0.01");
+    assertThat(longPosition.getFundingPnl()).isEqualByComparingTo("-0.10000000");
+    assertThat(shortPosition.getFundingPnl()).isEqualByComparingTo("0.10000000");
+    assertThat(longAccount.getBalance()).isEqualByComparingTo("9999.90000000");
+    assertThat(longAccount.getEquity()).isEqualByComparingTo("9999.90000000");
+    assertThat(longAccount.getFreeMargin()).isEqualByComparingTo("9979.90000000");
+    assertThat(shortAccount.getBalance()).isEqualByComparingTo("10000.10000000");
+    assertThat(shortAccount.getEquity()).isEqualByComparingTo("10000.10000000");
+    assertThat(shortAccount.getFreeMargin()).isEqualByComparingTo("9980.10000000");
+    assertThat(insertedSettlements).hasSize(2);
+    verify(accountRepository).save(longAccount);
+    verify(accountRepository).save(shortAccount);
+    verify(positionRepository).save(longPosition);
+    verify(positionRepository).save(shortPosition);
+    verify(ledgerService).recordFundingFeeSettlement(
+        eq(longAccount),
+        eq(new BigDecimal("-0.10000000")),
+        any(UUID.class),
+        eq("Perpetual funding fee"));
+    verify(ledgerService).recordFundingFeeSettlement(
+        eq(shortAccount),
+        eq(new BigDecimal("0.10000000")),
+        any(UUID.class),
+        eq("Perpetual funding fee"));
+    verify(ledgerService, times(2)).recordFundingFeeSettlement(
+        any(TradingAccountEntity.class),
+        any(BigDecimal.class),
+        any(UUID.class),
+        eq("Perpetual funding fee"));
   }
 
   private FundingService service() {

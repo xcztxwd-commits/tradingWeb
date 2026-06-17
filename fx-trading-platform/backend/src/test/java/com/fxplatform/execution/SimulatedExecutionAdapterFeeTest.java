@@ -41,6 +41,23 @@ class SimulatedExecutionAdapterFeeTest {
   }
 
   @Test
+  void marketOrdersFillRequestedQuantityInDemoExecution() {
+    contextRunner.run(context -> {
+      QuoteService quoteService = context.getBean(QuoteService.class);
+      SymbolRepository symbolRepository = context.getBean(SymbolRepository.class);
+      when(quoteService.freshQuote("ETHUSDT")).thenReturn(quote("ETHUSDT", "2799", "2800"));
+      when(symbolRepository.findBySymbol("ETHUSDT"))
+          .thenReturn(Optional.of(symbol("ETHUSDT", "LINEAR_PERPETUAL", "ETH", "USDT", "1")));
+
+      ExecutionResult result = context.getBean(SimulatedExecutionAdapter.class)
+          .execute(marketOrder("ETHUSDT", "2.00"));
+
+      assertThat(result.filledQuantity()).isEqualByComparingTo("2.00");
+      assertThat(result.remainingQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    });
+  }
+
+  @Test
   void inversePerpetualFeeUsesCurrentContractSizeMarginConvention() {
     assertFee("BTCUSD", "INVERSE_PERPETUAL", "BTC", "USD", "100", "1.00", "49990", "50000", "0.00000200");
   }

@@ -135,6 +135,7 @@ export const KLineChartPanel = memo(function KLineChartPanel({
   const visibleRangeRef = useRef<ReturnType<KLineChart['getVisibleRange']> | null>(null)
   const [lastClose, setLastClose] = useState<number | null>(null)
   const [hasNoCandles, setHasNoCandles] = useState(false)
+  const [tradeMarkerOverlayCount, setTradeMarkerOverlayCount] = useState(0)
   const [selectedDrawing, setSelectedDrawing] = useState<SelectedDrawingOverlay | null>(null)
   const [drawingManagerOpen, setDrawingManagerOpen] = useState(false)
   const [drawingRecords, setDrawingRecords] = useState<PersistedChartDrawing[]>([])
@@ -431,10 +432,14 @@ export const KLineChartPanel = memo(function KLineChartPanel({
 
   useEffect(() => {
     const chart = chartRef.current
-    if (!chart) return
+    if (!chart) {
+      setTradeMarkerOverlayCount(0)
+      return
+    }
 
     chart.removeOverlay({ groupId: tradeMarkerOverlayGroupId })
     const overlays = buildTradeMarkerOverlays(tradeMarkers, period)
+    setTradeMarkerOverlayCount(overlays.length)
     if (overlays.length > 0) chart.createOverlay(overlays)
   }, [period, tradeMarkers])
 
@@ -509,7 +514,11 @@ export const KLineChartPanel = memo(function KLineChartPanel({
   useResizeObserver(containerRef, () => chartRef.current?.resize())
 
   return (
-    <div className={styles.chartPanel}>
+    <div
+      className={styles.chartPanel}
+      data-trade-marker-count={tradeMarkers.length}
+      data-trade-marker-overlay-count={tradeMarkerOverlayCount}
+    >
       <div className={styles.canvasHeader}>
         <span>{symbol}</span>
         {crosshairCandle ? (

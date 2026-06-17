@@ -67,6 +67,9 @@ describe('bottom account panel tabs', () => {
     assert.match(dataSource, /isCurrentOrderStatus/)
     assert.match(ordersGridSource, /getOrderActionSummary/)
     assert.match(ordersGridSource, /orders\.actionStatus/)
+    assert.match(ordersGridSource, /orders\.timeline/)
+    assert.match(ordersGridSource, /function OrderTimeline/)
+    assert.match(ordersGridSource, /getOrderTimelineItems/)
     assert.doesNotMatch(ordersGridSource, /全部撤单/)
   })
 
@@ -117,6 +120,7 @@ describe('bottom account panel tabs', () => {
     assert.match(positionsGridSource, /positions\.breakEvenPrice/)
     assert.match(positionsGridSource, /positions\.floatingPnl/)
     assert.match(positionsGridSource, /positions\.realizedPnl/)
+    assert.match(positionsGridSource, /positions\.notional/)
     assert.match(positionsGridSource, /positions\.maintenanceMargin/)
     assert.match(positionsGridSource, /row\.maintenanceMargin/)
     assert.match(positionsGridSource, /positions\.takeProfitStopLoss/)
@@ -217,6 +221,7 @@ describe('bottom account panel tabs', () => {
       lots: '0.50',
       openPrice: '60000',
       currentPrice: '60200',
+      notional: '30100.00',
       floatingPnl: '100',
       realizedPnl: '0',
       marginHeld: '1505.00',
@@ -226,6 +231,7 @@ describe('bottom account panel tabs', () => {
     }, testT)
 
     assert.equal(row.showMaintenanceMargin, true)
+    assert.equal(row.notional, '30,100 USDT')
     assert.equal(row.maintenanceMargin, '120.4 USDT')
   })
 
@@ -250,6 +256,7 @@ describe('bottom account panel tabs', () => {
 
     assert.equal(row.showMaintenanceMargin, false)
     assert.equal(row.maintenanceMargin, null)
+    assert.equal(row.canClose, false)
   })
 
   it('falls back safely when maintenance margin is missing', () => {

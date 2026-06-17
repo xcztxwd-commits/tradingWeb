@@ -11,6 +11,11 @@ import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.provider.MarketDataRouter;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -27,7 +32,7 @@ public class QuoteService {
   private final StringRedisTemplate redisTemplate;
   private final ObjectMapper objectMapper;
 
-  @Value("${massive.quote-stale-ms}")
+  @Value("${market.quote-stale-ms:${massive.quote-stale-ms:3000}}")
   private long quoteStaleMs;
 
   @Value("${market.demo-quotes.enabled:false}")
@@ -44,6 +49,35 @@ public class QuoteService {
     QuoteResponse quote = fetchLatest(normalizedSymbol);
     cache(quote);
     return quote;
+  }
+
+  public Map<String, QuoteResponse> latestQuotes(Collection<String> symbols) {
+    List<String> normalizedSymbols = normalizeSymbols(symbols);
+    LinkedHashMap<String, QuoteResponse> quotes = new LinkedHashMap<>();
+    ArrayList<String> missingSymbols = new ArrayList<>();
+
+    for (String symbol : normalizedSymbols) {
+      QuoteResponse cached = readCached(symbol);
+      if (cached != null && canUseCachedForDisplay(cached)) {
+        quotes.put(symbol, cached);
+      } else {
+        missingSymbols.add(symbol);
+      }
+    }
+
+    if (!missingSymbols.isEmpty()) {
+      Map<String, QuoteResponse> fetchedQuotes = marketDataRouter.snapshots(missingSymbols);
+      for (String symbol : missingSymbols) {
+        QuoteResponse quote = fetchedQuotes.get(symbol);
+        if (quote == null) {
+          continue;
+        }
+        cache(quote);
+        quotes.put(symbol, quote);
+      }
+    }
+
+    return quotes;
   }
 
   public QuoteResponse freshQuote(String symbol) {
@@ -151,6 +185,17 @@ public class QuoteService {
 
   private String key(String symbol) {
     return "quote:" + symbol;
+  }
+
+  private List<String> normalizeSymbols(Collection<String> symbols) {
+    ArrayList<String> normalizedSymbols = new ArrayList<>();
+    for (String symbol : symbols) {
+      String normalizedSymbol = SymbolNormalizer.normalize(symbol);
+      if (!normalizedSymbol.isBlank() && !normalizedSymbols.contains(normalizedSymbol)) {
+        normalizedSymbols.add(normalizedSymbol);
+      }
+    }
+    return normalizedSymbols;
   }
 
 }

@@ -37,7 +37,7 @@ public class SecurityConfig {
   @Value("${app.cors.allowed-origins:}")
   private String allowedOrigins;
 
-  @Value("${app.cors.allowed-origin-patterns:http://localhost:*,http://127.0.0.1:*}")
+  @Value("${app.cors.allowed-origin-patterns:}")
   private String allowedOriginPatterns;
 
   /**

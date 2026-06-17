@@ -4,6 +4,20 @@ const adminPassword = process.env.ADMIN_SMOKE_PASSWORD ?? 'Password123!'
 const runId = process.env.ADMIN_SMOKE_RUN_ID ?? String(Date.now())
 const userEmail = process.env.ADMIN_SMOKE_USER_EMAIL ?? `admin-smoke-user+${runId}@example.com`
 const userPassword = process.env.ADMIN_SMOKE_USER_PASSWORD ?? 'Password123!'
+const ADMIN_ACTION_AUTHORITIES = [
+  'market:symbol:create',
+  'market:symbol:update',
+  'market:symbol:disable',
+  'market:data-provider:update',
+  'finance:fund-order:approve',
+  'finance:fund-order:reject',
+  'finance:adjustment:create',
+  'trading:order:cancel',
+  'trading:position:force-close',
+  'user:update',
+  'user:disable',
+  'user:force-logout'
+]
 
 const results = []
 const context = { runId, adminEmail, userEmail }
@@ -33,6 +47,56 @@ await step('admin authenticated profile is available', async () => {
   assert(me.email === adminEmail, 'Admin profile email must match smoke admin')
   assert(me.role === 'ADMIN', 'Admin profile must have ADMIN role')
   return { email: me.email, role: me.role }
+})
+
+await step('admin action authorities are seeded through RBAC buttons', async () => {
+  const role = await api('/api/admin/rbac/roles', {
+    method: 'POST',
+    token: adminToken,
+    body: {
+      name: `Smoke Action Role ${runId}`,
+      code: `smoke_action_${runId}`,
+      enabled: true,
+      sortOrder: 1,
+      description: 'admin action smoke'
+    }
+  })
+  const menu = await api('/api/admin/rbac/menus', {
+    method: 'POST',
+    token: adminToken,
+    body: {
+      parentId: null,
+      name: `Smoke Action Menu ${runId}`,
+      permissionKey: `smoke:admin-action:${runId}`,
+      path: `/smoke/action/${runId}`,
+      component: 'SmokeActionPage',
+      menuType: 'MENU',
+      enabled: true,
+      sortOrder: 1
+    }
+  })
+  await api(`/api/admin/rbac/roles/${role.id}/menu-permissions`, {
+    method: 'PUT',
+    token: adminToken,
+    body: { menuId: menu.id, buttons: ADMIN_ACTION_AUTHORITIES }
+  })
+  await api('/api/admin/rbac/user-roles', {
+    method: 'POST',
+    token: adminToken,
+    body: { userId: context.adminUserId, roleId: role.id }
+  })
+
+  const refreshed = await api('/api/auth/login', {
+    method: 'POST',
+    body: { email: adminEmail, password: adminPassword }
+  })
+  assert(refreshed.accessToken, 'Admin relogin must return access token')
+  assert(Array.isArray(refreshed.authorities), 'Admin relogin must return authorities')
+  for (const authority of ADMIN_ACTION_AUTHORITIES) {
+    assert(refreshed.authorities.includes(authority), `Admin authorities must include ${authority}`)
+  }
+  adminToken = refreshed.accessToken
+  return { roleId: role.id, menuId: menu.id, authorities: ADMIN_ACTION_AUTHORITIES.length }
 })
 
 await step('regular user can register and load profile', async () => {
@@ -66,27 +130,42 @@ const account = await step('regular user can create and query demo account', asy
 const market = await step('market symbols, quote, candles, order book and trades are usable', async () => {
   const symbols = await api('/api/market/symbols')
   assert(Array.isArray(symbols) && symbols.length > 0, 'Market symbols must be non-empty')
-  const symbol = symbols.find((item) => item.enabled) ?? symbols[0]
-  const quote = await api(`/api/market/quotes/${encodeURIComponent(symbol.symbol)}`)
+  const marketSymbol = symbols.find((item) => item.enabled && item.orderBookEnabled === true)
+    ?? symbols.find((item) => item.enabled)
+    ?? symbols[0]
+  const tradingSymbol = symbols.find((item) => item.enabled && item.tradable && item.quoteCurrency === 'USD')
+    ?? marketSymbol
+  const quote = await api(`/api/market/quotes/${encodeURIComponent(marketSymbol.symbol)}`)
   assert(Number(quote.ask) > 0 && Number(quote.bid) > 0, 'Quote bid/ask must be positive')
 
   const to = new Date()
   const from = new Date(to.getTime() - 6 * 60 * 60 * 1000)
   const candles = await api(
-    `/api/chart/candles?symbol=${encodeURIComponent(symbol.symbol)}&timeframe=1h&from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`
+    `/api/chart/candles?symbol=${encodeURIComponent(marketSymbol.symbol)}&timeframe=1h&from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`
   )
   assert(Array.isArray(candles), 'Chart candles must return a list')
 
-  const orderBook = await api(`/api/market/order-book/${encodeURIComponent(symbol.symbol)}`)
+  const orderBook = await api(`/api/market/order-book/${encodeURIComponent(marketSymbol.symbol)}`)
   assert(orderBook.bids && orderBook.asks, 'Order book must include bids and asks')
-  const trades = await api(`/api/market/trades/${encodeURIComponent(symbol.symbol)}?limit=5`)
+  const trades = await api(`/api/market/trades/${encodeURIComponent(marketSymbol.symbol)}?limit=5`)
   assert(Array.isArray(trades), 'Recent trades must return a list')
   const status = await api('/api/market/status')
   assert(status.status, 'Market status must include status')
 
-  context.symbol = symbol.symbol
-  context.quoteMid = quote.mid
-  return { symbol: symbol.symbol, candles: candles.length, trades: trades.length, status: status.status }
+  const tradingQuote = tradingSymbol.symbol === marketSymbol.symbol
+    ? quote
+    : await api(`/api/market/quotes/${encodeURIComponent(tradingSymbol.symbol)}`)
+  assert(Number(tradingQuote.ask) > 0 && Number(tradingQuote.bid) > 0, 'Trading quote bid/ask must be positive')
+  context.symbol = tradingSymbol.symbol
+  context.marketSymbol = marketSymbol.symbol
+  context.quoteMid = tradingQuote.mid
+  return {
+    marketSymbol: marketSymbol.symbol,
+    tradingSymbol: tradingSymbol.symbol,
+    candles: candles.length,
+    trades: trades.length,
+    status: status.status
+  }
 })
 
 const order = await step('regular user can create, list and inspect trading resources', async () => {
@@ -302,7 +381,8 @@ await step('admin finance commands write ledger and payment methods', async () =
       delta: '-0.50',
       reason: `codex smoke balance adjustment ${runId}`,
       note: 'e2e adjustment',
-      idempotencyKey: `codex-adjust-${runId}`
+      idempotencyKey: `codex-adjust-${runId}`,
+      confirmationText: 'CONFIRM_ADJUSTMENT'
     }
   })
   assert(adjustment.id, 'Balance adjustment operation must be recorded')

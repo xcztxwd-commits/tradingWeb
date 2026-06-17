@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { registerHooks } from 'node:module'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
@@ -77,27 +78,55 @@ describe('market stream shared client', () => {
     )
   })
 
-  it('shares one client and one STOMP subscription for two quote handlers on the same topic', async () => {
+  it('shares one /ws STOMP subscription for two BTCUSDT quote handlers on the same page', async () => {
     const { subscribeQuote } = await importMarketStream()
     const received = []
 
-    subscribeQuote('EURUSD', 'token-a', (quote) => received.push(['first', quote]))
-    subscribeQuote('EURUSD', 'token-a', (quote) => received.push(['second', quote]))
+    subscribeQuote('BTCUSDT', 'token-a', (quote) => received.push(['first', quote]))
+    subscribeQuote('BTCUSDT', 'token-a', (quote) => received.push(['second', quote]))
 
     const [client] = globalThis.__marketStreamFakeClients
     assert.equal(globalThis.__marketStreamFakeClients.length, 1)
 
     client.config.onConnect()
     assert.equal(client.subscriptions.length, 1)
+    assert.equal(client.config.brokerURL, 'ws://localhost/ws')
+    assert.equal(client.subscriptions[0].topic, '/topic/market/quotes/BTCUSDT')
 
-    client.subscriptions[0].callback({ body: '{"symbol":"EURUSD","bid":1.1}' })
+    client.subscriptions[0].callback({ body: '{"symbol":"BTCUSDT","bid":65000}' })
     assert.deepEqual(received, [
-      ['first', { symbol: 'EURUSD', bid: 1.1 }],
-      ['second', { symbol: 'EURUSD', bid: 1.1 }]
+      ['first', { symbol: 'BTCUSDT', bid: 65000 }],
+      ['second', { symbol: 'BTCUSDT', bid: 65000 }]
     ])
 
     client.config.onConnect()
     assert.equal(client.subscriptions.length, 1)
+  })
+
+  it('normalizes market topic symbols before subscribing', async () => {
+    const { subscribeOrderBook, subscribeQuote, subscribeRecentTrades } = await importMarketStream()
+
+    subscribeQuote('btc-usdt', null, () => {})
+    subscribeOrderBook('btc/usdt', null, () => {})
+    subscribeRecentTrades('btc_usdt', null, () => {})
+
+    const [client] = globalThis.__marketStreamFakeClients
+    client.config.onConnect()
+
+    assert.deepEqual(
+      client.subscriptions.map((subscription) => subscription.topic),
+      [
+        '/topic/market/quotes/BTCUSDT',
+        '/topic/market/order-book/BTCUSDT',
+        '/topic/market/trades/BTCUSDT'
+      ]
+    )
+  })
+
+  it('does not connect directly to Binance websocket hosts from the frontend', async () => {
+    const source = await readFile(new URL('./marketStream.ts', import.meta.url), 'utf8')
+
+    assert.doesNotMatch(source, /stream\.binance\.com|data-stream\.binance\.vision/)
   })
 
   it('isolates malformed JSON and throwing handlers from valid delivery', async () => {
@@ -156,5 +185,21 @@ describe('market stream shared client', () => {
     assert.equal(globalThis.__marketStreamFakeClients.length, 2)
     assert.equal(firstClient.deactivated, true)
     assert.equal(secondClient.deactivated, false)
+  })
+
+  it('subscribes to account trading-session events with the authenticated stream token', async () => {
+    const { subscribeTradingSessionEvents } = await importMarketStream()
+    const received = []
+
+    subscribeTradingSessionEvents('acct_1', 'token-a', (event) => received.push(event))
+
+    const [client] = globalThis.__marketStreamFakeClients
+    client.config.onConnect()
+
+    assert.equal(client.config.connectHeaders.Authorization, 'Bearer token-a')
+    assert.equal(client.subscriptions[0].topic, '/topic/trading/accounts/acct_1/events')
+
+    client.subscriptions[0].callback({ body: '{"type":"ORDER_EVENT","status":"FILLED"}' })
+    assert.deepEqual(received, [{ type: 'ORDER_EVENT', status: 'FILLED' }])
   })
 })

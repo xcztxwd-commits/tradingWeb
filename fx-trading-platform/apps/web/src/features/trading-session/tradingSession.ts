@@ -1,5 +1,6 @@
 import { createDemoAccount, getAccounts, getAccountSummary, getAssetLedger, getWalletBalances } from '../../services/accountApi'
 import { ApiClientError } from '../../services/apiClient'
+import { getLedgerEntries } from '../../services/ledgerApi'
 import {
   closePosition,
   createOrder,
@@ -25,6 +26,7 @@ export type TradingAccountData = {
   positions: PositionResponse[]
   positionHistory: PositionResponse[]
   ledgerEntries: LedgerEntry[]
+  assetLedgerEntries: AssetLedgerEntry[]
   walletBalances: WalletBalance[]
 }
 
@@ -33,33 +35,17 @@ export function isAuthSessionFailure(error: unknown) {
 }
 
 export async function loadTradingAccountData(token: string, accountId: string): Promise<TradingAccountData> {
-  const [account, orders, positions, positionHistory, assetLedgerEntries, walletBalances] = await Promise.all([
+  const [account, orders, positions, positionHistory, ledgerEntries, assetLedgerEntries, walletBalances] = await Promise.all([
     getAccountSummary(accountId, token),
     getOrders(token),
     getPositions(accountId, token),
     getPositionHistory(accountId, token),
+    getLedgerEntries(accountId, token),
     getAssetLedger(accountId, token),
     getWalletBalances(accountId, token)
   ])
-  const ledgerEntries = assetLedgerEntries.map(mapAssetLedgerEntry)
 
-  return { account, orders, positions, positionHistory, ledgerEntries, walletBalances }
-}
-
-function mapAssetLedgerEntry(entry: AssetLedgerEntry): LedgerEntry {
-  return {
-    id: entry.id,
-    accountId: entry.accountId,
-    walletType: entry.walletType,
-    entryType: entry.entryType,
-    amount: entry.amount,
-    balanceAfter: entry.balanceAfter,
-    currency: entry.asset,
-    referenceType: entry.referenceType,
-    referenceId: entry.referenceId,
-    description: entry.description,
-    createdAt: entry.createdAt
-  }
+  return { account, orders, positions, positionHistory, ledgerEntries, assetLedgerEntries, walletBalances }
 }
 
 export async function submitTradingOrder(payload: OrderPayload, token?: string | null) {

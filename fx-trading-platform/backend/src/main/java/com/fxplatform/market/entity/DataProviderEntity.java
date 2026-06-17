@@ -36,6 +36,14 @@ public class DataProviderEntity {
   private Integer rateLimitPerMinute = 1200;
   private ProviderHealthStatus healthStatus = ProviderHealthStatus.UNKNOWN;
   private Instant lastHealthCheckAt;
+  private Instant lastSuccessAt;
+  private Instant lastFailureAt;
+  private Long failureCount = 0L;
+  private Long avgLatencyMs;
+  private Instant lastQuoteSuccessAt;
+  private Long quoteStalenessMs;
+  private Instant lastInstrumentSyncAt;
+  private Integer lastInstrumentSyncCount = 0;
   @TableField(typeHandler = JsonbStringTypeHandler.class)
   private String configJson = "{}";
   @TableField(fill = FieldFill.INSERT)

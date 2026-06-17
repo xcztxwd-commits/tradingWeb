@@ -3,6 +3,7 @@ package com.fxplatform.market.repository;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.market.entity.SymbolEntity;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Locale;
@@ -16,6 +17,14 @@ public interface SymbolRepository extends FxBaseMapper<SymbolEntity> {
   default Optional<SymbolEntity> findBySymbol(String symbol) {
     return Optional.ofNullable(selectOne(new LambdaQueryWrapper<SymbolEntity>()
         .eq(SymbolEntity::getSymbol, symbol)));
+  }
+
+  default List<SymbolEntity> findBySymbols(Collection<String> symbols) {
+    if (symbols == null || symbols.isEmpty()) {
+      return List.of();
+    }
+    return selectList(new LambdaQueryWrapper<SymbolEntity>()
+        .in(SymbolEntity::getSymbol, symbols));
   }
 
   /** 查询启用中的品种，按品种代码升序返回。 */

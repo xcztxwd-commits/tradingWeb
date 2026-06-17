@@ -3,6 +3,7 @@ package com.fxplatform.admin.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -13,10 +14,12 @@ import com.fxplatform.config.entity.SystemDictionaryEntity;
 import com.fxplatform.config.entity.SystemSettingEntity;
 import com.fxplatform.config.repository.SystemDictionaryRepository;
 import com.fxplatform.config.repository.SystemSettingRepository;
+import com.fxplatform.config.service.SensitiveSettingService;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -31,6 +34,9 @@ class AdminConfigCommandServiceTest {
 
   @Mock
   private AuditLogService auditLogService;
+
+  private final SensitiveSettingService sensitiveSettingService =
+      new SensitiveSettingService("unit-test-config-encryption-key-32chars");
 
   @Test
   void upsertDictionaryCreatesMissingItemAndAudits() {
@@ -50,7 +56,8 @@ class AdminConfigCommandServiceTest {
           return item;
         });
 
-    AdminConfigCommandService service = new AdminConfigCommandService(dictionaryRepository, settingRepository, auditLogService);
+    AdminConfigCommandService service = new AdminConfigCommandService(
+        dictionaryRepository, settingRepository, auditLogService, sensitiveSettingService);
 
     var response = service.upsertDictionary(actorUserId, request);
 
@@ -81,7 +88,8 @@ class AdminConfigCommandServiceTest {
           return setting;
         });
 
-    AdminConfigCommandService service = new AdminConfigCommandService(dictionaryRepository, settingRepository, auditLogService);
+    AdminConfigCommandService service = new AdminConfigCommandService(
+        dictionaryRepository, settingRepository, auditLogService, sensitiveSettingService);
 
     var response = service.updateSetting(actorUserId, request);
 
@@ -93,5 +101,42 @@ class AdminConfigCommandServiceTest {
         eq("SETTING"),
         eq(response.id().toString()),
         contains("withdrawal.review.required"));
+  }
+
+  @Test
+  void updateSettingEncryptsSensitiveValueAndMasksResponseAndAuditDetails() {
+    UUID actorUserId = UUID.randomUUID();
+    AdminSystemSettingRequest request = new AdminSystemSettingRequest(
+        "settings.smsPassword",
+        "plain-secret",
+        "STRING",
+        "SMS gateway password",
+        true);
+    when(settingRepository.findBySettingKey("settings.smsPassword")).thenReturn(Optional.empty());
+    when(settingRepository.save(org.mockito.ArgumentMatchers.any(SystemSettingEntity.class)))
+        .thenAnswer(invocation -> {
+          SystemSettingEntity setting = invocation.getArgument(0);
+          setting.setId(UUID.randomUUID());
+          return setting;
+        });
+
+    AdminConfigCommandService service = new AdminConfigCommandService(
+        dictionaryRepository, settingRepository, auditLogService, sensitiveSettingService);
+
+    var response = service.updateSetting(actorUserId, request);
+
+    ArgumentCaptor<SystemSettingEntity> settingCaptor = ArgumentCaptor.forClass(SystemSettingEntity.class);
+    verify(settingRepository).save(settingCaptor.capture());
+    assertThat(settingCaptor.getValue().getSettingValue())
+        .startsWith("enc:v1:")
+        .doesNotContain("plain-secret");
+    assertThat(response.settingValue()).isEqualTo("********");
+    verify(auditLogService).record(
+        eq(actorUserId),
+        eq("ADMIN_SETTING_UPDATE"),
+        eq("SETTING"),
+        eq(response.id().toString()),
+        argThat(details -> details.contains("\"value\":\"********\"")
+            && !details.contains("plain-secret")));
   }
 }

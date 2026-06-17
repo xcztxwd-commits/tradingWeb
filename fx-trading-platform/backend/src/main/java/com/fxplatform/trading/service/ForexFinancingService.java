@@ -145,7 +145,11 @@ public class ForexFinancingService {
     applyFinancing(account, position, financing);
     accountRepository.save(account);
     positionRepository.save(position);
-    LedgerEntryEntity ledgerEntry = ledgerService.recordFinancing(account, financing, position.getId(), LEDGER_DESCRIPTION);
+    LedgerEntryEntity ledgerEntry = ledgerService.recordFinancingSettlement(
+        account,
+        financing,
+        settlement.getId(),
+        LEDGER_DESCRIPTION);
     if (ledgerEntry != null) {
       settlement.setLedgerEntryId(ledgerEntry.getId());
       financingSettlementRepository.updateById(settlement);

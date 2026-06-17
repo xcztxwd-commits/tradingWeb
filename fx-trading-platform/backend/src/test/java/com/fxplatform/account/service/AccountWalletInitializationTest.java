@@ -62,5 +62,14 @@ class AccountWalletInitializationTest {
         eq(account.getId()),
         eq("Initial DEMO wallet balance"),
         eq("CREDIT_AVAILABLE"));
+    verify(walletService).creditAvailableWithEntryType(
+        eq(account.getId()),
+        eq(WalletType.SPOT),
+        eq("USDT"),
+        eq(defaultBalance),
+        eq("DEMO_ACCOUNT"),
+        eq(account.getId()),
+        eq("Initial DEMO spot wallet balance"),
+        eq("CREDIT_AVAILABLE"));
   }
 }

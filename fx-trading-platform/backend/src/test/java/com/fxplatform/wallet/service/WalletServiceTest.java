@@ -13,6 +13,8 @@ import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -91,6 +93,55 @@ class WalletServiceTest {
     assertThat(ledgerCaptor.getAllValues().get(2).getAmount()).isEqualByComparingTo("-30.00000000");
     assertThat(ledgerCaptor.getAllValues().get(3).getAmount()).isEqualByComparingTo("10.00000000");
     assertThat(ledgerCaptor.getAllValues().getLast().getBalanceAfter()).isEqualByComparingTo("60.00000000");
+  }
+
+  @Test
+  void creditAvailableIsIdempotentForSameBusinessOperation() {
+    UUID accountId = UUID.randomUUID();
+    UUID referenceId = UUID.randomUUID();
+    WalletBalanceEntity balance = balance(accountId, "USDT", "0", "0", "0");
+    List<AssetLedgerEntryEntity> savedEntries = new ArrayList<>();
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "USDT"))
+        .thenReturn(Optional.of(balance));
+    when(walletBalanceRepository.save(any(WalletBalanceEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(assetLedgerEntryRepository.findByBusinessOperation(
+        accountId,
+        WalletType.SPOT.code(),
+        "USDT",
+        "DEMO_ACCOUNT",
+        referenceId,
+        "CREDIT_AVAILABLE"))
+        .thenAnswer(invocation -> savedEntries.stream().findFirst().orElse(null));
+    when(assetLedgerEntryRepository.save(any(AssetLedgerEntryEntity.class)))
+        .thenAnswer(invocation -> {
+          AssetLedgerEntryEntity entry = invocation.getArgument(0);
+          savedEntries.add(entry);
+          return entry;
+        });
+
+    WalletService service = service();
+
+    service.creditAvailableWithEntryType(
+        accountId,
+        "USDT",
+        new BigDecimal("100.00000000"),
+        "DEMO_ACCOUNT",
+        referenceId,
+        "Initial wallet balance",
+        "CREDIT_AVAILABLE");
+    service.creditAvailableWithEntryType(
+        accountId,
+        "USDT",
+        new BigDecimal("100.00000000"),
+        "DEMO_ACCOUNT",
+        referenceId,
+        "Initial wallet balance",
+        "CREDIT_AVAILABLE");
+
+    assertThat(balance.getTotal()).isEqualByComparingTo("100.00000000");
+    assertThat(balance.getAvailable()).isEqualByComparingTo("100.00000000");
+    verify(assetLedgerEntryRepository, org.mockito.Mockito.times(1)).save(any(AssetLedgerEntryEntity.class));
   }
 
   @Test

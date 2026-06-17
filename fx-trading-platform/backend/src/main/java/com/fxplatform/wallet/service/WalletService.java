@@ -74,6 +74,23 @@ public class WalletService {
         to);
   }
 
+  public boolean hasBusinessOperation(
+      UUID accountId,
+      WalletType walletType,
+      String asset,
+      String referenceType,
+      UUID referenceId,
+      String operationType
+  ) {
+    return assetLedgerEntryRepository.findByBusinessOperation(
+        accountId,
+        normalizeWalletType(walletType),
+        normalizeAsset(asset),
+        normalizeOptional(referenceType),
+        referenceId,
+        normalizeOptional(operationType)) != null;
+  }
+
   @Transactional
   public WalletBalanceEntity getOrCreateBalance(UUID accountId, String asset) {
     return getOrCreateBalance(accountId, DEFAULT_WALLET_TYPE, asset);
@@ -127,6 +144,9 @@ public class WalletService {
   ) {
     BigDecimal normalizedAmount = positiveAmount(amount);
     WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
+    if (findExistingOperation(balance, entryType, referenceType, referenceId) != null) {
+      return balance;
+    }
     balance.setTotal(scale(balance.getTotal().add(normalizedAmount)));
     balance.setAvailable(scale(balance.getAvailable().add(normalizedAmount)));
     persist(balance, normalizedAmount, entryType, referenceType, referenceId, description);
@@ -201,6 +221,9 @@ public class WalletService {
   ) {
     BigDecimal normalizedAmount = positiveAmount(amount);
     WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
+    if (findExistingOperation(balance, entryType, referenceType, referenceId) != null) {
+      return balance;
+    }
     ensureEnough(balance.getAvailable(), normalizedAmount, "AVAILABLE_BALANCE_NOT_ENOUGH",
         "Available balance is not enough");
     balance.setTotal(scale(balance.getTotal().subtract(normalizedAmount)));
@@ -263,6 +286,9 @@ public class WalletService {
   ) {
     BigDecimal normalizedAmount = positiveAmount(amount);
     WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
+    if (findExistingOperation(balance, entryType, referenceType, referenceId) != null) {
+      return balance;
+    }
     ensureEnough(balance.getAvailable(), normalizedAmount, "AVAILABLE_BALANCE_NOT_ENOUGH",
         "Available balance is not enough");
     balance.setAvailable(scale(balance.getAvailable().subtract(normalizedAmount)));
@@ -325,6 +351,9 @@ public class WalletService {
   ) {
     BigDecimal normalizedAmount = positiveAmount(amount);
     WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
+    if (findExistingOperation(balance, entryType, referenceType, referenceId) != null) {
+      return balance;
+    }
     ensureEnough(balance.getLocked(), normalizedAmount, "LOCKED_BALANCE_NOT_ENOUGH",
         "Locked balance is not enough");
     balance.setTotal(scale(balance.getTotal().subtract(normalizedAmount)));
@@ -374,6 +403,9 @@ public class WalletService {
   ) {
     BigDecimal normalizedAmount = positiveAmount(amount);
     WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
+    if (findExistingOperation(balance, entryType, referenceType, referenceId) != null) {
+      return balance;
+    }
     ensureEnough(balance.getLocked(), normalizedAmount, "LOCKED_BALANCE_NOT_ENOUGH",
         "Locked balance is not enough");
     balance.setAvailable(scale(balance.getAvailable().add(normalizedAmount)));
@@ -412,10 +444,26 @@ public class WalletService {
     entry.setAmount(scale(ledgerAmount));
     entry.setBalanceAfter(scale(balance.getAvailable()));
     entry.setEntryType(entryType);
+    entry.setOperationType(entryType);
     entry.setReferenceType(referenceType);
     entry.setReferenceId(referenceId);
     entry.setDescription(description);
     assetLedgerEntryRepository.save(entry);
+  }
+
+  private AssetLedgerEntryEntity findExistingOperation(
+      WalletBalanceEntity balance,
+      String entryType,
+      String referenceType,
+      UUID referenceId
+  ) {
+    return assetLedgerEntryRepository.findByBusinessOperation(
+        balance.getAccountId(),
+        balance.getWalletType(),
+        balance.getAsset(),
+        normalizeOptional(referenceType),
+        referenceId,
+        normalizeOptional(entryType));
   }
 
   private static WalletBalanceEntity newBalance(UUID accountId, String walletType, String asset) {

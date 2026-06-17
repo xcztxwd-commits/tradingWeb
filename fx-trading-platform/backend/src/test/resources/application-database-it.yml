@@ -7,6 +7,12 @@ admin:
   bootstrap:
     enabled: false
 
+security:
+  jwt:
+    secret: database-it-jwt-secret-value-at-least-32-chars
+  config:
+    encryption-key: database-it-config-encryption-key-32chars
+
 market:
   demo-quotes:
     enabled: false

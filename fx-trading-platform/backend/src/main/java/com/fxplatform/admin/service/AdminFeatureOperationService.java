@@ -20,6 +20,9 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -69,6 +72,7 @@ public class AdminFeatureOperationService {
     AdminFeaturePageResponse page = catalogService.page(pageKey);
     AdminFeatureActionResponse action = findAction(page, request.action());
     Map<String, Object> payload = request.payload() == null ? Map.of() : request.payload();
+    requireAuthority(AdminPermissionCatalog.permissionForFeatureAction(pageKey, action.key(), payload).orElse(null));
 
     Optional<AdminFeatureRecordEntity> replay = findReplayRecord(pageKey, action.key(), request.rowId(), payload);
     if (replay.isPresent()) {
@@ -207,6 +211,21 @@ public class AdminFeatureOperationService {
         .filter(action -> action.key().equals(actionKey))
         .findFirst()
         .orElseThrow(() -> new BusinessException("ADMIN_ACTION_UNKNOWN", "Unknown admin action: " + actionKey));
+  }
+
+  private void requireAuthority(String authority) {
+    if (authority == null || authority.isBlank()) {
+      return;
+    }
+    Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+    if (authentication == null) {
+      return;
+    }
+    boolean allowed = authentication.getAuthorities().stream()
+        .anyMatch(grantedAuthority -> authority.equals(grantedAuthority.getAuthority()));
+    if (!allowed) {
+      throw new AccessDeniedException("Missing admin authority: " + authority);
+    }
   }
 
   private Map<String, Object> rowFromRecord(AdminFeatureRecordEntity record) {

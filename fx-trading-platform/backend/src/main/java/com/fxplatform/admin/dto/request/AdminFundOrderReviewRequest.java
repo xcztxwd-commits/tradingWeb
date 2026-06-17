@@ -7,6 +7,10 @@ import jakarta.validation.constraints.NotBlank;
  */
 public record AdminFundOrderReviewRequest(
     @NotBlank String status,
-    @NotBlank String reason
+    @NotBlank String reason,
+    String confirmationText
 ) {
+  public AdminFundOrderReviewRequest(String status, String reason) {
+    this(status, reason, null);
+  }
 }

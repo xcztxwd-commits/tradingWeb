@@ -113,6 +113,7 @@ export function TradingDesktopView({
               sessionError={sessionError}
               loginRequired={loginRequired}
               leverage={market.leverage}
+              rules={market.rules}
               symbol={symbol}
               onLoginRequired={onLoginRequired}
               onSubmitOrder={submitOrder}

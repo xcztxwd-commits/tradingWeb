@@ -3,6 +3,7 @@ type AuthTokenStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 export const authSessionChangedEvent = 'fx-platform-auth-session-changed'
 
 const authTokenStorageKey = 'fx-platform-auth-token'
+const authRefreshTokenStorageKey = 'fx-platform-auth-refresh-token'
 const legacyAuthTokenStorageKey = 'fx-platform-demo-token'
 
 export function readStoredAuthToken(storage = getAuthTokenStorage()) {
@@ -24,6 +25,30 @@ export function readStoredAuthToken(storage = getAuthTokenStorage()) {
 export function writeStoredAuthToken(token: string, storage = getAuthTokenStorage()) {
   try {
     storage?.setItem(authTokenStorageKey, token)
+    storage?.removeItem(authRefreshTokenStorageKey)
+    storage?.removeItem(legacyAuthTokenStorageKey)
+  } catch {
+    // Login must keep working in browser contexts that block localStorage.
+  }
+  notifyAuthSessionChanged()
+}
+
+export function readStoredRefreshToken(storage = getAuthTokenStorage()) {
+  try {
+    return storage?.getItem(authRefreshTokenStorageKey) ?? null
+  } catch {
+    return null
+  }
+}
+
+export function writeStoredAuthTokens(
+  accessToken: string,
+  refreshToken: string,
+  storage = getAuthTokenStorage()
+) {
+  try {
+    storage?.setItem(authTokenStorageKey, accessToken)
+    storage?.setItem(authRefreshTokenStorageKey, refreshToken)
     storage?.removeItem(legacyAuthTokenStorageKey)
   } catch {
     // Login must keep working in browser contexts that block localStorage.
@@ -34,6 +59,7 @@ export function writeStoredAuthToken(token: string, storage = getAuthTokenStorag
 export function clearStoredAuthToken(storage = getAuthTokenStorage()) {
   try {
     storage?.removeItem(authTokenStorageKey)
+    storage?.removeItem(authRefreshTokenStorageKey)
   } catch {
     // Clearing a best-effort cached token should not block a fresh session.
   }

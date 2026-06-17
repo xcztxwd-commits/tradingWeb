@@ -10,6 +10,7 @@ import com.fxplatform.config.entity.SystemDictionaryEntity;
 import com.fxplatform.config.entity.SystemSettingEntity;
 import com.fxplatform.config.repository.SystemDictionaryRepository;
 import com.fxplatform.config.repository.SystemSettingRepository;
+import com.fxplatform.config.service.SensitiveSettingService;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,6 +28,9 @@ class AdminConfigQueryServiceTest {
   @Mock
   private SystemSettingRepository settingRepository;
 
+  private final SensitiveSettingService sensitiveSettingService =
+      new SensitiveSettingService("unit-test-config-encryption-key-32chars");
+
   @Test
   void dictionariesReturnPagedDtos() {
     SystemDictionaryEntity item = new SystemDictionaryEntity();
@@ -39,7 +43,8 @@ class AdminConfigQueryServiceTest {
     when(dictionaryRepository.findAll(any(), eq(Map.of("groupKey", "group_key")), eq("groupKey"), eq(true)))
         .thenReturn(page(item));
 
-    var page = new AdminConfigQueryService(dictionaryRepository, settingRepository).dictionaries(0, 20);
+    var page = new AdminConfigQueryService(dictionaryRepository, settingRepository, sensitiveSettingService)
+        .dictionaries(0, 20);
 
     assertThat(page.items()).hasSize(1);
     assertThat(page.items().get(0).groupKey()).isEqualTo("member_status");
@@ -57,11 +62,30 @@ class AdminConfigQueryServiceTest {
     when(settingRepository.findAll(any(), eq(Map.of("settingKey", "setting_key")), eq("settingKey"), eq(true)))
         .thenReturn(page(setting));
 
-    var page = new AdminConfigQueryService(dictionaryRepository, settingRepository).settings(0, 20);
+    var page = new AdminConfigQueryService(dictionaryRepository, settingRepository, sensitiveSettingService)
+        .settings(0, 20);
 
     assertThat(page.items()).hasSize(1);
     assertThat(page.items().get(0).settingKey()).isEqualTo("withdrawal.review.required");
     assertThat(page.items().get(0).settingValue()).isEqualTo("true");
+  }
+
+  @Test
+  void settingsMaskSensitiveValuesInPagedDtos() {
+    SystemSettingEntity setting = new SystemSettingEntity();
+    setting.setId(UUID.randomUUID());
+    setting.setSettingKey("settings.mailSecretKey");
+    setting.setSettingValue("enc:v1:ciphertext");
+    setting.setValueType("STRING");
+    setting.setEditable(true);
+    when(settingRepository.findAll(any(), eq(Map.of("settingKey", "setting_key")), eq("settingKey"), eq(true)))
+        .thenReturn(page(setting));
+
+    var page = new AdminConfigQueryService(dictionaryRepository, settingRepository, sensitiveSettingService)
+        .settings(0, 20);
+
+    assertThat(page.items()).hasSize(1);
+    assertThat(page.items().get(0).settingValue()).isEqualTo("********");
   }
 
   private static <T> Page<T> page(T item) {

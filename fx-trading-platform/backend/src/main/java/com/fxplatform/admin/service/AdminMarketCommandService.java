@@ -22,6 +22,7 @@ import com.fxplatform.market.repository.SymbolAdminEventRepository;
 import com.fxplatform.market.repository.SymbolCategoryRepository;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.SymbolProductTypes;
+import java.util.Objects;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -50,6 +51,12 @@ public class AdminMarketCommandService {
    */
   @Transactional
   public AdminSymbolResponse updateStatus(UUID actorUserId, UUID symbolId, AdminSymbolStatusRequest request) {
+    AdminActionAuthorization.requireAuthority(Boolean.TRUE.equals(request.enabled())
+        ? AdminPermissionCatalog.MARKET_SYMBOL_UPDATE
+        : AdminPermissionCatalog.MARKET_SYMBOL_DISABLE);
+    if (!Boolean.TRUE.equals(request.enabled())) {
+      AdminActionConfirmation.require(request.confirmationText(), AdminActionConfirmation.CONFIRM_DISABLE_SYMBOL);
+    }
     SymbolEntity symbol = findSymbol(symbolId);
     String before = String.valueOf(symbol.getEnabled());
     String after = String.valueOf(request.enabled());
@@ -89,6 +96,9 @@ public class AdminMarketCommandService {
   @Transactional
   public AdminSymbolResponse updateSymbol(UUID actorUserId, UUID symbolId, AdminSymbolRequest request) {
     SymbolEntity symbol = findSymbol(symbolId);
+    if (!Objects.equals(symbol.getLeverage(), request.leverage())) {
+      AdminActionConfirmation.require(request.confirmationText(), AdminActionConfirmation.CONFIRM_LEVERAGE_CHANGE);
+    }
     String before = symbol.getSymbol() + ":" + symbol.getDisplayName() + ":" + symbol.getEnabled();
     applySymbol(symbol, request);
     SymbolEntity saved = symbolRepository.save(symbol);
@@ -107,6 +117,7 @@ public class AdminMarketCommandService {
    */
   @Transactional
   public void deleteSymbol(UUID actorUserId, UUID symbolId, String reason) {
+    AdminActionAuthorization.requireAuthority(AdminPermissionCatalog.MARKET_SYMBOL_DISABLE);
     SymbolEntity symbol = findSymbol(symbolId);
     String before = String.valueOf(symbol.getEnabled());
     symbol.setEnabled(false);

@@ -3,6 +3,7 @@ package com.fxplatform.market.repository;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.market.entity.SymbolProviderBindingEntity;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -13,6 +14,18 @@ public interface SymbolProviderBindingRepository extends FxBaseMapper<SymbolProv
     return selectList(new LambdaQueryWrapper<SymbolProviderBindingEntity>()
         .eq(SymbolProviderBindingEntity::getSymbolId, symbolId)
         .eq(SymbolProviderBindingEntity::getEnabled, true)
+        .orderByAsc(SymbolProviderBindingEntity::getPriority)
+        .orderByAsc(SymbolProviderBindingEntity::getProviderSymbol));
+  }
+
+  default List<SymbolProviderBindingEntity> findEnabledBySymbolIdsOrderByPriority(Collection<UUID> symbolIds) {
+    if (symbolIds == null || symbolIds.isEmpty()) {
+      return List.of();
+    }
+    return selectList(new LambdaQueryWrapper<SymbolProviderBindingEntity>()
+        .in(SymbolProviderBindingEntity::getSymbolId, symbolIds)
+        .eq(SymbolProviderBindingEntity::getEnabled, true)
+        .orderByAsc(SymbolProviderBindingEntity::getSymbolId)
         .orderByAsc(SymbolProviderBindingEntity::getPriority)
         .orderByAsc(SymbolProviderBindingEntity::getProviderSymbol));
   }

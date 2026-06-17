@@ -11,6 +11,10 @@ import jakarta.validation.constraints.NotNull;
  */
 public record AdminSymbolStatusRequest(
     @NotNull Boolean enabled,
-    @NotBlank String reason
+    @NotBlank String reason,
+    String confirmationText
 ) {
+  public AdminSymbolStatusRequest(Boolean enabled, String reason) {
+    this(enabled, reason, null);
+  }
 }

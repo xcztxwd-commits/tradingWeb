@@ -137,6 +137,7 @@ public class AdminFinanceController {
   /**
    * 后台余额调整。
    */
+  @PreAuthorize("hasAuthority('finance:adjustment:create')")
   @PostMapping("/accounts/{accountId}/adjustments")
   public ApiResponse<AdminFundOperationResponse> adjustBalance(
       @AuthenticationPrincipal UserPrincipal principal,

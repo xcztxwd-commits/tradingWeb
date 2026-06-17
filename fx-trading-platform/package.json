@@ -4,10 +4,17 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "contract:export": "node scripts/export-openapi.mjs",
+    "contract:generate": "node scripts/generate-openapi-types.mjs",
+    "contract:check": "node scripts/generate-openapi-types.mjs --check",
+    "contract:ci": "npm run contract:export && npm run contract:check && npm run web:test && npm run web:build && npm run admin:build && npm run smoke:backend",
     "verify:architecture": "node scripts/verify-architecture.mjs",
     "smoke:backend": "node scripts/smoke-backend.mjs",
+    "smoke:business-closed-loop": "node scripts/smoke-business-closed-loop.mjs",
     "smoke:admin": "node scripts/smoke-admin.mjs",
     "smoke:real-trading-loop": "node scripts/smoke-real-trading-loop.mjs",
+    "smoke:btcusdt-perp-50x": "node scripts/smoke-btcusdt-perp-50x.mjs",
+    "smoke:ethusdt-perp-20x": "node scripts/smoke-ethusdt-perp-20x-position-chain.mjs",
     "smoke:user-core-pages": "node scripts/smoke-user-core-pages.mjs",
     "smoke:trading-login-gate": "node scripts/smoke-trading-login-gate.mjs",
     "smoke:visual-qa": "node scripts/smoke-visual-qa.mjs",
@@ -23,5 +30,8 @@
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0"
+  }
 }

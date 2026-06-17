@@ -1,6 +1,7 @@
 package com.fxplatform.admin.dto.response;
 
 import com.fxplatform.config.entity.SystemSettingEntity;
+import com.fxplatform.config.service.SensitiveSettingService;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -31,10 +32,19 @@ public record AdminSystemSettingResponse(
    * 将系统设置实体映射为后台 DTO。
    */
   public static AdminSystemSettingResponse from(SystemSettingEntity entity) {
+    return from(entity, null);
+  }
+
+  public static AdminSystemSettingResponse from(
+      SystemSettingEntity entity,
+      SensitiveSettingService sensitiveSettingService
+  ) {
     return new AdminSystemSettingResponse(
         entity.getId(),
         entity.getSettingKey(),
-        entity.getSettingValue(),
+        sensitiveSettingService == null
+            ? entity.getSettingValue()
+            : sensitiveSettingService.responseValue(entity.getSettingKey(), entity.getSettingValue()),
         entity.getValueType(),
         entity.getDescription(),
         entity.getEditable(),

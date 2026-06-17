@@ -202,6 +202,39 @@
   white-space: normal !important;
 }
 
+.orderTimeline {
+  min-width: 150px;
+  display: grid;
+  gap: 4px;
+  margin: 5px 0;
+  padding: 0;
+  list-style: none;
+  white-space: normal;
+}
+
+.orderTimeline li {
+  display: grid;
+  grid-template-columns: minmax(44px, max-content) minmax(52px, max-content) minmax(56px, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--trading-subtle);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.orderTimeline span {
+  color: var(--trading-subtle);
+}
+
+.orderTimeline strong {
+  color: var(--trading-text-strong);
+  font-weight: 800;
+}
+
+.orderTimeline time {
+  color: var(--trading-muted);
+}
+
 .positiveValue {
   color: var(--trading-buy) !important;
   font-weight: 800;

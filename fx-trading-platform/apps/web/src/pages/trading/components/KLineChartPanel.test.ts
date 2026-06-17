@@ -211,9 +211,12 @@ describe('KLineChartPanel chart instance controls', () => {
 
   it('creates automatic trading marker overlays from orders and positions', () => {
     assert.match(source, /tradeMarkers:\s*ChartTradeMarker\[\]/)
+    assert.match(source, /const \[tradeMarkerOverlayCount,\s*setTradeMarkerOverlayCount\] = useState\(0\)/)
     assert.match(source, /buildTradeMarkerOverlays\(tradeMarkers,\s*period\)/)
     assert.match(source, /chart\.removeOverlay\(\{\s*groupId:\s*tradeMarkerOverlayGroupId\s*\}\)/)
+    assert.match(source, /setTradeMarkerOverlayCount\(overlays\.length\)/)
     assert.match(source, /chart\.createOverlay\(overlays\)/)
+    assert.match(source, /data-trade-marker-overlay-count=\{tradeMarkerOverlayCount\}/)
     assert.match(chartWorkspaceSource, /buildChartTradeMarkers\(symbol,\s*orders,\s*positions\)/)
     assert.match(desktopViewSource, /orders=\{accountPanel\.orders\}/)
     assert.match(desktopViewSource, /positions=\{accountPanel\.positions\}/)

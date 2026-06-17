@@ -59,4 +59,41 @@ describe('trade form sizing algorithms', () => {
     assert.equal(form.amount, '0.01')
     assert.equal(getOrderNotional(form, mockMarket), 607.333)
   })
+
+  it('rejects market orders when the quote is unavailable or stale', () => {
+    const emptyMarket = createPanelMarket('ETHUSDT', { bids: [], asks: [], lastPrice: 0 })
+    const emptyQuoteForm = {
+      ...createInitialTradeForm('buy', emptyMarket),
+      orderType: 'market' as const,
+      amount: '0.5',
+      total: '0'
+    }
+
+    assert.deepEqual(
+      validateOrder(emptyQuoteForm, { balances: { USDT: 1000, ETH: 0 }, market: emptyMarket, minAmount: 0, minNotional: 0 }).errors,
+      ['marketStale']
+    )
+
+    const staleMarket = createPanelMarket(
+      'BTCUSDT',
+      { bids: [{ price: 60000 }], asks: [{ price: 60001 }], lastPrice: 60000, updatedAt: 1_780_000_000_000 }
+    )
+    const staleForm = {
+      ...createInitialTradeForm('buy', staleMarket),
+      orderType: 'market' as const,
+      amount: '0.01',
+      total: '600'
+    }
+
+    assert.deepEqual(
+      validateOrder(staleForm, {
+        balances: { USDT: 1000, BTC: 0 },
+        market: staleMarket,
+        minAmount: 0,
+        minNotional: 0,
+        now: 1_780_000_020_001
+      }).errors,
+      ['marketStale']
+    )
+  })
 })

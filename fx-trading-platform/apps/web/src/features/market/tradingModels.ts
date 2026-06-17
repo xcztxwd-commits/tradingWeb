@@ -49,6 +49,35 @@ export type MarketListItem = {
   quoteEnabled?: boolean
 }
 
+export type TradingInstrumentRules = {
+  symbol: string
+  exists: boolean
+  enabled: boolean
+  tradable: boolean
+  quoteEnabled: boolean
+  chartEnabled: boolean
+  orderBookEnabled: boolean
+  orderEnabled: boolean
+  productType?: ProductType
+  tickSize?: number
+  stepSize?: number
+  minQty?: number
+  maxQty?: number
+  minNotional?: number
+  maxNotional?: number
+  minLot?: number
+  maxLot?: number
+  maxLeverage?: number
+  defaultLeverage?: number
+  marginAsset?: string
+  settlementAsset?: string
+  contractSize?: number
+  riskTier?: string
+  tradingSession?: string
+  kycRequirement?: string
+  userRiskLevelRestriction?: string
+}
+
 export type TradingMarket = MarketListItem & {
   last: number
   changePercent: number
@@ -69,6 +98,7 @@ export type TradingMarket = MarketListItem & {
   quantityPrecision?: number
   marketCap?: number
   quoteTimestamp?: number
+  rules?: TradingInstrumentRules
 }
 
 export type TradingQuote = {
@@ -204,24 +234,10 @@ export function filterMarkets<T extends MarketListItem>(markets: T[], query: str
 
 export function getRealtimeQuoteMarkets<T extends MarketListItem>(
   markets: T[],
-  selectedSymbol: string,
-  firstScreenLimit = 6
+  selectedSymbol: string
 ): T[] {
-  const picked = new Map<string, T>()
-  const visibleLimit = Math.max(1, firstScreenLimit)
-
-  markets.slice(0, visibleLimit).forEach((market) => {
-    if (!canRequestRealtimeQuote(market)) return
-    picked.set(market.symbol, market)
-  })
-  markets.forEach((market) => {
-    if (market.favorite && canRequestRealtimeQuote(market)) picked.set(market.symbol, market)
-  })
-
   const selectedMarket = markets.find((market) => market.symbol === selectedSymbol)
-  if (selectedMarket && canRequestRealtimeQuote(selectedMarket)) picked.set(selectedMarket.symbol, selectedMarket)
-
-  return Array.from(picked.values())
+  return selectedMarket && canRequestRealtimeQuote(selectedMarket) ? [selectedMarket] : []
 }
 
 function canRequestRealtimeQuote(market: MarketListItem) {

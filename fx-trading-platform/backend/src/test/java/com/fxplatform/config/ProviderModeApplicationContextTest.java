@@ -18,7 +18,7 @@ class ProviderModeApplicationContextTest {
     contextRunner().run(context -> {
       assertThat(context.getEnvironment().getProperty("market.demo-quotes.enabled", Boolean.class)).isFalse();
       assertThat(context.getEnvironment().getProperty("market.test-data.enabled", Boolean.class)).isFalse();
-      assertThat(context.getEnvironment().getProperty("execution.mode")).isEqualTo("broker");
+      assertThat(context.getEnvironment().getProperty("execution.mode")).isEqualTo("disabled");
     });
   }
 
@@ -50,7 +50,7 @@ class ProviderModeApplicationContextTest {
         .run(context -> {
           assertThat(context.getEnvironment().getProperty("market.demo-quotes.enabled", Boolean.class)).isFalse();
           assertThat(context.getEnvironment().getProperty("market.test-data.enabled", Boolean.class)).isFalse();
-          assertThat(context.getEnvironment().getProperty("execution.mode")).isEqualTo("broker");
+          assertThat(context.getEnvironment().getProperty("execution.mode")).isEqualTo("disabled");
         });
   }
 

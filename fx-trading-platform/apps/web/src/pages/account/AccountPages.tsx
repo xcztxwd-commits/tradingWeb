@@ -343,7 +343,7 @@ export function KycPage() {
   const { account, loginRequired, retrySession, sessionError, sessionMode } = useTradingSession()
 
   return (
-    <AccountShell account={account} title="Identity verification" summary="Verification status and the next account action.">
+    <AccountShell account={account} title="Identity verification" summary="KYC is coming soon and currently limited to internal testing.">
       <AccountPageState
         loginRequired={loginRequired}
         redirect="/account/security/kyc"
@@ -354,10 +354,10 @@ export function KycPage() {
       <section className="account-panel account-panel--kyc">
         <ShieldCheck size={28} aria-hidden="true" />
         <div>
-          <h2>Complete identity verification</h2>
-          <p>Complete KYC before enabling higher funding and trading limits.</p>
-          <button className="table-action table-action--primary" type="button">
-            Start verification
+          <h2>KYC Coming soon</h2>
+          <p>Internal test only. Real identity verification is not enabled for user accounts yet.</p>
+          <button className="table-action table-action--secondary" type="button" disabled>
+            Coming soon
           </button>
         </div>
       </section>

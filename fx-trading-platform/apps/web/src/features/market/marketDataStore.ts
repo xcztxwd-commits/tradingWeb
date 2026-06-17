@@ -14,7 +14,8 @@ const emptySnapshot: MarketDataSnapshot = {
   bids: [],
   lastPrice: 0,
   lastPriceDirection: 'flat',
-  recentTrades: []
+  recentTrades: [],
+  updatedAt: undefined
 }
 
 class MarketDataStore {
@@ -25,6 +26,7 @@ class MarketDataStore {
   private recentTrades: TradeItem[] = []
   private lastPrice = 0
   private lastPriceDirection: MarketDataSnapshot['lastPriceDirection'] = 'flat'
+  private updatedAt: number | undefined
   private snapshot = emptySnapshot
   private flushTimer: ReturnType<typeof globalThis.setTimeout> | undefined
 
@@ -48,6 +50,7 @@ class MarketDataStore {
     this.recentTrades = state.recentTrades?.slice(0, 100) ?? []
     this.lastPrice = state.lastPrice ?? 0
     this.lastPriceDirection = state.lastPriceDirection ?? 'flat'
+    this.updatedAt = state.updatedAt
     this.writeLevels('bid', state.bids ?? [])
     this.writeLevels('ask', state.asks ?? [])
     this.commitSnapshot()
@@ -76,9 +79,10 @@ class MarketDataStore {
     }
   }
 
-  setLastPrice(price: number) {
+  setLastPrice(price: number, updatedAt = Date.now()) {
     this.lastPriceDirection = price > this.lastPrice ? 'up' : price < this.lastPrice ? 'down' : 'flat'
     this.lastPrice = price
+    this.updatedAt = updatedAt
     this.scheduleFlush()
   }
 
@@ -89,7 +93,7 @@ class MarketDataStore {
 
   addTrade(trade: TradeItem) {
     this.recentTrades = [trade, ...this.recentTrades].slice(0, 100)
-    this.setLastPrice(trade.price)
+    this.setLastPrice(trade.price, trade.time)
   }
 
   flushNow() {
@@ -120,7 +124,8 @@ class MarketDataStore {
       bids: mapToLevels(this.bidsMap, 'bid'),
       lastPrice: this.lastPrice,
       lastPriceDirection: this.lastPriceDirection,
-      recentTrades: this.recentTrades
+      recentTrades: this.recentTrades,
+      updatedAt: this.updatedAt
     }
     this.listeners.forEach((listener) => listener())
   }

@@ -5,7 +5,7 @@ import { OrderSubmitButton } from './OrderSubmitButton'
 import { PercentSlider } from './PercentSlider'
 import { PriceInput } from './PriceInput'
 import { TpSlPanel } from './TpSlPanel'
-import { isMarginQuantityMarket, usesQuoteBudgetMarketBuy } from '../hooks/useTradeForm'
+import { getRequiredMargin, isMarginQuantityMarket, usesQuoteBudgetMarketBuy } from '../hooks/useTradeForm'
 import { formatDecimal } from '../utils/format'
 import { parseSymbolAssets } from '../utils/symbols'
 import type { OrderValidationResult, TradeBalances, TradeField, TradeFormState, TradeMarket } from '../types/order'
@@ -67,11 +67,17 @@ export function OrderFormSide({
   const amountUnit = marketBuyAmount
     ? t('trading.minWithAsset', { amount: minMarketQuoteAmount, asset: quoteAsset })
     : marginQuantityMarket ? t('trading.contractsUnit') : baseAsset
+  const requiredQuoteAmount = getRequiredMargin(form, market)
+  const quoteShortfall = Math.max(0, requiredQuoteAmount - quoteBalance)
+  const baseShortfall = Math.max(0, Number(form.amount) - baseBalance)
 
   const getError = (...keys: string[]) => {
     if (!showErrors) return undefined
     return keys.map((key) => validation.fieldErrors[key as keyof typeof validation.fieldErrors]).find(Boolean)
   }
+  const marketStaleError = validation.errors.includes('marketStale') ? t('validation.marketStale') : undefined
+  const quoteBalanceError = getError('quoteBalance')
+  const baseBalanceError = getError('baseBalance')
 
   return (
     <section
@@ -102,7 +108,10 @@ export function OrderFormSide({
           onFocusChange={onPriceFocusChange}
         />
       ) : (
-        <StaticOrderField label={t('common.price')} value={t('trading.marketPrice')} disabled />
+        <>
+          <StaticOrderField label={t('common.price')} value={t('trading.marketPrice')} disabled />
+          {marketStaleError ? <span className="trade-panel__error">{marketStaleError}</span> : null}
+        </>
       )}
 
       <AmountInput
@@ -135,12 +144,18 @@ export function OrderFormSide({
         maxBuyAmount={maxBuyAmount}
         maxSellAmount={maxSellAmount}
         maxSellValue={maxSellValue}
+        requiredQuoteAmount={requiredQuoteAmount}
+        quoteShortfall={quoteShortfall}
+        baseShortfall={baseShortfall}
+        quoteBalanceError={quoteBalanceError}
+        baseBalanceError={baseBalanceError}
       />
 
       <OrderSubmitButton
         side={form.side}
         baseAsset={baseAsset}
         canTrade={canTrade}
+        disabledReason={marketStaleError}
         loginRequired={loginRequired}
         submitting={submitting}
         onClick={onSubmit}
@@ -228,7 +243,12 @@ function BalanceSummary({
   marginQuantityMarket,
   maxBuyAmount,
   maxSellAmount,
-  maxSellValue
+  maxSellValue,
+  requiredQuoteAmount,
+  quoteShortfall,
+  baseShortfall,
+  quoteBalanceError,
+  baseBalanceError
 }: {
   canTrade: boolean
   side: TradeFormState['side']
@@ -240,6 +260,11 @@ function BalanceSummary({
   maxBuyAmount: number
   maxSellAmount: number
   maxSellValue: number
+  requiredQuoteAmount: number
+  quoteShortfall: number
+  baseShortfall: number
+  quoteBalanceError?: string
+  baseBalanceError?: string
 }) {
   const { t } = useTranslation()
   const availableAsset = side === 'buy' || marginQuantityMarket ? quoteAsset : baseAsset
@@ -257,6 +282,26 @@ function BalanceSummary({
         <span>{side === 'buy' ? t('trading.maxBuy') : t('trading.maxSell')}</span>
         <strong>{canTrade ? formatDecimal(maxValue) || '--' : '--'} {maxAsset}</strong>
       </span>
+      {quoteBalanceError ? (
+        <span className="trade-panel__balance-alert">
+          <span>{marginQuantityMarket ? t('trading.marginRequirement') : t('trading.balanceShortfall')}</span>
+          <strong>
+            {marginQuantityMarket
+              ? t('trading.marginRequirementValue', {
+                required: formatBalance(requiredQuoteAmount),
+                available: formatBalance(quoteBalance),
+                asset: quoteAsset
+              })
+              : t('trading.balanceShortfallValue', { amount: formatBalance(quoteShortfall), asset: quoteAsset })}
+          </strong>
+        </span>
+      ) : null}
+      {baseBalanceError ? (
+        <span className="trade-panel__balance-alert">
+          <span>{t('trading.balanceShortfall')}</span>
+          <strong>{t('trading.balanceShortfallValue', { amount: formatBalance(baseShortfall), asset: baseAsset })}</strong>
+        </span>
+      ) : null}
     </div>
   )
 }

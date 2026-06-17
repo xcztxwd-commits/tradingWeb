@@ -85,7 +85,7 @@ const contentChecks = [
   ['backend/pom.xml', '<java.version>21</java.version>'],
   ['backend/pom.xml', 'mybatis-plus-spring-boot3-starter'],
   ['backend/pom.xml', 'hutool-all'],
-  ['backend/pom.xml', 'knife4j-openapi3-jakarta-spring-boot-starter'],
+  ['backend/pom.xml', 'springdoc-openapi-starter-webmvc-ui'],
   ['backend/src/main/resources/application.yml', 'mybatis-plus:'],
   ['backend/src/main/resources/application.yml', 'MASSIVE_API_KEY'],
   ['backend/src/main/java/com/fxplatform/FxPlatformApplication.java', '@MapperScan'],

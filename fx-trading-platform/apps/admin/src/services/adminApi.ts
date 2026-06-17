@@ -734,7 +734,11 @@ async function runProductAction(token: string, request: AdminFeatureOperationReq
     }
     const updated = await apiPatch<SymbolRow>(
       `/api/admin/market/symbols/${encodeURIComponent(request.rowId)}/status`,
-      { enabled: toBoolean(payload.enabled ?? payload.status, true), reason: String(payload.reason ?? '后台产品状态调整') },
+      {
+        enabled: toBoolean(payload.enabled ?? payload.status, true),
+        reason: String(payload.reason ?? '后台产品状态调整'),
+        confirmationText: payload.confirmationText
+      },
       token
     )
     return featureActionResult('products', request.action, updated.id, '产品状态已更新')
@@ -976,7 +980,7 @@ async function runFundOrderAction(token: string, pageKey: string, request: Admin
   if (request.action === 'review' && request.rowId) {
     const reviewed = await apiPost<FundOrderRow>(
       `/api/admin/finance/fund-orders/${encodeURIComponent(request.rowId)}/review`,
-      { status: 'APPROVED', reason: request.reason || '后台审核通过' },
+      { status: 'APPROVED', reason: request.reason || '后台审核通过', confirmationText: request.payload?.confirmationText },
       token
     )
     return featureActionResult(pageKey, request.action, reviewed.id, '资金订单已审核')
@@ -1070,7 +1074,8 @@ function productPayload(payload: Record<string, unknown>) {
     maxLot: String(payload.maxLot ?? '100'),
     leverage: Number(payload.leverage ?? 100),
     spreadMarkup: String(payload.spreadMarkup ?? '0'),
-    enabled: toBoolean(payload.enabled, true)
+    enabled: toBoolean(payload.enabled, true),
+    confirmationText: payload.confirmationText
   }
 }
 

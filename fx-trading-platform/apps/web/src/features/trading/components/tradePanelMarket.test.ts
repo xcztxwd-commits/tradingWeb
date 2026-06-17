@@ -67,6 +67,34 @@ describe('trade panel market model', () => {
     assert.equal(market.productType, 'CRYPTO_SPOT')
   })
 
+  it('preserves backend instrument rules in the panel market model', () => {
+    const market = createPanelMarket(
+      'BTCUSDT',
+      { bids: [{ price: 67123.4 }], asks: [{ price: 67124.8 }], lastPrice: 67124.1 },
+      {
+        category: 'crypto',
+        productType: 'CRYPTO_SPOT',
+        rules: {
+          symbol: 'BTCUSDT',
+          exists: true,
+          enabled: true,
+          tradable: true,
+          quoteEnabled: true,
+          chartEnabled: true,
+          orderBookEnabled: true,
+          orderEnabled: true,
+          minNotional: 5,
+          stepSize: 0.0001,
+          tickSize: 0.01,
+          contractSize: 1
+        }
+      }
+    )
+
+    assert.equal(market.rules?.minNotional, 5)
+    assert.equal(market.unitSize, 1)
+  })
+
   it('uses explicit productType modes for perpetual contracts', () => {
     const linear = createPanelMarket(
       'BTCUSDT',

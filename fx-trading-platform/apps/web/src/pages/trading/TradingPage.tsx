@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { formatTradingChartTitle, initialTradingSymbol, mergeWithMockMarkets, normalizeTradingSymbol } from './tradingPageMarketSelection'
 import { getTradingSessionStatusLabel, getTradingSessionStatusText } from './tradingPageSessionStatus'
+import { getTradeMinOrderAmount, getTradePricePrecision, getTradeQuantityPrecision, mergeMarketRules } from './tradingPageTradeRules'
 import type { TradingTerminalViewProps } from './tradingPageViewModels'
 import { useTradingMarketDataStatus } from './useTradingMarketDataStatus'
 import { useMobileTerminalViewport } from './useMobileTerminalViewport'
@@ -18,9 +19,9 @@ import { TradingMobileView } from './components/TradingMobileView'
 import { mockTradingMarkets } from '../../features/market/mockTradingData'
 import { hydrateMarketFavorites } from '../../features/market/marketFavorites'
 import { createTradingMarketPlaceholder, createTradingQuoteFromMarket } from '../../features/market/tradingMarketAdapters'
-import { fetchMarketSymbols } from '../../features/market/tradingMarketApi'
-import { getPricePrecision, getRealtimeQuoteMarkets } from '../../features/market/tradingModels'
-import type { TradingMarket } from '../../features/market/tradingModels'
+import { fetchMarketSymbolRules, fetchMarketSymbols } from '../../features/market/tradingMarketApi'
+import { getRealtimeQuoteMarkets } from '../../features/market/tradingModels'
+import type { TradingInstrumentRules, TradingMarket } from '../../features/market/tradingModels'
 import { useMarketFavorites } from '../../features/market/useMarketFavorites'
 import { useTradingQuoteMap } from './useTradingQuotes'
 import { TradePanel } from '../../features/trading/components/TradePanel'
@@ -47,6 +48,7 @@ export function TradingPage() {
   const [loginPromptRequested, setLoginPromptRequested] = useState(false)
   const [pendingTradeOpen, setPendingTradeOpen] = useState(false)
   const [tradePricePrefill, setTradePricePrefill] = useState<{ id: number; price: number } | null>(null)
+  const [selectedRules, setSelectedRules] = useState<TradingInstrumentRules | null>(null)
   const {
     token,
     account,
@@ -73,13 +75,20 @@ export function TradingPage() {
     () => favoriteHydratedMarkets.find((market) => market.symbol === selectedSymbol) ?? createTradingMarketPlaceholder(selectedSymbol),
     [favoriteHydratedMarkets, selectedSymbol]
   )
-  const visibleMarkets = useMemo(() => (favoriteHydratedMarkets.length > 0 ? favoriteHydratedMarkets : [selectedMarket]), [favoriteHydratedMarkets, selectedMarket])
+  const selectedMarketWithRules = useMemo(
+    () => mergeMarketRules(selectedMarket, selectedRules),
+    [selectedMarket, selectedRules]
+  )
+  const visibleMarkets = useMemo(() => {
+    const nextMarkets = favoriteHydratedMarkets.length > 0 ? favoriteHydratedMarkets : [selectedMarketWithRules]
+    return nextMarkets.map((market) => (market.symbol === selectedSymbol ? selectedMarketWithRules : market))
+  }, [favoriteHydratedMarkets, selectedMarketWithRules, selectedSymbol])
   const quoteMarkets = useMemo(
     () => getRealtimeQuoteMarkets(visibleMarkets, selectedSymbol),
     [selectedSymbol, visibleMarkets]
   )
   const quotes = useTradingQuoteMap(quoteMarkets, token, handleQuoteStatus)
-  const selectedQuote = quotes[selectedSymbol] ?? createTradingQuoteFromMarket(selectedMarket)
+  const selectedQuote = quotes[selectedSymbol] ?? createTradingQuoteFromMarket(selectedMarketWithRules)
   const marketDataStatusView = getStatusView(selectedSymbol, selectedQuote.source)
   const { chartCallbacks, chartSettings, chartThemeMode, indicators } = useTradingChartSettings(
     selectedSymbol,
@@ -94,10 +103,9 @@ export function TradingPage() {
     () => deriveTradingBalances(account, positions, selectedSymbol, walletBalances),
     [account, positions, selectedSymbol, walletBalances]
   )
-  const tradeMinOrderAmount = getTradeMinOrderAmount(selectedMarket)
-  const tradePricePrecision = selectedMarket.pricePrecision ?? getPricePrecision(selectedMarket.symbol)
-  const tradeQuantityPrecision =
-    selectedMarket.quantityPrecision ?? getQuantityPrecision(tradeMinOrderAmount, selectedMarket.symbol)
+  const tradeMinOrderAmount = getTradeMinOrderAmount(selectedMarketWithRules)
+  const tradePricePrecision = getTradePricePrecision(selectedMarketWithRules)
+  const tradeQuantityPrecision = getTradeQuantityPrecision(selectedMarketWithRules, tradeMinOrderAmount)
   useEffect(() => {
     setTradePricePrefill(null)
   }, [selectedSymbol])
@@ -129,6 +137,23 @@ export function TradingPage() {
       active = false
     }
   }, [querySymbol])
+
+  useEffect(() => {
+    let active = true
+    setSelectedRules(null)
+
+    void fetchMarketSymbolRules(selectedSymbol)
+      .then((rules) => {
+        if (active) setSelectedRules(rules)
+      })
+      .catch(() => {
+        if (active) setSelectedRules(null)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [selectedSymbol])
 
   useEffect(() => {
     if (!loginRequired) setLoginPromptRequested(false)
@@ -221,10 +246,10 @@ export function TradingPage() {
     chartCallbacks,
     chartSettings,
     chartThemeMode,
-    chartTitle: formatTradingChartTitle(selectedMarket, t),
+    chartTitle: formatTradingChartTitle(selectedMarketWithRules, t),
     indicators,
     loginRequired,
-    market: selectedMarket,
+    market: selectedMarketWithRules,
     favorites: favoriteSymbols,
     marketDataStatusView: marketDataStatusView,
     markets: visibleMarkets,
@@ -276,13 +301,14 @@ export function TradingPage() {
           compact
           accountId={accountId}
           balances={balances}
-          category={selectedMarket.category}
-          productType={selectedMarket.productType}
+          category={selectedMarketWithRules.category}
+          productType={selectedMarketWithRules.productType}
           sessionReady={sessionReady}
           sessionMode={tradePanelSessionMode}
           sessionError={sessionError}
           loginRequired={loginRequired}
-          leverage={selectedMarket.leverage}
+          leverage={selectedMarketWithRules.leverage}
+          rules={selectedMarketWithRules.rules}
           minOrderAmount={tradeMinOrderAmount}
           pricePrecision={tradePricePrecision}
           quantityPrecision={tradeQuantityPrecision}
@@ -304,17 +330,4 @@ export function TradingPage() {
       />
     </div>
   )
-}
-
-function getTradeMinOrderAmount(market: TradingMarket) {
-  const value = Number(market.minLot)
-  if (Number.isFinite(value) && value > 0) return value
-  if (market.symbol.includes('BTC') || market.symbol.includes('ETH')) return 0.0001
-  return 0.01
-}
-
-function getQuantityPrecision(minOrderAmount: number, symbol: string) {
-  const text = String(minOrderAmount)
-  if (text.includes('.')) return text.split('.')[1]?.replace(/0+$/, '').length ?? 0
-  return symbol.includes('BTC') || symbol.includes('ETH') ? 6 : 2
 }

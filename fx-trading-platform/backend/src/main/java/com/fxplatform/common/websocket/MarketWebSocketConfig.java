@@ -1,6 +1,8 @@
 package com.fxplatform.common.websocket;
 
+import java.util.Arrays;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
@@ -18,6 +20,12 @@ public class MarketWebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
   private final WebSocketJwtChannelInterceptor jwtChannelInterceptor;
 
+  @Value("${app.cors.allowed-origins:}")
+  private String allowedOrigins;
+
+  @Value("${app.cors.allowed-origin-patterns:}")
+  private String allowedOriginPatterns;
+
   /**
    * 发布或处理 configureMessageBroker WebSocket 消息。
    */
@@ -33,7 +41,15 @@ public class MarketWebSocketConfig implements WebSocketMessageBrokerConfigurer {
    */
   @Override
   public void registerStompEndpoints(StompEndpointRegistry registry) {
-    registry.addEndpoint("/ws").setAllowedOriginPatterns("*");
+    var endpoint = registry.addEndpoint("/ws");
+    String[] origins = csvValues(allowedOrigins);
+    if (origins.length > 0) {
+      endpoint.setAllowedOrigins(origins);
+    }
+    String[] originPatterns = csvValues(allowedOriginPatterns);
+    if (originPatterns.length > 0) {
+      endpoint.setAllowedOriginPatterns(originPatterns);
+    }
   }
 
   /**
@@ -42,5 +58,12 @@ public class MarketWebSocketConfig implements WebSocketMessageBrokerConfigurer {
   @Override
   public void configureClientInboundChannel(ChannelRegistration registration) {
     registration.interceptors(jwtChannelInterceptor);
+  }
+
+  private String[] csvValues(String value) {
+    return Arrays.stream(value.split(","))
+        .map(String::trim)
+        .filter(item -> !item.isEmpty())
+        .toArray(String[]::new);
   }
 }
