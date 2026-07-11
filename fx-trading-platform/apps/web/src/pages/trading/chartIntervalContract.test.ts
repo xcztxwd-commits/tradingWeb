@@ -19,6 +19,17 @@ type PerSymbolChartSettingsLoader = (
   storage: Pick<Storage, 'getItem' | 'setItem'>
 ) => chartSettings.ChartSettings
 
+type OwnedChartSettingsState = {
+  ownerSymbol: string
+  settings: chartSettings.ChartSettings
+}
+
+type ChartSettingsStateSelector = (
+  state: OwnedChartSettingsState,
+  selectedSymbol: string,
+  loadSettings: (symbol: string) => chartSettings.ChartSettings
+) => OwnedChartSettingsState
+
 const p0Symbols = [
   'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
   'BTCUSDT-PERP', 'ETHUSDT-PERP', 'BNBUSDT-PERP', 'SOLUSDT-PERP', 'XRPUSDT-PERP'
@@ -128,6 +139,44 @@ describe('P0 chart interval contract', () => {
     assert.equal(storage.readInterval('EURUSD'), '30m')
     assert.deepEqual(storage.writtenKeys, [chartSettings.getChartSettingsStorageKey('BTCUSDT')])
   })
+
+  it('selects the target symbol own settings before render when the state owner is stale', () => {
+    const loadForSymbol = requirePerSymbolLoader()
+    const selectForSymbol = requireChartSettingsStateSelector()
+    const storage = new MemoryStorage()
+    storage.seed(chartSettings.getChartSettingsStorageKey('EURUSD'), JSON.stringify({ interval: '30m' }))
+    storage.seed(chartSettings.getChartSettingsStorageKey('BTCUSDT'), JSON.stringify({ interval: '4h' }))
+    const staleState = {
+      ownerSymbol: 'EURUSD',
+      settings: loadForSymbol('EURUSD', storage)
+    }
+    storage.clearAccesses()
+
+    const selectedState = selectForSymbol(
+      staleState,
+      'BTCUSDT',
+      (symbol) => loadForSymbol(symbol, storage)
+    )
+
+    assert.equal(selectedState.ownerSymbol, 'BTCUSDT')
+    assert.equal(selectedState.settings.interval, '4h')
+    assert.deepEqual(storage.readKeys, [chartSettings.getChartSettingsStorageKey('BTCUSDT')])
+    assert.deepEqual(storage.writtenKeys, [])
+    assert.equal(storage.readIntervalWithoutTracking('EURUSD'), '30m')
+    assert.equal(storage.readIntervalWithoutTracking('BTCUSDT'), '4h')
+  })
+
+  it('returns a safe normalized P0 interval when migration storage writes fail', () => {
+    const loadForSymbol = requirePerSymbolLoader()
+    const key = chartSettings.getChartSettingsStorageKey('BTCUSDT')
+    const storage = new ThrowingWriteStorage(key, JSON.stringify({ interval: '30m' }))
+
+    const settings = loadForSymbol('BTCUSDT', storage)
+
+    assert.equal(settings.interval, '1m')
+    assert.deepEqual(storage.readKeys, [key])
+    assert.deepEqual(storage.attemptedWriteKeys, [key])
+  })
 })
 
 function requireIntervalContract(): ChartIntervalContract {
@@ -146,8 +195,17 @@ function requirePerSymbolLoader(): PerSymbolChartSettingsLoader {
   return candidate.loadChartSettingsForSymbol as PerSymbolChartSettingsLoader
 }
 
+function requireChartSettingsStateSelector(): ChartSettingsStateSelector {
+  const candidate = chartSettings as typeof chartSettings & {
+    selectChartSettingsForSymbol?: ChartSettingsStateSelector
+  }
+  assert.equal(typeof candidate.selectChartSettingsForSymbol, 'function')
+  return candidate.selectChartSettingsForSymbol as ChartSettingsStateSelector
+}
+
 class MemoryStorage {
   private readonly values = new Map<string, string>()
+  readonly readKeys: string[] = []
   readonly writtenKeys: string[] = []
 
   seed(key: string, value: string) {
@@ -155,6 +213,7 @@ class MemoryStorage {
   }
 
   getItem(key: string) {
+    this.readKeys.push(key)
     return this.values.get(key) ?? null
   }
 
@@ -166,5 +225,37 @@ class MemoryStorage {
   readInterval(symbol: string) {
     const raw = this.getItem(chartSettings.getChartSettingsStorageKey(symbol))
     return raw ? (JSON.parse(raw) as { interval?: string }).interval : undefined
+  }
+
+  readIntervalWithoutTracking(symbol: string) {
+    const raw = this.values.get(chartSettings.getChartSettingsStorageKey(symbol))
+    return raw ? (JSON.parse(raw) as { interval?: string }).interval : undefined
+  }
+
+  clearAccesses() {
+    this.readKeys.length = 0
+    this.writtenKeys.length = 0
+  }
+}
+
+class ThrowingWriteStorage {
+  readonly readKeys: string[] = []
+  readonly attemptedWriteKeys: string[] = []
+  private readonly storedKey: string
+  private readonly storedValue: string
+
+  constructor(storedKey: string, storedValue: string) {
+    this.storedKey = storedKey
+    this.storedValue = storedValue
+  }
+
+  getItem(key: string) {
+    this.readKeys.push(key)
+    return key === this.storedKey ? this.storedValue : null
+  }
+
+  setItem(key: string, _value: string): never {
+    this.attemptedWriteKeys.push(key)
+    throw new Error('storage quota exceeded')
   }
 }

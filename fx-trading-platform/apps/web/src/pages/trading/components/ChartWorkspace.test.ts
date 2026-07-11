@@ -55,8 +55,18 @@ describe('ChartWorkspace P0 interval boundary', () => {
     assert.match(workspaceSource, /<KLineChartPanel[\s\S]*period=\{activeInterval\}[\s\S]*symbol=\{symbol\}/)
   })
 
-  it('loads and migrates settings only after resolving the selected symbol storage key', () => {
-    assert.match(settingsHookSource, /useState<ChartSettings>\(\(\) => loadChartSettingsForSymbol\(selectedSymbol\)\)/)
-    assert.match(settingsHookSource, /setChartSettings\(loadChartSettingsForSymbol\(selectedSymbol\)\)/)
+  it('returns synchronously selected symbol settings instead of the stale owned state', () => {
+    assert.match(settingsHookSource, /useState<OwnedChartSettingsState>/)
+    assert.match(settingsHookSource, /const selectedChartSettingsState = selectChartSettingsForSymbol\(\s*chartSettingsState,\s*selectedSymbol\s*\)/)
+    assert.match(settingsHookSource, /chartSettings:\s*selectedChartSettingsState\.settings/)
+    assert.doesNotMatch(settingsHookSource, /chartSettings:\s*chartSettingsState\.settings/)
+    assert.doesNotMatch(settingsHookSource, /useEffect/)
+  })
+
+  it('bases an update on the selected symbol settings when the owned state is stale', () => {
+    assert.match(
+      settingsHookSource,
+      /setChartSettingsState\(\(current\) => \{[\s\S]*selectChartSettingsForSymbol\(current,\s*selectedSymbol\)[\s\S]*updater\(selectedState\.settings\)/
+    )
   })
 })

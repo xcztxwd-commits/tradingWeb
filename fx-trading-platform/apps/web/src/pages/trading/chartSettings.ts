@@ -539,14 +539,35 @@ export function loadChartSettings(symbol: string, storage = getBrowserStorage())
   }
 }
 
+export type OwnedChartSettingsState = {
+  ownerSymbol: string
+  settings: ChartSettings
+}
+
 export function loadChartSettingsForSymbol(symbol: string, storage = getBrowserStorage()): ChartSettings {
   const settings = loadChartSettings(symbol, storage)
   const interval = normalizeChartInterval(symbol, settings.interval)
   if (interval === settings.interval) return settings
 
   const normalizedSettings = { ...settings, interval }
-  saveChartSettings(symbol, normalizedSettings, storage)
+  try {
+    saveChartSettings(symbol, normalizedSettings, storage)
+  } catch {
+    // Storage persistence is best-effort; rendering must still use the safe interval.
+  }
   return normalizedSettings
+}
+
+export function selectChartSettingsForSymbol(
+  state: OwnedChartSettingsState,
+  selectedSymbol: string,
+  loadSettings: (symbol: string) => ChartSettings = loadChartSettingsForSymbol
+): OwnedChartSettingsState {
+  if (state.ownerSymbol === selectedSymbol) return state
+  return {
+    ownerSymbol: selectedSymbol,
+    settings: loadSettings(selectedSymbol)
+  }
 }
 
 export function saveChartSettings(symbol: string, settings: ChartSettings, storage = getBrowserStorage()) {
