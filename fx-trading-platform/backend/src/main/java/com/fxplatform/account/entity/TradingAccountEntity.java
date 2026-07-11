@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fxplatform.account.enums.AccountStatus;
 import com.fxplatform.account.enums.AccountType;
+import com.fxplatform.trading.enums.PositionMode;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -35,6 +36,9 @@ public class TradingAccountEntity {
   private BigDecimal marginLevel;
   private Integer leverage = 100;
   private AccountStatus status = AccountStatus.ACTIVE;
+  private PositionMode positionMode = PositionMode.ONE_WAY;
+  private Long demoGeneration = 0L;
+  private Instant resetAt;
 
   @TableField(fill = FieldFill.INSERT)
   private Instant createdAt;

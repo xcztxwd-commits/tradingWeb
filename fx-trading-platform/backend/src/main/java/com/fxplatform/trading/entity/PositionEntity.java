@@ -5,7 +5,11 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fxplatform.market.model.ProductType;
+import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.OrderSide;
+import com.fxplatform.trading.enums.PositionMode;
+import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -27,6 +31,10 @@ public class PositionEntity {
   private UUID id;
   private UUID accountId;
   private String symbol;
+  private ProductType productType = ProductType.FX_MARGIN;
+  private PositionMode positionMode = PositionMode.ONE_WAY;
+  private PositionSide positionSide = PositionSide.BOTH;
+  private MarginMode marginMode = MarginMode.CROSS;
   private OrderSide side;
   private BigDecimal lots;
   private BigDecimal openPrice;
@@ -46,6 +54,7 @@ public class PositionEntity {
   private String marginAsset;
   private PositionStatus status = PositionStatus.OPEN;
   private Integer leverage;
+  private Long version = 0L;
 
   @TableField(fill = FieldFill.INSERT)
   private Instant openedAt;
