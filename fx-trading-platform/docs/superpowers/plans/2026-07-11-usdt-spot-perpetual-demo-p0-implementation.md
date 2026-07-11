@@ -531,8 +531,10 @@ Assert fee asset and amount:
     Spot SELL fee = baseQuantity*fillPrice*rate, feeAsset=USDT
     Linear Perp fee = baseQuantity*fillPrice*rate, feeAsset=USDT
 
-Assert FullFillResult and persisted Order/Trade retain the same `liquidityRole`, `fee`,
-`feeAsset`, `sourceMode` and `providerCode`; exactly one Trade is written per fill.
+Assert FullFillResult, Order and Trade retain the same `liquidityRole`, `fee` and
+`feeAsset`; Trade additionally retains `sourceMode` and `providerCode`. Exactly one Trade is
+written per fill. Do not add source columns to Order: V46 intentionally stores execution
+source only on Trade.
 
 - [ ] **Step 2: Write RED no-partial invariant**
 
@@ -579,7 +581,8 @@ The coordinator is the sole price, fee rate, fee asset, liquidity role, slippage
 
 Before the first mutation, reject every non-full adapter/coordinator result. On success set
 Order to FILLED (never write PARTIALLY_FILLED), write exactly one Trade, and copy productType,
-positionSide, marginMode, fee, feeAsset, liquidityRole, sourceMode and providerCode. Spot
+positionSide, marginMode, fee, feeAsset and liquidityRole to both records; copy sourceMode and
+providerCode to Trade only, matching the V46 schema. Spot
 settlement consumes the explicit canonical fee amount/asset instead of deriving a rate;
 reuse PositionEngine and the existing wallet/ledger services.
 
