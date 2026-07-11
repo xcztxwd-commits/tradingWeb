@@ -45,3 +45,12 @@ describe('ChartWorkspace fullscreen target', () => {
     assert.match(workspaceStyles, /@media\s*\(max-width:\s*768px\)\s*{[\s\S]*\.drawingToolbarLoading\s*{[\s\S]*display:\s*none/)
   })
 })
+
+describe('ChartWorkspace P0 interval boundary', () => {
+  it('normalizes before rendering either the toolbar or candle panel and persists through onPeriodChange', () => {
+    assert.match(workspaceSource, /normalizeChartInterval\(symbol,\s*settings\.interval\)/)
+    assert.match(workspaceSource, /if \(settings\.interval === activeInterval\) return[\s\S]*onPeriodChange\(activeInterval\)/)
+    assert.match(workspaceSource, /<ChartTopToolbar[\s\S]*symbol=\{symbol\}[\s\S]*settings=\{activeSettings\}/)
+    assert.match(workspaceSource, /<KLineChartPanel[\s\S]*period=\{activeInterval\}[\s\S]*symbol=\{symbol\}/)
+  })
+})

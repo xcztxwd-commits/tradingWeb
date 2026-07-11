@@ -113,20 +113,25 @@ describe('ChartTopToolbar indicator menu', () => {
   })
 
   it('shows only starred intervals as quick period buttons', () => {
-    assert.match(source, /quickChartIntervals\(settings\)/)
+    assert.match(source, /symbol:\s*string/)
+    assert.match(source, /getChartIntervalOptions\(symbol\)/)
+    assert.match(source, /quickChartIntervals\(settings,\s*intervalOptions\)/)
     assert.match(source, /favoriteIntervals\.map/)
     assert.match(source, /favoriteIntervals=\{settings\.favoriteIntervals\}/)
     assert.match(source, /onFavoriteIntervalToggle=\{onFavoriteIntervalToggle\}/)
     assert.match(source, /onFavoriteIntervalToggle:\s*\(interval: TradingPeriod\) => void/)
   })
 
-  it('keeps the interval dropdown focused on all periods and star toggles', () => {
+  it('uses the same symbol-specific options for the dropdown and quick favorites', () => {
     const dropdownSource = readFileSync(join(currentDir, 'IntervalDropdown.tsx'), 'utf8')
 
+    assert.match(source, /<IntervalDropdown[\s\S]*options=\{intervalOptions\}/)
+    assert.match(dropdownSource, /options:\s*ChartIntervalOption\[\]/)
     assert.match(dropdownSource, /favoriteIntervals:\s*TradingPeriod\[\]/)
     assert.match(dropdownSource, /onFavoriteIntervalToggle:\s*\(interval: TradingPeriod\) => void/)
     assert.match(dropdownSource, /Star/)
-    assert.match(dropdownSource, /allChartIntervals\.map/)
+    assert.match(dropdownSource, /options\.map/)
+    assert.doesNotMatch(dropdownSource, /allChartIntervals/)
     assert.match(dropdownSource, /lockedFavorite = favorite && favoriteIntervals\.length <= 1/)
     assert.match(dropdownSource, /disabled=\{lockedFavorite\}/)
     assert.doesNotMatch(dropdownSource, /Keyboard,\s*/)

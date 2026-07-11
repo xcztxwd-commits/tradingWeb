@@ -6,7 +6,7 @@ import { isChartFullscreenShortcut, shouldIgnoreChartFullscreenShortcut } from '
 import { KLineChartPanel } from './KLineChartPanel'
 import type { ChartActionRequest } from './KLineChartPanel'
 import { buildChartTradeMarkers } from '../chartTradeMarkers'
-import { getDrawingShortcutAction, shouldIgnoreDrawingShortcut } from '../chartSettings'
+import { getDrawingShortcutAction, normalizeChartInterval, shouldIgnoreDrawingShortcut } from '../chartSettings'
 import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from '../chartSettings'
 import type { OrderResponse, PositionResponse } from '../../../components/tables/types'
 import type { TradingPeriod } from '../../../features/market/tradingModels'
@@ -83,6 +83,8 @@ export function ChartWorkspace({
     () => buildChartTradeMarkers(symbol, orders, positions),
     [orders, positions, symbol]
   )
+  const activeInterval = normalizeChartInterval(symbol, settings.interval)
+  const activeSettings = activeInterval === settings.interval ? settings : { ...settings, interval: activeInterval }
 
   const handleClearDrawings = useCallback(() => {
     setDrawingClearRequest((request) => request + 1)
@@ -212,11 +214,17 @@ export function ChartWorkspace({
     }
   }, [handleDrawingToolChange, settings.shortcutSettings.drawingShortcuts])
 
+  useEffect(() => {
+    if (settings.interval === activeInterval) return
+    onPeriodChange(activeInterval)
+  }, [activeInterval, onPeriodChange, settings.interval])
+
   return (
     <section ref={workspaceRef} className={workspaceClassName}>
       <ChartTopToolbar
+        symbol={symbol}
         indicators={indicators}
-        settings={settings}
+        settings={activeSettings}
         fullscreenActive={fullscreen || fallbackFullscreen}
         onChartSettingsChange={onChartSettingsChange}
         onResetChartSettings={onResetChartSettings}
@@ -263,7 +271,7 @@ export function ChartWorkspace({
           onCandlePriceSelect={onSelectPrice}
           onDrawingComplete={handleDrawingComplete}
           fullscreenActive={fullscreen || fallbackFullscreen}
-          period={settings.interval}
+          period={activeInterval}
           symbol={symbol}
           themeMode={themeMode}
           token={token}
