@@ -539,6 +539,16 @@ export function loadChartSettings(symbol: string, storage = getBrowserStorage())
   }
 }
 
+export function loadChartSettingsForSymbol(symbol: string, storage = getBrowserStorage()): ChartSettings {
+  const settings = loadChartSettings(symbol, storage)
+  const interval = normalizeChartInterval(symbol, settings.interval)
+  if (interval === settings.interval) return settings
+
+  const normalizedSettings = { ...settings, interval }
+  saveChartSettings(symbol, normalizedSettings, storage)
+  return normalizedSettings
+}
+
 export function saveChartSettings(symbol: string, settings: ChartSettings, storage = getBrowserStorage()) {
   storage?.setItem(getChartSettingsStorageKey(symbol), JSON.stringify(normalizeChartSettings(settings)))
 }

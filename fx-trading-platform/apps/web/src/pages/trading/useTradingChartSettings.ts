@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   defaultChartSettings,
   getEnabledIndicatorNames,
-  loadChartSettings,
+  loadChartSettingsForSymbol,
   saveChartSettings,
   toggleFavoriteInterval,
   updateIndicatorEnabled
@@ -23,10 +23,10 @@ export function useTradingChartSettings(
   selectedSymbol: string,
   colorScheme: string
 ): TradingChartSettingsState {
-  const [chartSettings, setChartSettings] = useState<ChartSettings>(() => loadChartSettings(selectedSymbol))
+  const [chartSettings, setChartSettings] = useState<ChartSettings>(() => loadChartSettingsForSymbol(selectedSymbol))
 
   useEffect(() => {
-    setChartSettings(loadChartSettings(selectedSymbol))
+    setChartSettings(loadChartSettingsForSymbol(selectedSymbol))
   }, [selectedSymbol])
 
   const updateChartSettings = useCallback(

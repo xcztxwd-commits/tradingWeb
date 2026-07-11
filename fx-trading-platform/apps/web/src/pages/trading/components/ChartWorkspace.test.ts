@@ -6,6 +6,7 @@ import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const workspaceSource = readFileSync(join(currentDir, 'ChartWorkspace.tsx'), 'utf8')
+const settingsHookSource = readFileSync(join(currentDir, '..', 'useTradingChartSettings.ts'), 'utf8')
 const panelSource = readFileSync(join(currentDir, 'KLineChartPanel.tsx'), 'utf8')
 const workspaceStyles = readFileSync(join(currentDir, 'ChartWorkspace.module.css'), 'utf8')
 
@@ -47,10 +48,15 @@ describe('ChartWorkspace fullscreen target', () => {
 })
 
 describe('ChartWorkspace P0 interval boundary', () => {
-  it('normalizes before rendering either the toolbar or candle panel and persists through onPeriodChange', () => {
+  it('normalizes before rendering either the toolbar or candle panel without persisting from the workspace', () => {
     assert.match(workspaceSource, /normalizeChartInterval\(symbol,\s*settings\.interval\)/)
-    assert.match(workspaceSource, /if \(settings\.interval === activeInterval\) return[\s\S]*onPeriodChange\(activeInterval\)/)
+    assert.doesNotMatch(workspaceSource, /onPeriodChange\(activeInterval\)/)
     assert.match(workspaceSource, /<ChartTopToolbar[\s\S]*symbol=\{symbol\}[\s\S]*settings=\{activeSettings\}/)
     assert.match(workspaceSource, /<KLineChartPanel[\s\S]*period=\{activeInterval\}[\s\S]*symbol=\{symbol\}/)
+  })
+
+  it('loads and migrates settings only after resolving the selected symbol storage key', () => {
+    assert.match(settingsHookSource, /useState<ChartSettings>\(\(\) => loadChartSettingsForSymbol\(selectedSymbol\)\)/)
+    assert.match(settingsHookSource, /setChartSettings\(loadChartSettingsForSymbol\(selectedSymbol\)\)/)
   })
 })

@@ -86,6 +86,7 @@ export function ChartTopToolbar({
     () => quickChartIntervals(settings, intervalOptions),
     [intervalOptions, settings.favoriteIntervals]
   )
+  const visibleFavoriteIntervals = favoriteIntervals.map((item) => item.value)
   const activeChartType = chartTypeOptions.find((item) => item.value === settings.chartType) ?? chartTypeOptions[0]
   const activePriceScaleMode =
     priceScaleModeOptions.find((item) => item.value === settings.axisSettings.priceScaleMode) ?? priceScaleModeOptions[0]
@@ -195,7 +196,7 @@ export function ChartTopToolbar({
             </button>
             <IntervalDropdown
               activeInterval={settings.interval}
-              favoriteIntervals={settings.favoriteIntervals}
+              favoriteIntervals={visibleFavoriteIntervals}
               options={intervalOptions}
               open={intervalDropdownOpen}
               onClose={() => setIntervalDropdownOpen(false)}

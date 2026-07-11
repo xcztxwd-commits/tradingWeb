@@ -14,6 +14,11 @@ type ChartIntervalContract = {
   normalizeChartInterval: (symbol: string, interval: TradingPeriod) => TradingPeriod
 }
 
+type PerSymbolChartSettingsLoader = (
+  symbol: string,
+  storage: Pick<Storage, 'getItem' | 'setItem'>
+) => chartSettings.ChartSettings
+
 const p0Symbols = [
   'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
   'BTCUSDT-PERP', 'ETHUSDT-PERP', 'BNBUSDT-PERP', 'SOLUSDT-PERP', 'XRPUSDT-PERP'
@@ -39,6 +44,13 @@ describe('P0 chart interval contract', () => {
     assert.deepEqual(quickOptions.map((item) => item.value), ['1h'])
     assert.equal(chartSettings.getIntervalByShortcutKey('1', quickOptions), '1h')
     assert.equal(chartSettings.getIntervalByShortcutKey('2', quickOptions), null)
+
+    const visibleAfterAdding = chartSettings.quickChartIntervals(
+      { favoriteIntervals: chartSettings.toggleFavoriteInterval(['30m'], '1m') },
+      p0Options
+    )
+    assert.deepEqual(visibleAfterAdding.map((item) => item.value), ['1m'])
+    assert.equal(visibleAfterAdding.length, 1)
   })
 
   it('preserves the complete legacy interval list for non-P0 symbols', () => {
@@ -86,6 +98,36 @@ describe('P0 chart interval contract', () => {
 
     assert.deepEqual(sentTimeframes, backendTimeframes)
   })
+
+  it('loads each symbol own settings without carrying the previous symbol interval into it', () => {
+    const loadForSymbol = requirePerSymbolLoader()
+    const storage = new MemoryStorage()
+    storage.seed(chartSettings.getChartSettingsStorageKey('EURUSD'), JSON.stringify({ interval: '30m' }))
+    storage.seed(chartSettings.getChartSettingsStorageKey('BTCUSDT'), JSON.stringify({ interval: '4h' }))
+
+    const eurSettings = loadForSymbol('EURUSD', storage)
+    const btcSettings = loadForSymbol('BTCUSDT', storage)
+
+    assert.equal(eurSettings.interval, '30m')
+    assert.equal(btcSettings.interval, '4h')
+    assert.equal(storage.readInterval('EURUSD'), '30m')
+    assert.equal(storage.readInterval('BTCUSDT'), '4h')
+    assert.deepEqual(storage.writtenKeys, [])
+  })
+
+  it('migrates only the target P0 symbol own unsupported stored interval to 1m', () => {
+    const loadForSymbol = requirePerSymbolLoader()
+    const storage = new MemoryStorage()
+    storage.seed(chartSettings.getChartSettingsStorageKey('EURUSD'), JSON.stringify({ interval: '30m' }))
+    storage.seed(chartSettings.getChartSettingsStorageKey('BTCUSDT'), JSON.stringify({ interval: '30m' }))
+
+    const btcSettings = loadForSymbol('BTCUSDT', storage)
+
+    assert.equal(btcSettings.interval, '1m')
+    assert.equal(storage.readInterval('BTCUSDT'), '1m')
+    assert.equal(storage.readInterval('EURUSD'), '30m')
+    assert.deepEqual(storage.writtenKeys, [chartSettings.getChartSettingsStorageKey('BTCUSDT')])
+  })
 })
 
 function requireIntervalContract(): ChartIntervalContract {
@@ -96,14 +138,33 @@ function requireIntervalContract(): ChartIntervalContract {
   return candidate as ChartIntervalContract
 }
 
+function requirePerSymbolLoader(): PerSymbolChartSettingsLoader {
+  const candidate = chartSettings as typeof chartSettings & {
+    loadChartSettingsForSymbol?: PerSymbolChartSettingsLoader
+  }
+  assert.equal(typeof candidate.loadChartSettingsForSymbol, 'function')
+  return candidate.loadChartSettingsForSymbol as PerSymbolChartSettingsLoader
+}
+
 class MemoryStorage {
   private readonly values = new Map<string, string>()
+  readonly writtenKeys: string[] = []
+
+  seed(key: string, value: string) {
+    this.values.set(key, value)
+  }
 
   getItem(key: string) {
     return this.values.get(key) ?? null
   }
 
   setItem(key: string, value: string) {
+    this.writtenKeys.push(key)
     this.values.set(key, value)
+  }
+
+  readInterval(symbol: string) {
+    const raw = this.getItem(chartSettings.getChartSettingsStorageKey(symbol))
+    return raw ? (JSON.parse(raw) as { interval?: string }).interval : undefined
   }
 }

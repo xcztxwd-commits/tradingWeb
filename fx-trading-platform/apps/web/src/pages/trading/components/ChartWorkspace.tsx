@@ -214,11 +214,6 @@ export function ChartWorkspace({
     }
   }, [handleDrawingToolChange, settings.shortcutSettings.drawingShortcuts])
 
-  useEffect(() => {
-    if (settings.interval === activeInterval) return
-    onPeriodChange(activeInterval)
-  }, [activeInterval, onPeriodChange, settings.interval])
-
   return (
     <section ref={workspaceRef} className={workspaceClassName}>
       <ChartTopToolbar

@@ -117,7 +117,7 @@ describe('ChartTopToolbar indicator menu', () => {
     assert.match(source, /getChartIntervalOptions\(symbol\)/)
     assert.match(source, /quickChartIntervals\(settings,\s*intervalOptions\)/)
     assert.match(source, /favoriteIntervals\.map/)
-    assert.match(source, /favoriteIntervals=\{settings\.favoriteIntervals\}/)
+    assert.match(source, /favoriteIntervals=\{visibleFavoriteIntervals\}/)
     assert.match(source, /onFavoriteIntervalToggle=\{onFavoriteIntervalToggle\}/)
     assert.match(source, /onFavoriteIntervalToggle:\s*\(interval: TradingPeriod\) => void/)
   })
@@ -126,6 +126,8 @@ describe('ChartTopToolbar indicator menu', () => {
     const dropdownSource = readFileSync(join(currentDir, 'IntervalDropdown.tsx'), 'utf8')
 
     assert.match(source, /<IntervalDropdown[\s\S]*options=\{intervalOptions\}/)
+    assert.match(source, /const visibleFavoriteIntervals = favoriteIntervals\.map\(\(item\) => item\.value\)/)
+    assert.match(source, /favoriteIntervals=\{visibleFavoriteIntervals\}/)
     assert.match(dropdownSource, /options:\s*ChartIntervalOption\[\]/)
     assert.match(dropdownSource, /favoriteIntervals:\s*TradingPeriod\[\]/)
     assert.match(dropdownSource, /onFavoriteIntervalToggle:\s*\(interval: TradingPeriod\) => void/)
