@@ -294,7 +294,6 @@ Platform normalizer preserves -PERP. Provider adapters alone map:
 - [ ] **Step 6: Run GREEN and contract export**
 
     & $mvn -f backend/pom.xml "-Dtest=DomainEnumContractTest,CreateOrderRequestTest,PositionResponseContractTest,SymbolNormalizerTest" test
-    cd ..
     & $node $npmCli run contract:export
     & $node $npmCli run contract:generate
 
