@@ -45,14 +45,14 @@ class V46V47EmptyDatabaseIT {
         .contains("position_side")
         .contains("fee_asset")
         .contains("margin_mode")
-        .contains("idx_positions_account_symbol_open")
-        // Slot uniqueness is deferred until Task 8 can migrate conflicting LIVE positions safely.
-        .doesNotContain("ux_positions_one_way_open_both")
-        .doesNotContain("ux_positions_hedge_open_side")
+        .contains("ux_positions_one_way_open_both")
+        .contains("ux_positions_hedge_open_side")
+        .doesNotContain("UPDATE trading.positions p")
         .doesNotContain("CREATE UNIQUE INDEX IF NOT EXISTS ux_trading_accounts_user_active_demo");
     assertThat(v47)
-        .contains("fixed_funding_rate")
-        .contains("funding_source_priority")
+        .contains("fixed_funding_rate NUMERIC(18, 10) NOT NULL DEFAULT 0.0001")
+        .contains("fixed_funding_interval_minutes INTEGER NOT NULL DEFAULT 480")
+        .contains("funding_source_priority TEXT[] NOT NULL DEFAULT ARRAY['BINANCE', 'OKX', 'FIXED']")
         .contains("ux_funding_rates_symbol_time")
         .contains("ux_trading_accounts_user_active_demo")
         .contains("BTCUSDT-PERP")
@@ -122,6 +122,15 @@ class V46V47EmptyDatabaseIT {
             and leverage = 100
             and settlement_asset = 'USDT'
             and margin_asset = 'USDT'
+          """)).isEqualTo(5);
+      assertThat(count(jdbc, """
+          select count(*)
+          from market.symbols
+          where tradable = true
+            and product_type = 'LINEAR_PERP'
+            and fixed_funding_rate = 0.0001
+            and fixed_funding_interval_minutes = 480
+            and funding_source_priority = ARRAY['BINANCE', 'OKX', 'FIXED']::TEXT[]
           """)).isEqualTo(5);
       assertThat(count(jdbc, """
           select count(*)
@@ -213,6 +222,40 @@ class V46V47EmptyDatabaseIT {
         values (?, 'ETHUSDT-PERP', 101)
         """, activeDemoId))
         .isInstanceOf(DataAccessException.class);
+
+    assertPerpetualPositionSlotUniqueness(jdbc, activeDemoId);
+  }
+
+  private void assertPerpetualPositionSlotUniqueness(JdbcTemplate jdbc, UUID accountId) {
+    insertPerpetualPosition(jdbc, accountId, "BTCUSDT-PERP", "LONG", "ONE_WAY", "BOTH");
+    assertThatThrownBy(() -> insertPerpetualPosition(
+        jdbc, accountId, "BTCUSDT-PERP", "LONG", "ONE_WAY", "BOTH"))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("ux_positions_one_way_open_both");
+
+    insertPerpetualPosition(jdbc, accountId, "ETHUSDT-PERP", "LONG", "HEDGE", "LONG");
+    insertPerpetualPosition(jdbc, accountId, "ETHUSDT-PERP", "SHORT", "HEDGE", "SHORT");
+    assertThatThrownBy(() -> insertPerpetualPosition(
+        jdbc, accountId, "ETHUSDT-PERP", "LONG", "HEDGE", "LONG"))
+        .isInstanceOf(DataAccessException.class)
+        .hasMessageContaining("ux_positions_hedge_open_side");
+  }
+
+  private void insertPerpetualPosition(
+      JdbcTemplate jdbc,
+      UUID accountId,
+      String symbol,
+      String side,
+      String positionMode,
+      String positionSide) {
+    jdbc.update("""
+        insert into trading.positions (
+          id, account_id, symbol, side, lots, open_price, current_price,
+          floating_pnl, realized_pnl, status, leverage, margin_held,
+          product_type, position_mode, position_side, margin_mode
+        ) values (?, ?, ?, ?, 1, 60000, 60000, 0, 0, 'OPEN', 10, 6000,
+          'LINEAR_PERP', ?, ?, 'CROSS')
+        """, UUID.randomUUID(), accountId, symbol, side, positionMode, positionSide);
   }
 
   private void assertFundingRateUniqueness(JdbcTemplate jdbc) {

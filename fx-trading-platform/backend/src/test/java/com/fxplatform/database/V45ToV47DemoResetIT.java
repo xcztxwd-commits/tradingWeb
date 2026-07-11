@@ -385,6 +385,10 @@ class V45ToV47DemoResetIT {
         select count(*) from trading.positions
         where account_id = ? and symbol = 'LEGACYUSDT-PERP' and status = 'OPEN'
         """, live.accountId())).isEqualTo(2);
+    assertLegacyLivePositionWasPreserved(
+        jdbc, live.positionId(), "1", "60000", "1000");
+    assertLegacyLivePositionWasPreserved(
+        jdbc, fixture.conflictingLivePositionId(), "2", "59000", "4000");
     assertPresent(jdbc, "trading.order_events", live.orderEventId());
     assertPresent(jdbc, "core.wallet_balances", live.walletId());
     assertPresent(jdbc, "ledger.asset_ledger_entries", live.assetLedgerId());
@@ -400,6 +404,43 @@ class V45ToV47DemoResetIT {
         "select balance from core.trading_accounts where id = ?",
         BigDecimal.class,
         live.accountId())).isEqualByComparingTo("777");
+  }
+
+  private void assertLegacyLivePositionWasPreserved(
+      JdbcTemplate jdbc,
+      UUID positionId,
+      String expectedLots,
+      String expectedOpenPrice,
+      String expectedFloatingPnl) {
+    LegacyPositionState position = jdbc.queryForObject("""
+        select symbol, side, lots, open_price, current_price, floating_pnl, status,
+               product_type, position_mode, position_side, margin_mode
+        from trading.positions
+        where id = ?
+        """, (rs, rowNum) -> new LegacyPositionState(
+            rs.getString("symbol"),
+            rs.getString("side"),
+            rs.getBigDecimal("lots"),
+            rs.getBigDecimal("open_price"),
+            rs.getBigDecimal("current_price"),
+            rs.getBigDecimal("floating_pnl"),
+            rs.getString("status"),
+            rs.getString("product_type"),
+            rs.getString("position_mode"),
+            rs.getString("position_side"),
+            rs.getString("margin_mode")), positionId);
+
+    assertThat(position.symbol()).isEqualTo("LEGACYUSDT-PERP");
+    assertThat(position.side()).isEqualTo("LONG");
+    assertThat(position.lots()).isEqualByComparingTo(expectedLots);
+    assertThat(position.openPrice()).isEqualByComparingTo(expectedOpenPrice);
+    assertThat(position.currentPrice()).isEqualByComparingTo("61000");
+    assertThat(position.floatingPnl()).isEqualByComparingTo(expectedFloatingPnl);
+    assertThat(position.status()).isEqualTo("OPEN");
+    assertThat(position.productType()).isEqualTo("FX_MARGIN");
+    assertThat(position.positionMode()).isEqualTo("ONE_WAY");
+    assertThat(position.positionSide()).isEqualTo("BOTH");
+    assertThat(position.marginMode()).isEqualTo("CROSS");
   }
 
   private void assertUsersProvidersConfigAndContentWerePreserved(
@@ -496,5 +537,19 @@ class V45ToV47DemoResetIT {
       BigDecimal total,
       BigDecimal available,
       BigDecimal locked) {
+  }
+
+  private record LegacyPositionState(
+      String symbol,
+      String side,
+      BigDecimal lots,
+      BigDecimal openPrice,
+      BigDecimal currentPrice,
+      BigDecimal floatingPnl,
+      String status,
+      String productType,
+      String positionMode,
+      String positionSide,
+      String marginMode) {
   }
 }

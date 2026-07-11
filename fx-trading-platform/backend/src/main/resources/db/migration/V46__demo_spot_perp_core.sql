@@ -79,17 +79,21 @@ ALTER TABLE trading.positions
   ADD COLUMN IF NOT EXISTS margin_mode VARCHAR(16) NOT NULL DEFAULT 'CROSS',
   ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0;
 
-UPDATE trading.positions p
-SET product_type = s.product_type,
-    margin_mode = CASE WHEN s.product_type = 'CRYPTO_SPOT' THEN 'CASH' ELSE 'CROSS' END
-FROM market.symbols s
-WHERE s.symbol = p.symbol;
+-- Keep legacy V45 positions on the new-column defaults. This preserves valid
+-- duplicate LIVE history while new LINEAR_PERP writes opt into slot uniqueness.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_positions_one_way_open_both
+  ON trading.positions(account_id, symbol)
+  WHERE status = 'OPEN'
+    AND product_type = 'LINEAR_PERP'
+    AND position_mode = 'ONE_WAY'
+    AND position_side = 'BOTH';
 
--- V45 permits conflicting LIVE position rows. Slot uniqueness is deferred until
--- Task 8 can migrate those rows with explicit ONE_WAY/HEDGE semantics.
-CREATE INDEX IF NOT EXISTS idx_positions_account_symbol_open
-  ON trading.positions(account_id, symbol, position_mode, position_side)
-  WHERE status = 'OPEN' AND product_type = 'LINEAR_PERP';
+CREATE UNIQUE INDEX IF NOT EXISTS ux_positions_hedge_open_side
+  ON trading.positions(account_id, symbol, position_side)
+  WHERE status = 'OPEN'
+    AND product_type = 'LINEAR_PERP'
+    AND position_mode = 'HEDGE'
+    AND position_side IN ('LONG', 'SHORT');
 
 CREATE INDEX IF NOT EXISTS idx_orders_account_active
   ON trading.orders(account_id, status, created_at DESC)

@@ -118,6 +118,15 @@ class PostgresDatabaseIT {
         """)).isEqualTo(10);
     assertThat(count("""
         select count(*)
+        from market.symbols
+        where tradable = true
+          and product_type = 'LINEAR_PERP'
+          and fixed_funding_rate = 0.0001
+          and fixed_funding_interval_minutes = 480
+          and funding_source_priority = ARRAY['BINANCE', 'OKX', 'FIXED']::TEXT[]
+        """)).isEqualTo(5);
+    assertThat(count("""
+        select count(*)
         from flyway_schema_history
         where success = true and version = '47'
         """)).isEqualTo(1);
