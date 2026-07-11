@@ -219,7 +219,7 @@ Expected: PASS.
     git add backend/src/main/resources/db/migration backend/src/test/java/com/fxplatform/database
     git commit -m "feat: add demo spot and perpetual database semantics"
 
-### Task 2: Add domain enums, entities and generated API contract
+### Task 2: Add domain enums, entities and DTO contract
 
 **Files:**
 - Reuse: backend/src/main/java/com/fxplatform/market/model/ProductType.java
@@ -291,17 +291,15 @@ Platform normalizer preserves -PERP. Provider adapters alone map:
     BTCUSDT-PERP -> BTCUSDT       for Binance USD-M
     BTCUSDT-PERP -> BTC-USDT-SWAP for OKX
 
-- [ ] **Step 6: Run GREEN and contract export**
+- [ ] **Step 6: Run GREEN**
 
     & $mvn -f backend/pom.xml "-Dtest=DomainEnumContractTest,CreateOrderRequestTest,PositionResponseContractTest,SymbolNormalizerTest" test
-    & $node $npmCli run contract:export
-    & $node $npmCli run contract:generate
 
-Expected: tests pass and packages/shared-types/src/generated/openapi.ts changes.
+Expected: tests pass. OpenAPI export/generation intentionally occurs in Task 13 after all backend endpoints and DTO schemas exist, avoiding a stale partial generated contract.
 
 - [ ] **Step 7: Commit**
 
-    git add backend/src/main packages/shared-types
+    git add backend/src/main backend/src/test
     git commit -m "feat: add spot and perpetual trading contracts"
 
 ### Task 3: Enforce Demo execution and account-first locking
