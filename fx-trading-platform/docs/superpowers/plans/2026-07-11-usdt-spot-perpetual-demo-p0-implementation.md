@@ -459,14 +459,26 @@ Add /api/market/perpetuals/{symbol}/reference and sourceMode/providerCode/asOf/e
 
 **Files:**
 - Create: backend/src/main/java/com/fxplatform/execution/ExecutableMarketSnapshot.java
+- Create: backend/src/main/java/com/fxplatform/execution/FullFillExecutionPath.java
 - Create: backend/src/main/java/com/fxplatform/execution/FullFillRequest.java
 - Create: backend/src/main/java/com/fxplatform/execution/FullFillResult.java
 - Create: backend/src/main/java/com/fxplatform/execution/FullFillCoordinator.java
+- Modify: backend/src/main/java/com/fxplatform/common/exception/ErrorCode.java
 - Modify: backend/src/main/java/com/fxplatform/execution/SimulatedExecutionAdapter.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/OrderFillService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/OrderService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/PendingOrderExecutionService.java
+- Modify: backend/src/main/java/com/fxplatform/trading/service/SpotSettlementService.java
+- Modify: backend/src/main/java/com/fxplatform/trading/service/TradingTransactionExecutor.java
+- Test: backend/src/test/java/com/fxplatform/ArchitectureRulesTest.java
+- Test: backend/src/test/java/com/fxplatform/common/exception/ErrorCodeContractTest.java
 - Test: backend/src/test/java/com/fxplatform/execution/FullFillCoordinatorTest.java
+- Test: backend/src/test/java/com/fxplatform/execution/SimulatedExecutionAdapterFeeTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/service/OrderFillServiceTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/service/OrderServiceTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/service/PendingOrderExecutionServiceTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/service/SpotSettlementServiceTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/service/TradingTransactionExecutorTest.java
 - Test: backend/src/test/java/com/fxplatform/trading/service/TradingWorkflowRegressionProtectionTest.java
 
 **Interfaces:**
@@ -475,44 +487,118 @@ Add /api/market/perpetuals/{symbol}/reference and sourceMode/providerCode/asOf/e
 
     FullFillResult execute(FullFillRequest request, ExecutableMarketSnapshot snapshot)
 
+- ExecutableMarketSnapshot is an immutable projection of one Task 4 whole bundle and carries:
+
+    platformSymbol, productType, providerCode, providerSymbol, sourceMode,
+    bid, ask, last, mark, index, asOf, expiresAt
+
+- FullFillRequest explicitly identifies one execution path so maker/taker is never inferred
+  after the fact: `MARKET`, `IMMEDIATE_LIMIT`, `RESTING_LIMIT`, or
+  `TRIGGERED_STOP_MARKET`. It carries the canonical requested base quantity.
+
+- FullFillResult is the single canonical all-or-nothing result and carries:
+
+    filledPrice, filledAt, filledQuantity, remainingQuantity=0,
+    feeRate, fee, feeAsset, liquidityRole, slippage,
+    sourceMode, providerCode, providerSymbol, asOf, expiresAt
+
+**Transaction and retry boundary:**
+
+- Resolve a complete fresh bundle before any account/wallet/position/order lock and before the local mutation transaction.
+- TradingTransactionExecutor uses `Propagation.REQUIRES_NEW`; inside it lock in the existing deterministic order, reload mutable state, then validate the snapshot symbol and `now < expiresAt` immediately before the first repository/wallet/ledger write.
+- If lock waiting makes the snapshot stale, roll back with zero writes. The caller may resolve and retry outside the transaction at most two times; after that return `MARKET_DATA_STALE`.
+- Never perform an external provider call while holding a trading mutation lock.
+- Every pending candidate runs in its own transaction; one failed/stale candidate remains PENDING with its hold intact and must not prevent later candidates from being processed.
+
+**Task boundary:**
+
+- This task centralizes fill calculation, metadata, full-fill validation and transaction ownership for existing immediate/pending paths.
+- Task 6 owns the public Spot quantity-unit contract, immediate marketable LIMIT/STOP_MARKET creation behavior, complete hold calculation and OCO. Its PendingOrderExecutionProcessor reuses the Task 5 `REQUIRES_NEW` executor and only adds order/group locking; it must not create a second transaction policy. Do not partially implement or claim those features here.
+
 - [ ] **Step 1: Write RED price/fee matrix**
 
 Assert exact BigDecimal results for:
 
     MARKET BUY ask*(1+0.0001), taker 0.0005
     MARKET SELL bid*(1-0.0001), taker
-    immediate LIMIT uses best-or-limit and taker
-    resting LIMIT uses best-or-limit and maker 0.0002
+    immediate LIMIT BUY min(ask, limit), SELL max(bid, limit), taker
+    resting GTC LIMIT BUY min(ask, limit), SELL max(bid, limit), maker 0.0002
     STOP_MARKET uses trigger snapshot then MARKET price
+
+Assert fee asset and amount:
+
+    Spot BUY fee = baseQuantity*rate, feeAsset=base asset
+    Spot SELL fee = baseQuantity*fillPrice*rate, feeAsset=USDT
+    Linear Perp fee = baseQuantity*fillPrice*rate, feeAsset=USDT
+
+Assert FullFillResult and persisted Order/Trade retain the same `liquidityRole`, `fee`,
+`feeAsset`, `sourceMode` and `providerCode`; exactly one Trade is written per fill.
 
 - [ ] **Step 2: Write RED no-partial invariant**
 
-Pass a fake adapter result with filledQuantity != quantity. Expected:
+Pass fake adapter results with filledQuantity lower than requested base quantity, greater than it,
+null, or with non-zero remainingQuantity. Expected in every case:
 
     BusinessException("PARTIAL_FILL_NOT_SUPPORTED")
     no Order/Trade/Wallet/Position/Ledger mutation
+
+Validate this before OrderFillService performs its first save, and keep a final defensive
+check there against `order.baseQuantity` (falling back only for pre-Task-6 legacy orders).
+Add the stable code to ErrorCode and its contract test. Update existing tests that accepted PARTIALLY_FILLED to expect
+rejection; do not delete the historical enum because legacy rows remain readable.
 
 - [ ] **Step 3: Write RED lock-wait freshness test**
 
 Resolve a valid snapshot, block on the account lock until expiresAt passes, then release the lock. Assert the coordinator makes zero mutation with the expired snapshot and the caller retries outside the transaction with a newly resolved whole bundle (or returns MARKET_DATA_STALE when no fresh candidate exists).
 
-- [ ] **Step 4: Run RED**
+Also cover symbol/product mismatch, missing executable bid/ask/mark, first-attempt expiry
+followed by one fresh retry, and retry exhaustion. All invalid snapshot cases must make zero
+repository, wallet, position and ledger writes.
 
-    & $mvn -f backend/pom.xml "-Dtest=FullFillCoordinatorTest,TradingWorkflowRegressionProtectionTest" test
+- [ ] **Step 4: Write RED pending isolation and concurrency tests**
 
-- [ ] **Step 5: Implement coordinator**
+Assert:
 
-The coordinator computes price, fee rate, liquidity role and slippage once, then calls OrderFillService. Pending and MARKET paths must no longer duplicate fee math.
+    each candidate resolves its whole bundle outside the transaction
+    PENDING/trigger/freshness are rechecked after locks
+    stale or failed candidate remains PENDING and retains its hold
+    failure of candidate N does not prevent candidate N+1 from filling
+    two concurrent workers create at most one Trade for one order
+    waiting GTC LIMIT is persisted as maker; immediate LIMIT is taker
+    TradingTransactionExecutor is annotated REQUIRES_NEW
 
-- [ ] **Step 6: Make each pending order its own transaction**
+- [ ] **Step 5: Run RED**
+
+    & $mvn -f backend/pom.xml "-Dtest=FullFillCoordinatorTest,SimulatedExecutionAdapterFeeTest,OrderFillServiceTest,OrderServiceTest,PendingOrderExecutionServiceTest,SpotSettlementServiceTest,TradingWorkflowRegressionProtectionTest" test
+
+- [ ] **Step 6: Implement coordinator and make the adapter quantity-only**
+
+The coordinator is the sole price, fee rate, fee asset, liquidity role, slippage and source-metadata authority, then calls OrderFillService. Pending and MARKET paths must no longer duplicate that math. FullFillExecutionPath supplies the role decision explicitly. SimulatedExecutionAdapter must not call QuoteService or calculate fees/prices; it may only return or validate an explicit full requested quantity with zero remaining quantity for the DEMO execution intent.
+
+- [ ] **Step 7: Persist one complete Order/Trade fill**
+
+Before the first mutation, reject every non-full adapter/coordinator result. On success set
+Order to FILLED (never write PARTIALLY_FILLED), write exactly one Trade, and copy productType,
+positionSide, marginMode, fee, feeAsset, liquidityRole, sourceMode and providerCode. Spot
+settlement consumes the explicit canonical fee amount/asset instead of deriving a rate;
+reuse PositionEngine and the existing wallet/ledger services.
+
+- [ ] **Step 8: Move network resolution outside transaction and isolate pending orders**
+
+Remove the outer createOrder transaction only where needed so whole-bundle resolution occurs
+before locks, then enter TradingTransactionExecutor for the mutation. Keep cancel/modify
+transactions unchanged. Recheck account, wallets/positions, order state, trigger condition and
+snapshot freshness after locking. Catch failures per pending candidate so the batch continues.
 
 The scheduler loop must invoke a separate transactional worker per order so one failure cannot roll back the batch.
 
-- [ ] **Step 7: Run GREEN**
+- [ ] **Step 9: Run GREEN**
 
-    & $mvn -f backend/pom.xml "-Dtest=FullFillCoordinatorTest,SimulatedExecutionAdapterFeeTest,OrderFillServiceTest,PendingOrderExecutionServiceTest,TradingWorkflowRegressionProtectionTest" test
+    & $mvn -f backend/pom.xml "-Dtest=ArchitectureRulesTest,ErrorCodeContractTest,FullFillCoordinatorTest,SimulatedExecutionAdapterFeeTest,OrderFillServiceTest,OrderServiceTest,PendingOrderExecutionServiceTest,SpotSettlementServiceTest,TradingTransactionExecutorTest,TradingWorkflowRegressionProtectionTest" test
 
-- [ ] **Step 8: Commit**
+    & $mvn -f backend/pom.xml test
+
+- [ ] **Step 10: Commit**
 
     git add backend/src/main backend/src/test
     git commit -m "refactor: unify demo full-fill execution"
@@ -574,7 +660,7 @@ Cover BUY and SELL price validation, one shared hold, one-leg-fill-cancels-other
 
 - [ ] **Step 6: Implement Spot semantics**
 
-Perform hold and order creation in one account/wallet transaction. PendingOrderExecutionProcessor uses REQUIRES_NEW per order. OCO group claim and peer cancellation occur under ordered row locks.
+Perform hold and order creation in one account/wallet transaction. PendingOrderExecutionProcessor invokes the Task 5 TradingTransactionExecutor (`REQUIRES_NEW`) per order rather than defining another transaction boundary. OCO group claim and peer cancellation occur under ordered row locks.
 
 - [ ] **Step 7: Run GREEN and wallet regression**
 
