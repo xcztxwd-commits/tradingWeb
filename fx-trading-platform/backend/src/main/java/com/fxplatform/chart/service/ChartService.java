@@ -6,6 +6,7 @@ import com.fxplatform.chart.repository.CandleRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.market.provider.MarketDataRouter;
+import com.fxplatform.market.model.MarketBundleProducts;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -26,6 +27,9 @@ public class ChartService {
 
   public List<CandleResponse> candles(String symbol, String timeframe, Instant from, Instant to) {
     String normalizedSymbol = SymbolNormalizer.normalize(symbol);
+    if (MarketBundleProducts.isP0(normalizedSymbol)) {
+      return marketDataRouter.candles(normalizedSymbol, timeframe, from, to);
+    }
     try {
       List<CandleResponse> providerCandles = marketDataRouter.candles(normalizedSymbol, timeframe, from, to);
       List<CandleEntity> dbCandles = databaseCandleEntities(normalizedSymbol, timeframe, from, to);

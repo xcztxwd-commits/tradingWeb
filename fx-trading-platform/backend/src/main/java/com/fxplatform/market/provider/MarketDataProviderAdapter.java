@@ -6,6 +6,9 @@ import com.fxplatform.market.dto.MarketDepthResponse;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
 import com.fxplatform.market.dto.SymbolResponse;
+import com.fxplatform.market.model.CandleRequest;
+import com.fxplatform.market.model.PerpetualMarketBundle;
+import com.fxplatform.market.model.SpotMarketBundle;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -68,5 +71,21 @@ public interface MarketDataProviderAdapter extends MarketDataProvider {
 
   default List<RecentTradeResponse> fetchRecentTrades(String symbol, String providerSymbol, int limit) {
     return List.of();
+  }
+
+  default Optional<SpotMarketBundle> fetchSpotBundle(
+      String platformSymbol,
+      String providerSymbol,
+      CandleRequest candleRequest
+  ) {
+    return Optional.empty();
+  }
+
+  default Optional<PerpetualMarketBundle> fetchPerpetualBundle(
+      String platformSymbol,
+      String providerSymbol,
+      CandleRequest candleRequest
+  ) {
+    return Optional.empty();
   }
 }

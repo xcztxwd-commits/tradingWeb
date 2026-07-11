@@ -10,15 +10,22 @@ import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
 import com.fxplatform.market.dto.SymbolResponse;
 import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.model.CandleRequest;
+import com.fxplatform.market.model.MarketSourceMode;
+import com.fxplatform.market.model.SpotMarketBundle;
+import com.fxplatform.market.provider.MarketBundleAssembler;
 import com.fxplatform.market.provider.MarketDataCapability;
+import com.fxplatform.market.provider.MarketDataDurations;
 import com.fxplatform.market.provider.MarketDataProviderAdapter;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -28,6 +35,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -39,21 +47,61 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
   private static final List<CryptoSymbol> CRYPTO_SYMBOLS = List.of(
       new CryptoSymbol("BTCUSDT", "BTC-USDT", "Bitcoin / Tether", "BTC", "USDT"),
       new CryptoSymbol("ETHUSDT", "ETH-USDT", "Ethereum / Tether", "ETH", "USDT"),
+      new CryptoSymbol("BNBUSDT", "BNB-USDT", "BNB / Tether", "BNB", "USDT"),
       new CryptoSymbol("SOLUSDT", "SOL-USDT", "Solana / Tether", "SOL", "USDT"),
       new CryptoSymbol("XRPUSDT", "XRP-USDT", "XRP / Tether", "XRP", "USDT"));
 
   private final String restBaseUrl;
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
+  private final Clock clock;
+  private final Duration freshness;
+  private final Duration requestTimeout;
+
+  @Autowired
+  public OkxSpotMarketDataProvider(
+      @Value("${okx.rest-base-url:https://www.okx.com}") String restBaseUrl,
+      @Value("${market.bundle-freshness:3s}") String freshnessValue,
+      @Value("${market.public-http-timeout:2s}") String requestTimeoutValue
+  ) {
+    this(
+        restBaseUrl,
+        newHttpClient(MarketDataDurations.parsePositive(requestTimeoutValue, Duration.ofSeconds(2))),
+        new ObjectMapper(),
+        Clock.systemUTC(),
+        MarketDataDurations.parsePositive(freshnessValue, Duration.ofSeconds(3)),
+        MarketDataDurations.parsePositive(requestTimeoutValue, Duration.ofSeconds(2)));
+  }
+
+  public OkxSpotMarketDataProvider(String restBaseUrl) {
+    this(restBaseUrl, newHttpClient(Duration.ofSeconds(2)),
+        new ObjectMapper(), Clock.systemUTC(), Duration.ofSeconds(3), Duration.ofSeconds(2));
+  }
 
   public OkxSpotMarketDataProvider(
-      @Value("${okx.rest-base-url:https://www.okx.com}") String restBaseUrl
+      String restBaseUrl,
+      HttpClient httpClient,
+      ObjectMapper objectMapper,
+      Clock clock,
+      Duration freshness
+  ) {
+    this(restBaseUrl, httpClient, objectMapper, clock, freshness, Duration.ofSeconds(2));
+  }
+
+  public OkxSpotMarketDataProvider(
+      String restBaseUrl,
+      HttpClient httpClient,
+      ObjectMapper objectMapper,
+      Clock clock,
+      Duration freshness,
+      Duration requestTimeout
   ) {
     this.restBaseUrl = restBaseUrl;
-    this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(5))
-        .build();
-    this.objectMapper = new ObjectMapper();
+    this.httpClient = httpClient;
+    this.objectMapper = objectMapper;
+    this.clock = clock;
+    this.freshness = MarketDataDurations.positive(freshness, Duration.ofSeconds(3));
+    this.requestTimeout = MarketDataDurations.positive(requestTimeout, Duration.ofSeconds(2));
   }
 
   @Override
@@ -164,6 +212,54 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
         .orElse(List.of());
   }
 
+  @Override
+  public Optional<SpotMarketBundle> fetchSpotBundle(
+      String platformSymbol,
+      String providerSymbol,
+      CandleRequest candleRequest
+  ) {
+    if (!configured() || candleRequest == null) {
+      return Optional.empty();
+    }
+    String instrument = normalizeInstrument(StrUtil.blankToDefault(providerSymbol, platformSymbol));
+    Optional<QuoteResponse> quote = fetchLatestQuote(platformSymbol, instrument);
+    Instant quoteFetchedAt = clock.instant();
+    if (quote.isEmpty()) {
+      return Optional.empty();
+    }
+    Optional<MarketDepthResponse> depth = fetchOrderBook(platformSymbol, instrument);
+    Instant depthFetchedAt = clock.instant();
+    if (depth.isEmpty()) {
+      return Optional.empty();
+    }
+    List<RecentTradeResponse> trades = fetchRecentTrades(platformSymbol, instrument, 40);
+    Instant tradesFetchedAt = clock.instant();
+    if (trades.isEmpty()) {
+      return Optional.empty();
+    }
+    List<CandleResponse> candles = fetchCandles(
+        platformSymbol, instrument, candleRequest.timeframe(), candleRequest.from(), candleRequest.to());
+    Instant candlesFetchedAt = clock.instant();
+    if (candles.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(MarketBundleAssembler.spot(
+        normalizePlatformSymbol(platformSymbol),
+        instrument,
+        code(),
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        quote.get(),
+        depth.get(),
+        trades,
+        candles,
+        MarketBundleAssembler.ComponentObservations.spot(
+            MarketBundleAssembler.snapshotObservedAt(quote.get().timestamp(), quoteFetchedAt),
+            MarketBundleAssembler.snapshotObservedAt(depth.get().timestamp(), depthFetchedAt),
+            tradesFetchedAt,
+            candlesFetchedAt),
+        freshness));
+  }
+
   private URI tickerUri(String instId) {
     return URI.create("%s/api/v5/market/ticker?instId=%s".formatted(baseUrl(), instId));
   }
@@ -196,7 +292,7 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
 
   private Optional<JsonNode> sendJson(URI uri) {
     HttpRequest request = HttpRequest.newBuilder(uri)
-        .timeout(Duration.ofSeconds(10))
+        .timeout(requestTimeout)
         .header("Accept", "application/json")
         .GET()
         .build();
@@ -242,11 +338,25 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
         mid,
         ask.subtract(bid),
         "okx-spot",
-        data.path("ts").asLong(Instant.now().toEpochMilli()),
-        BigDecimal.ZERO,
+        data.path("ts").asLong(clock.instant().toEpochMilli()),
+        changePercent(data, mid),
         decimalValue(data, "high24h").orElse(mid),
         decimalValue(data, "low24h").orElse(mid),
         decimalValue(data, "vol24h").orElse(null)));
+  }
+
+  private static HttpClient newHttpClient(Duration timeout) {
+    return HttpClient.newBuilder().connectTimeout(timeout).build();
+  }
+
+  private BigDecimal changePercent(JsonNode data, BigDecimal last) {
+    Optional<BigDecimal> open = decimalValue(data, "open24h");
+    if (open.isEmpty() || open.get().signum() <= 0) {
+      return BigDecimal.ZERO;
+    }
+    return last.subtract(open.get())
+        .divide(open.get(), 10, RoundingMode.HALF_UP)
+        .multiply(BigDecimal.valueOf(100));
   }
 
   private Map<String, QuoteResponse> parseTickerBatch(JsonNode body, Map<String, String> platformSymbolByInstrument) {
@@ -288,7 +398,7 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
   private MarketDepthResponse parseDepth(String requestedSymbol, JsonNode data) {
     return new MarketDepthResponse(
         normalizePlatformSymbol(requestedSymbol),
-        data.path("ts").asLong(Instant.now().toEpochMilli()),
+        data.path("ts").asLong(clock.instant().toEpochMilli()),
         parseDepthLevels(data.path("bids")),
         parseDepthLevels(data.path("asks")));
   }
@@ -317,7 +427,7 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
             decimalText(row, "px"),
             decimalText(row, "sz"),
             row.path("side").asText("buy").toUpperCase(Locale.ROOT),
-            row.path("ts").asLong(Instant.now().toEpochMilli())))
+            row.path("ts").asLong(clock.instant().toEpochMilli())))
         .toList();
   }
 
@@ -382,6 +492,9 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
 
   private String normalizeInterval(String timeframe) {
     String interval = StrUtil.blankToDefault(timeframe, "1m").trim();
+    if (interval.toLowerCase(Locale.ROOT).endsWith("h")) {
+      return interval.substring(0, interval.length() - 1) + "H";
+    }
     if ("1d".equalsIgnoreCase(interval)) {
       return "1D";
     }

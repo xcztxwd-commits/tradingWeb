@@ -9,18 +9,116 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 
 class BinanceSpotMarketDataProviderTest {
 
   private final ObjectMapper objectMapper = new ObjectMapper();
+
+  @Test
+  void configuredPublicTimeoutStopsWholeBundleBeforeDownstreamRequests() throws IOException {
+    AtomicInteger downstreamRequests = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.createContext("/api/v3/ticker/24hr", exchange -> {
+      java.util.concurrent.locks.LockSupport.parkNanos(Duration.ofMillis(250).toNanos());
+      writeJson(exchange, """
+          {"bidPrice":"1","askPrice":"2","lastPrice":"1.5","closeTime":1783814410000}
+          """);
+    });
+    server.createContext("/api/v3/depth", exchange -> {
+      downstreamRequests.incrementAndGet();
+      writeJson(exchange, "{}");
+    });
+    server.createContext("/api/v3/trades", exchange -> {
+      downstreamRequests.incrementAndGet();
+      writeJson(exchange, "[]");
+    });
+    server.createContext("/api/v3/klines", exchange -> {
+      downstreamRequests.incrementAndGet();
+      writeJson(exchange, "[]");
+    });
+    server.start();
+    try {
+      var provider = new BinanceSpotMarketDataProvider(
+          "http://127.0.0.1:" + server.getAddress().getPort(),
+          HttpClient.newHttpClient(), objectMapper, Clock.systemUTC(),
+          Duration.ofSeconds(5), Duration.ofMillis(50));
+
+      var bundle = provider.fetchSpotBundle(
+          "BTCUSDT", "BTCUSDT",
+          new com.fxplatform.market.model.CandleRequest(
+              "1m", Instant.now().minusSeconds(60), Instant.now()));
+
+      assertThat(bundle).isEmpty();
+      assertThat(downstreamRequests).hasValue(0);
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void completeSpotFixtureBuildsSingleProviderBundleWithInjectedDependencies() throws IOException {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    Instant observedAt = now.minusSeconds(1);
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.createContext("/api/v3/ticker/24hr", exchange -> writeJson(exchange, """
+        {"symbol":"BTCUSDT","bidPrice":"65000.10","askPrice":"65000.20",
+         "lastPrice":"65000.15","priceChangePercent":"1.25","highPrice":"66000",
+         "lowPrice":"64000","volume":"1234.5","closeTime":%d}
+        """.formatted(observedAt.toEpochMilli())));
+    server.createContext("/api/v3/depth", exchange -> writeJson(exchange, """
+        {"bids":[["65000.10","1.2"]],"asks":[["65000.20","2.3"]]}
+        """));
+    server.createContext("/api/v3/trades", exchange -> writeJson(exchange, """
+        [{"id":10,"price":"65000.15","qty":"0.3","isBuyerMaker":false,"time":1700000000000}]
+        """));
+    server.createContext("/api/v3/klines", exchange -> writeJson(exchange, """
+        [[1700000000000,"64000","65100","63900","65000","12.4"]]
+        """));
+    server.start();
+    try {
+      BinanceSpotMarketDataProvider provider = new BinanceSpotMarketDataProvider(
+          "http://127.0.0.1:" + server.getAddress().getPort(),
+          HttpClient.newHttpClient(), objectMapper, Clock.fixed(now, ZoneOffset.UTC), Duration.ofSeconds(5));
+
+      var bundle = provider.fetchSpotBundle(
+          "BTCUSDT", "BTCUSDT",
+          new com.fxplatform.market.model.CandleRequest("1m", now.minusSeconds(3600), now));
+
+      assertThat(bundle).isPresent();
+      assertThat(bundle.get().providerCode()).isEqualTo("binance");
+      assertThat(bundle.get().changePercent()).isEqualByComparingTo("1.25");
+      assertThat(bundle.get().high24h()).isEqualByComparingTo("66000");
+      assertThat(bundle.get().low24h()).isEqualByComparingTo("64000");
+      assertThat(bundle.get().volume24h()).isEqualByComparingTo("1234.5");
+      assertThat(bundle.get().asOf()).isEqualTo(observedAt);
+      assertThat(bundle.get().expiresAt()).isEqualTo(observedAt.plusSeconds(5));
+      assertThat(bundle.get().orderBook().providerCode()).isEqualTo("binance");
+      assertThat(bundle.get().recentTrades()).allMatch(trade -> observedAt.equals(trade.asOf()));
+      assertThat(bundle.get().candles()).allMatch(candle -> observedAt.equals(candle.asOf()));
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
 
   @Test
   void fetchLatestQuoteMapsSpotTickerResponseForSol() throws IOException {

@@ -2,6 +2,9 @@ package com.fxplatform.market.provider;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.common.exception.BusinessException;
@@ -9,6 +12,7 @@ import com.fxplatform.market.entity.DataProviderCapabilityEntity;
 import com.fxplatform.market.entity.DataProviderEntity;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.entity.SymbolProviderBindingEntity;
+import com.fxplatform.market.enums.ProviderHealthStatus;
 import com.fxplatform.market.repository.DataProviderCapabilityRepository;
 import com.fxplatform.market.repository.DataProviderRepository;
 import com.fxplatform.market.repository.SymbolProviderBindingRepository;
@@ -63,6 +67,40 @@ class ProviderResolverTest {
     assertThat(resolution.provider()).isSameAs(fastProvider);
     assertThat(resolution.adapter()).isSameAs(fastAdapter);
     assertThat(resolution.providerSymbol()).isEqualTo("EUR_USD");
+  }
+
+  @Test
+  void legacyResolveReturnsPrimaryWhenSecondaryRepositoryLookupWouldFail() {
+    UUID symbolId = UUID.randomUUID();
+    UUID primaryProviderId = UUID.randomUUID();
+    UUID secondaryProviderId = UUID.randomUUID();
+    SymbolProviderBindingEntity primary = binding(
+        symbolId, primaryProviderId, "BTCUSDT", 10, true);
+    SymbolProviderBindingEntity secondary = binding(
+        symbolId, secondaryProviderId, "BTC-USDT", 20, true);
+    DataProviderEntity primaryProvider = provider(primaryProviderId, "binance", true);
+    FakeAdapter primaryAdapter = new FakeAdapter(
+        "binance", true, MarketDataCapability.QUOTE);
+
+    when(symbolRepository.findBySymbol("BTCUSDT"))
+        .thenReturn(Optional.of(symbol(symbolId, "BTCUSDT", true)));
+    when(bindingRepository.findEnabledBySymbolIdOrderByPriority(symbolId))
+        .thenReturn(List.of(primary, secondary));
+    when(providerRepository.findById(any(UUID.class))).thenAnswer(invocation -> {
+      UUID providerId = invocation.getArgument(0);
+      if (providerId.equals(primaryProviderId)) {
+        return Optional.of(primaryProvider);
+      }
+      throw new IllegalStateException("secondary repository unavailable");
+    });
+    when(capabilityRepository.existsEnabledCapability(
+        primaryProviderId, MarketDataCapability.QUOTE)).thenReturn(true);
+
+    ProviderResolution resolution = resolver(List.of(primaryAdapter))
+        .resolve("BTCUSDT", MarketDataCapability.QUOTE);
+
+    assertThat(resolution.provider()).isSameAs(primaryProvider);
+    verify(providerRepository, never()).findById(secondaryProviderId);
   }
 
   @Test
@@ -175,6 +213,96 @@ class ProviderResolverTest {
     assertThat(resolutions.get("EURUSD").providerSymbol()).isEqualTo("C:EURUSD");
     assertThat(resolutions.get("BTCUSDT").provider()).isSameAs(binance);
     assertThat(resolutions.get("BTCUSDT").providerSymbol()).isEqualTo("BTCUSDT");
+  }
+
+  @Test
+  void resolveCandidatesKeepsDownPrimaryEligibleForRecoveryProbe() {
+    UUID symbolId = UUID.randomUUID();
+    UUID binanceId = UUID.randomUUID();
+    UUID okxId = UUID.randomUUID();
+    SymbolEntity symbol = symbol(symbolId, "BTCUSDT", true);
+    SymbolProviderBindingEntity binanceBinding = binding(symbolId, binanceId, "BTCUSDT", 10, true);
+    SymbolProviderBindingEntity okxBinding = binding(symbolId, okxId, "BTC-USDT", 20, true);
+    DataProviderEntity binance = provider(binanceId, "binance", true);
+    binance.setHealthStatus(ProviderHealthStatus.DOWN);
+    DataProviderEntity okx = provider(okxId, "okx", true);
+
+    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol));
+    when(bindingRepository.findEnabledBySymbolIdOrderByPriority(symbolId))
+        .thenReturn(List.of(binanceBinding, okxBinding));
+    when(providerRepository.findById(binanceId)).thenReturn(Optional.of(binance));
+    when(providerRepository.findById(okxId)).thenReturn(Optional.of(okx));
+    when(capabilityRepository.existsEnabledCapability(binanceId, MarketDataCapability.QUOTE)).thenReturn(true);
+    when(capabilityRepository.existsEnabledCapability(okxId, MarketDataCapability.QUOTE)).thenReturn(true);
+
+    List<ProviderResolution> candidates = resolver(List.of(
+        new FakeAdapter("binance", true, MarketDataCapability.QUOTE),
+        new FakeAdapter("okx", true, MarketDataCapability.QUOTE)))
+        .resolveCandidates("BTCUSDT", MarketDataCapability.QUOTE);
+
+    assertThat(candidates).extracting(candidate -> candidate.provider().getCode())
+        .containsExactly("binance", "okx");
+    assertThat(candidates.getFirst().provider().getHealthStatus()).isEqualTo(ProviderHealthStatus.DOWN);
+  }
+
+  @Test
+  void resolveCandidatesRequiresEveryDatabaseAndAdapterCapability() {
+    UUID symbolId = UUID.randomUUID();
+    UUID databaseIncompleteId = UUID.randomUUID();
+    UUID adapterIncompleteId = UUID.randomUUID();
+    UUID completeId = UUID.randomUUID();
+    SymbolProviderBindingEntity databaseIncompleteBinding = binding(
+        symbolId, databaseIncompleteId, "BTCUSDT", 10, true);
+    SymbolProviderBindingEntity adapterIncompleteBinding = binding(
+        symbolId, adapterIncompleteId, "BTC-USDT", 20, true);
+    SymbolProviderBindingEntity completeBinding = binding(
+        symbolId, completeId, "BTCUSDT", 30, true);
+    DataProviderEntity databaseIncomplete = provider(databaseIncompleteId, "binance", true);
+    DataProviderEntity adapterIncomplete = provider(adapterIncompleteId, "okx", true);
+    DataProviderEntity complete = provider(completeId, "local-spot", true);
+    Set<MarketDataCapability> bundleCapabilities = Set.of(
+        MarketDataCapability.QUOTE,
+        MarketDataCapability.CANDLES,
+        MarketDataCapability.ORDER_BOOK,
+        MarketDataCapability.TRADES);
+
+    when(symbolRepository.findBySymbol("BTCUSDT"))
+        .thenReturn(Optional.of(symbol(symbolId, "BTCUSDT", true)));
+    when(bindingRepository.findEnabledBySymbolIdOrderByPriority(symbolId))
+        .thenReturn(List.of(
+            databaseIncompleteBinding, adapterIncompleteBinding, completeBinding));
+    when(providerRepository.findById(databaseIncompleteId))
+        .thenReturn(Optional.of(databaseIncomplete));
+    when(providerRepository.findById(adapterIncompleteId))
+        .thenReturn(Optional.of(adapterIncomplete));
+    when(providerRepository.findById(completeId)).thenReturn(Optional.of(complete));
+    when(capabilityRepository.existsEnabledCapability(any(UUID.class), any()))
+        .thenAnswer(invocation -> {
+          UUID providerId = invocation.getArgument(0);
+          MarketDataCapability capability = invocation.getArgument(1);
+          return !providerId.equals(databaseIncompleteId)
+              || capability != MarketDataCapability.TRADES;
+        });
+
+    List<ProviderResolution> candidates = resolver(List.of(
+        new FakeAdapter("binance", true,
+            MarketDataCapability.QUOTE,
+            MarketDataCapability.CANDLES,
+            MarketDataCapability.ORDER_BOOK,
+            MarketDataCapability.TRADES),
+        new FakeAdapter("okx", true,
+            MarketDataCapability.QUOTE,
+            MarketDataCapability.ORDER_BOOK,
+            MarketDataCapability.TRADES),
+        new FakeAdapter("local-spot", true,
+            MarketDataCapability.QUOTE,
+            MarketDataCapability.CANDLES,
+            MarketDataCapability.ORDER_BOOK,
+            MarketDataCapability.TRADES)))
+        .resolveCandidates("BTCUSDT", bundleCapabilities);
+
+    assertThat(candidates).extracting(candidate -> candidate.provider().getCode())
+        .containsExactly("local-spot");
   }
 
   private ProviderResolver resolver(List<MarketDataProviderAdapter> adapters) {

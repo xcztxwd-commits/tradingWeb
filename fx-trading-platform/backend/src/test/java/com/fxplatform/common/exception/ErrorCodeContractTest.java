@@ -26,6 +26,9 @@ class ErrorCodeContractTest {
         "EXECUTION_DISABLED",
         "DEMO_ACCOUNT_REQUIRED",
         "PRODUCT_NOT_ALLOWED",
-        "SYMBOL_NOT_ALLOWED"));
+        "SYMBOL_NOT_ALLOWED",
+        "MARKET_DATA_UNAVAILABLE",
+        "MARKET_DATA_STALE",
+        "MARKET_BUNDLE_INCOMPLETE"));
   }
 }

@@ -21,6 +21,9 @@ public final class ErrorCode {
   public static final String DEMO_ACCOUNT_REQUIRED = "DEMO_ACCOUNT_REQUIRED";
   public static final String PRODUCT_NOT_ALLOWED = "PRODUCT_NOT_ALLOWED";
   public static final String SYMBOL_NOT_ALLOWED = "SYMBOL_NOT_ALLOWED";
+  public static final String MARKET_DATA_UNAVAILABLE = "MARKET_DATA_UNAVAILABLE";
+  public static final String MARKET_DATA_STALE = "MARKET_DATA_STALE";
+  public static final String MARKET_BUNDLE_INCOMPLETE = "MARKET_BUNDLE_INCOMPLETE";
 
   private static final Set<String> STANDARD_CODES = Set.of(
       AUTH_TOKEN_EXPIRED,
@@ -39,7 +42,10 @@ public final class ErrorCode {
       EXECUTION_DISABLED,
       DEMO_ACCOUNT_REQUIRED,
       PRODUCT_NOT_ALLOWED,
-      SYMBOL_NOT_ALLOWED);
+      SYMBOL_NOT_ALLOWED,
+      MARKET_DATA_UNAVAILABLE,
+      MARKET_DATA_STALE,
+      MARKET_BUNDLE_INCOMPLETE);
 
   private ErrorCode() {
   }

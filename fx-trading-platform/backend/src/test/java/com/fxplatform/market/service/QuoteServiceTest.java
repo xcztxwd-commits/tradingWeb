@@ -5,11 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.provider.MarketDataRouter;
+import com.fxplatform.market.model.MarketSourceMode;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.util.List;
@@ -35,7 +38,7 @@ class QuoteServiceTest {
   @Mock
   private ValueOperations<String, String> valueOperations;
 
-  private final ObjectMapper objectMapper = new ObjectMapper();
+  private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
 
   @Test
   void quoteStaleWindowPrefersSharedMarketConfigWithMassiveFallback() throws NoSuchFieldException {
@@ -94,6 +97,41 @@ class QuoteServiceTest {
   }
 
   @Test
+  void p0QuoteNeverUsesRedisRealtimeCacheInsteadOfAuthoritativeBundle() throws Exception {
+    long now = System.currentTimeMillis();
+    QuoteResponse authoritative = new QuoteResponse(
+        "quote", "BTCUSDT", new BigDecimal("65000"), new BigDecimal("65001"),
+        new BigDecimal("65000.5"), null, BigDecimal.ONE, "okx", now,
+        null, null, null, null, MarketSourceMode.PUBLIC_EXTERNAL, "okx", "BTC-USDT",
+        java.time.Instant.ofEpochMilli(now), java.time.Instant.ofEpochMilli(now + 5000), false);
+    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+    when(marketDataRouter.latestQuote("BTCUSDT")).thenReturn(authoritative);
+
+    QuoteResponse result = service(false).latestQuote("BTCUSDT");
+
+    assertThat(result).isSameAs(authoritative);
+    assertThat(result.providerCode()).isEqualTo("okx");
+    verify(marketDataRouter).latestQuote("BTCUSDT");
+    verify(valueOperations, never()).get("quote:BTCUSDT");
+  }
+
+  @Test
+  void p0AuthoritativeQuoteStillReturnsWhenRedisWriteFails() {
+    long now = System.currentTimeMillis();
+    QuoteResponse authoritative = new QuoteResponse(
+        "quote", "BTCUSDT", new BigDecimal("65000"), new BigDecimal("65001"),
+        new BigDecimal("65000.5"), null, BigDecimal.ONE, "local-spot", now,
+        null, null, null, null, MarketSourceMode.LOCAL_SIMULATED, "local-spot", "BTCUSDT",
+        java.time.Instant.ofEpochMilli(now), java.time.Instant.ofEpochMilli(now + 5000), false);
+    when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+    doThrow(new IllegalStateException("redis down"))
+        .when(valueOperations).set(org.mockito.ArgumentMatchers.eq("quote:BTCUSDT"), anyString());
+    when(marketDataRouter.latestQuote("BTCUSDT")).thenReturn(authoritative);
+
+    assertThat(service(false).latestQuote("BTCUSDT")).isSameAs(authoritative);
+  }
+
+  @Test
   void latestQuotesUsesFreshCacheAndFetchesMissingSymbolsInOneBatch() throws Exception {
     QuoteResponse cached = new QuoteResponse(
         "quote",
@@ -116,8 +154,7 @@ class QuoteServiceTest {
 
     when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     when(valueOperations.get("quote:EURUSD")).thenReturn(objectMapper.writeValueAsString(cached));
-    when(valueOperations.get("quote:BTCUSDT")).thenReturn(null);
-    when(marketDataRouter.snapshots(List.of("BTCUSDT"))).thenReturn(Map.of("BTCUSDT", fetched));
+    when(marketDataRouter.latestQuote("BTCUSDT")).thenReturn(fetched);
 
     QuoteService service = service(false);
     ReflectionTestUtils.setField(service, "quoteStaleMs", 600_000);
@@ -127,7 +164,7 @@ class QuoteServiceTest {
     assertThat(quotes.keySet()).containsExactly("EURUSD", "BTCUSDT");
     assertThat(quotes.get("EURUSD")).isEqualTo(cached);
     assertThat(quotes.get("BTCUSDT")).isSameAs(fetched);
-    verify(marketDataRouter).snapshots(List.of("BTCUSDT"));
+    verify(marketDataRouter).latestQuote("BTCUSDT");
   }
 
   @Test

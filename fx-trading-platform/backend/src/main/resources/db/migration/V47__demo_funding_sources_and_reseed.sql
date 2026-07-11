@@ -74,11 +74,11 @@ INSERT INTO market.data_providers (
   ),
   (
     'local-spot', 'Local Spot Simulation', 'LOCAL', ARRAY['CRYPTO'],
-    null, null, true, 900, 'HEALTHY', '{"market":"spot"}'::jsonb
+    null, null, true, 900, 'UP', '{"market":"spot"}'::jsonb
   ),
   (
     'local-perp', 'Local Perpetual Simulation', 'LOCAL', ARRAY['CRYPTO', 'LINEAR_PERP'],
-    null, null, true, 900, 'HEALTHY', '{"market":"linear-perp"}'::jsonb
+    null, null, true, 900, 'UP', '{"market":"linear-perp"}'::jsonb
   )
 ON CONFLICT (code) DO NOTHING;
 

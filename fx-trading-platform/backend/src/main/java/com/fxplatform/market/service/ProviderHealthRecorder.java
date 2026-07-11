@@ -39,7 +39,10 @@ public class ProviderHealthRecorder {
     if (quote != null) {
       provider.setQuoteStalenessMs(Math.max(0, now.toEpochMilli() - quote.timestamp()));
     }
-    save(provider);
+    if (providerRepository != null) {
+      providerRepository.updateQuoteSuccessHealth(
+          provider.getId(), now, latencyMs, provider.getQuoteStalenessMs());
+    }
   }
 
   public void recordFailure(DataProviderEntity provider, long latencyMs) {
@@ -54,7 +57,9 @@ public class ProviderHealthRecorder {
     provider.setLastFailureAt(now);
     provider.setFailureCount(currentFailures + 1);
     provider.setAvgLatencyMs((currentAverage * (currentFailures + 1) + latencyMs) / (currentFailures + 2));
-    save(provider);
+    if (providerRepository != null) {
+      providerRepository.updateFailureHealth(provider.getId(), now, latencyMs);
+    }
   }
 
   public void recordInstrumentSyncSuccess(DataProviderEntity provider, int syncedCount) {
@@ -67,12 +72,8 @@ public class ProviderHealthRecorder {
     provider.setLastSuccessAt(now);
     provider.setLastInstrumentSyncAt(now);
     provider.setLastInstrumentSyncCount(syncedCount);
-    save(provider);
-  }
-
-  private void save(DataProviderEntity provider) {
     if (providerRepository != null) {
-      providerRepository.save(provider);
+      providerRepository.updateInstrumentSyncSuccessHealth(provider.getId(), now, syncedCount);
     }
   }
 }

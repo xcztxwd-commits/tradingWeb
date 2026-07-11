@@ -1,5 +1,7 @@
 package com.fxplatform.market.dto;
 
+import com.fxplatform.market.model.MarketSourceMode;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -9,6 +11,21 @@ public record MarketDepthResponse(
     String symbol,
     long timestamp,
     List<MarketDepthLevelResponse> bids,
-    List<MarketDepthLevelResponse> asks
+    List<MarketDepthLevelResponse> asks,
+    String providerCode,
+    String providerSymbol,
+    MarketSourceMode sourceMode,
+    Instant asOf,
+    Instant expiresAt,
+    boolean stale
 ) {
+
+  public MarketDepthResponse(
+      String symbol,
+      long timestamp,
+      List<MarketDepthLevelResponse> bids,
+      List<MarketDepthLevelResponse> asks
+  ) {
+    this(symbol, timestamp, bids, asks, null, null, null, null, null, false);
+  }
 }

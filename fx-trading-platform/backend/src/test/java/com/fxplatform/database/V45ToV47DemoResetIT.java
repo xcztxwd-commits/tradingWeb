@@ -2,10 +2,13 @@ package com.fxplatform.database;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fxplatform.market.enums.ProviderHealthStatus;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -69,7 +72,7 @@ class V45ToV47DemoResetIT {
         insert into market.data_providers (
           id, code, name, provider_type, asset_classes, enabled, priority, health_status, config_json
         ) values (?, 'fixture-provider', 'Fixture Provider', 'LOCAL', ARRAY['CRYPTO'], false, 777,
-          'HEALTHY', '{"fixture":true}'::jsonb)
+          'DOWN', '{"fixture":true}'::jsonb)
         """, providerId);
     jdbc.update("""
         insert into config.system_settings (
@@ -465,6 +468,32 @@ class V45ToV47DemoResetIT {
         "select priority from market.data_providers where id = ?",
         Integer.class,
         fixture.providerId())).isEqualTo(777);
+    assertThat(jdbc.queryForObject(
+        "select health_status from market.data_providers where id = ?",
+        String.class,
+        fixture.providerId())).isEqualTo(ProviderHealthStatus.DOWN.name());
+    Map<String, String> localProviderHealth = jdbc.query(
+        """
+            select code, health_status
+            from market.data_providers
+            where code in ('local-spot', 'local-perp')
+            order by code
+            """,
+        rs -> {
+          java.util.LinkedHashMap<String, String> values = new java.util.LinkedHashMap<>();
+          while (rs.next()) {
+            values.put(rs.getString("code"), rs.getString("health_status"));
+          }
+          return values;
+        });
+    assertThat(localProviderHealth)
+        .containsOnly(
+            Map.entry("local-perp", ProviderHealthStatus.UP.name()),
+            Map.entry("local-spot", ProviderHealthStatus.UP.name()));
+    Set<String> supportedHealthStatuses = java.util.Arrays.stream(ProviderHealthStatus.values())
+        .map(Enum::name)
+        .collect(java.util.stream.Collectors.toSet());
+    assertThat(localProviderHealth.values()).allMatch(supportedHealthStatuses::contains);
     assertThat(jdbc.queryForObject(
         "select setting_value from config.system_settings where id = ?",
         String.class,

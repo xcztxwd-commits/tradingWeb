@@ -60,7 +60,10 @@ class V46V47EmptyDatabaseIT {
         .contains("binance-usdm")
         .contains("okx-swap")
         .contains("local-perp")
+        .contains("null, null, true, 900, 'UP', '{\"market\":\"spot\"}'::jsonb")
+        .contains("null, null, true, 900, 'UP', '{\"market\":\"linear-perp\"}'::jsonb")
         .contains("UPDATE market.data_providers\nSET enabled = true")
+        .doesNotContain("'HEALTHY'")
         .doesNotContain("'USDT_PERP'");
     assertThat(v47.indexOf("CREATE UNIQUE INDEX IF NOT EXISTS ux_trading_accounts_user_active_demo"))
         .isGreaterThan(v47.indexOf("DELETE FROM core.trading_accounts"));

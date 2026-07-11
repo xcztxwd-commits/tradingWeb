@@ -59,9 +59,17 @@ binance:
   futures-base-url: ${BINANCE_FUTURES_BASE_URL:https://fapi.binance.com}
   websocket-base-url: ${BINANCE_WS_BASE_URL:wss://stream.binance.com:9443/ws}
 
+okx:
+  rest-base-url: ${OKX_REST_BASE_URL:https://www.okx.com}
+
 market:
   fear-greed-url: ${MARKET_FEAR_GREED_URL:https://api.alternative.me/fng/?limit=1&format=json}
   quote-stale-ms: ${MARKET_QUOTE_STALE_MS:3000}
+  bundle-freshness: ${MARKET_BUNDLE_FRESHNESS:3s}
+  public-http-timeout: ${MARKET_PUBLIC_HTTP_TIMEOUT:2s}
+  local-perp:
+    simulated-premium: ${MARKET_LOCAL_PERP_SIMULATED_PREMIUM:0.0001}
+    premium-limit: ${MARKET_LOCAL_PERP_PREMIUM_LIMIT:0.001}
   demo-quotes:
     enabled: ${MARKET_DEMO_QUOTES_ENABLED:false}
   realtime:
