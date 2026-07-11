@@ -506,7 +506,7 @@ Add /api/market/perpetuals/{symbol}/reference and sourceMode/providerCode/asOf/e
 
 - Resolve a complete fresh bundle before any account/wallet/position/order lock and before the local mutation transaction.
 - TradingTransactionExecutor uses `Propagation.REQUIRES_NEW`; inside it lock in the existing deterministic order, reload mutable state, then validate the snapshot symbol and `now < expiresAt` immediately before the first repository/wallet/ledger write.
-- If lock waiting makes the snapshot stale, roll back with zero writes. The caller may resolve and retry outside the transaction at most two times; after that return `MARKET_DATA_STALE`.
+- If lock waiting makes the snapshot stale, roll back with zero writes. The caller may make at most two total attempts (one initial attempt plus one transaction-external re-resolution); after that return `MARKET_DATA_STALE`. Other business failures are not retried.
 - Never perform an external provider call while holding a trading mutation lock.
 - Every pending candidate runs in its own transaction; one failed/stale candidate remains PENDING with its hold intact and must not prevent later candidates from being processed.
 
@@ -553,7 +553,7 @@ rejection; do not delete the historical enum because legacy rows remain readable
 
 Resolve a valid snapshot, block on the account lock until expiresAt passes, then release the lock. Assert the coordinator makes zero mutation with the expired snapshot and the caller retries outside the transaction with a newly resolved whole bundle (or returns MARKET_DATA_STALE when no fresh candidate exists).
 
-Also cover symbol/product mismatch, missing executable bid/ask/mark, first-attempt expiry
+Also cover symbol/product mismatch, missing Spot bid/ask/last, missing Perp bid/ask/last/mark/index, first-attempt expiry
 followed by one fresh retry, and retry exhaustion. All invalid snapshot cases must make zero
 repository, wallet, position and ledger writes.
 
