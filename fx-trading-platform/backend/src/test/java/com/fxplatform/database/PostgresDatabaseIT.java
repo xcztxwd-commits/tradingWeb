@@ -94,6 +94,36 @@ class PostgresDatabaseIT {
   }
 
   @Test
+  void springBootAppliesTheV46V47MigrationContract() {
+    assertThat(count("""
+        select count(*)
+        from information_schema.tables
+        where table_schema = 'trading' and table_name = 'account_symbol_settings'
+        """)).isEqualTo(1);
+    assertThat(count("""
+        select count(*)
+        from information_schema.columns
+        where table_schema = 'trading'
+          and table_name = 'orders'
+          and column_name in ('position_side', 'margin_mode', 'quantity_unit', 'order_origin')
+        """)).isEqualTo(4);
+    assertThat(count("""
+        select count(*)
+        from market.symbols
+        where tradable = true
+          and symbol in (
+            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+            'BTCUSDT-PERP', 'ETHUSDT-PERP', 'BNBUSDT-PERP', 'SOLUSDT-PERP', 'XRPUSDT-PERP'
+          )
+        """)).isEqualTo(10);
+    assertThat(count("""
+        select count(*)
+        from flyway_schema_history
+        where success = true and version = '47'
+        """)).isEqualTo(1);
+  }
+
+  @Test
   void productTypeConstraintsRejectNullAndInvalidWrites() {
     String nullProductTypeSymbol = "PTN" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
     assertThatThrownBy(() -> insertSymbol(nullProductTypeSymbol, null))
