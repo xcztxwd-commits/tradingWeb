@@ -368,6 +368,7 @@ Static search must show guard use in every currently existing MARKET, pending, m
 
 **Files:**
 - Create: backend/src/main/java/com/fxplatform/market/model/MarketSourceMode.java
+- Create: backend/src/main/java/com/fxplatform/market/model/CandleRequest.java
 - Create: backend/src/main/java/com/fxplatform/market/model/SpotMarketBundle.java
 - Create: backend/src/main/java/com/fxplatform/market/model/PerpetualMarketBundle.java
 - Create: backend/src/main/java/com/fxplatform/market/dto/PerpetualReferenceResponse.java
@@ -378,14 +379,23 @@ Static search must show guard use in every currently existing MARKET, pending, m
 - Create: backend/src/main/java/com/fxplatform/market/adapter/okx/OkxSwapMarketDataProvider.java
 - Create: backend/src/main/java/com/fxplatform/market/adapter/local/LocalSpotMarketDataProvider.java
 - Create: backend/src/main/java/com/fxplatform/market/adapter/local/LocalPerpMarketDataProvider.java
+- Modify: backend/src/main/java/com/fxplatform/market/provider/MarketDataProviderAdapter.java
 - Modify: backend/src/main/java/com/fxplatform/market/provider/ProviderResolver.java
 - Modify: backend/src/main/java/com/fxplatform/market/provider/MarketDataRouter.java
+- Modify: backend/src/main/java/com/fxplatform/market/adapter/binance/BinanceSpotMarketDataProvider.java
+- Modify: backend/src/main/java/com/fxplatform/market/adapter/okx/OkxSpotMarketDataProvider.java
+- Modify: backend/src/main/java/com/fxplatform/market/dto/QuoteResponse.java
 - Modify: backend/src/main/java/com/fxplatform/market/service/QuoteService.java
 - Modify: backend/src/main/java/com/fxplatform/market/service/DemoMarketDataGenerator.java
 - Modify: backend/src/main/java/com/fxplatform/market/controller/MarketController.java
+- Modify: backend/src/main/java/com/fxplatform/chart/service/ChartService.java
+- Modify: backend/src/main/resources/application.yml
+- Test: backend/src/test/java/com/fxplatform/market/provider/ProviderResolverTest.java
 - Test: backend/src/test/java/com/fxplatform/market/provider/MarketBundleResolverTest.java
+- Test: backend/src/test/java/com/fxplatform/market/service/MarketSourceSelectionTrackerTest.java
 - Test: backend/src/test/java/com/fxplatform/market/adapter/binance/BinanceUsdMMarketDataProviderTest.java
 - Test: backend/src/test/java/com/fxplatform/market/adapter/okx/OkxSwapMarketDataProviderTest.java
+- Test: backend/src/test/java/com/fxplatform/market/service/LocalSpotMarketDataProviderTest.java
 - Test: backend/src/test/java/com/fxplatform/market/service/LocalPerpMarketDataProviderTest.java
 
 **Interfaces:**
@@ -394,7 +404,8 @@ Static search must show guard use in every currently existing MARKET, pending, m
     SpotMarketBundle resolveSpot(String platformSymbol, CandleRequest candleRequest)
     PerpetualMarketBundle resolvePerp(String platformSymbol, CandleRequest candleRequest)
 
-- Both bundles contain platformSymbol, providerSymbol, providerCode, sourceMode, bid, ask, last, orderBook, recentTrades, candles, asOf and expiresAt. PerpetualMarketBundle additionally contains mark and index. Every field in one returned bundle is from one provider candidate; its freshness is the most conservative child timestamp.
+- Both bundles contain platformSymbol, providerSymbol, providerCode, sourceMode, bid, ask, last, orderBook, recentTrades, candles, asOf and expiresAt. PerpetualMarketBundle additionally contains mark and index. Every field in one returned bundle is from one provider candidate; its freshness is the most conservative component observation/fetched timestamp, never a historical candle open time.
+- `ProviderResolver.resolveCandidates` returns every eligible candidate in binding priority order. Existing `resolve`, `resolveAll`, Massive/FX and display-cache behavior remain compatible; the exact ten P0 products delegate to the new whole-bundle resolver.
 
 - [ ] **Step 1: Write RED fallback tests**
 
@@ -407,6 +418,9 @@ Scenarios:
     no cross-provider field mixing
     quote/depth/trades/candles all carry the selected provider identity
     exact platform symbol BTCUSDT-PERP and venue-specific providerSymbol coexist
+    primary stale or incomplete => fresh secondary whole bundle
+    first selection emits no source-change event; fallback/recovery emits exactly one each
+    candidate health DOWN does not permanently suppress primary recovery probing
 
 - [ ] **Step 2: Write RED local mark test**
 
@@ -414,6 +428,7 @@ Scenarios:
     mark = index * (1 + clampedPremium)
     bid <= last <= ask
     all fields share generation/asOf
+    five Spot and five Perp local profiles never fall through to the legacy EURUSD profile
 
 - [ ] **Step 3: Run RED**
 
@@ -421,19 +436,19 @@ Scenarios:
 
 - [ ] **Step 4: Implement provider adapters with injected HTTP clients**
 
-Tests must use fixture responses; unit tests may not access the internet. Map provider symbol only inside the adapter.
+Tests must use fixture responses; unit tests may not access the internet. HTTP clients, object mappers and clocks used by adapters must be injectable. Map provider symbols only inside adapters (`BTCUSDT-PERP` remains canonical while Binance uses `BTCUSDT` and OKX uses `BTC-USDT-SWAP`). Existing Spot symbol/rules/icon methods remain compatible, and OKX Spot adds BNBUSDT.
 
 - [ ] **Step 5: Implement candidate fallback and freshness**
 
-ProviderResolver returns ordered candidates. Any missing required quote/depth/trades/candles/reference field, exception or expired snapshot moves to the next entire provider. MarketSourceSelectionTracker emits one source-change event on fallback and recovery.
+ProviderResolver returns ordered candidates. One candidate adapter must produce the entire bundle; the resolver may never fill a missing field from another adapter. Any missing required quote/depth/trades/candles/reference field, exception or expired snapshot moves to the next entire provider. `MarketSourceSelectionTracker` is concurrency-safe and emits one internal typed source-change event on fallback and recovery; public STOMP bridging remains Task 13.
 
 - [ ] **Step 6: Extend REST/status**
 
-Add /api/market/perpetuals/{symbol}/reference and sourceMode/providerCode/asOf/expiresAt/stale fields to existing responses.
+Add /api/market/perpetuals/{symbol}/reference and sourceMode/providerCode/asOf/expiresAt/stale fields to existing responses. For the ten P0 products, Quote/order-book/trades/candles must come from the current selected bundle and must not be overlaid by a different provider's Redis/realtime/DB cache. `ChartService` may overlay only same-provider data; legacy FX database and Massive fallbacks remain unchanged. No database migration or new scheduler is introduced in this task.
 
 - [ ] **Step 7: Run GREEN**
 
-    & $mvn -f backend/pom.xml "-Dtest=MarketBundleResolverTest,BinanceUsdMMarketDataProviderTest,OkxSwapMarketDataProviderTest,LocalPerpMarketDataProviderTest,MarketDataRouterTest,QuoteServiceTest,MarketControllerTest" test
+    & $mvn -f backend/pom.xml "-Dtest=ProviderResolverTest,MarketBundleResolverTest,MarketSourceSelectionTrackerTest,BinanceUsdMMarketDataProviderTest,OkxSwapMarketDataProviderTest,LocalSpotMarketDataProviderTest,LocalPerpMarketDataProviderTest,MarketDataRouterTest,QuoteServiceTest,MarketControllerTest,ChartServiceTest" test
 
 - [ ] **Step 8: Commit**
 
