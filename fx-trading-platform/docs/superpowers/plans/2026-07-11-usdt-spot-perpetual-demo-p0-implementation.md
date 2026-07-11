@@ -312,14 +312,16 @@ Expected: tests pass. OpenAPI export/generation intentionally occurs in Task 13 
 - Modify: backend/src/main/java/com/fxplatform/trading/repository/PositionRepository.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/OrderService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/PendingOrderExecutionService.java
+- Modify: backend/src/main/java/com/fxplatform/trading/service/PositionService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/ProtectiveOrderExecutionService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/FundingService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/LiquidationService.java
+- Modify: backend/src/main/java/com/fxplatform/admin/service/AdminTradingCommandService.java
 - Test: backend/src/test/java/com/fxplatform/execution/DemoExecutionGuardTest.java
 - Test: backend/src/test/java/com/fxplatform/trading/service/OrderPositionConcurrencyTest.java
 
 **Interfaces:**
-- Produces: requireDemo(TradingAccountEntity, ProductType) and FOR UPDATE account/wallet/position methods.
+- Produces: requireDemo(TradingAccountEntity, ProductType, String canonicalSymbol) and FOR UPDATE account/wallet/position/order methods. The guard resolves canonicalSymbol against backend market.symbols and requires tradable=true; no caller-provided boolean is trusted.
 - Guarantees: every repository lock follows the single Global Constraints order; each flow may skip unused lock classes but never reorder them.
 
 - [ ] **Step 1: Write RED guard matrix**
@@ -351,11 +353,11 @@ Repository methods must use SELECT ... FOR UPDATE via mapper SQL or MyBatis-Plus
 
 - [ ] **Step 5: Add guard to every execution entry**
 
-Static search must show guard use in MARKET, pending, protection, funding, liquidation, Admin force close and reset/transfer writers.
+Static search must show guard use in every currently existing MARKET, pending, manual/system close, protection, funding, liquidation and Admin force-close entry. Reset/transfer writers do not exist yet and must call the same guard when Task 7 creates them.
 
 - [ ] **Step 6: Run GREEN**
 
-    & $mvn -f backend/pom.xml "-Dtest=DemoExecutionGuardTest,OrderPositionConcurrencyTest,ExecutionModeStartupValidatorTest" test
+    & $mvn -f backend/pom.xml "-Dtest=DemoExecutionGuardTest,OrderPositionConcurrencyTest,ExecutionModeStartupValidatorTest,PositionServiceTest,AdminTradingCommandServiceTest" test
 
 - [ ] **Step 7: Commit**
 
