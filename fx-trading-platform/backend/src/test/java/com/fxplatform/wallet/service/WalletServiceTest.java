@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -31,6 +32,58 @@ class WalletServiceTest {
 
   @Mock
   private AssetLedgerEntryRepository assetLedgerEntryRepository;
+
+  @BeforeEach
+  void rowLockLookupUsesTheSameFixtureBalance() {
+    org.mockito.Mockito.lenient().when(walletBalanceRepository
+            .findByAccountIdAndWalletTypeAndAssetForUpdate(
+                any(UUID.class), any(String.class), any(String.class)))
+        .thenAnswer(invocation -> walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(
+            invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)));
+  }
+
+  @Test
+  void walletMutationLocksTheBalanceRowBeforeDebit() {
+    UUID accountId = UUID.randomUUID();
+    WalletBalanceEntity balance = balance(
+        accountId, "USDT", "100.00000000", "100.00000000", "0.00000000");
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT")).thenReturn(Optional.of(balance));
+    org.mockito.Mockito.clearInvocations(walletBalanceRepository);
+
+    service().debitAvailable(
+        accountId,
+        "USDT",
+        new BigDecimal("10.00000000"),
+        "TEST",
+        UUID.randomUUID(),
+        "Serialized debit");
+
+    verify(walletBalanceRepository).findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT");
+  }
+
+  @Test
+  void requiredSpotWalletsAreCreatedAndLockedInAssetOrder() {
+    UUID accountId = UUID.randomUUID();
+    WalletBalanceEntity usdt = balance(
+        accountId, "USDT", "100.00000000", "100.00000000", "0.00000000");
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "BTC")).thenReturn(Optional.empty());
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT")).thenReturn(Optional.of(usdt));
+    when(walletBalanceRepository.save(any(WalletBalanceEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    service().lockBalancesInOrder(accountId, List.of("USDT", "btc", "BTC"));
+
+    org.mockito.InOrder assetOrder = org.mockito.Mockito.inOrder(walletBalanceRepository);
+    assetOrder.verify(walletBalanceRepository).findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "BTC");
+    assetOrder.verify(walletBalanceRepository).save(any(WalletBalanceEntity.class));
+    assetOrder.verify(walletBalanceRepository).findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT");
+  }
 
   @Test
   void walletTypeSeparatesSameAssetBalances() {

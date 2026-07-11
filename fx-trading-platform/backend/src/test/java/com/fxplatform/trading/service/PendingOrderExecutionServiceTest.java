@@ -11,8 +11,10 @@ import static org.mockito.Mockito.when;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
@@ -25,12 +27,15 @@ import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
+import com.fxplatform.wallet.repository.WalletBalanceRepository;
+import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -63,6 +68,33 @@ class PendingOrderExecutionServiceTest {
   @Mock
   private OrderEventService orderEventService;
 
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  @Mock
+  private WalletBalanceRepository walletBalanceRepository;
+
+  @Mock
+  private WalletService walletService;
+
+  @Mock
+  private SpotPositionService spotPositionService;
+
+  @Mock
+  private TradingTransactionExecutor transactionExecutor;
+
+  @BeforeEach
+  void rowLockQueriesReturnTheScannedFixtures() {
+    org.mockito.Mockito.lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+    org.mockito.Mockito.lenient().when(orderRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> orderRepository.findByStatus(OrderStatus.PENDING).stream()
+            .filter(order -> order.getId().equals(invocation.getArgument(0)))
+            .findFirst());
+    org.mockito.Mockito.lenient().when(transactionExecutor.execute(any()))
+        .thenAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+  }
+
   @Test
   void executesBuyLimitWhenAskTouchesRequestedPrice() {
     UUID accountId = UUID.randomUUID();
@@ -93,7 +125,13 @@ class PendingOrderExecutionServiceTest {
         quoteService,
         riskCheckService,
         new OrderFillService(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService),
-        orderEventService);
+        orderEventService,
+        demoExecutionGuard,
+        walletBalanceRepository,
+        walletService,
+        spotPositionService,
+        positionRepository,
+        transactionExecutor);
 
     int filled = service.executePendingOrders();
 
@@ -116,6 +154,13 @@ class PendingOrderExecutionServiceTest {
         eq(OrderStatus.FILLED),
         eq(null),
         eq("Pending order filled"));
+    verify(demoExecutionGuard, org.mockito.Mockito.times(2))
+        .requireDemo(account, ProductType.CRYPTO_SPOT, "EURUSD");
+    org.mockito.InOrder accountWalletOrder = org.mockito.Mockito.inOrder(
+        accountRepository, walletBalanceRepository, orderRepository);
+    accountWalletOrder.verify(accountRepository).findByIdForUpdate(accountId);
+    accountWalletOrder.verify(walletBalanceRepository).findByAccountIdForUpdate(accountId);
+    accountWalletOrder.verify(orderRepository).findByIdForUpdate(order.getId());
   }
 
   @Test
@@ -145,7 +190,13 @@ class PendingOrderExecutionServiceTest {
         quoteService,
         riskCheckService,
         new OrderFillService(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService),
-        orderEventService);
+        orderEventService,
+        demoExecutionGuard,
+        walletBalanceRepository,
+        walletService,
+        spotPositionService,
+        positionRepository,
+        transactionExecutor);
 
     int filled = service.executePendingOrders();
 
@@ -171,6 +222,7 @@ class PendingOrderExecutionServiceTest {
 
     when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
     when(quoteService.freshQuote("EURUSD")).thenReturn(quote(new BigDecimal("1.07996"), new BigDecimal("1.08000")));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account(accountId)));
     when(orderRepository.claimPending(order.getId())).thenReturn(0);
 
     PendingOrderExecutionService service = new PendingOrderExecutionService(
@@ -179,18 +231,64 @@ class PendingOrderExecutionServiceTest {
         quoteService,
         riskCheckService,
         new OrderFillService(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService),
-        orderEventService);
+        orderEventService,
+        demoExecutionGuard,
+        walletBalanceRepository,
+        walletService,
+        spotPositionService,
+        positionRepository,
+        transactionExecutor);
 
     int filled = service.executePendingOrders();
 
     assertThat(filled).isZero();
     assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
-    verify(accountRepository, never()).findById(any());
-    verify(riskCheckService, never()).checkOrder(any(), any());
+    verify(accountRepository, org.mockito.Mockito.times(2)).findById(accountId);
+    verify(accountRepository).findByIdForUpdate(accountId);
+    verify(riskCheckService).checkOrder(any(), any());
     verify(orderRepository, never()).save(order);
     verify(tradeRepository, never()).save(any());
     verify(positionRepository, never()).save(any());
     verify(orderEventService, never()).record(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void spotPendingLocksExactWalletAssetsBeforeTheOrderRow() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity order = pendingOrder(
+        accountId, OrderSide.BUY, OrderType.LIMIT, new BigDecimal("50000.00000000"));
+    order.setSymbol("BTCUSDT");
+    TradingAccountEntity account = account(accountId);
+
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(quoteService.freshQuote("BTCUSDT"))
+        .thenReturn(quote(new BigDecimal("49999.00000000"), new BigDecimal("50000.00000000")));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    when(riskCheckService.checkOrder(any(), any())).thenReturn(new BigDecimal("500.00000000"));
+    when(orderRepository.claimPending(order.getId())).thenReturn(0);
+
+    PendingOrderExecutionService service = new PendingOrderExecutionService(
+        orderRepository,
+        accountRepository,
+        quoteService,
+        riskCheckService,
+        new OrderFillService(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService),
+        orderEventService,
+        demoExecutionGuard,
+        walletBalanceRepository,
+        walletService,
+        spotPositionService,
+        positionRepository,
+        transactionExecutor);
+
+    assertThat(service.executePendingOrders()).isZero();
+
+    org.mockito.InOrder accountWalletOrder = org.mockito.Mockito.inOrder(
+        accountRepository, walletService, spotPositionService, orderRepository);
+    accountWalletOrder.verify(accountRepository).findByIdForUpdate(accountId);
+    accountWalletOrder.verify(walletService).lockBalancesInOrder(accountId, List.of("BTC", "USDT"));
+    accountWalletOrder.verify(spotPositionService).lockOrCreate(accountId, "BTC", "USDT");
+    accountWalletOrder.verify(orderRepository).findByIdForUpdate(order.getId());
   }
 
   @Test
@@ -207,7 +305,13 @@ class PendingOrderExecutionServiceTest {
         quoteService,
         riskCheckService,
         new OrderFillService(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService),
-        orderEventService);
+        orderEventService,
+        demoExecutionGuard,
+        walletBalanceRepository,
+        walletService,
+        spotPositionService,
+        positionRepository,
+        transactionExecutor);
 
     int filled = service.executePendingOrders();
 
@@ -233,7 +337,13 @@ class PendingOrderExecutionServiceTest {
         quoteService,
         riskCheckService,
         new OrderFillService(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService),
-        orderEventService);
+        orderEventService,
+        demoExecutionGuard,
+        walletBalanceRepository,
+        walletService,
+        spotPositionService,
+        positionRepository,
+        transactionExecutor);
 
     int filled = service.executePendingOrders();
 

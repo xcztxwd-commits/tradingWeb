@@ -15,6 +15,7 @@ import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.QuoteService;
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -65,6 +67,22 @@ class LiquidationServiceTest {
   @Mock
   private WalletService walletService;
 
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  @Mock
+  private TradingTransactionExecutor transactionExecutor;
+
+  @BeforeEach
+  void accountRowsAreAvailableToTheGuardAndFeeLock() {
+    lenient().when(accountRepository.findById(org.mockito.ArgumentMatchers.any(UUID.class)))
+        .thenAnswer(invocation -> Optional.of(account(invocation.getArgument(0), "10000.00000000")));
+    lenient().when(accountRepository.findByIdForUpdate(org.mockito.ArgumentMatchers.any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+    lenient().when(transactionExecutor.execute(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+  }
+
   @Test
   void fxAccountBelowStopOutClosesOpenPositionsByLargestLossFirst() {
     UUID accountId = UUID.randomUUID();
@@ -94,6 +112,14 @@ class LiquidationServiceTest {
     InOrder order = inOrder(positionService);
     order.verify(positionService).closeSystemPosition(accountId, biggerLoss.getId(), "FX_MARGIN_STOP_OUT");
     order.verify(positionService).closeSystemPosition(accountId, smallerLoss.getId(), "FX_MARGIN_STOP_OUT");
+    verify(transactionExecutor, times(2)).execute(org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void liquidationScanDoesNotHoldOneTransactionAcrossFreshRiskSnapshots() throws Exception {
+    assertThat(LiquidationService.class.getMethod("scanAccount", UUID.class)
+        .isAnnotationPresent(org.springframework.transaction.annotation.Transactional.class))
+        .isFalse();
   }
 
   @Test
@@ -148,6 +174,7 @@ class LiquidationServiceTest {
     assertThat(position.getNotional()).isEqualByComparingTo("1000.00000000");
     assertThat(position.getMaintenanceMargin()).isEqualByComparingTo("5.00000000");
     verify(positionService).closeSystemPosition(accountId, position.getId(), "PERP_MAINTENANCE_MARGIN");
+    verify(positionRepository, never()).save(position);
   }
 
   @Test
@@ -290,6 +317,7 @@ class LiquidationServiceTest {
   @Test
   void perpAccountBelowMaintenanceMarginClosesHighestRiskContributionFirst() {
     UUID accountId = UUID.randomUUID();
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account(accountId, "1000.00000000")));
     PositionEntity lowerRisk = openPerpPosition(accountId, UUID.randomUUID(), "ETHUSDT", "60.00000000", "-5.00000000");
     PositionEntity higherRisk = openPerpPosition(accountId, UUID.randomUUID(), "BTCUSDT", "100.00000000", "-75.00000000");
     lowerRisk.setLots(BigDecimal.ONE);
@@ -432,7 +460,9 @@ class LiquidationServiceTest {
         riskConfigRepository,
         ledgerService,
         quoteService,
-        walletService);
+        walletService,
+        demoExecutionGuard,
+        transactionExecutor);
   }
 
   private static TradingAccountEntity account(UUID accountId, String balance) {

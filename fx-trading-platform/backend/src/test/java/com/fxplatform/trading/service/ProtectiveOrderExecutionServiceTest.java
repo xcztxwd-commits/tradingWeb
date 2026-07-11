@@ -4,9 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
+import com.fxplatform.account.entity.TradingAccountEntity;
+import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.OrderSide;
@@ -14,7 +20,9 @@ import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -32,6 +40,22 @@ class ProtectiveOrderExecutionServiceTest {
   @Mock
   private PositionService positionService;
 
+  @Mock
+  private TradingAccountRepository accountRepository;
+
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  @BeforeEach
+  void accountFixture() {
+    org.mockito.Mockito.lenient().when(accountRepository.findById(any(UUID.class)))
+        .thenAnswer(invocation -> {
+          TradingAccountEntity account = new TradingAccountEntity();
+          account.setId(invocation.getArgument(0));
+          return Optional.of(account);
+        });
+  }
+
   @Test
   void closesBuyPositionWhenBidTouchesTakeProfit() {
     UUID accountId = UUID.randomUUID();
@@ -42,12 +66,14 @@ class ProtectiveOrderExecutionServiceTest {
     when(positionRepository.findByStatus(PositionStatus.OPEN)).thenReturn(List.of(position));
     when(quoteService.freshQuote("EURUSD")).thenReturn(quote(new BigDecimal("1.10100"), new BigDecimal("1.10104")));
 
-    ProtectiveOrderExecutionService service = new ProtectiveOrderExecutionService(positionRepository, quoteService, positionService);
+    ProtectiveOrderExecutionService service = new ProtectiveOrderExecutionService(
+        positionRepository, accountRepository, quoteService, positionService, demoExecutionGuard);
 
     int closed = service.executeProtectiveOrders();
 
     assertThat(closed).isEqualTo(1);
     verify(positionService).closeSystemPosition(accountId, positionId);
+    verify(demoExecutionGuard).requireDemo(any(TradingAccountEntity.class), eq(ProductType.CRYPTO_SPOT), eq("EURUSD"));
   }
 
   @Test
@@ -61,7 +87,8 @@ class ProtectiveOrderExecutionServiceTest {
     when(positionRepository.findByStatus(PositionStatus.OPEN)).thenReturn(List.of(position));
     when(quoteService.freshQuote("EURUSD")).thenReturn(quote(new BigDecimal("1.10096"), new BigDecimal("1.10100")));
 
-    ProtectiveOrderExecutionService service = new ProtectiveOrderExecutionService(positionRepository, quoteService, positionService);
+    ProtectiveOrderExecutionService service = new ProtectiveOrderExecutionService(
+        positionRepository, accountRepository, quoteService, positionService, demoExecutionGuard);
 
     int closed = service.executeProtectiveOrders();
 
@@ -79,7 +106,8 @@ class ProtectiveOrderExecutionServiceTest {
     when(positionRepository.findByStatus(PositionStatus.OPEN)).thenReturn(List.of(position));
     when(quoteService.freshQuote("EURUSD")).thenThrow(new BusinessException("QUOTE_STALE", "Quote is stale"));
 
-    ProtectiveOrderExecutionService service = new ProtectiveOrderExecutionService(positionRepository, quoteService, positionService);
+    ProtectiveOrderExecutionService service = new ProtectiveOrderExecutionService(
+        positionRepository, accountRepository, quoteService, positionService, demoExecutionGuard);
 
     int closed = service.executeProtectiveOrders();
 
@@ -99,7 +127,8 @@ class ProtectiveOrderExecutionServiceTest {
     when(positionService.closeSystemPosition(accountId, positionId))
         .thenThrow(new BusinessException("POSITION_NOT_OPEN", "Position is no longer open"));
 
-    ProtectiveOrderExecutionService service = new ProtectiveOrderExecutionService(positionRepository, quoteService, positionService);
+    ProtectiveOrderExecutionService service = new ProtectiveOrderExecutionService(
+        positionRepository, accountRepository, quoteService, positionService, demoExecutionGuard);
 
     int closed = service.executeProtectiveOrders();
 

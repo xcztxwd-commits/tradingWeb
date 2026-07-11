@@ -12,6 +12,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.ExecutionAdapter;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
@@ -37,12 +38,14 @@ import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
+import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -83,6 +86,27 @@ class TradingWorkflowRegressionProtectionTest {
 
   @Mock
   private SpotSettlementService spotSettlementService;
+
+  @Mock
+  private SpotPositionService spotPositionService;
+
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  @Mock
+  private WalletBalanceRepository walletBalanceRepository;
+
+  @BeforeEach
+  void rowLockQueriesReturnTheSameFixtureRows() {
+    org.mockito.Mockito.lenient()
+        .when(accountRepository.findByIdAndUserIdForUpdate(any(UUID.class), any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findByIdAndUserId(
+            invocation.getArgument(0), invocation.getArgument(1)));
+    org.mockito.Mockito.lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+    org.mockito.Mockito.lenient().when(positionRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> positionRepository.findById(invocation.getArgument(0)));
+  }
 
   @Test
   void forexMarketBuyCreatesFilledOrderOpenPositionAndMarginLedgerEntries() {
@@ -229,7 +253,11 @@ class TradingWorkflowRegressionProtectionTest {
         new OrderCommandFactory(),
         new OrderEntityFactory(),
         new OrderResponseMapper(),
-        new OrderStatusPolicy());
+        new OrderStatusPolicy(),
+        demoExecutionGuard,
+        walletBalanceRepository,
+        positionRepository,
+        spotPositionService);
   }
 
   private PositionService positionService() {
@@ -240,7 +268,8 @@ class TradingWorkflowRegressionProtectionTest {
         quoteService,
         new PnLCalculator(engine),
         ledgerService,
-        symbolRepository);
+        symbolRepository,
+        demoExecutionGuard);
   }
 
   private static CreateOrderRequest marketOrder(

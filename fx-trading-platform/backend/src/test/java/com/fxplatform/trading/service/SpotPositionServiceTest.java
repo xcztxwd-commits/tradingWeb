@@ -27,7 +27,7 @@ class SpotPositionServiceTest {
 
   @BeforeEach
   void setUpRepository() {
-    when(spotPositionRepository.findByAccountIdAndWalletTypeAndAssetAndCostAsset(
+    when(spotPositionRepository.findBySlotForUpdate(
         any(UUID.class),
         any(String.class),
         any(String.class),

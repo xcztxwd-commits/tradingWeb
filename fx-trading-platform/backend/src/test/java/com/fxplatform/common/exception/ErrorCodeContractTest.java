@@ -22,6 +22,10 @@ class ErrorCodeContractTest {
         "ORDER_NOT_CANCELABLE",
         "ORDER_ALREADY_FILLED",
         "DUPLICATE_CLIENT_ORDER_ID",
-        "EXECUTION_UNAVAILABLE"));
+        "EXECUTION_UNAVAILABLE",
+        "EXECUTION_DISABLED",
+        "DEMO_ACCOUNT_REQUIRED",
+        "PRODUCT_NOT_ALLOWED",
+        "SYMBOL_NOT_ALLOWED"));
   }
 }

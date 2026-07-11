@@ -17,6 +17,10 @@ public final class ErrorCode {
   public static final String ORDER_ALREADY_FILLED = "ORDER_ALREADY_FILLED";
   public static final String DUPLICATE_CLIENT_ORDER_ID = "DUPLICATE_CLIENT_ORDER_ID";
   public static final String EXECUTION_UNAVAILABLE = "EXECUTION_UNAVAILABLE";
+  public static final String EXECUTION_DISABLED = "EXECUTION_DISABLED";
+  public static final String DEMO_ACCOUNT_REQUIRED = "DEMO_ACCOUNT_REQUIRED";
+  public static final String PRODUCT_NOT_ALLOWED = "PRODUCT_NOT_ALLOWED";
+  public static final String SYMBOL_NOT_ALLOWED = "SYMBOL_NOT_ALLOWED";
 
   private static final Set<String> STANDARD_CODES = Set.of(
       AUTH_TOKEN_EXPIRED,
@@ -31,7 +35,11 @@ public final class ErrorCode {
       ORDER_NOT_CANCELABLE,
       ORDER_ALREADY_FILLED,
       DUPLICATE_CLIENT_ORDER_ID,
-      EXECUTION_UNAVAILABLE);
+      EXECUTION_UNAVAILABLE,
+      EXECUTION_DISABLED,
+      DEMO_ACCOUNT_REQUIRED,
+      PRODUCT_NOT_ALLOWED,
+      SYMBOL_NOT_ALLOWED);
 
   private ErrorCode() {
   }

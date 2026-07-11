@@ -9,6 +9,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 /**
  * OrderRepository 通过 MyBatis-Plus 访问订单。
@@ -63,6 +65,24 @@ public interface OrderRepository extends FxBaseMapper<OrderEntity> {
     return selectCount(new LambdaQueryWrapper<OrderEntity>()
         .ge(OrderEntity::getCreatedAt, createdAt));
   }
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE id = #{id}
+      FOR UPDATE
+      """)
+  Optional<OrderEntity> findByIdForUpdate(@Param("id") UUID id);
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE account_id = #{accountId}
+        AND status IN ('PENDING', 'WORKING')
+      ORDER BY id
+      FOR UPDATE
+      """)
+  List<OrderEntity> findPendingByAccountIdForUpdate(@Param("accountId") UUID accountId);
 
   /** 触价执行前先从 PENDING 抢占到 WORKING，避免多实例重复成交同一挂单。 */
   default int claimPending(UUID orderId) {

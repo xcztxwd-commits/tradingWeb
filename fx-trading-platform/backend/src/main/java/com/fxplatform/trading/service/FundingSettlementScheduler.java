@@ -9,7 +9,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -22,7 +21,6 @@ public class FundingSettlementScheduler {
   private Instant lastScanTime;
 
   @Scheduled(fixedDelayString = "${trading.funding.scan-ms:60000}")
-  @Transactional
   public int settleDueFunding() {
     Instant scanTime = Instant.now();
     int settled = 0;

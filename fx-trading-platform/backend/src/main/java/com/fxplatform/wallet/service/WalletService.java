@@ -10,6 +10,7 @@ import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -42,6 +43,17 @@ public class WalletService {
 
   public List<WalletBalanceEntity> balances(UUID accountId) {
     return walletBalanceRepository.findByAccountIdOrderByAssetAsc(accountId);
+  }
+
+  @Transactional
+  public List<WalletBalanceEntity> lockBalancesInOrder(UUID accountId, Collection<String> assets) {
+    return assets.stream()
+        .map(WalletService::normalizeAsset)
+        .filter(StringUtils::hasText)
+        .distinct()
+        .sorted()
+        .map(asset -> getOrCreateBalance(accountId, DEFAULT_WALLET_TYPE, asset))
+        .toList();
   }
 
   public List<AssetLedgerEntryEntity> assetLedgerEntries(
@@ -100,7 +112,10 @@ public class WalletService {
   public WalletBalanceEntity getOrCreateBalance(UUID accountId, WalletType walletType, String asset) {
     String normalizedAsset = normalizeAsset(asset);
     String normalizedWalletType = normalizeWalletType(walletType);
-    return walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, normalizedWalletType, normalizedAsset)
+    return walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+            accountId,
+            normalizedWalletType,
+            normalizedAsset)
         .orElseGet(() -> walletBalanceRepository.save(newBalance(accountId, normalizedWalletType, normalizedAsset)));
   }
 

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 /**
@@ -27,6 +28,25 @@ public interface TradingAccountRepository extends FxBaseMapper<TradingAccountEnt
         .eq(TradingAccountEntity::getId, id)
         .eq(TradingAccountEntity::getUserId, userId)));
   }
+
+  @Select("""
+      SELECT *
+      FROM core.trading_accounts
+      WHERE id = #{id}
+      FOR UPDATE
+      """)
+  Optional<TradingAccountEntity> findByIdForUpdate(@Param("id") UUID id);
+
+  @Select("""
+      SELECT *
+      FROM core.trading_accounts
+      WHERE id = #{id}
+        AND user_id = #{userId}
+      FOR UPDATE
+      """)
+  Optional<TradingAccountEntity> findByIdAndUserIdForUpdate(
+      @Param("id") UUID id,
+      @Param("userId") UUID userId);
 
   @Update("""
       UPDATE core.trading_accounts

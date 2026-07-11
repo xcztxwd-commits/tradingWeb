@@ -8,6 +8,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.account.service.AccountSnapshotService;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.entity.SymbolEntity;
@@ -36,7 +37,6 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 @Service
@@ -63,6 +63,8 @@ public class LiquidationService {
   private final LedgerService ledgerService;
   private final QuoteService quoteService;
   private final WalletService walletService;
+  private final DemoExecutionGuard demoExecutionGuard;
+  private final TradingTransactionExecutor transactionExecutor;
   private final TradingInstrumentClassifier instrumentClassifier = new TradingInstrumentClassifier();
   private final PnLCalculator pnlCalculator = new PnLCalculator();
   private final PerpMarginCalculator perpMarginCalculator = new PerpMarginCalculator();
@@ -70,7 +72,6 @@ public class LiquidationService {
   @Value("${trading.stop-out-level:50}")
   private BigDecimal defaultStopOutLevel = DEFAULT_STOP_OUT_LEVEL;
 
-  @Transactional
   public int scanAccount(UUID accountId) {
     int closed = 0;
     while (true) {
@@ -80,11 +81,17 @@ public class LiquidationService {
         return closed;
       }
       LiquidationCandidate selected = candidate.get();
-      if (!liquidatePosition(selected.position(), selected.reason())) {
+      boolean liquidated = transactionExecutor.execute(() -> {
+        if (!liquidatePosition(selected.position(), selected.reason())) {
+          return false;
+        }
+        selected.position().setStatus(PositionStatus.CLOSED);
+        chargeLiquidationFee(accountId, selected.risk());
+        return true;
+      });
+      if (!liquidated) {
         return closed;
       }
-      selected.position().setStatus(PositionStatus.CLOSED);
-      chargeLiquidationFee(accountId, selected.risk());
       closed++;
     }
   }
@@ -110,6 +117,10 @@ public class LiquidationService {
     if (position == null || position.getStatus() != PositionStatus.OPEN) {
       return false;
     }
+    TradingAccountEntity account = accountRepository.findById(position.getAccountId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    SymbolEntity symbol = symbolFor(position);
+    demoExecutionGuard.requireDemo(account, symbol.getProductType(), position.getSymbol());
     try {
       positionService.closeSystemPosition(position.getAccountId(), position.getId(), reason);
       return true;
@@ -261,8 +272,6 @@ public class LiquidationService {
     position.setMaintenanceMargin(margin.maintenanceMargin());
     position.setSettlementAsset(profile.settlementAsset());
     position.setMarginAsset(profile.marginAsset());
-    positionRepository.save(position);
-
     return new PerpRiskPosition(
         position,
         profile.kind(),
@@ -286,7 +295,7 @@ public class LiquidationService {
       return;
     }
 
-    TradingAccountEntity account = accountRepository.findById(accountId)
+    TradingAccountEntity account = accountRepository.findByIdForUpdate(accountId)
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
     BigDecimal balance = orZero(account.getBalance()).subtract(risk.liquidationFee()).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
     BigDecimal equity = accountEquity(account).subtract(risk.liquidationFee()).setScale(MONEY_SCALE, RoundingMode.HALF_UP);

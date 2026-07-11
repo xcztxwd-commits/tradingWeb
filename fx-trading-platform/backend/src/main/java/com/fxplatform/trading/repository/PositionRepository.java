@@ -8,6 +8,8 @@ import com.fxplatform.trading.enums.PositionStatus;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 /**
  * PositionRepository 通过 MyBatis-Plus 访问持仓。
@@ -58,6 +60,24 @@ public interface PositionRepository extends FxBaseMapper<PositionEntity> {
     return selectCount(new LambdaQueryWrapper<PositionEntity>()
         .eq(PositionEntity::getStatus, status));
   }
+
+  @Select("""
+      SELECT *
+      FROM trading.positions
+      WHERE id = #{id}
+      FOR UPDATE
+      """)
+  Optional<PositionEntity> findByIdForUpdate(@Param("id") UUID id);
+
+  @Select("""
+      SELECT *
+      FROM trading.positions
+      WHERE account_id = #{accountId}
+        AND status = 'OPEN'
+      ORDER BY symbol, position_side, id
+      FOR UPDATE
+      """)
+  List<PositionEntity> findOpenByAccountIdForUpdate(@Param("accountId") UUID accountId);
 
   /** 按 OPEN 状态条件平仓，保证重复触发不会重复结算保证金和 PnL。 */
   default int closeIfOpen(PositionEntity position) {

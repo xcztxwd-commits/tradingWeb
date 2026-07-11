@@ -36,7 +36,8 @@ class AssetConversionServiceTest {
 
   @BeforeEach
   void setUpRepositories() {
-    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(any(UUID.class), any(String.class), any(String.class)))
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        any(UUID.class), any(String.class), any(String.class)))
         .thenAnswer(invocation -> Optional.ofNullable(balance(
             invocation.getArgument(0),
             invocation.getArgument(1),

@@ -68,15 +68,25 @@ public class SpotPositionService {
     return spotPositionRepository.save(position);
   }
 
+  @Transactional
+  public SpotPositionEntity lockOrCreate(
+      UUID accountId,
+      String asset,
+      String costAsset
+  ) {
+    return position(accountId, asset, costAsset);
+  }
+
   private SpotPositionEntity position(UUID accountId, String asset, String costAsset) {
     String normalizedAsset = normalize(asset);
     String normalizedCostAsset = normalize(costAsset);
-    return spotPositionRepository.findByAccountIdAndWalletTypeAndAssetAndCostAsset(
+    return spotPositionRepository.findBySlotForUpdate(
             accountId,
             WalletType.SPOT.code(),
             normalizedAsset,
             normalizedCostAsset)
-        .orElseGet(() -> newPosition(accountId, normalizedAsset, normalizedCostAsset));
+        .orElseGet(() -> spotPositionRepository.save(
+            newPosition(accountId, normalizedAsset, normalizedCostAsset)));
   }
 
   private SpotPositionEntity newPosition(UUID accountId, String asset, String costAsset) {

@@ -9,8 +9,10 @@ import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.ExecutionAdapter;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.request.UpdateOrderRequest;
@@ -20,6 +22,8 @@ import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.repository.OrderRepository;
+import com.fxplatform.trading.repository.PositionRepository;
+import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -46,6 +50,10 @@ public class OrderService {
   private final OrderEntityFactory orderEntityFactory;
   private final OrderResponseMapper orderResponseMapper;
   private final OrderStatusPolicy orderStatusPolicy;
+  private final DemoExecutionGuard demoExecutionGuard;
+  private final WalletBalanceRepository walletBalanceRepository;
+  private final PositionRepository positionRepository;
+  private final SpotPositionService spotPositionService;
 
   @Transactional
   public OrderResponse createOrder(UserPrincipal principal, CreateOrderRequest request) {
@@ -69,12 +77,25 @@ public class OrderService {
 
   @Transactional
   public OrderResponse cancelOrder(UserPrincipal principal, UUID orderId) {
-    OrderEntity order = requireOwnedOrder(principal.id(), orderId);
-    if (order.getStatus() != OrderStatus.PENDING) {
+    OrderEntity orderSnapshot = requireOwnedOrder(principal.id(), orderId);
+    if (orderSnapshot.getStatus() != OrderStatus.PENDING) {
       throw new BusinessException("ORDER_NOT_CANCELABLE", "Only pending orders can be canceled");
     }
 
-    TradingAccountEntity account = requireOwnedAccount(principal.id(), order.getAccountId());
+    TradingAccountEntity accountSnapshot = requireOwnedAccount(principal.id(), orderSnapshot.getAccountId());
+    ProductType productType = requestedProduct(orderSnapshot.getSymbol());
+    boolean spotWalletHold = riskCheckService.isSpotSymbol(orderSnapshot.getSymbol());
+    demoExecutionGuard.requireDemo(accountSnapshot, productType, orderSnapshot.getSymbol());
+
+    TradingAccountEntity account = accountRepository
+        .findByIdAndUserIdForUpdate(orderSnapshot.getAccountId(), principal.id())
+        .orElseThrow(() -> new AuthorizationException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(account, productType, orderSnapshot.getSymbol());
+    lockMutationState(account.getId(), productType, orderSnapshot.getSymbol());
+    OrderEntity order = requireOwnedOrderForUpdate(principal.id(), orderId);
+    if (order.getStatus() != OrderStatus.PENDING) {
+      throw new BusinessException("ORDER_NOT_CANCELABLE", "Only pending orders can be canceled");
+    }
     BigDecimal holdAmount = orZero(order.getHoldAmount());
 
     order.setStatus(OrderStatus.CANCELED);
@@ -84,7 +105,13 @@ public class OrderService {
       throw new BusinessException("ORDER_NOT_CANCELABLE", "Only pending orders can be canceled");
     }
     if (holdAmount.compareTo(BigDecimal.ZERO) > 0) {
-      releaseOrderHold(account, order, holdAmount, "Pending order canceled", "Pending spot order canceled");
+      releaseOrderHold(
+          account,
+          order,
+          holdAmount,
+          spotWalletHold,
+          "Pending order canceled",
+          "Pending spot order canceled");
       order.setHoldAmount(BigDecimal.ZERO);
     }
     orderEventService.record(
@@ -99,44 +126,61 @@ public class OrderService {
 
   @Transactional
   public OrderResponse modifyOrder(UserPrincipal principal, UUID orderId, UpdateOrderRequest update) {
-    OrderEntity order = requireOwnedOrder(principal.id(), orderId);
-    if (order.getStatus() != OrderStatus.PENDING) {
+    OrderEntity orderSnapshot = requireOwnedOrder(principal.id(), orderId);
+    if (orderSnapshot.getStatus() != OrderStatus.PENDING) {
       throw new BusinessException("ORDER_NOT_MODIFIABLE", "Only pending orders can be modified");
     }
 
-    BigDecimal quantity = update.quantity() != null ? update.quantity() : currentQuantity(order);
-    BigDecimal price = update.price() != null ? update.price() : currentPrice(order);
+    BigDecimal quantity = update.quantity() != null ? update.quantity() : currentQuantity(orderSnapshot);
+    BigDecimal price = update.price() != null ? update.price() : currentPrice(orderSnapshot);
     if (price == null) {
       throw new BusinessException("ORDER_PRICE_REQUIRED", "Limit and stop orders require requested price");
     }
 
-    TradingAccountEntity account = requireOwnedAccount(principal.id(), order.getAccountId());
-    BigDecimal oldHold = orZero(order.getHoldAmount());
-    boolean spotWalletHold = isSpotWalletHold(order);
+    TradingAccountEntity accountSnapshot = requireOwnedAccount(principal.id(), orderSnapshot.getAccountId());
+    ProductType productType = requestedProduct(orderSnapshot.getSymbol());
+    demoExecutionGuard.requireDemo(accountSnapshot, productType, orderSnapshot.getSymbol());
+    BigDecimal oldHold = orZero(orderSnapshot.getHoldAmount());
+    boolean spotWalletHold = riskCheckService.isSpotSymbol(orderSnapshot.getSymbol());
     CreateOrderRequest riskRequest = new CreateOrderRequest(
-        order.getAccountId(),
-        order.getSymbol(),
-        order.getSide(),
-        order.getOrderType(),
+        orderSnapshot.getAccountId(),
+        orderSnapshot.getSymbol(),
+        orderSnapshot.getSide(),
+        orderSnapshot.getOrderType(),
         quantity,
         price,
-        update.stopLoss() != null ? update.stopLoss() : order.getStopLoss(),
-        update.takeProfit() != null ? update.takeProfit() : order.getTakeProfit(),
-        order.getIdempotencyKey(),
-        order.getClientOrderId(),
+        update.stopLoss() != null ? update.stopLoss() : orderSnapshot.getStopLoss(),
+        update.takeProfit() != null ? update.takeProfit() : orderSnapshot.getTakeProfit(),
+        orderSnapshot.getIdempotencyKey(),
+        orderSnapshot.getClientOrderId(),
         quantity,
         price,
-        order.getLeverage());
-    BigDecimal newHold = riskCheckService.checkOrder(accountForMarginCheck(account, oldHold), riskRequest);
+        orderSnapshot.getLeverage());
+    BigDecimal newHold = riskCheckService.checkOrder(accountForMarginCheck(accountSnapshot, oldHold), riskRequest);
     String holdCurrency = spotWalletHold
-        ? riskCheckService.resolveHoldCurrency(account, riskRequest)
-        : account.getBaseCurrency();
+        ? riskCheckService.resolveHoldCurrency(accountSnapshot, riskRequest)
+        : accountSnapshot.getBaseCurrency();
+
+    TradingAccountEntity account = accountRepository
+        .findByIdAndUserIdForUpdate(orderSnapshot.getAccountId(), principal.id())
+        .orElseThrow(() -> new AuthorizationException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(account, productType, orderSnapshot.getSymbol());
+    lockMutationState(account.getId(), productType, orderSnapshot.getSymbol());
+    OrderEntity order = requireOwnedOrderForUpdate(principal.id(), orderId);
+    if (order.getStatus() != OrderStatus.PENDING) {
+      throw new BusinessException("ORDER_NOT_MODIFIABLE", "Only pending orders can be modified");
+    }
+    if (orZero(order.getHoldAmount()).compareTo(oldHold) != 0
+        || currentQuantity(order).compareTo(currentQuantity(orderSnapshot)) != 0
+        || !java.util.Objects.equals(currentPrice(order), currentPrice(orderSnapshot))) {
+      throw new BusinessException("ORDER_CHANGED", "Order changed while modification was prepared");
+    }
     BigDecimal delta = newHold.subtract(oldHold);
     if (delta.compareTo(BigDecimal.ZERO) > 0) {
       reserveOrderHold(account, delta, holdCurrency, spotWalletHold, order.getId(),
           "Pending order margin increased", "Pending spot order wallet increased");
     } else if (delta.compareTo(BigDecimal.ZERO) < 0) {
-      releaseOrderHold(account, order, delta.abs(),
+      releaseOrderHold(account, order, delta.abs(), spotWalletHold,
           "Pending order margin decreased", "Pending spot order wallet decreased");
     }
 
@@ -162,20 +206,32 @@ public class OrderService {
 
   private OrderResponse createNewOrder(OrderCommand command) {
     CreateOrderRequest request = command.toRequest();
-    TradingAccountEntity account = accountRepository.findByIdAndUserId(command.accountId(), command.userId())
+    TradingAccountEntity accountSnapshot = accountRepository.findByIdAndUserId(command.accountId(), command.userId())
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    ProductType productType = requestedProduct(command.symbol());
+    demoExecutionGuard.requireDemo(accountSnapshot, productType, command.symbol());
 
     if (command.orderType() != OrderType.MARKET && command.price() == null) {
       throw new BusinessException("ORDER_PRICE_REQUIRED", "Limit and stop orders require requested price");
     }
 
-    BigDecimal requiredMargin = riskCheckService.checkOrder(account, request);
-    int effectiveLeverage = riskCheckService.resolveEffectiveLeverage(account, request);
+    BigDecimal requiredMargin = riskCheckService.checkOrder(accountSnapshot, request);
+    int effectiveLeverage = riskCheckService.resolveEffectiveLeverage(accountSnapshot, request);
     boolean spotWalletHold = riskCheckService.isSpotSymbol(command.symbol());
     String holdCurrency = spotWalletHold
-        ? riskCheckService.resolveHoldCurrency(account, request)
-        : account.getBaseCurrency();
+        ? riskCheckService.resolveHoldCurrency(accountSnapshot, request)
+        : accountSnapshot.getBaseCurrency();
+    ExecutionResult execution = command.orderType() == OrderType.MARKET
+        ? executionAdapter.execute(request)
+        : null;
+
+    TradingAccountEntity account = accountRepository.findByIdAndUserIdForUpdate(command.accountId(), command.userId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(account, productType, command.symbol());
+    lockMutationState(account.getId(), productType, command.symbol());
+
     OrderEntity order = orderEntityFactory.createReceived(command);
+    order.setProductType(productType);
     order.setLeverage(effectiveLeverage);
 
     if (command.orderType() != OrderType.MARKET) {
@@ -199,7 +255,6 @@ public class OrderService {
 
     order.setStatus(orderStatusPolicy.acceptedStatus(command.orderType()));
     orderRepository.save(order);
-    ExecutionResult execution = executionAdapter.execute(request);
     if (execution.rejected()) {
       return rejectOrder(order, execution);
     }
@@ -255,6 +310,15 @@ public class OrderService {
         .orElseThrow(() -> new AuthorizationException("ORDER_NOT_FOUND", "Order not found"));
   }
 
+  private OrderEntity requireOwnedOrderForUpdate(UUID userId, UUID orderId) {
+    OrderEntity order = orderRepository.findByIdForUpdate(orderId)
+        .orElseThrow(() -> new AuthorizationException("ORDER_NOT_FOUND", "Order not found"));
+    if (!userId.equals(order.getUserId())) {
+      throw new AuthorizationException("ORDER_NOT_FOUND", "Order not found");
+    }
+    return order;
+  }
+
   private TradingAccountEntity requireOwnedAccount(UUID userId, UUID accountId) {
     return accountRepository.findByIdAndUserId(accountId, userId)
         .orElseThrow(() -> new AuthorizationException("ACCOUNT_NOT_FOUND", "Account not found"));
@@ -292,10 +356,11 @@ public class OrderService {
       TradingAccountEntity account,
       OrderEntity order,
       BigDecimal amount,
+      boolean spotWalletHold,
       String marginDescription,
       String spotDescription
   ) {
-    if (isSpotWalletHold(order)) {
+    if (spotWalletHold) {
       walletService.releaseLockedWithEntryType(
           account.getId(),
           order.getHoldCurrency(),
@@ -310,10 +375,6 @@ public class OrderService {
     account.setFreeMargin(accountEquity(account).subtract(account.getUsedMargin()));
     accountRepository.save(account);
     ledgerService.recordOrderRelease(account, amount, order.getId(), marginDescription);
-  }
-
-  private boolean isSpotWalletHold(OrderEntity order) {
-    return riskCheckService.isSpotSymbol(order.getSymbol());
   }
 
   private TradingAccountEntity accountForMarginCheck(TradingAccountEntity account, BigDecimal existingHold) {
@@ -337,6 +398,26 @@ public class OrderService {
 
   private BigDecimal currentPrice(OrderEntity order) {
     return order.getPrice() != null ? order.getPrice() : order.getRequestedPrice();
+  }
+
+  private ProductType requestedProduct(String canonicalSymbol) {
+    return canonicalSymbol.endsWith("-PERP") ? ProductType.LINEAR_PERP : ProductType.CRYPTO_SPOT;
+  }
+
+  private void lockMutationState(UUID accountId, ProductType productType, String canonicalSymbol) {
+    if (productType == ProductType.CRYPTO_SPOT) {
+      if (canonicalSymbol != null && canonicalSymbol.endsWith("USDT") && canonicalSymbol.length() > 4) {
+        String baseAsset = canonicalSymbol.substring(0, canonicalSymbol.length() - 4);
+        walletService.lockBalancesInOrder(
+            accountId,
+            List.of(baseAsset, "USDT"));
+        spotPositionService.lockOrCreate(accountId, baseAsset, "USDT");
+      } else {
+        walletBalanceRepository.findByAccountIdForUpdate(accountId);
+      }
+      return;
+    }
+    positionRepository.findOpenByAccountIdForUpdate(accountId);
   }
 
 }

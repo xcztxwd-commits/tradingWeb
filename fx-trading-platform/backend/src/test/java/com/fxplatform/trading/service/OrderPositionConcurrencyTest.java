@@ -12,6 +12,7 @@ import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.ExecutionAdapter;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.entity.SymbolEntity;
@@ -19,6 +20,7 @@ import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.risk.service.PnLCalculator;
+import com.fxplatform.risk.model.InstrumentKind;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.entity.OrderEntity;
@@ -29,9 +31,12 @@ import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
+import com.fxplatform.trading.repository.SpotPositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
 import com.fxplatform.wallet.service.WalletService;
+import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import java.math.BigDecimal;
+import java.lang.reflect.Method;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -43,10 +48,120 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.apache.ibatis.annotations.Select;
 import org.mockito.Answers;
 import org.mockito.stubbing.Answer;
 
 class OrderPositionConcurrencyTest {
+
+  @Test
+  void repositoriesExposeDeterministicPostgresRowLocks() throws Exception {
+    assertForUpdate(TradingAccountRepository.class, "findByIdForUpdate", UUID.class);
+    assertForUpdate(TradingAccountRepository.class, "findByIdAndUserIdForUpdate", UUID.class, UUID.class);
+    assertForUpdate(WalletBalanceRepository.class, "findByAccountIdAndWalletTypeAndAssetForUpdate",
+        UUID.class, String.class, String.class);
+    assertSortedForUpdate(
+        WalletBalanceRepository.class, "findByAccountIdForUpdate", "ORDER BY wallet_type, asset", UUID.class);
+    assertForUpdate(PositionRepository.class, "findByIdForUpdate", UUID.class);
+    assertSortedForUpdate(
+        PositionRepository.class,
+        "findOpenByAccountIdForUpdate",
+        "ORDER BY symbol, position_side, id",
+        UUID.class);
+    assertForUpdate(
+        SpotPositionRepository.class,
+        "findBySlotForUpdate",
+        UUID.class,
+        String.class,
+        String.class,
+        String.class);
+    assertSortedForUpdate(
+        SpotPositionRepository.class,
+        "findByAccountIdForUpdate",
+        "ORDER BY wallet_type, asset, cost_asset, id",
+        UUID.class);
+    assertForUpdate(OrderRepository.class, "findByIdForUpdate", UUID.class);
+    assertSortedForUpdate(OrderRepository.class, "findPendingByAccountIdForUpdate", "ORDER BY id", UUID.class);
+  }
+
+  @Test
+  void manualCloseFetchesQuoteBeforeAccountFirstRowLocks() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    TradingAccountEntity account = account(
+        userId, accountId, new BigDecimal("10000.00000000"), new BigDecimal("80.00000000"));
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSDT-PERP");
+    position.setLots(BigDecimal.ONE);
+    position.setOpenPrice(new BigDecimal("50000.00000000"));
+    position.setCurrentPrice(new BigDecimal("50000.00000000"));
+    QuoteResponse quote = new QuoteResponse(
+        "quote",
+        "BTCUSDT-PERP",
+        new BigDecimal("50010.00000000"),
+        new BigDecimal("50012.00000000"),
+        new BigDecimal("50011.00000000"),
+        new BigDecimal("2.00000000"),
+        "test",
+        1780660000000L);
+    SymbolEntity symbol = new SymbolEntity();
+    symbol.setSymbol("BTCUSDT-PERP");
+    symbol.setProductType(ProductType.LINEAR_PERP);
+    symbol.setAssetClass("LINEAR_PERPETUAL");
+    symbol.setBaseCurrency("BTC");
+    symbol.setQuoteCurrency("USDT");
+    symbol.setLotSize(BigDecimal.ONE);
+    symbol.setContractSize(BigDecimal.ONE);
+    symbol.setContractMultiplier(BigDecimal.ONE);
+    symbol.setSettlementAsset("USDT");
+    symbol.setMarginAsset("USDT");
+
+    TradingAccountRepository accountRepository = mock(TradingAccountRepository.class);
+    PositionRepository positionRepository = mock(PositionRepository.class);
+    QuoteService quoteService = mock(QuoteService.class);
+    PnLCalculator pnlCalculator = mock(PnLCalculator.class);
+    LedgerService ledgerService = mock(LedgerService.class);
+    SymbolRepository symbolRepository = mock(SymbolRepository.class);
+    DemoExecutionGuard guard = mock(DemoExecutionGuard.class);
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(quote);
+    when(accountRepository.findByIdAndUserIdForUpdate(accountId, userId)).thenReturn(Optional.of(account));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
+    when(positionRepository.findByIdForUpdate(positionId)).thenReturn(Optional.of(position));
+    when(positionRepository.closeIfOpen(position)).thenReturn(1);
+    when(pnlCalculator.floatingPnl(
+        InstrumentKind.LINEAR_PERPETUAL,
+        OrderSide.BUY,
+        BigDecimal.ONE,
+        new BigDecimal("50000.00000000"),
+        new BigDecimal("50010.00000000"),
+        BigDecimal.ONE)).thenReturn(BigDecimal.ZERO);
+
+    PositionService service = new PositionService(
+        positionRepository,
+        accountRepository,
+        quoteService,
+        pnlCalculator,
+        ledgerService,
+        symbolRepository,
+        guard);
+
+    service.closePosition(userId, accountId, positionId);
+
+    org.mockito.InOrder quoteBeforeLock = org.mockito.Mockito.inOrder(accountRepository, quoteService);
+    quoteBeforeLock.verify(accountRepository).findByIdAndUserId(accountId, userId);
+    quoteBeforeLock.verify(quoteService).freshQuote("BTCUSDT-PERP");
+    quoteBeforeLock.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
+
+    org.mockito.InOrder accountFirst = org.mockito.Mockito.inOrder(accountRepository, guard, positionRepository);
+    accountFirst.verify(accountRepository).findByIdAndUserId(accountId, userId);
+    accountFirst.verify(positionRepository).findById(positionId);
+    accountFirst.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
+    accountFirst.verify(guard).requireDemo(account, ProductType.LINEAR_PERP, "BTCUSDT-PERP");
+    accountFirst.verify(positionRepository).findByIdForUpdate(positionId);
+  }
 
   @Test
   void concurrentLimitOrdersForSameAccountCannotReserveMoreThanFreeMargin() throws Exception {
@@ -140,7 +255,8 @@ class OrderPositionConcurrencyTest {
         quoteService,
         pnlCalculator,
         ledgerService,
-        symbolRepository);
+        symbolRepository,
+        mock(DemoExecutionGuard.class));
 
     List<Attempt> attempts = runConcurrently(
         () -> service.closePosition(userId, accountId, positionId),
@@ -195,6 +311,9 @@ class OrderPositionConcurrencyTest {
         awaitBothIfNeeded(staleReads);
         return Optional.of(copy(accountState.get()));
       }
+      if ("findByIdAndUserIdForUpdate".equals(name) || "findByIdForUpdate".equals(name)) {
+        return Optional.of(copy(accountState.get()));
+      }
       if ("reserveMarginIfAvailable".equals(name)) {
         BigDecimal amount = invocation.getArgument(1);
         synchronized (lock) {
@@ -231,6 +350,9 @@ class OrderPositionConcurrencyTest {
       }
       if ("findByUserIdAndId".equals(name)) {
         awaitBothIfNeeded(staleReads);
+        return Optional.of(copy(orderState.get()));
+      }
+      if ("findByIdForUpdate".equals(name)) {
         return Optional.of(copy(orderState.get()));
       }
       if ("cancelPending".equals(name)) {
@@ -271,6 +393,9 @@ class OrderPositionConcurrencyTest {
       String name = invocation.getMethod().getName();
       if ("findById".equals(name)) {
         awaitBothIfNeeded(staleReads);
+        return Optional.of(copy(positionState.get()));
+      }
+      if ("findByIdForUpdate".equals(name)) {
         return Optional.of(copy(positionState.get()));
       }
       if ("closeIfOpen".equals(name)) {
@@ -317,7 +442,11 @@ class OrderPositionConcurrencyTest {
         new OrderCommandFactory(),
         new OrderEntityFactory(),
         new OrderResponseMapper(),
-        new OrderStatusPolicy());
+        new OrderStatusPolicy(),
+        mock(DemoExecutionGuard.class),
+        mock(WalletBalanceRepository.class),
+        mock(PositionRepository.class),
+        mock(SpotPositionService.class));
   }
 
   private static CreateOrderRequest limitOrder(UUID accountId, String clientOrderId) {
@@ -455,5 +584,28 @@ class OrderPositionConcurrencyTest {
   }
 
   private record Attempt(boolean success, Throwable error) {
+  }
+
+  private static void assertForUpdate(Class<?> repositoryType, String methodName, Class<?>... parameterTypes)
+      throws Exception {
+    String sql = selectSql(repositoryType.getMethod(methodName, parameterTypes));
+    assertThat(sql).containsIgnoringCase("FOR UPDATE");
+  }
+
+  private static void assertSortedForUpdate(
+      Class<?> repositoryType,
+      String methodName,
+      String expectedOrderBy,
+      Class<?>... parameterTypes
+  ) throws Exception {
+    String sql = selectSql(repositoryType.getMethod(methodName, parameterTypes));
+    assertThat(sql).containsIgnoringCase(expectedOrderBy);
+    assertThat(sql).containsIgnoringCase("FOR UPDATE");
+  }
+
+  private static String selectSql(Method method) {
+    Select select = method.getAnnotation(Select.class);
+    assertThat(select).as("%s must declare mapper SQL", method).isNotNull();
+    return String.join(" ", select.value()).replaceAll("\\s+", " ");
   }
 }

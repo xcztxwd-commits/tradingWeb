@@ -6,6 +6,7 @@ import static com.fxplatform.common.money.MoneyAmount.orZero;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.entity.LedgerEntryEntity;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
@@ -23,8 +24,11 @@ import com.fxplatform.trading.repository.FundingSettlementRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +49,7 @@ public class FundingService {
   private final LedgerService ledgerService;
   private final SymbolRepository symbolRepository;
   private final TradingInstrumentClassifier instrumentClassifier;
+  private final DemoExecutionGuard demoExecutionGuard;
 
   public FundingRateEntity getCurrentFundingRate(String symbol) {
     String normalized = normalizeSymbol(symbol);
@@ -54,10 +59,22 @@ public class FundingService {
 
   @Transactional
   public BigDecimal settleFundingForAccount(UUID accountId) {
-    return positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN)
+    Map<UUID, FundingCandidate> candidates = positionRepository
+        .findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN)
         .stream()
         .filter(this::isPerpetualPosition)
-        .map(this::settleFundingForPosition)
+        .map(position -> new FundingCandidate(
+            position.getId(),
+            normalizeSymbol(position.getSymbol()),
+            getCurrentFundingRate(position.getSymbol())))
+        .collect(Collectors.toMap(FundingCandidate::positionId, Function.identity()));
+
+    TradingAccountEntity account = accountRepository.findByIdForUpdate(accountId)
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    return positionRepository.findOpenByAccountIdForUpdate(accountId)
+        .stream()
+        .filter(position -> matches(candidates.get(position.getId()), position))
+        .map(position -> settleLockedPosition(account, position, candidates.get(position.getId()).fundingRate()))
         .reduce(BigDecimal.ZERO, BigDecimal::add)
         .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
   }
@@ -69,17 +86,28 @@ public class FundingService {
 
   @Transactional
   public BigDecimal settleFundingForPosition(PositionEntity position, FundingRateEntity fundingRate) {
+    TradingAccountEntity account = accountRepository.findByIdForUpdate(position.getAccountId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    PositionEntity lockedPosition = positionRepository.findByIdForUpdate(position.getId())
+        .orElseThrow(() -> new BusinessException("POSITION_NOT_FOUND", "Position not found"));
+    return settleLockedPosition(account, lockedPosition, fundingRate);
+  }
+
+  private BigDecimal settleLockedPosition(
+      TradingAccountEntity account,
+      PositionEntity position,
+      FundingRateEntity fundingRate
+  ) {
     if (position.getStatus() != PositionStatus.OPEN) {
       return zeroMoney();
     }
 
-    InstrumentProfile profile = instrumentProfile(position);
+    SymbolEntity symbol = symbolFor(position);
+    InstrumentProfile profile = instrumentClassifier.profile(symbol);
     if (!isPerpetual(profile.kind())) {
       return zeroMoney();
     }
-
-    TradingAccountEntity account = accountRepository.findById(position.getAccountId())
-        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(account, symbol.getProductType(), position.getSymbol());
     BigDecimal cashflow = fundingCashflow(position, fundingRate, profile);
     FundingSettlementEntity settlement = fundingSettlement(account, position, fundingRate, profile, cashflow);
     if (!fundingSettlementRepository.insertIfAbsent(settlement)) {
@@ -261,5 +289,12 @@ public class FundingService {
 
   private String normalizeSymbol(String symbol) {
     return symbol == null ? "" : symbol.trim().toUpperCase();
+  }
+
+  private boolean matches(FundingCandidate candidate, PositionEntity position) {
+    return candidate != null && candidate.symbol().equals(normalizeSymbol(position.getSymbol()));
+  }
+
+  private record FundingCandidate(UUID positionId, String symbol, FundingRateEntity fundingRate) {
   }
 }

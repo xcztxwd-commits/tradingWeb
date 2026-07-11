@@ -7,7 +7,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.dto.AccountSnapshot;
+import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.account.service.AccountSnapshotService;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
@@ -27,6 +29,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
@@ -62,9 +65,41 @@ class Step09LiquidationServiceAuditTest {
   @Mock
   private WalletService walletService;
 
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  @BeforeEach
+  void accountRowsAreAvailableToTheGuard() {
+    org.mockito.Mockito.lenient()
+        .when(accountRepository.findById(org.mockito.ArgumentMatchers.any(UUID.class)))
+        .thenAnswer(invocation -> {
+          TradingAccountEntity account = new TradingAccountEntity();
+          account.setId(invocation.getArgument(0));
+          account.setBaseCurrency("USD");
+          account.setBalance(new BigDecimal("10000.00000000"));
+          account.setEquity(new BigDecimal("10000.00000000"));
+          account.setUsedMargin(BigDecimal.ZERO);
+          account.setFreeMargin(new BigDecimal("10000.00000000"));
+          account.setLeverage(10);
+          return Optional.of(account);
+        });
+    org.mockito.Mockito.lenient()
+        .when(accountRepository.findByIdForUpdate(org.mockito.ArgumentMatchers.any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+  }
+
   @Test
   void perpAccountBelowMaintenanceClosesLargestRiskFirst() {
     UUID accountId = UUID.randomUUID();
+    TradingAccountEntity riskAccount = new TradingAccountEntity();
+    riskAccount.setId(accountId);
+    riskAccount.setBaseCurrency("USD");
+    riskAccount.setBalance(new BigDecimal("1000.00000000"));
+    riskAccount.setEquity(new BigDecimal("100.00000000"));
+    riskAccount.setUsedMargin(new BigDecimal("1000.00000000"));
+    riskAccount.setFreeMargin(new BigDecimal("-900.00000000"));
+    riskAccount.setLeverage(10);
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(riskAccount));
     PositionEntity lowRisk = openPerp(accountId, "ETHUSDT", "60.00000000", "-5.00000000");
     PositionEntity highRisk = openPerp(accountId, "BTCUSDT", "100.00000000", "-75.00000000");
     lowRisk.setLots(BigDecimal.ONE);
@@ -117,7 +152,9 @@ class Step09LiquidationServiceAuditTest {
         riskConfigRepository,
         ledgerService,
         quoteService,
-        walletService);
+        walletService,
+        demoExecutionGuard,
+        new com.fxplatform.trading.service.TradingTransactionExecutor());
   }
 
   private static AccountSnapshot snapshot(UUID accountId, String equity, String usedMargin, String maintenanceMargin) {

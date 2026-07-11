@@ -1,7 +1,11 @@
 package com.fxplatform.trading.service;
 
+import com.fxplatform.account.entity.TradingAccountEntity;
+import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.OrderSide;
@@ -22,8 +26,10 @@ import org.springframework.stereotype.Service;
 public class ProtectiveOrderExecutionService {
 
   private final PositionRepository positionRepository;
+  private final TradingAccountRepository accountRepository;
   private final QuoteService quoteService;
   private final PositionService positionService;
+  private final DemoExecutionGuard demoExecutionGuard;
 
   /**
    * 定时扫描只读取 OPEN 持仓；实际平仓仍委托 PositionService 保证结算一致性。
@@ -32,6 +38,9 @@ public class ProtectiveOrderExecutionService {
   public int executeProtectiveOrders() {
     int closed = 0;
     for (PositionEntity position : positionRepository.findByStatus(PositionStatus.OPEN)) {
+      TradingAccountEntity account = accountRepository.findById(position.getAccountId())
+          .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+      demoExecutionGuard.requireDemo(account, requestedProduct(position.getSymbol()), position.getSymbol());
       QuoteResponse quote;
       try {
         quote = quoteService.freshQuote(position.getSymbol());
@@ -92,5 +101,9 @@ public class ProtectiveOrderExecutionService {
    */
   private BigDecimal closingPrice(PositionEntity position, QuoteResponse quote) {
     return position.getSide() == OrderSide.BUY ? quote.bid() : quote.ask();
+  }
+
+  private ProductType requestedProduct(String canonicalSymbol) {
+    return canonicalSymbol.endsWith("-PERP") ? ProductType.LINEAR_PERP : ProductType.CRYPTO_SPOT;
   }
 }

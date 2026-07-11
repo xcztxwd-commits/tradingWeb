@@ -12,8 +12,10 @@ import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.ExecutionAdapter;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.request.UpdateOrderRequest;
@@ -29,6 +31,7 @@ import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
+import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -37,6 +40,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -69,6 +73,23 @@ class OrderServiceTest {
 
   @Mock
   private WalletService walletService;
+
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  @Mock
+  private WalletBalanceRepository walletBalanceRepository;
+
+  @Mock
+  private SpotPositionService spotPositionService;
+
+  @BeforeEach
+  void lockedAccountLookupUsesTheOwnedAccountFixture() {
+    org.mockito.Mockito.lenient()
+        .when(accountRepository.findByIdAndUserIdForUpdate(any(UUID.class), any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findByIdAndUserId(
+            invocation.getArgument(0), invocation.getArgument(1)));
+  }
 
   @Test
   void marketOrderRecordsMarginLedgerAfterRiskAndExecution() {
@@ -116,6 +137,58 @@ class OrderServiceTest {
     assertThat(positionCaptor.getValue().getMarginHeld()).isEqualByComparingTo(filledMargin);
     verify(accountRepository).reserveMarginIfAvailable(accountId, filledMargin);
     verify(ledgerService).recordMarginHold(eq(account), eq(filledMargin), any(UUID.class), eq("Market order margin hold"));
+    verify(demoExecutionGuard, org.mockito.Mockito.times(2))
+        .requireDemo(account, ProductType.CRYPTO_SPOT, "EURUSD");
+    org.mockito.InOrder accountWalletOrder = org.mockito.Mockito.inOrder(
+        accountRepository, walletBalanceRepository, orderRepository);
+    accountWalletOrder.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
+    accountWalletOrder.verify(walletBalanceRepository).findByAccountIdForUpdate(accountId);
+    accountWalletOrder.verify(orderRepository, org.mockito.Mockito.atLeastOnce()).save(any(OrderEntity.class));
+  }
+
+  @Test
+  void linearPerpLocksSortedPositionsBeforeWritingMarketOrder() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = new CreateOrderRequest(
+        accountId,
+        "BTCUSDT-PERP",
+        OrderSide.BUY,
+        OrderType.MARKET,
+        null,
+        null,
+        null,
+        null,
+        "idem-perp-lock-order",
+        "client-perp-lock-order",
+        BigDecimal.ONE,
+        null,
+        10);
+    TradingAccountEntity account = demoAccount(userId, accountId);
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(
+        userId, accountId, "client-perp-lock-order")).thenReturn(Optional.empty());
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class)))
+        .thenReturn(new BigDecimal("100.00000000"));
+    when(riskCheckService.resolveEffectiveLeverage(eq(account), any(CreateOrderRequest.class))).thenReturn(10);
+    when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(ExecutionResult.rejected(
+        "EXECUTION_REJECTED",
+        "Demo execution rejected"));
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
+      OrderEntity order = invocation.getArgument(0);
+      order.setId(UUID.randomUUID());
+      return order;
+    });
+
+    orderService(org.mockito.Mockito.mock(OrderEventService.class)).createOrder(principal, request);
+
+    org.mockito.InOrder accountPositionOrder = org.mockito.Mockito.inOrder(
+        accountRepository, positionRepository, orderRepository);
+    accountPositionOrder.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
+    accountPositionOrder.verify(positionRepository).findOpenByAccountIdForUpdate(accountId);
+    accountPositionOrder.verify(orderRepository, org.mockito.Mockito.atLeastOnce()).save(any(OrderEntity.class));
   }
 
   @Test
@@ -472,6 +545,12 @@ class OrderServiceTest {
     assertThat(response.status()).isEqualTo(OrderStatus.PENDING.name());
     assertThat(response.holdAmount()).isEqualByComparingTo(holdAmount);
     assertThat(response.holdCurrency()).isEqualTo("USDT");
+    org.mockito.InOrder accountWalletOrder = org.mockito.Mockito.inOrder(
+        accountRepository, walletService, spotPositionService, orderRepository);
+    accountWalletOrder.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
+    accountWalletOrder.verify(walletService).lockBalancesInOrder(accountId, List.of("BTC", "USDT"));
+    accountWalletOrder.verify(spotPositionService).lockOrCreate(accountId, "BTC", "USDT");
+    accountWalletOrder.verify(orderRepository).save(any(OrderEntity.class));
     assertThat(account.getUsedMargin()).isEqualByComparingTo("0");
     verify(walletService).lockAvailableWithEntryType(
         eq(accountId),
@@ -609,7 +688,7 @@ class OrderServiceTest {
 
     assertThat(response.id()).isEqualTo(existingOrderId);
     assertThat(response.status()).isEqualTo(OrderStatus.PENDING.name());
-    verify(executionAdapter, never()).execute(any());
+    verify(executionAdapter).execute(any());
     verify(tradeRepository, never()).save(any());
     verify(positionRepository, never()).save(any());
     verify(ledgerService, never()).recordMarginHold(any(), any(), any(), any());
@@ -704,6 +783,7 @@ class OrderServiceTest {
     order.setHoldCurrency("USD");
 
     when(orderRepository.findByUserIdAndId(userId, orderId)).thenReturn(Optional.of(order));
+    when(orderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(orderRepository.cancelPending(any(OrderEntity.class))).thenReturn(1);
     OrderEventService orderEventService = org.mockito.Mockito.mock(OrderEventService.class);
@@ -740,6 +820,7 @@ class OrderServiceTest {
     order.setHoldCurrency("USDT");
 
     when(orderRepository.findByUserIdAndId(userId, orderId)).thenReturn(Optional.of(order));
+    when(orderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(orderRepository.cancelPending(any(OrderEntity.class))).thenReturn(1);
     when(riskCheckService.isSpotSymbol("BTCUSDT")).thenReturn(true);
@@ -751,6 +832,12 @@ class OrderServiceTest {
     assertThat(response.status()).isEqualTo(OrderStatus.CANCELED.name());
     assertThat(response.holdAmount()).isEqualByComparingTo("0");
     assertThat(account.getUsedMargin()).isEqualByComparingTo("0");
+    org.mockito.InOrder accountWalletOrder = org.mockito.Mockito.inOrder(
+        accountRepository, walletService, spotPositionService, orderRepository);
+    accountWalletOrder.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
+    accountWalletOrder.verify(walletService).lockBalancesInOrder(accountId, List.of("BTC", "USDT"));
+    accountWalletOrder.verify(spotPositionService).lockOrCreate(accountId, "BTC", "USDT");
+    accountWalletOrder.verify(orderRepository).findByIdForUpdate(orderId);
     verify(walletService).releaseLockedWithEntryType(
         eq(accountId),
         eq("USDT"),
@@ -805,6 +892,7 @@ class OrderServiceTest {
     order.setHoldCurrency("USD");
 
     when(orderRepository.findByUserIdAndId(userId, orderId)).thenReturn(Optional.of(order));
+    when(orderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(orderRepository.cancelPending(any(OrderEntity.class))).thenReturn(1);
     OrderEventService orderEventService = org.mockito.Mockito.mock(OrderEventService.class);
@@ -845,6 +933,7 @@ class OrderServiceTest {
         new BigDecimal("1.09000"));
 
     when(orderRepository.findByUserIdAndId(userId, orderId)).thenReturn(Optional.of(order));
+    when(orderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(riskCheckService.checkOrder(any(TradingAccountEntity.class), any(CreateOrderRequest.class)))
         .thenReturn(new BigDecimal("20.00000000"));
@@ -862,6 +951,11 @@ class OrderServiceTest {
     assertThat(order.getHoldAmount()).isEqualByComparingTo("20.00000000");
     assertThat(account.getUsedMargin()).isEqualByComparingTo("20.00000000");
     assertThat(account.getFreeMargin()).isEqualByComparingTo("9980.00000000");
+    org.mockito.InOrder accountWalletOrder = org.mockito.Mockito.inOrder(
+        accountRepository, walletBalanceRepository, orderRepository);
+    accountWalletOrder.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
+    accountWalletOrder.verify(walletBalanceRepository).findByAccountIdForUpdate(accountId);
+    accountWalletOrder.verify(orderRepository).findByIdForUpdate(orderId);
     verify(orderRepository).save(order);
     verify(accountRepository).reserveMarginIfAvailable(accountId, new BigDecimal("10.00000000"));
     verify(ledgerService).recordOrderHold(eq(account), eq(new BigDecimal("10.00000000")), eq(orderId), eq("Pending order margin increased"));
@@ -940,6 +1034,10 @@ class OrderServiceTest {
         new OrderCommandFactory(),
         new OrderEntityFactory(),
         new OrderResponseMapper(),
-        new OrderStatusPolicy());
+        new OrderStatusPolicy(),
+        demoExecutionGuard,
+        walletBalanceRepository,
+        positionRepository,
+        spotPositionService);
   }
 }

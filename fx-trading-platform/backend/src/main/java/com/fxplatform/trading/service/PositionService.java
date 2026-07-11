@@ -8,10 +8,12 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.market.service.SymbolProductTypes;
 import com.fxplatform.risk.model.InstrumentKind;
@@ -51,6 +53,7 @@ public class PositionService {
   private final LedgerService ledgerService;
   private final SymbolRepository symbolRepository;
   private final SpotPositionRepository spotPositionRepository;
+  private final DemoExecutionGuard demoExecutionGuard;
   private final TradingInstrumentClassifier instrumentClassifier = new TradingInstrumentClassifier();
   private final TradingAlgorithmEngine tradingAlgorithmEngine = new TradingAlgorithmEngine();
   private final PerpMarginCalculator perpMarginCalculator = new PerpMarginCalculator();
@@ -63,7 +66,8 @@ public class PositionService {
       PnLCalculator pnlCalculator,
       LedgerService ledgerService,
       SymbolRepository symbolRepository,
-      SpotPositionRepository spotPositionRepository
+      SpotPositionRepository spotPositionRepository,
+      DemoExecutionGuard demoExecutionGuard
   ) {
     this.positionRepository = positionRepository;
     this.accountRepository = accountRepository;
@@ -72,6 +76,7 @@ public class PositionService {
     this.ledgerService = ledgerService;
     this.symbolRepository = symbolRepository;
     this.spotPositionRepository = spotPositionRepository;
+    this.demoExecutionGuard = demoExecutionGuard;
   }
 
   public PositionService(
@@ -80,9 +85,11 @@ public class PositionService {
       QuoteService quoteService,
       PnLCalculator pnlCalculator,
       LedgerService ledgerService,
-      SymbolRepository symbolRepository
+      SymbolRepository symbolRepository,
+      DemoExecutionGuard demoExecutionGuard
   ) {
-    this(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService, symbolRepository, null);
+    this(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService, symbolRepository, null,
+        demoExecutionGuard);
   }
 
   public PositionService(
@@ -90,9 +97,11 @@ public class PositionService {
       TradingAccountRepository accountRepository,
       QuoteService quoteService,
       PnLCalculator pnlCalculator,
-      LedgerService ledgerService
+      LedgerService ledgerService,
+      DemoExecutionGuard demoExecutionGuard
   ) {
-    this(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService, null, null);
+    this(positionRepository, accountRepository, quoteService, pnlCalculator, ledgerService, null, null,
+        demoExecutionGuard);
   }
 
   /**
@@ -132,8 +141,16 @@ public class PositionService {
    */
   @Transactional
   public PositionResponse closePosition(UUID userId, UUID accountId, UUID positionId) {
-    TradingAccountEntity account = requireOwnedAccount(userId, accountId);
-    return closeOwnedPosition(account, positionId);
+    requireOwnedAccount(userId, accountId);
+    PositionEntity positionSnapshot = requireOwnedPosition(accountId, positionId);
+    requireOpen(positionSnapshot, "Only open positions can be closed");
+    QuoteResponse quote = quoteService.freshQuote(positionSnapshot.getSymbol());
+
+    TradingAccountEntity account = requireOwnedAccountForUpdate(userId, accountId);
+    ProductType productType = symbolFor(positionSnapshot).getProductType();
+    demoExecutionGuard.requireDemo(account, productType, positionSnapshot.getSymbol());
+    PositionEntity position = requireOwnedPositionForUpdate(accountId, positionId);
+    return closeOwnedPosition(account, position, quote, null);
   }
 
   @Transactional
@@ -143,17 +160,17 @@ public class PositionService {
       UUID positionId,
       UpdatePositionProtectionRequest request
   ) {
-    TradingAccountEntity account = requireOwnedAccount(userId, accountId);
-    PositionEntity position = positionRepository.findById(positionId)
-        .orElseThrow(() -> new BusinessException("POSITION_NOT_FOUND", "Position not found"));
-    if (!position.getAccountId().equals(accountId)) {
-      throw new AuthorizationException("POSITION_ACCOUNT_MISMATCH", "Position does not belong to account");
-    }
-    if (position.getStatus() != PositionStatus.OPEN) {
-      throw new BusinessException("POSITION_NOT_OPEN", "Only open positions can be modified");
-    }
+    requireOwnedAccount(userId, accountId);
+    PositionEntity positionSnapshot = requireOwnedPosition(accountId, positionId);
+    requireOpen(positionSnapshot, "Only open positions can be modified");
+    validateProtection(positionSnapshot, request);
 
-    validateProtection(position, request);
+    TradingAccountEntity account = requireOwnedAccountForUpdate(userId, accountId);
+    ProductType productType = symbolFor(positionSnapshot).getProductType();
+    demoExecutionGuard.requireDemo(account, productType, positionSnapshot.getSymbol());
+    PositionEntity position = requireOwnedPositionForUpdate(accountId, positionId);
+    requireOpen(position, "Only open positions can be modified");
+    validateProtectionDirection(position.getSide(), request.stopLoss(), request.takeProfit());
     position.setStopLoss(request.stopLoss());
     position.setTakeProfit(request.takeProfit());
     positionRepository.save(position);
@@ -167,31 +184,25 @@ public class PositionService {
 
   @Transactional
   public PositionResponse closeSystemPosition(UUID accountId, UUID positionId, String forcedCloseReason) {
-    TradingAccountEntity account = accountRepository.findById(accountId)
-        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
-    return closeOwnedPosition(account, positionId, forcedCloseReason);
-  }
+    PositionEntity positionSnapshot = requireOwnedPosition(accountId, positionId);
+    requireOpen(positionSnapshot, "Only open positions can be closed");
+    QuoteResponse quote = quoteService.freshQuote(positionSnapshot.getSymbol());
 
-  private PositionResponse closeOwnedPosition(TradingAccountEntity account, UUID positionId) {
-    return closeOwnedPosition(account, positionId, null);
+    TradingAccountEntity account = accountRepository.findByIdForUpdate(accountId)
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    ProductType productType = symbolFor(positionSnapshot).getProductType();
+    demoExecutionGuard.requireDemo(account, productType, positionSnapshot.getSymbol());
+    PositionEntity position = requireOwnedPositionForUpdate(accountId, positionId);
+    return closeOwnedPosition(account, position, quote, forcedCloseReason);
   }
 
   private PositionResponse closeOwnedPosition(
       TradingAccountEntity account,
-      UUID positionId,
+      PositionEntity position,
+      QuoteResponse quote,
       String forcedCloseReason
   ) {
-    UUID accountId = account.getId();
-    PositionEntity position = positionRepository.findById(positionId)
-        .orElseThrow(() -> new BusinessException("POSITION_NOT_FOUND", "Position not found"));
-    if (!position.getAccountId().equals(accountId)) {
-      throw new AuthorizationException("POSITION_ACCOUNT_MISMATCH", "Position does not belong to account");
-    }
-    if (position.getStatus() != PositionStatus.OPEN) {
-      throw new BusinessException("POSITION_NOT_OPEN", "Only open positions can be closed");
-    }
-
-    QuoteResponse quote = quoteService.freshQuote(position.getSymbol());
+    requireOpen(position, "Only open positions can be closed");
     BigDecimal closePrice = position.getSide() == OrderSide.BUY ? quote.bid() : quote.ask();
     BigDecimal realizedPnl = displayPnl(position, account, closePrice);
     BigDecimal marginToRelease = orZero(position.getMarginHeld());
@@ -227,6 +238,37 @@ public class PositionService {
   private TradingAccountEntity requireOwnedAccount(UUID userId, UUID accountId) {
     return accountRepository.findByIdAndUserId(accountId, userId)
         .orElseThrow(() -> new AuthorizationException("ACCOUNT_NOT_FOUND", "Account not found"));
+  }
+
+  private TradingAccountEntity requireOwnedAccountForUpdate(UUID userId, UUID accountId) {
+    return accountRepository.findByIdAndUserIdForUpdate(accountId, userId)
+        .orElseThrow(() -> new AuthorizationException("ACCOUNT_NOT_FOUND", "Account not found"));
+  }
+
+  private PositionEntity requireOwnedPosition(UUID accountId, UUID positionId) {
+    PositionEntity position = positionRepository.findById(positionId)
+        .orElseThrow(() -> new BusinessException("POSITION_NOT_FOUND", "Position not found"));
+    requirePositionAccount(position, accountId);
+    return position;
+  }
+
+  private PositionEntity requireOwnedPositionForUpdate(UUID accountId, UUID positionId) {
+    PositionEntity position = positionRepository.findByIdForUpdate(positionId)
+        .orElseThrow(() -> new BusinessException("POSITION_NOT_FOUND", "Position not found"));
+    requirePositionAccount(position, accountId);
+    return position;
+  }
+
+  private void requirePositionAccount(PositionEntity position, UUID accountId) {
+    if (!position.getAccountId().equals(accountId)) {
+      throw new AuthorizationException("POSITION_ACCOUNT_MISMATCH", "Position does not belong to account");
+    }
+  }
+
+  private void requireOpen(PositionEntity position, String message) {
+    if (position.getStatus() != PositionStatus.OPEN) {
+      throw new BusinessException("POSITION_NOT_OPEN", message);
+    }
   }
 
   private void validateProtection(PositionEntity position, UpdatePositionProtectionRequest request) {

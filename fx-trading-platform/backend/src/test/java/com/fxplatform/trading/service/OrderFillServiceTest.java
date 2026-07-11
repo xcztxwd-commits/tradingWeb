@@ -335,7 +335,8 @@ class OrderFillServiceTest {
       return position;
     });
     when(accountRepository.reserveMarginIfAvailable(eq(accountId), any(BigDecimal.class))).thenReturn(1);
-    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "BTC"))
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "BTC"))
         .thenReturn(Optional.of(btcBalance));
 
     OrderFillService service = new OrderFillService(

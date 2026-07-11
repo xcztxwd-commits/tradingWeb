@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.repository.SymbolRepository;
@@ -23,7 +24,10 @@ import com.fxplatform.trading.service.FundingService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -51,6 +55,19 @@ class Step08FundingServiceAuditTest {
 
   @Mock
   private SymbolRepository symbolRepository;
+
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  private final Map<UUID, PositionEntity> positions = new HashMap<>();
+
+  @BeforeEach
+  void rowLockQueriesReturnTheSameFixtureRows() {
+    org.mockito.Mockito.lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+    org.mockito.Mockito.lenient().when(positionRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> Optional.ofNullable(positions.get(invocation.getArgument(0))));
+  }
 
   @ParameterizedTest
   @CsvSource({
@@ -160,7 +177,8 @@ class Step08FundingServiceAuditTest {
         accountRepository,
         ledgerService,
         symbolRepository,
-        new TradingInstrumentClassifier());
+        new TradingInstrumentClassifier(),
+        demoExecutionGuard);
   }
 
   private static TradingAccountEntity account(UUID accountId, String balance) {
@@ -174,7 +192,7 @@ class Step08FundingServiceAuditTest {
     return account;
   }
 
-  private static PositionEntity position(UUID accountId, String symbol, OrderSide side, String lots, String markPrice) {
+  private PositionEntity position(UUID accountId, String symbol, OrderSide side, String lots, String markPrice) {
     PositionEntity position = new PositionEntity();
     position.setId(UUID.randomUUID());
     position.setAccountId(accountId);
@@ -186,6 +204,7 @@ class Step08FundingServiceAuditTest {
     position.setMarkPrice(new BigDecimal(markPrice));
     position.setStatus(PositionStatus.OPEN);
     position.setFundingPnl(BigDecimal.ZERO);
+    positions.put(position.getId(), position);
     return position;
   }
 

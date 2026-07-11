@@ -45,7 +45,8 @@ class Step05SpotWalletSettlementAuditTest {
 
   @BeforeEach
   void setUpRepositories() {
-    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(any(UUID.class), any(String.class), any(String.class)))
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        any(UUID.class), any(String.class), any(String.class)))
         .thenAnswer(invocation -> Optional.ofNullable(
             balances.get(key(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)))));
     when(walletBalanceRepository.save(any(WalletBalanceEntity.class))).thenAnswer(invocation -> {

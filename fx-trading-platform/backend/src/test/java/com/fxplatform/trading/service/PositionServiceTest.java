@@ -12,6 +12,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.entity.SymbolEntity;
@@ -34,6 +35,7 @@ import java.util.Optional;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -61,6 +63,20 @@ class PositionServiceTest {
 
   @Mock
   private SpotPositionRepository spotPositionRepository;
+
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  @BeforeEach
+  void rowLockQueriesReturnTheSameFixtureRows() {
+    lenient().when(accountRepository.findByIdAndUserIdForUpdate(any(UUID.class), any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findByIdAndUserId(
+            invocation.getArgument(0), invocation.getArgument(1)));
+    lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+    lenient().when(positionRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> positionRepository.findById(invocation.getArgument(0)));
+  }
 
   @Test
   void openPositionsRefreshFloatingPnlFromLatestQuote() {
@@ -935,7 +951,6 @@ class PositionServiceTest {
     UUID positionId = UUID.randomUUID();
     PositionEntity position = openPosition(UUID.randomUUID(), positionId);
 
-    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
 
     PositionService service = service();
@@ -966,7 +981,8 @@ class PositionServiceTest {
         pnlCalculator,
         ledgerService,
         symbolRepository,
-        spotPositionRepository);
+        spotPositionRepository,
+        demoExecutionGuard);
   }
 
   private static SpotPositionEntity spotPosition(UUID accountId, String asset, String costAsset) {

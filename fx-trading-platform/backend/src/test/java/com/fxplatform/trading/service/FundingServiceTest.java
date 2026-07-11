@@ -10,9 +10,11 @@ import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.entity.LedgerEntryEntity;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.risk.service.TradingInstrumentClassifier;
 import com.fxplatform.trading.entity.FundingSettlementEntity;
@@ -26,12 +28,15 @@ import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -58,6 +63,34 @@ class FundingServiceTest {
 
   @Mock
   private SymbolRepository symbolRepository;
+
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  private final Map<UUID, PositionEntity> positions = new HashMap<>();
+
+  @BeforeEach
+  void rowLockQueriesReturnTheSameFixtureRows() {
+    org.mockito.Mockito.lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+    org.mockito.Mockito.lenient().when(positionRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> Optional.ofNullable(positions.get(invocation.getArgument(0))));
+    org.mockito.Mockito.lenient().when(positionRepository.findOpenByAccountIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> positions.values().stream()
+            .filter(position -> position.getAccountId().equals(invocation.getArgument(0)))
+            .filter(position -> position.getStatus() == PositionStatus.OPEN)
+            .sorted(java.util.Comparator.comparing(PositionEntity::getSymbol)
+                .thenComparing(PositionEntity::getId))
+            .toList());
+    org.mockito.Mockito.lenient().when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+            any(UUID.class), eq(PositionStatus.OPEN)))
+        .thenAnswer(invocation -> positions.values().stream()
+            .filter(position -> position.getAccountId().equals(invocation.getArgument(0)))
+            .filter(position -> position.getStatus() == PositionStatus.OPEN)
+            .sorted(java.util.Comparator.comparing(PositionEntity::getSymbol)
+                .thenComparing(PositionEntity::getId))
+            .toList());
+  }
 
   @Test
   void getCurrentFundingRateReturnsLatestNormalizedSymbol() {
@@ -115,6 +148,7 @@ class FundingServiceTest {
         eq(new BigDecimal(expectedCashflow)),
         any(UUID.class),
         eq("Perpetual funding fee"));
+    verify(demoExecutionGuard).requireDemo(account, ProductType.LINEAR_PERP, "BTCUSDT");
   }
 
   @Test
@@ -157,8 +191,6 @@ class FundingServiceTest {
     PositionEntity perp = position(accountId, "BTCUSDT", OrderSide.BUY, "1.00", "50000.00000000");
     PositionEntity forex = position(accountId, "EURUSD", OrderSide.BUY, "0.10", "1.10000000");
 
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(perp, forex));
     when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
     when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(perpSymbol(
         "BTCUSDT",
@@ -181,6 +213,22 @@ class FundingServiceTest {
     assertThat(forex.getFundingPnl()).isEqualByComparingTo(BigDecimal.ZERO);
     verify(positionRepository).save(perp);
     verify(positionRepository, never()).save(forex);
+
+    org.mockito.InOrder candidateBeforeLocks = org.mockito.Mockito.inOrder(
+        positionRepository,
+        fundingRateRepository,
+        accountRepository);
+    candidateBeforeLocks.verify(positionRepository)
+        .findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN);
+    candidateBeforeLocks.verify(fundingRateRepository).findLatestBySymbol("BTCUSDT");
+    candidateBeforeLocks.verify(accountRepository).findByIdForUpdate(accountId);
+  }
+
+  @Test
+  void fundingSchedulerDoesNotHoldOneTransactionAcrossAccounts() throws Exception {
+    assertThat(FundingSettlementScheduler.class.getMethod("settleDueFunding")
+        .isAnnotationPresent(org.springframework.transaction.annotation.Transactional.class))
+        .isFalse();
   }
 
   @Test
@@ -309,7 +357,8 @@ class FundingServiceTest {
         accountRepository,
         ledgerService,
         symbolRepository,
-        new TradingInstrumentClassifier());
+        new TradingInstrumentClassifier(),
+        demoExecutionGuard);
   }
 
   private static TradingAccountEntity account(UUID accountId, String balance) {
@@ -323,7 +372,7 @@ class FundingServiceTest {
     return account;
   }
 
-  private static PositionEntity position(UUID accountId, String symbol, OrderSide side, String lots, String markPrice) {
+  private PositionEntity position(UUID accountId, String symbol, OrderSide side, String lots, String markPrice) {
     PositionEntity position = new PositionEntity();
     position.setId(UUID.randomUUID());
     position.setAccountId(accountId);
@@ -335,6 +384,7 @@ class FundingServiceTest {
     position.setMarkPrice(new BigDecimal(markPrice));
     position.setStatus(PositionStatus.OPEN);
     position.setFundingPnl(BigDecimal.ZERO);
+    positions.put(position.getId(), position);
     return position;
   }
 
@@ -361,6 +411,9 @@ class FundingServiceTest {
   ) {
     SymbolEntity symbol = new SymbolEntity();
     symbol.setSymbol(symbolCode);
+    symbol.setProductType(assetClass.startsWith("INVERSE")
+        ? ProductType.INVERSE_PERP
+        : ProductType.LINEAR_PERP);
     symbol.setAssetClass(assetClass);
     symbol.setBaseCurrency(baseCurrency);
     symbol.setQuoteCurrency(quoteCurrency);
