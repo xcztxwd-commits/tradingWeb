@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.mock;
 import static org.mockito.ArgumentMatchers.anyLong;
 
 import com.fxplatform.chart.dto.CandleResponse;
@@ -30,8 +32,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -57,12 +63,107 @@ class MarketBundleResolverTest {
 
   private MarketSourceSelectionTracker tracker;
   private MarketBundleResolver resolver;
+  private AtomicInteger selectionEvents;
 
   @BeforeEach
   void setUp() {
-    tracker = new MarketSourceSelectionTracker(event -> { }, CLOCK);
+    selectionEvents = new AtomicInteger();
+    tracker = new MarketSourceSelectionTracker(event -> selectionEvents.incrementAndGet(), CLOCK);
     resolver = new MarketBundleResolver(
         providerResolver, new MarketBundleValidator(CLOCK), tracker, healthRecorder, CLOCK);
+  }
+
+  @ParameterizedTest
+  @MethodSource("invalidCandleRequests")
+  void rejectsInvalidCandleRequestBeforeProviderResolutionAndTelemetry(CandleRequest request) {
+    assertThatThrownBy(() -> resolver.resolveSpot("BTCUSDT", request))
+        .isInstanceOfSatisfying(BusinessException.class,
+            error -> assertThat(error.getCode()).isEqualTo("INVALID_CANDLE_REQUEST"));
+    assertThatThrownBy(() -> resolver.resolvePerp("BTCUSDT-PERP", request))
+        .isInstanceOfSatisfying(BusinessException.class,
+            error -> assertThat(error.getCode()).isEqualTo("INVALID_CANDLE_REQUEST"));
+
+    verifyNoInteractions(providerResolver, healthRecorder);
+    assertThat(selectionEvents).hasValue(0);
+  }
+
+  @Test
+  void restoredInterruptStopsSpotResolutionWithoutFallbackOrTelemetry() {
+    BundleAdapter interrupted = BundleAdapter.interrupting("binance");
+    BundleAdapter secondary = BundleAdapter.spot(
+        "okx", completeSpot("okx", "BTC-USDT", NOW.minusSeconds(1)));
+    BundleAdapter local = BundleAdapter.spot(
+        "local-spot", completeSpot("local-spot", "BTCUSDT", NOW.minusSeconds(1)));
+    when(providerResolver.resolveCandidates("BTCUSDT", BUNDLE_CAPABILITIES))
+        .thenReturn(List.of(
+            candidate("BTCUSDT", ProductType.CRYPTO_SPOT, "BTCUSDT", interrupted),
+            candidate("BTCUSDT", ProductType.CRYPTO_SPOT, "BTC-USDT", secondary),
+            candidate("BTCUSDT", ProductType.CRYPTO_SPOT, "BTCUSDT", local)));
+    MarketSourceSelectionTracker selectionTracker = mock(MarketSourceSelectionTracker.class);
+    MarketBundleResolver interruptResolver = new MarketBundleResolver(
+        providerResolver, new MarketBundleValidator(CLOCK), selectionTracker, healthRecorder, CLOCK);
+
+    try {
+      assertThatThrownBy(() -> interruptResolver.resolveSpot("BTCUSDT", CANDLES))
+          .isInstanceOfSatisfying(BusinessException.class,
+              error -> assertThat(error.getCode()).isEqualTo("MARKET_DATA_UNAVAILABLE"));
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    } finally {
+      Thread.interrupted();
+    }
+
+    assertThat(interrupted.spotCalls).isEqualTo(1);
+    assertThat(secondary.spotCalls).isZero();
+    assertThat(local.spotCalls).isZero();
+    verifyNoInteractions(healthRecorder, selectionTracker);
+  }
+
+  @Test
+  void restoredInterruptStopsPerpetualResolutionWithoutFallbackOrTelemetry() {
+    BundleAdapter interrupted = BundleAdapter.interrupting("binance-usdm");
+    BundleAdapter secondary = BundleAdapter.perp(
+        "okx-swap", completePerp(
+            "okx-swap", "BTC-USDT-SWAP", MarketSourceMode.PUBLIC_EXTERNAL, NOW.minusSeconds(1)));
+    BundleAdapter local = BundleAdapter.perp(
+        "local-perp", completePerp(
+            "local-perp", "BTCUSDT-PERP", MarketSourceMode.LOCAL_SIMULATED, NOW.minusSeconds(1)));
+    when(providerResolver.resolveCandidates("BTCUSDT-PERP", BUNDLE_CAPABILITIES))
+        .thenReturn(List.of(
+            candidate("BTCUSDT-PERP", ProductType.LINEAR_PERP, "BTCUSDT", interrupted),
+            candidate("BTCUSDT-PERP", ProductType.LINEAR_PERP, "BTC-USDT-SWAP", secondary),
+            candidate("BTCUSDT-PERP", ProductType.LINEAR_PERP, "BTCUSDT-PERP", local)));
+    MarketSourceSelectionTracker selectionTracker = mock(MarketSourceSelectionTracker.class);
+    MarketBundleResolver interruptResolver = new MarketBundleResolver(
+        providerResolver, new MarketBundleValidator(CLOCK), selectionTracker, healthRecorder, CLOCK);
+
+    try {
+      assertThatThrownBy(() -> interruptResolver.resolvePerp("BTCUSDT-PERP", CANDLES))
+          .isInstanceOfSatisfying(BusinessException.class,
+              error -> assertThat(error.getCode()).isEqualTo("MARKET_DATA_UNAVAILABLE"));
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    } finally {
+      Thread.interrupted();
+    }
+
+    assertThat(interrupted.perpCalls).isEqualTo(1);
+    assertThat(secondary.perpCalls).isZero();
+    assertThat(local.perpCalls).isZero();
+    verifyNoInteractions(healthRecorder, selectionTracker);
+  }
+
+  private static Stream<CandleRequest> invalidCandleRequests() {
+    return Stream.of(
+        null,
+        new CandleRequest(null, NOW.minusSeconds(60), NOW),
+        new CandleRequest("0m", NOW.minusSeconds(60), NOW),
+        new CandleRequest("-1m", NOW.minusSeconds(60), NOW),
+        new CandleRequest("999999999999999999999999m", NOW.minusSeconds(60), NOW),
+        new CandleRequest("1M", NOW.minusSeconds(60), NOW),
+        new CandleRequest("1m", null, NOW),
+        new CandleRequest("1m", NOW.minusSeconds(60), null),
+        new CandleRequest("1m", NOW, NOW),
+        new CandleRequest("1m", NOW, NOW.minusSeconds(1)),
+        new CandleRequest("1d", NOW.minus(Duration.ofDays(367)), NOW));
   }
 
   @Test
@@ -382,34 +483,42 @@ class MarketBundleResolverTest {
     private final List<SpotMarketBundle> spots;
     private final PerpetualMarketBundle perp;
     private final boolean throwing;
+    private final boolean interrupting;
     private int spotCalls;
+    private int perpCalls;
 
     private BundleAdapter(
         String code,
         List<SpotMarketBundle> spots,
         PerpetualMarketBundle perp,
-        boolean throwing
+        boolean throwing,
+        boolean interrupting
     ) {
       this.code = code;
       this.spots = spots;
       this.perp = perp;
       this.throwing = throwing;
+      this.interrupting = interrupting;
     }
 
     static BundleAdapter spot(String code, SpotMarketBundle spot) {
-      return new BundleAdapter(code, java.util.Collections.singletonList(spot), null, false);
+      return new BundleAdapter(code, java.util.Collections.singletonList(spot), null, false, false);
     }
 
     static BundleAdapter spotSequence(String code, SpotMarketBundle... spots) {
-      return new BundleAdapter(code, java.util.Arrays.asList(spots), null, false);
+      return new BundleAdapter(code, java.util.Arrays.asList(spots), null, false, false);
     }
 
     static BundleAdapter perp(String code, PerpetualMarketBundle perp) {
-      return new BundleAdapter(code, List.of(), perp, false);
+      return new BundleAdapter(code, List.of(), perp, false, false);
     }
 
     static BundleAdapter throwing(String code) {
-      return new BundleAdapter(code, List.of(), null, true);
+      return new BundleAdapter(code, List.of(), null, true, false);
+    }
+
+    static BundleAdapter interrupting(String code) {
+      return new BundleAdapter(code, List.of(), null, false, true);
     }
 
     @Override
@@ -434,6 +543,11 @@ class MarketBundleResolverTest {
         String providerSymbol,
         CandleRequest candleRequest
     ) {
+      if (interrupting) {
+        spotCalls += 1;
+        Thread.currentThread().interrupt();
+        return Optional.empty();
+      }
       if (throwing) {
         throw new IllegalStateException("provider unavailable");
       }
@@ -448,6 +562,11 @@ class MarketBundleResolverTest {
         String providerSymbol,
         CandleRequest candleRequest
     ) {
+      perpCalls += 1;
+      if (interrupting) {
+        Thread.currentThread().interrupt();
+        return Optional.empty();
+      }
       if (throwing) {
         throw new IllegalStateException("provider unavailable");
       }

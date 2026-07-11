@@ -20,6 +20,11 @@ public record MarketDepthResponse(
     boolean stale
 ) {
 
+  public MarketDepthResponse {
+    bids = bids == null ? null : List.copyOf(bids);
+    asks = asks == null ? null : List.copyOf(asks);
+  }
+
   public MarketDepthResponse(
       String symbol,
       long timestamp,

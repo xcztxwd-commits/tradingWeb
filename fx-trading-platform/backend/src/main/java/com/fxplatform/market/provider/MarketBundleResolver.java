@@ -70,12 +70,14 @@ public class MarketBundleResolver {
   }
 
   public SpotMarketBundle resolveSpot(String platformSymbol, CandleRequest candleRequest) {
+    CandleRequestPolicy.requireValid(candleRequest);
     String symbol = SymbolNormalizer.normalize(platformSymbol);
     for (ProviderResolution candidate : candidates(symbol, ProductType.CRYPTO_SPOT, SPOT_PROVIDERS)) {
       Instant startedAt = clock.instant();
       try {
         Optional<SpotMarketBundle> bundle = candidate.adapter().fetchSpotBundle(
             symbol, candidate.providerSymbol(), candleRequest);
+        throwIfInterrupted();
         if (bundle.isPresent() && matchesCandidate(bundle.get(), candidate) && validator.valid(bundle.get())) {
           recordSuccess(candidate, MarketBundleAssembler.quote(bundle.get(), clock), startedAt);
           selectionTracker.recordSelection(symbol, bundle.get().providerCode(), bundle.get().sourceMode());
@@ -83,6 +85,7 @@ public class MarketBundleResolver {
         }
       } catch (RuntimeException ignored) {
         // An incomplete or failed candidate causes whole-bundle fallback.
+        throwIfInterrupted();
       }
       recordFailure(candidate, startedAt);
     }
@@ -90,12 +93,14 @@ public class MarketBundleResolver {
   }
 
   public PerpetualMarketBundle resolvePerp(String platformSymbol, CandleRequest candleRequest) {
+    CandleRequestPolicy.requireValid(candleRequest);
     String symbol = SymbolNormalizer.normalize(platformSymbol);
     for (ProviderResolution candidate : candidates(symbol, ProductType.LINEAR_PERP, PERP_PROVIDERS)) {
       Instant startedAt = clock.instant();
       try {
         Optional<PerpetualMarketBundle> bundle = candidate.adapter().fetchPerpetualBundle(
             symbol, candidate.providerSymbol(), candleRequest);
+        throwIfInterrupted();
         if (bundle.isPresent() && matchesCandidate(bundle.get(), candidate) && validator.valid(bundle.get())) {
           recordSuccess(candidate, MarketBundleAssembler.quote(bundle.get(), clock), startedAt);
           selectionTracker.recordSelection(symbol, bundle.get().providerCode(), bundle.get().sourceMode());
@@ -103,6 +108,7 @@ public class MarketBundleResolver {
         }
       } catch (RuntimeException ignored) {
         // An incomplete or failed candidate causes whole-bundle fallback.
+        throwIfInterrupted();
       }
       recordFailure(candidate, startedAt);
     }
@@ -118,6 +124,14 @@ public class MarketBundleResolver {
         .filter(candidate -> SymbolProductTypes.readOrLegacy(candidate.symbol()) == expectedProduct)
         .filter(candidate -> allowedProviders.contains(candidate.provider().getCode()))
         .toList();
+  }
+
+  private void throwIfInterrupted() {
+    if (Thread.currentThread().isInterrupted()) {
+      throw new BusinessException(
+          ErrorCode.MARKET_DATA_UNAVAILABLE,
+          "Market data resolution was interrupted");
+    }
   }
 
   private void recordSuccess(

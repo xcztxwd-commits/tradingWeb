@@ -2,6 +2,7 @@ package com.fxplatform.market.adapter.local;
 
 import com.fxplatform.chart.dto.CandleResponse;
 import com.fxplatform.market.model.CandleRequest;
+import com.fxplatform.market.provider.CandleRequestPolicy;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
@@ -13,14 +14,13 @@ final class LocalMarketDataSupport {
   private LocalMarketDataSupport() {
   }
 
-  static List<CandleResponse> candles(CandleRequest request, BigDecimal reference, Instant now) {
-    String timeframe = request == null || request.timeframe() == null ? "1m" : request.timeframe();
-    long intervalSeconds = intervalSeconds(timeframe);
-    Instant to = request == null || request.to() == null ? now : request.to();
-    Instant from = request == null || request.from() == null ? to.minusSeconds(intervalSeconds * 60L) : request.from();
-    if (!from.isBefore(to)) {
+  static List<CandleResponse> candles(CandleRequest request, BigDecimal reference) {
+    if (!CandleRequestPolicy.isValid(request)) {
       return List.of();
     }
+    long intervalSeconds = intervalSeconds(request.timeframe());
+    Instant from = request.from();
+    Instant to = request.to();
     long first = (from.getEpochSecond() / intervalSeconds) * intervalSeconds;
     long lastExclusive = to.getEpochSecond();
     long available = Math.max(1L, (lastExclusive - first + intervalSeconds - 1L) / intervalSeconds);
@@ -44,20 +44,15 @@ final class LocalMarketDataSupport {
   }
 
   private static long intervalSeconds(String timeframe) {
-    if (timeframe == null || timeframe.length() < 2) {
-      return 60L;
-    }
-    try {
-      long value = Long.parseLong(timeframe.substring(0, timeframe.length() - 1));
-      return switch (Character.toLowerCase(timeframe.charAt(timeframe.length() - 1))) {
-        case 's' -> value;
-        case 'm' -> value * 60L;
-        case 'h' -> value * 3600L;
-        case 'd' -> value * 86400L;
-        default -> 60L;
-      };
-    } catch (NumberFormatException ignored) {
-      return 60L;
-    }
+    return switch (timeframe) {
+      case "1s" -> 1L;
+      case "1m" -> 60L;
+      case "5m" -> 300L;
+      case "15m" -> 900L;
+      case "1h" -> 3_600L;
+      case "4h" -> 14_400L;
+      case "1d" -> 86_400L;
+      default -> throw new IllegalArgumentException("Unsupported candle timeframe");
+    };
   }
 }

@@ -24,6 +24,7 @@ public final class ErrorCode {
   public static final String MARKET_DATA_UNAVAILABLE = "MARKET_DATA_UNAVAILABLE";
   public static final String MARKET_DATA_STALE = "MARKET_DATA_STALE";
   public static final String MARKET_BUNDLE_INCOMPLETE = "MARKET_BUNDLE_INCOMPLETE";
+  public static final String INVALID_CANDLE_REQUEST = "INVALID_CANDLE_REQUEST";
 
   private static final Set<String> STANDARD_CODES = Set.of(
       AUTH_TOKEN_EXPIRED,
@@ -45,7 +46,8 @@ public final class ErrorCode {
       SYMBOL_NOT_ALLOWED,
       MARKET_DATA_UNAVAILABLE,
       MARKET_DATA_STALE,
-      MARKET_BUNDLE_INCOMPLETE);
+      MARKET_BUNDLE_INCOMPLETE,
+      INVALID_CANDLE_REQUEST);
 
   private ErrorCode() {
   }

@@ -17,6 +17,7 @@ import com.fxplatform.market.provider.MarketBundleAssembler;
 import com.fxplatform.market.provider.MarketDataCapability;
 import com.fxplatform.market.provider.MarketDataDurations;
 import com.fxplatform.market.provider.MarketDataProviderAdapter;
+import com.fxplatform.market.provider.MarketRequestDeadline;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -127,6 +128,14 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
 
   @Override
   public Optional<QuoteResponse> fetchLatestQuote(String symbol, String providerSymbol) {
+    return fetchLatestQuote(symbol, providerSymbol, null);
+  }
+
+  private Optional<QuoteResponse> fetchLatestQuote(
+      String symbol,
+      String providerSymbol,
+      MarketRequestDeadline deadline
+  ) {
     if (!configured()) {
       return Optional.empty();
     }
@@ -134,7 +143,8 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
     if (!instId.endsWith("-USDT")) {
       return Optional.empty();
     }
-    return sendJson(tickerUri(instId)).flatMap(body -> firstData(body).flatMap(data -> parseTicker(symbol, data)));
+    return sendJson(tickerUri(instId), deadline)
+        .flatMap(body -> firstData(body).flatMap(data -> parseTicker(symbol, data)));
   }
 
   @Override
@@ -183,31 +193,60 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
 
   @Override
   public List<CandleResponse> fetchCandles(String symbol, String providerSymbol, String timeframe, Instant from, Instant to) {
+    return fetchCandles(symbol, providerSymbol, timeframe, from, to, null);
+  }
+
+  private List<CandleResponse> fetchCandles(
+      String symbol,
+      String providerSymbol,
+      String timeframe,
+      Instant from,
+      Instant to,
+      MarketRequestDeadline deadline
+  ) {
     if (!configured() || from == null || to == null || !from.isBefore(to)) {
       return List.of();
     }
     String instId = normalizeInstrument(StrUtil.blankToDefault(providerSymbol, symbol));
-    return sendJson(candlesUri(instId, timeframe, from, to))
+    return sendJson(candlesUri(instId, timeframe, from, to), deadline)
         .map(this::parseCandles)
         .orElse(List.of());
   }
 
   @Override
   public Optional<MarketDepthResponse> fetchOrderBook(String symbol, String providerSymbol) {
+    return fetchOrderBook(symbol, providerSymbol, null);
+  }
+
+  private Optional<MarketDepthResponse> fetchOrderBook(
+      String symbol,
+      String providerSymbol,
+      MarketRequestDeadline deadline
+  ) {
     if (!configured()) {
       return Optional.empty();
     }
     String instId = normalizeInstrument(StrUtil.blankToDefault(providerSymbol, symbol));
-    return sendJson(booksUri(instId)).flatMap(body -> firstData(body).map(data -> parseDepth(symbol, data)));
+    return sendJson(booksUri(instId), deadline)
+        .flatMap(body -> firstData(body).flatMap(data -> parseDepth(symbol, data)));
   }
 
   @Override
   public List<RecentTradeResponse> fetchRecentTrades(String symbol, String providerSymbol, int limit) {
+    return fetchRecentTrades(symbol, providerSymbol, limit, null);
+  }
+
+  private List<RecentTradeResponse> fetchRecentTrades(
+      String symbol,
+      String providerSymbol,
+      int limit,
+      MarketRequestDeadline deadline
+  ) {
     if (!configured()) {
       return List.of();
     }
     String instId = normalizeInstrument(StrUtil.blankToDefault(providerSymbol, symbol));
-    return sendJson(tradesUri(instId, limit))
+    return sendJson(tradesUri(instId, limit), deadline)
         .map(body -> parseTrades(symbol, body))
         .orElse(List.of());
   }
@@ -222,23 +261,24 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
       return Optional.empty();
     }
     String instrument = normalizeInstrument(StrUtil.blankToDefault(providerSymbol, platformSymbol));
-    Optional<QuoteResponse> quote = fetchLatestQuote(platformSymbol, instrument);
+    MarketRequestDeadline deadline = MarketRequestDeadline.start(freshness);
+    Optional<QuoteResponse> quote = fetchLatestQuote(platformSymbol, instrument, deadline);
     Instant quoteFetchedAt = clock.instant();
     if (quote.isEmpty()) {
       return Optional.empty();
     }
-    Optional<MarketDepthResponse> depth = fetchOrderBook(platformSymbol, instrument);
+    Optional<MarketDepthResponse> depth = fetchOrderBook(platformSymbol, instrument, deadline);
     Instant depthFetchedAt = clock.instant();
     if (depth.isEmpty()) {
       return Optional.empty();
     }
-    List<RecentTradeResponse> trades = fetchRecentTrades(platformSymbol, instrument, 40);
+    List<RecentTradeResponse> trades = fetchRecentTrades(platformSymbol, instrument, 40, deadline);
     Instant tradesFetchedAt = clock.instant();
     if (trades.isEmpty()) {
       return Optional.empty();
     }
     List<CandleResponse> candles = fetchCandles(
-        platformSymbol, instrument, candleRequest.timeframe(), candleRequest.from(), candleRequest.to());
+        platformSymbol, instrument, candleRequest.timeframe(), candleRequest.from(), candleRequest.to(), deadline);
     Instant candlesFetchedAt = clock.instant();
     if (candles.isEmpty()) {
       return Optional.empty();
@@ -291,8 +331,18 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
   }
 
   private Optional<JsonNode> sendJson(URI uri) {
+    return sendJson(uri, null);
+  }
+
+  private Optional<JsonNode> sendJson(URI uri, MarketRequestDeadline deadline) {
+    Optional<Duration> timeout = deadline == null
+        ? Optional.of(requestTimeout)
+        : deadline.remainingTimeout(requestTimeout);
+    if (timeout.isEmpty()) {
+      return Optional.empty();
+    }
     HttpRequest request = HttpRequest.newBuilder(uri)
-        .timeout(requestTimeout)
+        .timeout(timeout.get())
         .header("Accept", "application/json")
         .GET()
         .build();
@@ -300,6 +350,9 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
     try {
       HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        return Optional.empty();
+      }
+      if (deadline != null && deadline.expired()) {
         return Optional.empty();
       }
       JsonNode body = objectMapper.readTree(response.body());
@@ -327,6 +380,10 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
     if (!data.hasNonNull("bidPx") || !data.hasNonNull("askPx") || !data.hasNonNull("last")) {
       return Optional.empty();
     }
+    Optional<Long> observedAt = positiveEpochMillis(data, "ts");
+    if (observedAt.isEmpty()) {
+      return Optional.empty();
+    }
     BigDecimal bid = decimalText(data, "bidPx");
     BigDecimal ask = decimalText(data, "askPx");
     BigDecimal mid = decimalText(data, "last");
@@ -338,7 +395,7 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
         mid,
         ask.subtract(bid),
         "okx-spot",
-        data.path("ts").asLong(clock.instant().toEpochMilli()),
+        observedAt.get(),
         changePercent(data, mid),
         decimalValue(data, "high24h").orElse(mid),
         decimalValue(data, "low24h").orElse(mid),
@@ -395,12 +452,16 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
         .toList();
   }
 
-  private MarketDepthResponse parseDepth(String requestedSymbol, JsonNode data) {
-    return new MarketDepthResponse(
+  private Optional<MarketDepthResponse> parseDepth(String requestedSymbol, JsonNode data) {
+    Optional<Long> observedAt = positiveEpochMillis(data, "ts");
+    if (observedAt.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(new MarketDepthResponse(
         normalizePlatformSymbol(requestedSymbol),
-        data.path("ts").asLong(clock.instant().toEpochMilli()),
+        observedAt.get(),
         parseDepthLevels(data.path("bids")),
-        parseDepthLevels(data.path("asks")));
+        parseDepthLevels(data.path("asks"))));
   }
 
   private List<MarketDepthLevelResponse> parseDepthLevels(JsonNode rows) {
@@ -412,6 +473,18 @@ public class OkxSpotMarketDataProvider implements MarketDataProviderAdapter {
         .filter(row -> row.size() >= 2)
         .map(row -> new MarketDepthLevelResponse(decimalAt(row, 0), decimalAt(row, 1)))
         .toList();
+  }
+
+  private Optional<Long> positiveEpochMillis(JsonNode node, String field) {
+    if (!node.hasNonNull(field)) {
+      return Optional.empty();
+    }
+    try {
+      long value = Long.parseLong(node.path(field).asText());
+      return value > 0L ? Optional.of(value) : Optional.empty();
+    } catch (NumberFormatException ignored) {
+      return Optional.empty();
+    }
   }
 
   private List<RecentTradeResponse> parseTrades(String requestedSymbol, JsonNode body) {

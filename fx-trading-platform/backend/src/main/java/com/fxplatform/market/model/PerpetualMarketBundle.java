@@ -28,6 +28,11 @@ public record PerpetualMarketBundle(
     Instant expiresAt
 ) {
 
+  public PerpetualMarketBundle {
+    recentTrades = recentTrades == null ? null : List.copyOf(recentTrades);
+    candles = candles == null ? null : List.copyOf(candles);
+  }
+
   public PerpetualMarketBundle(
       String platformSymbol,
       String providerSymbol,

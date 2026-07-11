@@ -5,6 +5,7 @@ import com.fxplatform.market.model.CandleRequest;
 import com.fxplatform.market.model.MarketSourceMode;
 import com.fxplatform.market.model.SpotMarketBundle;
 import com.fxplatform.market.provider.MarketBundleAssembler;
+import com.fxplatform.market.provider.CandleRequestPolicy;
 import com.fxplatform.market.provider.MarketDataCapability;
 import com.fxplatform.market.provider.MarketDataDurations;
 import com.fxplatform.market.provider.MarketDataProviderAdapter;
@@ -64,6 +65,9 @@ public class LocalSpotMarketDataProvider implements MarketDataProviderAdapter {
       String providerSymbol,
       CandleRequest candleRequest
   ) {
+    if (!CandleRequestPolicy.isValid(candleRequest)) {
+      return Optional.empty();
+    }
     Instant now = clock.instant();
     long tick = now.toEpochMilli() / 1000L;
     QuoteResponse quote = generator.quote(platformSymbol, tick, now);
@@ -71,7 +75,10 @@ public class LocalSpotMarketDataProvider implements MarketDataProviderAdapter {
     var trades = java.util.stream.LongStream.range(0, 20)
         .mapToObj(index -> generator.trade(platformSymbol, tick + index, quote))
         .toList();
-    var candles = LocalMarketDataSupport.candles(candleRequest, quote.mid(), now);
+    var candles = LocalMarketDataSupport.candles(candleRequest, quote.mid());
+    if (candles.isEmpty()) {
+      return Optional.empty();
+    }
     return Optional.of(MarketBundleAssembler.spot(
         platformSymbol,
         providerSymbol == null || providerSymbol.isBlank() ? platformSymbol : providerSymbol,

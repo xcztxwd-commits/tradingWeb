@@ -26,6 +26,11 @@ public record SpotMarketBundle(
     Instant expiresAt
 ) {
 
+  public SpotMarketBundle {
+    recentTrades = recentTrades == null ? null : List.copyOf(recentTrades);
+    candles = candles == null ? null : List.copyOf(candles);
+  }
+
   public SpotMarketBundle(
       String platformSymbol,
       String providerSymbol,

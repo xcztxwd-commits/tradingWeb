@@ -23,10 +23,35 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class BinanceSpotMarketDataProviderTest {
 
   private final ObjectMapper objectMapper = new ObjectMapper();
+
+  @ParameterizedTest
+  @ValueSource(strings = {"MISSING", "not-a-number", "0"})
+  void tickerRequiresPositiveVenueTimestamp(String timestamp) throws IOException {
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    String timestampField = timestampField("closeTime", timestamp);
+    server.createContext("/api/v3/ticker/24hr", exchange -> writeJson(exchange, """
+        {"bidPrice":"65000.10","askPrice":"65000.20","lastPrice":"65000.15"%s}
+        """.formatted(timestampField)));
+    server.start();
+    try {
+      BinanceSpotMarketDataProvider provider = new BinanceSpotMarketDataProvider(
+          "http://127.0.0.1:" + server.getAddress().getPort(),
+          HttpClient.newHttpClient(), objectMapper, Clock.systemUTC(), Duration.ofSeconds(5));
+
+      assertThat(provider.fetchLatestQuote("BTCUSDT", "BTCUSDT")).isEmpty();
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
 
   @Test
   void configuredPublicTimeoutStopsWholeBundleBeforeDownstreamRequests() throws IOException {
@@ -66,6 +91,49 @@ class BinanceSpotMarketDataProviderTest {
 
       assertThat(bundle).isEmpty();
       assertThat(downstreamRequests).hasValue(0);
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void bundleFreshnessBoundsTheCumulativeCandidateRequestTime() throws IOException {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    AtomicInteger requests = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = Executors.newCachedThreadPool();
+    server.setExecutor(executor);
+    Duration responseDelay = Duration.ofMillis(70);
+    delayedJsonContext(server, requests, responseDelay, "/api/v3/ticker/24hr", """
+        {"bidPrice":"65000.10","askPrice":"65000.20","lastPrice":"65000.15",
+         "closeTime":%d}
+        """.formatted(now.toEpochMilli()));
+    delayedJsonContext(server, requests, responseDelay, "/api/v3/depth", """
+        {"bids":[["65000.10","1.2"]],"asks":[["65000.20","2.3"]]}
+        """);
+    delayedJsonContext(server, requests, responseDelay, "/api/v3/trades", """
+        [{"id":10,"price":"65000.15","qty":"0.3","isBuyerMaker":false,"time":1700000000000}]
+        """);
+    delayedJsonContext(server, requests, responseDelay, "/api/v3/klines", """
+        [[1700000000000,"64000","65100","63900","65000","12.4"]]
+        """);
+    server.start();
+    try {
+      var provider = new BinanceSpotMarketDataProvider(
+          "http://127.0.0.1:" + server.getAddress().getPort(),
+          HttpClient.newHttpClient(), objectMapper, Clock.fixed(now, ZoneOffset.UTC),
+          Duration.ofMillis(160), Duration.ofMillis(200));
+
+      long startedAt = System.nanoTime();
+      var bundle = provider.fetchSpotBundle(
+          "BTCUSDT", "BTCUSDT",
+          new com.fxplatform.market.model.CandleRequest("1m", now.minusSeconds(60), now));
+      Duration elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
+
+      assertThat(bundle).isEmpty();
+      assertThat(requests.get()).isLessThan(4);
+      assertThat(elapsed).isLessThan(Duration.ofMillis(600));
     } finally {
       server.stop(0);
       executor.shutdownNow();
@@ -475,6 +543,28 @@ class BinanceSpotMarketDataProviderTest {
       thread.setDaemon(true);
       return thread;
     });
+  }
+
+  private void delayedJsonContext(
+      HttpServer server,
+      AtomicInteger requests,
+      Duration delay,
+      String path,
+      String json
+  ) {
+    server.createContext(path, exchange -> {
+      requests.incrementAndGet();
+      java.util.concurrent.locks.LockSupport.parkNanos(delay.toNanos());
+      writeJson(exchange, json);
+    });
+  }
+
+  private String timestampField(String field, String value) {
+    if ("MISSING".equals(value)) {
+      return "";
+    }
+    String jsonValue = value.chars().allMatch(Character::isDigit) ? value : "\"" + value + "\"";
+    return ",\"" + field + "\":" + jsonValue;
   }
 
   private void writeJson(com.sun.net.httpserver.HttpExchange exchange, String json) throws IOException {

@@ -29,6 +29,7 @@ class ErrorCodeContractTest {
         "SYMBOL_NOT_ALLOWED",
         "MARKET_DATA_UNAVAILABLE",
         "MARKET_DATA_STALE",
-        "MARKET_BUNDLE_INCOMPLETE"));
+        "MARKET_BUNDLE_INCOMPLETE",
+        "INVALID_CANDLE_REQUEST"));
   }
 }
