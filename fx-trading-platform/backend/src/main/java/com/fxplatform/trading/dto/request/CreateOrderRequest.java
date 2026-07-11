@@ -9,6 +9,7 @@ import com.fxplatform.trading.enums.ProtectionType;
 import com.fxplatform.trading.enums.QuantityUnit;
 import com.fxplatform.trading.enums.TriggerExecutionType;
 import com.fxplatform.trading.enums.TriggerPriceType;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
@@ -41,7 +42,7 @@ public record CreateOrderRequest(
     BigDecimal triggerPrice,
     TriggerPriceType triggerPriceType,
     @NotNull Boolean reduceOnly,
-    List<AttachedProtectionRequest> attachedProtections
+    @Valid List<AttachedProtectionRequest> attachedProtections
 ) {
   public CreateOrderRequest {
     positionSide = positionSide == null ? PositionSide.BOTH : positionSide;

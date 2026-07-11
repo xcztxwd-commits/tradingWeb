@@ -11,11 +11,15 @@ import com.fxplatform.trading.enums.ProtectionType;
 import com.fxplatform.trading.enums.QuantityUnit;
 import com.fxplatform.trading.enums.TriggerExecutionType;
 import com.fxplatform.trading.enums.TriggerPriceType;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validation;
+import jakarta.validation.ValidatorFactory;
 import java.lang.reflect.RecordComponent;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -142,5 +146,48 @@ class CreateOrderRequestTest {
     assertThat(request.triggerPriceType()).isEqualTo(TriggerPriceType.MARK_PRICE);
     assertThat(request.reduceOnly()).isTrue();
     assertThat(request.attachedProtections()).containsExactly(protection);
+  }
+
+  @Test
+  void validatesEachAttachedProtection() {
+    AttachedProtectionRequest invalidProtection = new AttachedProtectionRequest(
+        null,
+        null,
+        TriggerPriceType.MARK_PRICE,
+        null,
+        null);
+    CreateOrderRequest request = new CreateOrderRequest(
+        UUID.randomUUID(),
+        "BTCUSDT-PERP",
+        OrderSide.BUY,
+        OrderType.MARKET,
+        null,
+        null,
+        null,
+        null,
+        "perp-order-invalid-protection",
+        "perp-order-invalid-protection",
+        BigDecimal.ONE,
+        null,
+        10,
+        PositionSide.LONG,
+        QuantityUnit.BASE,
+        MarginMode.ISOLATED,
+        null,
+        null,
+        false,
+        List.of(invalidProtection));
+
+    try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+      Set<ConstraintViolation<CreateOrderRequest>> violations = factory.getValidator()
+          .validate(request);
+
+      assertThat(violations)
+          .extracting(violation -> violation.getPropertyPath().toString())
+          .containsExactlyInAnyOrder(
+              "attachedProtections[0].protectionType",
+              "attachedProtections[0].triggerPrice",
+              "attachedProtections[0].triggerExecutionType");
+    }
   }
 }
