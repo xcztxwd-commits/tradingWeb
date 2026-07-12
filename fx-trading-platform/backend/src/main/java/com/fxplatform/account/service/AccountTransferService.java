@@ -8,6 +8,11 @@ import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.enums.LedgerEntryType;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.trading.repository.OrderRepository;
+import com.fxplatform.trading.repository.PositionRepository;
+import com.fxplatform.trading.service.PerpetualAccountRiskSnapshotService;
+import com.fxplatform.trading.service.PerpetualAccountRiskSnapshotService.PreparedAccountRisk;
+import com.fxplatform.trading.service.TradingTransactionExecutor;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
 import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.service.WalletService;
@@ -15,9 +20,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AccountTransferService {
@@ -29,20 +34,31 @@ public class AccountTransferService {
   private final WalletService walletService;
   private final LedgerService ledgerService;
   private final DemoExecutionGuard demoExecutionGuard;
+  private final PositionRepository positionRepository;
+  private final OrderRepository orderRepository;
+  private final PerpetualAccountRiskSnapshotService perpetualAccountRiskSnapshotService;
+  private final TradingTransactionExecutor transactionExecutor;
 
   public AccountTransferService(
       TradingAccountRepository accountRepository,
       WalletService walletService,
       LedgerService ledgerService,
-      DemoExecutionGuard demoExecutionGuard
+      DemoExecutionGuard demoExecutionGuard,
+      PositionRepository positionRepository,
+      OrderRepository orderRepository,
+      PerpetualAccountRiskSnapshotService perpetualAccountRiskSnapshotService,
+      TradingTransactionExecutor transactionExecutor
   ) {
     this.accountRepository = accountRepository;
     this.walletService = walletService;
     this.ledgerService = ledgerService;
     this.demoExecutionGuard = demoExecutionGuard;
+    this.positionRepository = positionRepository;
+    this.orderRepository = orderRepository;
+    this.perpetualAccountRiskSnapshotService = perpetualAccountRiskSnapshotService;
+    this.transactionExecutor = transactionExecutor;
   }
 
-  @Transactional
   public AccountTransferResponse transfer(
       UUID userId,
       UUID accountId,
@@ -56,6 +72,49 @@ public class AccountTransferService {
           ErrorCode.TRANSFER_AMOUNT_INVALID,
           "Transfer direction and requestId are required");
     }
+
+    var accountSnapshot = accountRepository.findByIdAndUserId(accountId, userId)
+        .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
+    demoExecutionGuard.requireDemoAccount(accountSnapshot);
+    if (ledgerService.findTransfer(accountId, requestId).isPresent()) {
+      return transactionExecutor.execute(
+          () -> transferLocked(userId, accountId, direction, normalizedAmount, requestId, null));
+    }
+
+    BusinessException lastStale = null;
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        PreparedAccountRisk prepared = perpetualAccountRiskSnapshotService.prepare(
+            accountId,
+            Map.of());
+        return transactionExecutor.execute(
+            () -> transferLocked(
+                userId,
+                accountId,
+                direction,
+                normalizedAmount,
+                requestId,
+                prepared));
+      } catch (BusinessException exception) {
+        if (!ErrorCode.MARKET_DATA_STALE.equals(exception.getCode()) || attempt > 0) {
+          throw exception;
+        }
+        lastStale = exception;
+      }
+    }
+    throw lastStale == null
+        ? new BusinessException(ErrorCode.MARKET_DATA_STALE, "Perpetual account risk is stale")
+        : lastStale;
+  }
+
+  private AccountTransferResponse transferLocked(
+      UUID userId,
+      UUID accountId,
+      Direction direction,
+      BigDecimal normalizedAmount,
+      UUID requestId,
+      PreparedAccountRisk prepared
+  ) {
 
     var account = accountRepository.findByIdAndUserIdForUpdate(accountId, userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
@@ -76,10 +135,22 @@ public class AccountTransferService {
           existing.createdAt());
     }
 
+    var lockedPositions = positionRepository.findOpenLinearPerpByAccountIdForUpdate(accountId);
+    var lockedOrders = orderRepository.findActiveLinearPerpByAccountIdForUpdate(accountId);
+    var freshRisk = perpetualAccountRiskSnapshotService.project(
+        account,
+        lockedPositions,
+        lockedOrders,
+        prepared);
+    perpetualAccountRiskSnapshotService.applyRevaluation(account, lockedPositions, freshRisk);
+
     String description;
     if (direction == Direction.SPOT_TO_PERP) {
       requireAvailable(spot.getAvailable(), normalizedAmount);
       description = "Spot to perpetual transfer";
+      addPerp(account, normalizedAmount);
+      accountRepository.save(account);
+      lockedPositions.forEach(positionRepository::save);
       spot = walletService.debitAvailableWithEntryType(
           accountId,
           WalletType.SPOT,
@@ -89,8 +160,6 @@ public class AccountTransferService {
           requestId,
           description,
           LedgerEntryType.TRANSFER_OUT.name());
-      addPerp(account, normalizedAmount);
-      accountRepository.save(account);
       ledgerService.recordTransfer(
           account,
           LedgerEntryType.TRANSFER_IN,
@@ -103,6 +172,7 @@ public class AccountTransferService {
       description = "Perpetual to Spot transfer";
       subtractPerp(account, normalizedAmount);
       accountRepository.save(account);
+      lockedPositions.forEach(positionRepository::save);
       spot = walletService.creditAvailableWithEntryType(
           accountId,
           WalletType.SPOT,

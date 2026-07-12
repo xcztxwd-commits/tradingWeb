@@ -8,6 +8,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
@@ -19,6 +20,9 @@ import com.fxplatform.market.service.SymbolProductTypes;
 import com.fxplatform.risk.model.InstrumentKind;
 import com.fxplatform.risk.model.InstrumentProfile;
 import com.fxplatform.risk.service.PerpMarginCalculator;
+import com.fxplatform.risk.service.PerpetualRiskService;
+import com.fxplatform.risk.service.PerpetualRiskService.CrossLiquidationLeg;
+import com.fxplatform.risk.service.PerpetualRiskService.PositionRisk;
 import com.fxplatform.risk.service.PnLCalculator;
 import com.fxplatform.risk.service.TradingAlgorithmEngine;
 import com.fxplatform.risk.service.TradingInstrumentClassifier;
@@ -26,6 +30,7 @@ import com.fxplatform.trading.dto.request.UpdatePositionProtectionRequest;
 import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.entity.SpotPositionEntity;
+import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.PositionRepository;
@@ -34,7 +39,9 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -57,6 +64,7 @@ public class PositionService {
   private final TradingInstrumentClassifier instrumentClassifier = new TradingInstrumentClassifier();
   private final TradingAlgorithmEngine tradingAlgorithmEngine = new TradingAlgorithmEngine();
   private final PerpMarginCalculator perpMarginCalculator = new PerpMarginCalculator();
+  private final PerpetualRiskService perpetualRiskService = new PerpetualRiskService(perpMarginCalculator);
 
   @Autowired
   public PositionService(
@@ -109,9 +117,16 @@ public class PositionService {
    */
   public List<PositionResponse> openPositions(UUID userId, UUID accountId) {
     TradingAccountEntity account = requireOwnedAccount(userId, accountId);
-    List<PositionResponse> responses = new ArrayList<>(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN)
-        .stream()
-        .map(position -> toRealtimeResponse(position, account))
+    List<PositionEntity> openPositions = positionRepository
+        .findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN);
+    Map<String, QuoteResponse> quoteCache = new HashMap<>();
+    List<RealtimePositionContext> contexts = realtimePositionContexts(
+        openPositions,
+        account,
+        quoteCache);
+    Map<String, BigDecimal> crossLiquidationPrices = crossLiquidationPrices(account, contexts);
+    List<PositionResponse> responses = new ArrayList<>(contexts.stream()
+        .map(context -> toRealtimeResponse(context, account, crossLiquidationPrices))
         .toList());
     if (spotPositionRepository != null) {
       spotPositionRepository.findOpenByAccountId(accountId).stream()
@@ -360,13 +375,112 @@ public class PositionService {
         position.getPositionSide());
   }
 
+  private List<RealtimePositionContext> realtimePositionContexts(
+      List<PositionEntity> positions,
+      TradingAccountEntity account,
+      Map<String, QuoteResponse> quoteCache
+  ) {
+    List<RealtimePositionContext> contexts = new ArrayList<>();
+    for (PositionEntity position : positions) {
+      String symbol = SymbolNormalizer.normalize(position.getSymbol());
+      QuoteResponse quote = quoteCache.computeIfAbsent(
+          symbol,
+          ignored -> quoteService.freshQuote(position.getSymbol()));
+      InstrumentProfile profile = instrumentProfile(position);
+      PositionRisk linearRisk = null;
+      if (profile.kind() == InstrumentKind.LINEAR_PERPETUAL) {
+        BigDecimal markPrice = requireAuthorityMark(quote);
+        linearRisk = perpetualRiskService.positionRisk(
+            position.getSide(),
+            position.getLots(),
+            position.getOpenPrice(),
+            markPrice,
+            positionLeverage(position, account),
+            position.getMarginHeld(),
+            position.getFundingPnl(),
+            profile.maintenanceMarginRate());
+      }
+      contexts.add(new RealtimePositionContext(position, quote, profile, linearRisk));
+    }
+    return List.copyOf(contexts);
+  }
+
+  private Map<String, BigDecimal> crossLiquidationPrices(
+      TradingAccountEntity account,
+      List<RealtimePositionContext> contexts
+  ) {
+    BigDecimal isolatedPrincipal = BigDecimal.ZERO;
+    BigDecimal totalCrossUpl = BigDecimal.ZERO;
+    BigDecimal totalCrossThreshold = BigDecimal.ZERO;
+    Map<String, List<CrossLiquidationLeg>> legsBySymbol = new HashMap<>();
+    Map<String, BigDecimal> uplBySymbol = new HashMap<>();
+    Map<String, BigDecimal> thresholdBySymbol = new HashMap<>();
+
+    for (RealtimePositionContext context : contexts) {
+      if (context.profile().kind() != InstrumentKind.LINEAR_PERPETUAL) {
+        continue;
+      }
+      PositionEntity position = context.position();
+      PositionRisk risk = context.linearRisk();
+      if (position.getMarginMode() == MarginMode.ISOLATED) {
+        isolatedPrincipal = isolatedPrincipal.add(orZero(position.getMarginHeld()));
+        continue;
+      }
+
+      String symbol = SymbolNormalizer.normalize(position.getSymbol());
+      BigDecimal threshold = risk.maintenanceMargin().add(risk.estimatedCloseTakerFee());
+      totalCrossUpl = totalCrossUpl.add(risk.unrealizedPnl());
+      totalCrossThreshold = totalCrossThreshold.add(threshold);
+      uplBySymbol.merge(symbol, risk.unrealizedPnl(), BigDecimal::add);
+      thresholdBySymbol.merge(symbol, threshold, BigDecimal::add);
+      legsBySymbol.computeIfAbsent(symbol, ignored -> new ArrayList<>()).add(
+          new CrossLiquidationLeg(
+              position.getSide(),
+              position.getLots(),
+              position.getOpenPrice(),
+              context.profile().maintenanceMarginRate()));
+    }
+
+    Map<String, BigDecimal> prices = new HashMap<>();
+    BigDecimal accountCrossBase = orZero(account.getBalance()).subtract(isolatedPrincipal);
+    for (Map.Entry<String, List<CrossLiquidationLeg>> entry : legsBySymbol.entrySet()) {
+      String symbol = entry.getKey();
+      BigDecimal fixedCrossEquity = accountCrossBase
+          .add(totalCrossUpl)
+          .subtract(uplBySymbol.get(symbol));
+      BigDecimal fixedThreshold = totalCrossThreshold.subtract(thresholdBySymbol.get(symbol));
+      prices.put(
+          symbol,
+          perpetualRiskService.estimatedCrossLiquidationPrice(
+              fixedCrossEquity,
+              fixedThreshold,
+              entry.getValue()));
+    }
+    return prices;
+  }
+
   /**
    * OPEN 持仓响应按当前报价派生展示浮盈亏，但读取路径不回写数据库。
    */
-  private PositionResponse toRealtimeResponse(PositionEntity position, TradingAccountEntity account) {
-    QuoteResponse quote = quoteService.freshQuote(position.getSymbol());
+  private PositionResponse toRealtimeResponse(
+      RealtimePositionContext context,
+      TradingAccountEntity account,
+      Map<String, BigDecimal> crossLiquidationPrices
+  ) {
+    PositionEntity position = context.position();
+    QuoteResponse quote = context.quote();
     BigDecimal currentPrice = position.getSide() == OrderSide.BUY ? quote.bid() : quote.ask();
-    InstrumentProfile profile = instrumentProfile(position);
+    InstrumentProfile profile = context.profile();
+    if (profile.kind() == InstrumentKind.LINEAR_PERPETUAL) {
+      return toRealtimeLinearPerpetualResponse(
+          position,
+          account,
+          quote,
+          currentPrice,
+          profile,
+          context.linearRisk(),
+          crossLiquidationPrices.get(SymbolNormalizer.normalize(position.getSymbol())));
+    }
     BigDecimal markPrice = markPrice(quote, currentPrice);
     BigDecimal pnlPrice = isPerpetual(profile.kind()) ? markPrice : currentPrice;
     BigDecimal floatingPnl = displayPnl(position, account, profile, pnlPrice);
@@ -396,6 +510,51 @@ public class PositionService {
         position.getMarginHeld(),
         maintenanceMargin(position, profile, markPrice, positionLeverage(position, account)),
         maintenanceMarginRate(profile),
+        null,
+        position.getStatus().name(),
+        position.getOpenedAt(),
+        position.getClosedAt(),
+        position.getProductType(),
+        position.getPositionMode(),
+        position.getPositionSide());
+  }
+
+  private PositionResponse toRealtimeLinearPerpetualResponse(
+      PositionEntity position,
+      TradingAccountEntity account,
+      QuoteResponse quote,
+      BigDecimal currentPrice,
+      InstrumentProfile profile,
+      PositionRisk risk,
+      BigDecimal crossLiquidationPrice
+  ) {
+    BigDecimal markPrice = requireAuthorityMark(quote);
+    return new PositionResponse(
+        position.getId(),
+        position.getSymbol(),
+        position.getSide().name(),
+        profile.instrumentType(),
+        marginMode(position, profile),
+        displayLeverage(position, account, profile),
+        profile.positionUnit(),
+        position.getLots(),
+        position.getOpenPrice(),
+        markPrice,
+        currentPrice,
+        risk.markNotional(),
+        position.getMarginMode() == MarginMode.ISOLATED
+            ? risk.estimatedLiquidationPrice()
+            : crossLiquidationPrice,
+        position.getOpenPrice(),
+        position.getStopLoss(),
+        position.getTakeProfit(),
+        risk.unrealizedPnl(),
+        risk.roiRatio(),
+        position.getRealizedPnl(),
+        position.getFundingPnl(),
+        position.getMarginHeld(),
+        risk.maintenanceMargin(),
+        profile.maintenanceMarginRate(),
         null,
         position.getStatus().name(),
         position.getOpenedAt(),
@@ -564,6 +723,17 @@ public class PositionService {
     return quote.mid() != null ? quote.mid() : closeoutPrice;
   }
 
+  private BigDecimal requireAuthorityMark(QuoteResponse quote) {
+    if (quote == null
+        || quote.markPrice() == null
+        || quote.markPrice().compareTo(BigDecimal.ZERO) <= 0) {
+      throw new BusinessException(
+          "MARKET_DATA_UNAVAILABLE",
+          "Linear Perpetual position response requires a positive authority mark");
+    }
+    return quote.markPrice();
+  }
+
   private BigDecimal maintenanceMargin(
       PositionEntity position,
       InstrumentProfile profile,
@@ -634,6 +804,14 @@ public class PositionService {
 
   private SymbolEntity requireProductType(SymbolEntity symbol) {
     return SymbolProductTypes.requireExplicit(symbol);
+  }
+
+  private record RealtimePositionContext(
+      PositionEntity position,
+      QuoteResponse quote,
+      InstrumentProfile profile,
+      PositionRisk linearRisk
+  ) {
   }
 
   private String normalize(String value) {

@@ -32,13 +32,16 @@ import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.request.UpdateOrderRequest;
 import com.fxplatform.trading.dto.response.OrderEventResponse;
 import com.fxplatform.trading.dto.response.OrderResponse;
+import com.fxplatform.trading.entity.AccountSymbolSettingEntity;
 import com.fxplatform.trading.entity.OrderEntity;
+import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.TriggerExecutionType;
 import com.fxplatform.trading.enums.TriggerPriceType;
+import com.fxplatform.trading.repository.AccountSymbolSettingRepository;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
@@ -48,6 +51,7 @@ import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -87,6 +91,9 @@ public class OrderService {
   private final InstrumentRulesEngine instrumentRulesEngine;
   private final QuantityConversionService quantityConversionService;
   private final OrderHoldCalculator orderHoldCalculator;
+  private final AccountSymbolSettingRepository accountSymbolSettingRepository;
+  private final PerpetualOrderRiskService perpetualOrderRiskService;
+  private final PerpetualAccountRiskSnapshotService perpetualAccountRiskSnapshotService;
   private OcoOrderService ocoOrderService;
 
   @Autowired
@@ -113,7 +120,10 @@ public class OrderService {
       SymbolRepository symbolRepository,
       InstrumentRulesEngine instrumentRulesEngine,
       QuantityConversionService quantityConversionService,
-      OrderHoldCalculator orderHoldCalculator
+      OrderHoldCalculator orderHoldCalculator,
+      AccountSymbolSettingRepository accountSymbolSettingRepository,
+      PerpetualOrderRiskService perpetualOrderRiskService,
+      PerpetualAccountRiskSnapshotService perpetualAccountRiskSnapshotService
   ) {
     this.orderRepository = orderRepository;
     this.accountRepository = accountRepository;
@@ -138,6 +148,64 @@ public class OrderService {
     this.instrumentRulesEngine = instrumentRulesEngine;
     this.quantityConversionService = quantityConversionService;
     this.orderHoldCalculator = orderHoldCalculator;
+    this.accountSymbolSettingRepository = accountSymbolSettingRepository;
+    this.perpetualOrderRiskService = perpetualOrderRiskService;
+    this.perpetualAccountRiskSnapshotService = perpetualAccountRiskSnapshotService;
+  }
+
+  /** Compatibility constructor for Task 6 Spot fixtures. */
+  public OrderService(
+      OrderRepository orderRepository,
+      TradingAccountRepository accountRepository,
+      RiskCheckService riskCheckService,
+      ExecutionAdapter executionAdapter,
+      OrderFillService orderFillService,
+      LedgerService ledgerService,
+      WalletService walletService,
+      OrderEventService orderEventService,
+      OrderCommandFactory orderCommandFactory,
+      OrderEntityFactory orderEntityFactory,
+      OrderResponseMapper orderResponseMapper,
+      OrderStatusPolicy orderStatusPolicy,
+      DemoExecutionGuard demoExecutionGuard,
+      WalletBalanceRepository walletBalanceRepository,
+      PositionRepository positionRepository,
+      SpotPositionService spotPositionService,
+      MarketBundleResolver marketBundleResolver,
+      FullFillCoordinator fullFillCoordinator,
+      TradingTransactionExecutor transactionExecutor,
+      SymbolRepository symbolRepository,
+      InstrumentRulesEngine instrumentRulesEngine,
+      QuantityConversionService quantityConversionService,
+      OrderHoldCalculator orderHoldCalculator
+  ) {
+    this(
+        orderRepository,
+        accountRepository,
+        riskCheckService,
+        executionAdapter,
+        orderFillService,
+        ledgerService,
+        walletService,
+        orderEventService,
+        orderCommandFactory,
+        orderEntityFactory,
+        orderResponseMapper,
+        orderStatusPolicy,
+        demoExecutionGuard,
+        walletBalanceRepository,
+        positionRepository,
+        spotPositionService,
+        marketBundleResolver,
+        fullFillCoordinator,
+        transactionExecutor,
+        symbolRepository,
+        instrumentRulesEngine,
+        quantityConversionService,
+        orderHoldCalculator,
+        null,
+        null,
+        null);
   }
 
   /** Compatibility constructor for Task 5 and historical unit fixtures. */
@@ -182,6 +250,9 @@ public class OrderService {
         marketBundleResolver,
         fullFillCoordinator,
         transactionExecutor,
+        null,
+        null,
+        null,
         null,
         null,
         null,
@@ -278,12 +349,25 @@ public class OrderService {
         .findByIdAndUserIdForUpdate(orderSnapshot.getAccountId(), principal.id())
         .orElseThrow(() -> new AuthorizationException("ACCOUNT_NOT_FOUND", "Account not found"));
     demoExecutionGuard.requireDemo(account, productType, orderSnapshot.getSymbol());
-    lockMutationState(account.getId(), productType, orderSnapshot.getSymbol());
+    if (productType == ProductType.LINEAR_PERP
+        && isP0Symbol(orderSnapshot.getSymbol())
+        && accountSymbolSettingRepository != null) {
+      accountSymbolSettingRepository.findByAccountIdAndSymbolForUpdate(
+          account.getId(), orderSnapshot.getSymbol());
+      positionRepository.findOpenLinearPerpBySymbolForUpdate(
+          account.getId(), orderSnapshot.getSymbol());
+      orderRepository.findActiveLinearPerpBySymbolForUpdate(
+          account.getId(), orderSnapshot.getSymbol());
+    } else {
+      lockMutationState(account.getId(), productType, orderSnapshot.getSymbol());
+    }
     OrderEntity order = requireOwnedOrderForUpdate(principal.id(), orderId);
     if (order.getStatus() != OrderStatus.PENDING) {
       throw new BusinessException("ORDER_NOT_CANCELABLE", "Only pending orders can be canceled");
     }
     BigDecimal holdAmount = orZero(order.getHoldAmount());
+    boolean isolatedInternalHold = order.getMarginMode() == MarginMode.ISOLATED
+        && order.getParentPositionId() != null;
 
     order.setStatus(OrderStatus.CANCELED);
     order.setCanceledAt(Instant.now());
@@ -292,13 +376,26 @@ public class OrderService {
       throw new BusinessException("ORDER_NOT_CANCELABLE", "Only pending orders can be canceled");
     }
     if (holdAmount.compareTo(BigDecimal.ZERO) > 0) {
-      releaseOrderHold(
-          account,
-          order,
-          holdAmount,
-          spotWalletHold,
-          "Pending order canceled",
-          "Pending spot order canceled");
+      if (productType == ProductType.LINEAR_PERP && isP0Symbol(order.getSymbol())) {
+        if (isolatedInternalHold) {
+          releaseIsolatedPerpetualOrderHold(account, holdAmount);
+        } else {
+          releasePerpetualOrderHold(account, holdAmount);
+        }
+        ledgerService.recordOrderRelease(
+            account,
+            holdAmount,
+            order.getId(),
+            "Pending Perpetual order canceled");
+      } else {
+        releaseOrderHold(
+            account,
+            order,
+            holdAmount,
+            spotWalletHold,
+            "Pending order canceled",
+            "Pending spot order canceled");
+      }
       order.setHoldAmount(BigDecimal.ZERO);
     }
     orderEventService.record(
@@ -322,6 +419,12 @@ public class OrderService {
         && isP0Symbol(orderSnapshot.getSymbol())
         && task6SpotReady()) {
       return modifyP0SpotWithRetry(principal, orderSnapshot, update);
+    }
+    if (requestedProduct(orderSnapshot.getSymbol()) == ProductType.LINEAR_PERP
+        && isP0Symbol(orderSnapshot.getSymbol())) {
+      throw new BusinessException(
+          "ORDER_NOT_MODIFIABLE",
+          "P0 Linear Perpetual order modification is not supported");
     }
     return modifyLegacyOrder(principal, orderId, orderSnapshot, update);
   }
@@ -764,6 +867,15 @@ public class OrderService {
       return createP0SpotWithRetry(command, request, accountSnapshot);
     }
 
+    if (productType == ProductType.LINEAR_PERP && isP0Symbol(command.symbol())) {
+      if (!task9PerpetualReady()) {
+        throw new BusinessException(
+            ErrorCode.EXECUTION_UNAVAILABLE,
+            "P0 Linear Perpetual execution authority is unavailable");
+      }
+      return createP0PerpetualWithRetry(command, request);
+    }
+
     if (command.orderType() != OrderType.MARKET && command.price() == null) {
       throw new BusinessException("ORDER_PRICE_REQUIRED", "Limit and stop orders require requested price");
     }
@@ -863,6 +975,357 @@ public class OrderService {
     throw new BusinessException(
         ErrorCode.MARKET_DATA_STALE,
         lastStale == null ? "No fresh executable market snapshot" : lastStale.getMessage());
+  }
+
+  private OrderResponse createP0PerpetualWithRetry(
+      OrderCommand identityCommand,
+      CreateOrderRequest request
+  ) {
+    validateP0PerpetualContract(request);
+    SymbolEntity symbol = symbolRepository.findBySymbol(identityCommand.symbol())
+        .orElseThrow(() -> new BusinessException("SYMBOL_NOT_FOUND", "Symbol not found"));
+    InstrumentRules rules = instrumentRulesEngine.rules(symbol);
+    BusinessException lastStale = null;
+    for (int attempt = 0; attempt < MAX_MARKET_ATTEMPTS; attempt++) {
+      try {
+        ExecutableMarketSnapshot snapshot = resolveExecutableSnapshot(
+            identityCommand.symbol(), ProductType.LINEAR_PERP);
+        PerpetualAccountRiskSnapshotService.PreparedAccountRisk preparedAccountRisk =
+            perpetualAccountRiskSnapshotService.prepare(
+                identityCommand.accountId(),
+                Map.of(identityCommand.symbol(), snapshot));
+        QuantityConversionService.Conversion conversion = quantityConversionService.convertPerpetual(
+            request.quantityUnit(),
+            request.quantity(),
+            rules.stepSize(),
+            symbol.getContractSize(),
+            symbol.getContractMultiplier(),
+            snapshot.mark(),
+            rules.minNotional());
+        instrumentRulesEngine.validateCanonicalOrder(
+            perpetualRuleValidationRequest(request),
+            symbol,
+            conversion.baseQuantity(),
+            request.orderType() == OrderType.LIMIT ? request.price() : snapshot.mark());
+        FullFillExecutionPath path = perpetualExecutionPath(request, snapshot);
+        return transactionExecutor.execute(() -> persistP0Perpetual(
+            identityCommand,
+            request,
+            conversion,
+            path,
+            snapshot,
+            preparedAccountRisk));
+      } catch (BusinessException exception) {
+        if (!ErrorCode.MARKET_DATA_STALE.equals(exception.getCode())) {
+          throw exception;
+        }
+        lastStale = exception;
+      }
+    }
+    throw new BusinessException(
+        ErrorCode.MARKET_DATA_STALE,
+        lastStale == null ? "No fresh executable market snapshot" : lastStale.getMessage());
+  }
+
+  private OrderResponse persistP0Perpetual(
+      OrderCommand identityCommand,
+      CreateOrderRequest publicRequest,
+      QuantityConversionService.Conversion conversion,
+      FullFillExecutionPath path,
+      ExecutableMarketSnapshot snapshot,
+      PerpetualAccountRiskSnapshotService.PreparedAccountRisk preparedAccountRisk
+  ) {
+    TradingAccountEntity account = accountRepository.findByIdAndUserIdForUpdate(
+            identityCommand.accountId(), identityCommand.userId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(account, ProductType.LINEAR_PERP, identityCommand.symbol());
+    AccountSymbolSettingEntity setting = accountSymbolSettingRepository
+        .findByAccountIdAndSymbolForUpdate(account.getId(), identityCommand.symbol())
+        .orElseThrow(() -> new BusinessException(
+            "INVALID_INSTRUMENT_RULES",
+            "Locked Perpetual symbol setting is required"));
+    perpetualAccountRiskSnapshotService.requireCurrentLeverageWithinLimit(setting);
+    List<PositionEntity> accountPositions = positionRepository
+        .findOpenLinearPerpByAccountIdForUpdate(account.getId());
+    List<OrderEntity> accountActiveOrders = orderRepository
+        .findActiveLinearPerpByAccountIdForUpdate(account.getId());
+    PerpetualAccountRiskSnapshotService.AccountRiskProjection accountRisk =
+        perpetualAccountRiskSnapshotService.project(
+            account,
+            accountPositions,
+            accountActiveOrders,
+            preparedAccountRisk);
+    perpetualAccountRiskSnapshotService.applyRevaluation(
+        account,
+        accountPositions,
+        accountRisk);
+    List<PositionEntity> positions = accountPositions.stream()
+        .filter(position -> identityCommand.symbol().equals(position.getSymbol()))
+        .toList();
+    List<OrderEntity> activeOrders = accountActiveOrders.stream()
+        .filter(order -> identityCommand.symbol().equals(order.getSymbol()))
+        .toList();
+    PerpetualAccountRiskSnapshotService.PreparedSymbolRisk targetRisk =
+        preparedAccountRisk.symbols().get(identityCommand.symbol());
+    if (targetRisk == null) {
+      throw new BusinessException(
+          ErrorCode.MARKET_DATA_UNAVAILABLE,
+          "Target Perpetual risk snapshot was not prepared");
+    }
+    PerpetualOrderRiskService.OrderRisk risk = perpetualOrderRiskService.evaluate(
+        account.getPositionMode(),
+        setting,
+        positions,
+        publicRequest.side(),
+        publicRequest.positionSide(),
+        Boolean.TRUE.equals(publicRequest.reduceOnly()),
+        publicRequest.orderType(),
+        conversion.baseQuantity(),
+        publicRequest.price(),
+        snapshot,
+        targetRisk.maintenanceMarginRate());
+    OrderCommand canonicalCommand = canonicalPerpetualCommand(
+        identityCommand,
+        publicRequest,
+        conversion.baseQuantity(),
+        risk);
+    OrderEntity order = preparedOrder(
+        canonicalCommand,
+        publicRequest,
+        ProductType.LINEAR_PERP,
+        risk.leverage());
+    order.setPositionMode(risk.positionMode());
+    order.setFilledQuantity(BigDecimal.ZERO);
+    order.setRemainingQuantity(conversion.baseQuantity());
+    order.setHoldAmount(risk.holdAmount());
+    order.setHoldCurrency(risk.holdCurrency());
+    PositionEntity isolatedHoldPosition = isolatedCloseHoldPosition(risk, positions);
+    if (isolatedHoldPosition != null) {
+      order.setParentPositionId(isolatedHoldPosition.getId());
+      validateAggregateIsolatedCloseHolds(
+          isolatedHoldPosition,
+          risk,
+          activeOrders);
+    }
+
+    FullFillResult fullFill = null;
+    if (path != null) {
+      CreateOrderRequest executionIntent = canonicalPerpetualExecutionIntent(
+          publicRequest,
+          conversion.baseQuantity(),
+          risk);
+      fullFill = fullFillCoordinator.execute(
+          new FullFillRequest(
+              executionIntent,
+              identityCommand.symbol(),
+              ProductType.LINEAR_PERP,
+              identityCommand.side(),
+              path,
+              conversion.baseQuantity(),
+              path == FullFillExecutionPath.IMMEDIATE_LIMIT ? publicRequest.price() : null),
+          snapshot);
+      fullFillCoordinator.requireFresh(fullFill);
+    } else {
+      fullFillCoordinator.requireFresh(snapshot);
+    }
+
+    requirePreparedAccountRiskFresh(preparedAccountRisk);
+
+    if (isolatedHoldPosition != null) {
+      reserveIsolatedPerpetualOrderHold(account, risk.holdAmount());
+    } else {
+      reservePerpetualOrderHold(account, risk.holdAmount());
+    }
+    for (PositionEntity position : accountPositions) {
+      positionRepository.save(position);
+    }
+    order.setStatus(path == null ? OrderStatus.PENDING : OrderStatus.ACCEPTED);
+    orderRepository.save(order);
+    ledgerService.recordOrderHold(
+        account,
+        risk.holdAmount(),
+        order.getId(),
+        "Perpetual order margin reserved");
+
+    if (fullFill == null) {
+      orderEventService.record(
+          order.getId(),
+          "ORDER_PENDING",
+          OrderStatus.ACCEPTED,
+          OrderStatus.PENDING,
+          null,
+          "Perpetual order accepted and waiting");
+      return orderResponseMapper.toResponse(order);
+    }
+
+    orderFillService.fillPerpetual(
+        order,
+        account,
+        fullFill,
+        snapshot.mark(),
+        risk.leverage(),
+        "Perpetual position margin held");
+    orderEventService.record(
+        order.getId(),
+        "ORDER_FILLED",
+        OrderStatus.ACCEPTED,
+        OrderStatus.FILLED,
+        null,
+        "Perpetual order filled");
+    return orderResponseMapper.toResponse(order);
+  }
+
+  private FullFillExecutionPath perpetualExecutionPath(
+      CreateOrderRequest request,
+      ExecutableMarketSnapshot snapshot
+  ) {
+    return switch (request.orderType()) {
+      case MARKET -> FullFillExecutionPath.MARKET;
+      case LIMIT -> isLimitMarketable(request, snapshot)
+          ? FullFillExecutionPath.IMMEDIATE_LIMIT
+          : null;
+      case STOP_MARKET -> null;
+      default -> throw new BusinessException(
+          "INVALID_PERPETUAL_ORDER_TYPE",
+          "Unsupported P0 Linear Perpetual order type");
+    };
+  }
+
+  private void validateP0PerpetualContract(CreateOrderRequest request) {
+    if (request.orderType() == null || request.orderType() == OrderType.STOP) {
+      throw new BusinessException(
+          "INVALID_PERPETUAL_ORDER_TYPE",
+          "Unsupported P0 Linear Perpetual order contract");
+    }
+    if (request.stopLoss() != null
+        || request.takeProfit() != null
+        || !request.attachedProtections().isEmpty()) {
+      throw new BusinessException(
+          ErrorCode.PRODUCT_NOT_ALLOWED,
+          "Perpetual attached protections are outside Task 9");
+    }
+    switch (request.orderType()) {
+      case MARKET -> {
+        if (request.price() != null
+            || request.triggerPrice() != null
+            || request.triggerPriceType() != null) {
+          throw new BusinessException(
+              "INVALID_PERPETUAL_ORDER_FIELDS",
+              "MARKET does not accept price or trigger fields");
+        }
+      }
+      case LIMIT -> {
+        requirePositiveField(request.price(), ErrorCode.ORDER_PRICE_REQUIRED, "LIMIT price is required");
+        if (request.triggerPrice() != null || request.triggerPriceType() != null) {
+          throw new BusinessException(
+              "INVALID_PERPETUAL_ORDER_FIELDS",
+              "LIMIT does not accept trigger fields");
+        }
+      }
+      case STOP_MARKET -> {
+        requirePositiveField(
+            request.triggerPrice(),
+            ErrorCode.ORDER_TRIGGER_PRICE_REQUIRED,
+            "STOP_MARKET triggerPrice is required");
+        if (request.price() != null
+            || (request.triggerPriceType() != null
+            && request.triggerPriceType() != TriggerPriceType.MARK_PRICE)) {
+          throw new BusinessException(
+              "INVALID_PERPETUAL_ORDER_FIELDS",
+              "STOP_MARKET uses MARK_PRICE and does not accept limit price");
+        }
+      }
+      default -> throw new BusinessException(
+          "INVALID_PERPETUAL_ORDER_TYPE",
+          "Unsupported P0 Linear Perpetual order type");
+    }
+  }
+
+  private OrderCommand canonicalPerpetualCommand(
+      OrderCommand identity,
+      CreateOrderRequest request,
+      BigDecimal baseQuantity,
+      PerpetualOrderRiskService.OrderRisk risk
+  ) {
+    return new OrderCommand(
+        identity.userId(),
+        identity.accountId(),
+        identity.symbol(),
+        identity.side(),
+        identity.orderType(),
+        baseQuantity,
+        identity.price(),
+        null,
+        null,
+        identity.clientOrderId(),
+        identity.idempotencyKey(),
+        risk.leverage(),
+        request.quantity(),
+        baseQuantity,
+        request.quantityUnit(),
+        risk.marginMode(),
+        risk.positionSide(),
+        request.reduceOnly(),
+        request.triggerPrice(),
+        request.orderType() == OrderType.STOP_MARKET
+            ? TriggerPriceType.MARK_PRICE
+            : null,
+        List.of());
+  }
+
+  private CreateOrderRequest canonicalPerpetualExecutionIntent(
+      CreateOrderRequest publicRequest,
+      BigDecimal baseQuantity,
+      PerpetualOrderRiskService.OrderRisk risk
+  ) {
+    return new CreateOrderRequest(
+        publicRequest.accountId(),
+        publicRequest.symbol(),
+        publicRequest.side(),
+        publicRequest.orderType(),
+        baseQuantity,
+        publicRequest.price(),
+        null,
+        null,
+        publicRequest.idempotencyKey(),
+        publicRequest.clientOrderId(),
+        baseQuantity,
+        publicRequest.price(),
+        risk.leverage(),
+        risk.positionSide(),
+        com.fxplatform.trading.enums.QuantityUnit.BASE,
+        risk.marginMode(),
+        publicRequest.triggerPrice(),
+        publicRequest.orderType() == OrderType.STOP_MARKET
+            ? TriggerPriceType.MARK_PRICE
+            : null,
+        publicRequest.reduceOnly(),
+        List.of());
+  }
+
+  /** Public leverage is an audit input; exact symbol-setting authority is locked in the mutation. */
+  private CreateOrderRequest perpetualRuleValidationRequest(CreateOrderRequest request) {
+    return new CreateOrderRequest(
+        request.accountId(),
+        request.symbol(),
+        request.side(),
+        request.orderType(),
+        request.lots(),
+        request.requestedPrice(),
+        request.stopLoss(),
+        request.takeProfit(),
+        request.idempotencyKey(),
+        request.clientOrderId(),
+        request.quantity(),
+        request.price(),
+        null,
+        request.positionSide(),
+        request.quantityUnit(),
+        request.marginMode(),
+        request.triggerPrice(),
+        request.triggerPriceType(),
+        request.reduceOnly(),
+        request.attachedProtections());
   }
 
   private OrderResponse persistP0Spot(
@@ -1143,6 +1606,27 @@ public class OrderService {
         && orderHoldCalculator != null;
   }
 
+  private boolean task9PerpetualReady() {
+    return symbolRepository != null
+        && instrumentRulesEngine != null
+        && quantityConversionService != null
+        && accountSymbolSettingRepository != null
+        && perpetualOrderRiskService != null
+        && perpetualAccountRiskSnapshotService != null
+        && fullFillCoordinator != null;
+  }
+
+  private void requirePreparedAccountRiskFresh(
+      PerpetualAccountRiskSnapshotService.PreparedAccountRisk preparedAccountRisk
+  ) {
+    if (preparedAccountRisk == null || preparedAccountRisk.snapshots().isEmpty()) {
+      throw new BusinessException(
+          ErrorCode.MARKET_DATA_UNAVAILABLE,
+          "Prepared Perpetual account risk is unavailable");
+    }
+    preparedAccountRisk.snapshots().values().forEach(fullFillCoordinator::requireFresh);
+  }
+
   @Autowired
   void setOcoOrderService(OcoOrderService ocoOrderService) {
     this.ocoOrderService = ocoOrderService;
@@ -1404,6 +1888,126 @@ public class OrderService {
     account.setUsedMargin(orZero(account.getUsedMargin()).add(amount));
     account.setFreeMargin(accountEquity(account).subtract(account.getUsedMargin()));
     ledgerService.recordOrderHold(account, amount, orderId, marginDescription);
+  }
+
+  private void reservePerpetualOrderHold(
+      TradingAccountEntity account,
+      BigDecimal amount
+  ) {
+    BigDecimal hold = orZero(amount);
+    if (hold.compareTo(BigDecimal.ZERO) <= 0) {
+      throw new BusinessException(ErrorCode.ORDER_HOLD_INVALID, "Perpetual order hold must be positive");
+    }
+    if (orZero(account.getFreeMargin()).compareTo(hold) < 0) {
+      throw new BusinessException(ErrorCode.INSUFFICIENT_MARGIN, "Free margin is not enough");
+    }
+    account.setUsedMargin(orZero(account.getUsedMargin()).add(hold));
+    account.setFreeMargin(orZero(account.getFreeMargin()).subtract(hold));
+    accountRepository.save(account);
+  }
+
+  private void reserveIsolatedPerpetualOrderHold(
+      TradingAccountEntity account,
+      BigDecimal amount
+  ) {
+    BigDecimal hold = orZero(amount);
+    if (hold.compareTo(BigDecimal.ZERO) <= 0) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Isolated Perpetual order hold must be positive");
+    }
+    account.setUsedMargin(orZero(account.getUsedMargin()).add(hold));
+    accountRepository.save(account);
+  }
+
+  private PositionEntity isolatedCloseHoldPosition(
+      PerpetualOrderRiskService.OrderRisk risk,
+      List<PositionEntity> positions
+  ) {
+    if (risk.marginMode() != MarginMode.ISOLATED
+        || risk.openingBase().compareTo(BigDecimal.ZERO) != 0
+        || risk.closingBase().compareTo(BigDecimal.ZERO) <= 0) {
+      return null;
+    }
+    return positions.stream()
+        .filter(position -> position.getId() != null)
+        .filter(position -> position.getPositionMode() == risk.positionMode())
+        .filter(position -> position.getPositionSide() == risk.positionSide())
+        .findFirst()
+        .orElseThrow(() -> new BusinessException(
+            ErrorCode.REDUCE_ONLY_EXCEEDS_POSITION,
+            "Isolated close requires one locked position slot"));
+  }
+
+  private void validateAggregateIsolatedCloseHolds(
+      PositionEntity position,
+      PerpetualOrderRiskService.OrderRisk newRisk,
+      List<OrderEntity> activeOrders
+  ) {
+    BigDecimal existingClosing = BigDecimal.ZERO;
+    BigDecimal existingHolds = BigDecimal.ZERO;
+    for (OrderEntity active : activeOrders) {
+      if (!position.getId().equals(active.getParentPositionId())
+          || active.getProtectionType() != null) {
+        continue;
+      }
+      existingClosing = existingClosing.add(activeRemainingBase(active));
+      existingHolds = existingHolds.add(orZero(active.getHoldAmount()));
+    }
+    if (existingClosing.add(newRisk.closingBase()).compareTo(abs(position.getLots())) > 0) {
+      throw new BusinessException(
+          ErrorCode.REDUCE_ONLY_EXCEEDS_POSITION,
+          "Aggregate Isolated close orders exceed the locked position slot");
+    }
+    if (existingHolds.add(newRisk.holdAmount())
+        .compareTo(newRisk.isolatedHoldCapacity()) >= 0) {
+      throw new BusinessException(
+          ErrorCode.MARGIN_REDUCTION_UNSAFE,
+          "Aggregate Isolated close holds exceed the position risk buffer");
+    }
+  }
+
+  private static BigDecimal activeRemainingBase(OrderEntity order) {
+    if (order.getRemainingQuantity() != null
+        && order.getRemainingQuantity().compareTo(BigDecimal.ZERO) > 0) {
+      return order.getRemainingQuantity();
+    }
+    return orZero(order.getBaseQuantity());
+  }
+
+  private static BigDecimal abs(BigDecimal value) {
+    return value == null ? BigDecimal.ZERO : value.abs();
+  }
+
+  private void releasePerpetualOrderHold(
+      TradingAccountEntity account,
+      BigDecimal amount
+  ) {
+    BigDecimal hold = orZero(amount);
+    if (hold.compareTo(BigDecimal.ZERO) <= 0
+        || orZero(account.getUsedMargin()).compareTo(hold) < 0) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Perpetual order hold cannot be released from the locked account state");
+    }
+    account.setUsedMargin(account.getUsedMargin().subtract(hold));
+    account.setFreeMargin(orZero(account.getFreeMargin()).add(hold));
+    accountRepository.save(account);
+  }
+
+  private void releaseIsolatedPerpetualOrderHold(
+      TradingAccountEntity account,
+      BigDecimal amount
+  ) {
+    BigDecimal hold = orZero(amount);
+    if (hold.compareTo(BigDecimal.ZERO) <= 0
+        || orZero(account.getUsedMargin()).compareTo(hold) < 0) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Isolated Perpetual order hold cannot be released from the locked account state");
+    }
+    account.setUsedMargin(account.getUsedMargin().subtract(hold));
+    accountRepository.save(account);
   }
 
   private void releaseOrderHold(

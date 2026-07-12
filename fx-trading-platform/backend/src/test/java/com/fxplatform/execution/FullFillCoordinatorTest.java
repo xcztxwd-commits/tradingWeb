@@ -112,6 +112,20 @@ class FullFillCoordinatorTest {
   }
 
   @Test
+  void linearPerpetualNormalizesCanonicalPriceBeforeFeeCalculation() {
+    stubFullIntent("0.0005");
+
+    FullFillResult result = coordinator.execute(
+        request("BTCUSDT-PERP", ProductType.LINEAR_PERP, OrderSide.BUY,
+            FullFillExecutionPath.MARKET, "0.0005", null),
+        perpSnapshot("BTCUSDT-PERP", "50000.123456789", "49999.9"));
+
+    assertThat(result.filledPrice()).isEqualByComparingTo("50005.12346913");
+    assertThat(result.filledPrice().scale()).isEqualTo(8);
+    assertThat(result.fee()).isEqualByComparingTo("0.01250128");
+  }
+
+  @Test
   void projectsCanonicalPricingAndSharedRatesWithoutCallingExecutionAdapter() {
     FullFillPricingProjection projection = coordinator.project(
         ProductType.CRYPTO_SPOT,

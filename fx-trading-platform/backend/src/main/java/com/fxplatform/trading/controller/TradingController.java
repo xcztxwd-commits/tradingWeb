@@ -4,15 +4,18 @@ import com.fxplatform.common.response.ApiResponse;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.request.CreateOcoOrderRequest;
+import com.fxplatform.trading.dto.request.AdjustPositionMarginRequest;
 import com.fxplatform.trading.dto.request.UpdatePositionProtectionRequest;
 import com.fxplatform.trading.dto.request.UpdateOrderRequest;
 import com.fxplatform.trading.dto.response.OrderEventResponse;
 import com.fxplatform.trading.dto.response.OrderResponse;
 import com.fxplatform.trading.dto.response.OcoOrderGroupResponse;
 import com.fxplatform.trading.dto.response.PositionResponse;
+import com.fxplatform.trading.dto.response.AdjustPositionMarginResponse;
 import com.fxplatform.trading.service.OrderService;
 import com.fxplatform.trading.service.OcoOrderService;
 import com.fxplatform.trading.service.PositionService;
+import com.fxplatform.trading.service.PositionMarginService;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
@@ -38,6 +41,7 @@ public class TradingController {
   private final OrderService orderService;
   private final PositionService positionService;
   private final OcoOrderService ocoOrderService;
+  private final PositionMarginService positionMarginService;
 
   /**
    * 处理 createOrder 提交接口请求。
@@ -108,6 +112,15 @@ public class TradingController {
       @RequestParam UUID accountId
   ) {
     return ApiResponse.success(positionService.positionHistory(principal.id(), accountId));
+  }
+
+  @PostMapping("/positions/{positionId}/margin")
+  public ApiResponse<AdjustPositionMarginResponse> adjustPositionMargin(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @PathVariable UUID positionId,
+      @Valid @RequestBody AdjustPositionMarginRequest request
+  ) {
+    return ApiResponse.success(positionMarginService.adjust(principal.id(), positionId, request));
   }
 
   @PatchMapping("/positions/{positionId}/protection")

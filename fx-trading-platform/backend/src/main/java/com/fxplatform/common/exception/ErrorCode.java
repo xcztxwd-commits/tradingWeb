@@ -50,6 +50,9 @@ public final class ErrorCode {
   public static final String INVALID_POSITION_SIDE = "INVALID_POSITION_SIDE";
   public static final String INVALID_POSITION_MODE = "INVALID_POSITION_MODE";
   public static final String INVALID_MARGIN_MODE = "INVALID_MARGIN_MODE";
+  public static final String MARGIN_ADJUSTMENT_INVALID = "MARGIN_ADJUSTMENT_INVALID";
+  public static final String MARGIN_REDUCTION_UNSAFE = "MARGIN_REDUCTION_UNSAFE";
+  public static final String POSITION_VERSION_CONFLICT = "POSITION_VERSION_CONFLICT";
 
   private static final Set<String> STANDARD_CODES = Set.of(
       AUTH_TOKEN_EXPIRED,
@@ -97,7 +100,10 @@ public final class ErrorCode {
       REDUCE_ONLY_WOULD_INCREASE,
       INVALID_POSITION_SIDE,
       INVALID_POSITION_MODE,
-      INVALID_MARGIN_MODE);
+      INVALID_MARGIN_MODE,
+      MARGIN_ADJUSTMENT_INVALID,
+      MARGIN_REDUCTION_UNSAFE,
+      POSITION_VERSION_CONFLICT);
 
   private ErrorCode() {
   }

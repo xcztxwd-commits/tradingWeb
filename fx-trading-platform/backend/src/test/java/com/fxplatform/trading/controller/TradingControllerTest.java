@@ -11,13 +11,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.trading.dto.request.CreateOcoOrderRequest;
+import com.fxplatform.trading.dto.request.AdjustPositionMarginRequest;
+import com.fxplatform.trading.dto.request.AdjustPositionMarginRequest.Action;
+import com.fxplatform.trading.dto.response.AdjustPositionMarginResponse;
 import com.fxplatform.trading.dto.response.OcoOrderGroupResponse;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.QuantityUnit;
+import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.TriggerPriceType;
 import com.fxplatform.trading.service.OcoOrderService;
 import com.fxplatform.trading.service.OrderService;
 import com.fxplatform.trading.service.PositionService;
+import com.fxplatform.trading.service.PositionMarginService;
 import java.math.BigDecimal;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -28,11 +34,39 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class TradingControllerTest {
 
   @Test
+  void postPositionMarginDelegatesAuthenticatedOwnerWithoutAnAccountOverride() {
+    OrderService orderService = org.mockito.Mockito.mock(OrderService.class);
+    PositionService positionService = org.mockito.Mockito.mock(PositionService.class);
+    OcoOrderService ocoOrderService = org.mockito.Mockito.mock(OcoOrderService.class);
+    PositionMarginService marginService = org.mockito.Mockito.mock(PositionMarginService.class);
+    TradingController controller = new TradingController(
+        orderService, positionService, ocoOrderService, marginService);
+    UserPrincipal principal = new UserPrincipal(UUID.randomUUID(), "trader@example.com", "TRADER");
+    UUID positionId = UUID.randomUUID();
+    AdjustPositionMarginRequest request = new AdjustPositionMarginRequest(
+        Action.ADD, new BigDecimal("100"), 3L);
+    AdjustPositionMarginResponse expected = new AdjustPositionMarginResponse(
+        UUID.randomUUID(), positionId, "BTCUSDT-PERP", PositionSide.BOTH,
+        MarginMode.ISOLATED, Action.ADD, new BigDecimal("100"), new BigDecimal("1000"),
+        new BigDecimal("1100"), new BigDecimal("1100"), new BigDecimal("50"),
+        new BigDecimal("5"), new BigDecimal("45000"), new BigDecimal("1100"),
+        new BigDecimal("8900"), 4L);
+    when(marginService.adjust(principal.id(), positionId, request)).thenReturn(expected);
+
+    var response = controller.adjustPositionMargin(principal, positionId, request);
+
+    assertThat(response.data()).isSameAs(expected);
+    verify(marginService).adjust(principal.id(), positionId, request);
+  }
+
+  @Test
   void postOcoDelegatesWithAuthenticatedOwnerAndReturnsGroup() {
     OrderService orderService = org.mockito.Mockito.mock(OrderService.class);
     PositionService positionService = org.mockito.Mockito.mock(PositionService.class);
     OcoOrderService ocoOrderService = org.mockito.Mockito.mock(OcoOrderService.class);
-    TradingController controller = new TradingController(orderService, positionService, ocoOrderService);
+    PositionMarginService marginService = org.mockito.Mockito.mock(PositionMarginService.class);
+    TradingController controller = new TradingController(
+        orderService, positionService, ocoOrderService, marginService);
     UserPrincipal principal = new UserPrincipal(UUID.randomUUID(), "trader@example.com", "TRADER");
     CreateOcoOrderRequest request = new CreateOcoOrderRequest(
         UUID.randomUUID(), "BTCUSDT", OrderSide.SELL, new BigDecimal("0.1"),
@@ -53,8 +87,9 @@ class TradingControllerTest {
     OrderService orderService = org.mockito.Mockito.mock(OrderService.class);
     PositionService positionService = org.mockito.Mockito.mock(PositionService.class);
     OcoOrderService ocoOrderService = org.mockito.Mockito.mock(OcoOrderService.class);
+    PositionMarginService marginService = org.mockito.Mockito.mock(PositionMarginService.class);
     MockMvc mockMvc = MockMvcBuilders.standaloneSetup(
-        new TradingController(orderService, positionService, ocoOrderService)).build();
+        new TradingController(orderService, positionService, ocoOrderService, marginService)).build();
 
     mockMvc.perform(post("/api/trading/oco")
             .contentType(MediaType.APPLICATION_JSON)
@@ -80,7 +115,9 @@ class TradingControllerTest {
     OrderService orderService = org.mockito.Mockito.mock(OrderService.class);
     PositionService positionService = org.mockito.Mockito.mock(PositionService.class);
     OcoOrderService ocoOrderService = org.mockito.Mockito.mock(OcoOrderService.class);
-    TradingController controller = new TradingController(orderService, positionService, ocoOrderService);
+    PositionMarginService marginService = org.mockito.Mockito.mock(PositionMarginService.class);
+    TradingController controller = new TradingController(
+        orderService, positionService, ocoOrderService, marginService);
     UserPrincipal principal = new UserPrincipal(UUID.randomUUID(), "trader@example.com", "TRADER");
     CreateOcoOrderRequest request = new CreateOcoOrderRequest(
         UUID.randomUUID(), "BTCUSDT", OrderSide.SELL, new BigDecimal("0.1"),

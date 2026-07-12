@@ -147,12 +147,9 @@ class Task8PostgresTradingSettingsIT {
             exception -> assertThat(exception.getCode()).isEqualTo("MARGIN_MODE_SWITCH_BLOCKED"));
     jdbcTemplate.update("DELETE FROM trading.orders WHERE id IN (?, ?)", activePerp, terminalPerp);
 
-    insertPosition(fixture, "BTCUSDT-PERP", "LINEAR_PERP", "HEDGE", "LONG");
-    assertThatThrownBy(() -> settingsService.updateSymbolSettings(
-        fixture.userId(), fixture.accountId(), "BTCUSDT-PERP",
-        new UpdateSymbolSettingsRequest(20, null, null, 0L)))
-        .isInstanceOfSatisfying(BusinessException.class,
-            exception -> assertThat(exception.getCode()).isEqualTo("LEVERAGE_CHANGE_BLOCKED"));
+    // Task 9 intentionally permits leverage changes with open Perpetual positions and
+    // atomically recalculates both slots. Its PostgreSQL behavior belongs to the Task 9 gate;
+    // Task 8 continues to own only mode/margin-mode blocking semantics.
   }
 
   @Test

@@ -2,6 +2,7 @@ package com.fxplatform.account.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.dto.AccountSnapshot;
@@ -15,9 +16,13 @@ import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.risk.service.PnLCalculator;
 import com.fxplatform.risk.service.TradingAlgorithmEngine;
+import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
+import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.OrderSide;
+import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
 import java.util.List;
@@ -42,6 +47,9 @@ class AccountSnapshotServiceTest {
 
   @Mock
   private SymbolRepository symbolRepository;
+
+  @Mock
+  private OrderRepository orderRepository;
 
   @Test
   void snapshotIncludesPositiveOpenFloatingPnlInEquityAndFreeMargin() {
@@ -122,7 +130,8 @@ class AccountSnapshotServiceTest {
     when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
         .thenReturn(List.of(position));
     when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(linearSymbol()));
-    when(quoteService.freshQuote("BTCUSDT")).thenReturn(quote("BTCUSDT", "50100.00000000", "50102.00000000"));
+    when(quoteService.freshQuote("BTCUSDT")).thenReturn(
+        quoteWithMark("BTCUSDT", "50100.00000000", "50102.00000000", "50101.00000000"));
 
     AccountSnapshot snapshot = service().snapshot(account);
 
@@ -161,7 +170,7 @@ class AccountSnapshotServiceTest {
         accountId, PositionStatus.OPEN)).thenReturn(List.of(position));
     when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
     when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(
-        quote("BTCUSDT-PERP", "50100.00000000", "50102.00000000"));
+        quoteWithMark("BTCUSDT-PERP", "50100.00000000", "50102.00000000", "50101.00000000"));
 
     AccountSnapshot snapshot = service().snapshot(account);
 
@@ -171,6 +180,146 @@ class AccountSnapshotServiceTest {
     assertThat(snapshot.maintenanceMargin()).isEqualByComparingTo("250.50500000");
     assertThat(snapshot.usedMargin()).isEqualByComparingTo("5000.00000000");
     assertThat(snapshot.freeMargin()).isEqualByComparingTo("5101.00000000");
+  }
+
+  @Test
+  void linearPerpetualSnapshotSeparatesCrossAvailableFromDisplayEquityAndIncludesActiveHolds() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    account.setBaseCurrency("USDT");
+    account.setBalance(new BigDecimal("50000.00000000"));
+    account.setEquity(new BigDecimal("123.00000000"));
+    account.setUsedMargin(new BigDecimal("999.00000000"));
+    account.setFreeMargin(new BigDecimal("456.00000000"));
+
+    PositionEntity cross = linearPosition(
+        accountId, "BTCUSDT-PERP", "100", "110", "10", MarginMode.CROSS);
+    PositionEntity isolated = linearPosition(
+        accountId, "ETHUSDT-PERP", "200", "190", "30", MarginMode.ISOLATED);
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of(cross, isolated));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(
+        linearSymbol("BTCUSDT-PERP", "BTC")));
+    when(symbolRepository.findBySymbol("ETHUSDT-PERP")).thenReturn(Optional.of(
+        linearSymbol("ETHUSDT-PERP", "ETH")));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(
+        quoteWithMark("BTCUSDT-PERP", "109", "111", "110"));
+    when(quoteService.freshQuote("ETHUSDT-PERP")).thenReturn(
+        quoteWithMark("ETHUSDT-PERP", "189", "191", "190"));
+    when(orderRepository.findByAccountIdAndStatusIn(
+        org.mockito.ArgumentMatchers.eq(accountId), org.mockito.ArgumentMatchers.anyList()))
+        .thenReturn(List.of(
+            activeOrder(accountId, ProductType.LINEAR_PERP, OrderStatus.PENDING, "5"),
+            activeOrder(accountId, ProductType.LINEAR_PERP, OrderStatus.WORKING, "7"),
+            activeOrder(accountId, ProductType.CRYPTO_SPOT, OrderStatus.PENDING, "99")));
+
+    AccountSnapshot snapshot = serviceWithOrders().snapshot(account);
+
+    assertThat(snapshot.openFloatingPnl()).isEqualByComparingTo("0.00000000");
+    assertThat(snapshot.equity()).isEqualByComparingTo("50000.00000000");
+    assertThat(snapshot.usedMargin()).isEqualByComparingTo("52.00000000");
+    assertThat(snapshot.maintenanceMargin()).isEqualByComparingTo("1.50000000");
+    assertThat(snapshot.freeMargin()).isEqualByComparingTo("49958.00000000");
+    assertThat(snapshot.marginAvailable()).isEqualByComparingTo("49958.00000000");
+    assertThat(snapshot.warning()).contains("usedMargin");
+  }
+
+  @Test
+  void hedgeSlotsUseOneAuthorityQuotePerSymbolWithinTheSameSnapshot() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    PositionEntity longSlot = linearPosition(
+        accountId, "BTCUSDT-PERP", "100", "110", "10", MarginMode.CROSS);
+    PositionEntity shortSlot = linearPosition(
+        accountId, "BTCUSDT-PERP", "100", "110", "10", MarginMode.CROSS);
+    shortSlot.setSide(OrderSide.SELL);
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of(longSlot, shortSlot));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(
+        linearSymbol("BTCUSDT-PERP", "BTC")));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(
+        quoteWithMark("BTCUSDT-PERP", "109", "111", "110"));
+
+    AccountSnapshot snapshot = service().snapshot(account);
+
+    assertThat(snapshot.openFloatingPnl()).isEqualByComparingTo("0.00000000");
+    verify(quoteService, times(1)).freshQuote("BTCUSDT-PERP");
+  }
+
+  @Test
+  void canonicalPerpetualUsesZeroActualMarginWithoutRestoringTheoreticalInitial() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    PositionEntity position = linearPosition(
+        accountId, "BTCUSDT-PERP", "100", "200", "0", MarginMode.ISOLATED);
+    position.setInitialMargin(new BigDecimal("10"));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(
+        linearSymbol("BTCUSDT-PERP", "BTC")));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(
+        quoteWithMark("BTCUSDT-PERP", "199", "201", "200"));
+    OrderEntity internalCloseHold = activeOrder(
+        accountId, ProductType.LINEAR_PERP, OrderStatus.PENDING, "2");
+    internalCloseHold.setMarginMode(MarginMode.ISOLATED);
+    internalCloseHold.setParentPositionId(position.getId());
+    internalCloseHold.setSymbol(position.getSymbol());
+    internalCloseHold.setPositionMode(position.getPositionMode());
+    internalCloseHold.setPositionSide(position.getPositionSide());
+    when(orderRepository.findByAccountIdAndStatusIn(
+        org.mockito.ArgumentMatchers.eq(accountId), org.mockito.ArgumentMatchers.anyList()))
+        .thenReturn(List.of(internalCloseHold));
+
+    AccountSnapshot snapshot = serviceWithOrders().snapshot(account);
+
+    assertThat(snapshot.openFloatingPnl()).isEqualByComparingTo("100.00000000");
+    assertThat(snapshot.equity()).isEqualByComparingTo("10100.00000000");
+    assertThat(snapshot.usedMargin()).isEqualByComparingTo("2.00000000");
+    assertThat(snapshot.freeMargin()).isEqualByComparingTo("10000.00000000");
+  }
+
+  @Test
+  void orphanIsolatedCloseHoldRemainsACrossEncumbranceInTheReadSnapshot() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    account.setBalance(new BigDecimal("1000"));
+    account.setEquity(new BigDecimal("1000"));
+    account.setUsedMargin(BigDecimal.ZERO);
+    account.setFreeMargin(new BigDecimal("1000"));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of());
+    OrderEntity orphan = activeOrder(
+        accountId, ProductType.LINEAR_PERP, OrderStatus.PENDING, "10");
+    orphan.setSymbol("BTCUSDT-PERP");
+    orphan.setMarginMode(MarginMode.ISOLATED);
+    orphan.setParentPositionId(UUID.randomUUID());
+    when(orderRepository.findByAccountIdAndStatusIn(
+        org.mockito.ArgumentMatchers.eq(accountId), org.mockito.ArgumentMatchers.anyList()))
+        .thenReturn(List.of(orphan));
+
+    AccountSnapshot snapshot = serviceWithOrders().snapshot(account);
+
+    assertThat(snapshot.usedMargin()).isEqualByComparingTo("10.00000000");
+    assertThat(snapshot.freeMargin()).isEqualByComparingTo("990.00000000");
+  }
+
+  @Test
+  void linearPerpetualSnapshotRejectsMissingAuthorityMarkInsteadOfFallingBackToMid() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    PositionEntity position = linearPosition(
+        accountId, "BTCUSDT-PERP", "100", "100", "10", MarginMode.CROSS);
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(
+        linearSymbol("BTCUSDT-PERP", "BTC")));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(
+        quote("BTCUSDT-PERP", "109", "111"));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> serviceWithOrders().snapshot(account))
+        .isInstanceOf(BusinessException.class)
+        .satisfies(error -> assertThat(((BusinessException) error).getCode())
+            .isEqualTo("MARKET_DATA_UNAVAILABLE"));
   }
 
   @Test
@@ -238,7 +387,8 @@ class AccountSnapshotServiceTest {
         new BigDecimal("100"),
         10)));
     when(quoteService.freshQuote("BTCUSDT")).thenReturn(quote("BTCUSDT", "110.00000000", "111.00000000"));
-    when(quoteService.freshQuote("ETHUSD")).thenReturn(quote("ETHUSD", "1010.00000000", "1011.00000000"));
+    when(quoteService.freshQuote("ETHUSD")).thenReturn(
+        quoteWithMark("ETHUSD", "1010.00000000", "1011.00000000", "1010.50000000"));
     when(quoteService.freshQuote("SOLUSDT")).thenReturn(quote("SOLUSDT", "55.00000000", "56.00000000"));
 
     AccountSnapshot snapshot = service().snapshot(account);
@@ -278,6 +428,16 @@ class AccountSnapshotServiceTest {
         quoteService,
         new PnLCalculator(new TradingAlgorithmEngine()),
         symbolRepository);
+  }
+
+  private AccountSnapshotService serviceWithOrders() {
+    return new AccountSnapshotService(
+        accountRepository,
+        positionRepository,
+        quoteService,
+        new PnLCalculator(new TradingAlgorithmEngine()),
+        symbolRepository,
+        orderRepository);
   }
 
   private static TradingAccountEntity account(UUID accountId) {
@@ -337,6 +497,49 @@ class AccountSnapshotServiceTest {
     return symbol;
   }
 
+  private static SymbolEntity linearSymbol(String code, String baseCurrency) {
+    SymbolEntity symbol = linearSymbol();
+    symbol.setSymbol(code);
+    symbol.setBaseCurrency(baseCurrency);
+    return symbol;
+  }
+
+  private static PositionEntity linearPosition(
+      UUID accountId,
+      String symbol,
+      String entry,
+      String mark,
+      String marginHeld,
+      MarginMode marginMode
+  ) {
+    PositionEntity position = openForexPosition(accountId, OrderSide.BUY, entry, marginHeld);
+    position.setSymbol(symbol);
+    position.setProductType(ProductType.LINEAR_PERP);
+    position.setLots(BigDecimal.ONE);
+    position.setLeverage(10);
+    position.setMarginMode(marginMode);
+    position.setInitialMargin(new BigDecimal(entry).divide(BigDecimal.TEN));
+    position.setMarkPrice(new BigDecimal(mark));
+    position.setMaintenanceMargin(new BigDecimal(mark).multiply(new BigDecimal("0.005")));
+    position.setNotional(new BigDecimal(mark));
+    return position;
+  }
+
+  private static OrderEntity activeOrder(
+      UUID accountId,
+      ProductType productType,
+      OrderStatus status,
+      String hold
+  ) {
+    OrderEntity order = new OrderEntity();
+    order.setId(UUID.randomUUID());
+    order.setAccountId(accountId);
+    order.setProductType(productType);
+    order.setStatus(status);
+    order.setHoldAmount(new BigDecimal(hold));
+    return order;
+  }
+
   private static SymbolEntity symbol(
       String code,
       ProductType productType,
@@ -383,5 +586,29 @@ class AccountSnapshotServiceTest {
         askPrice.subtract(bidPrice),
         "test",
         1781667600000L);
+  }
+
+  private static QuoteResponse quoteWithMark(
+      String symbol,
+      String bid,
+      String ask,
+      String mark
+  ) {
+    BigDecimal bidPrice = new BigDecimal(bid);
+    BigDecimal askPrice = new BigDecimal(ask);
+    return new QuoteResponse(
+        "quote",
+        symbol,
+        bidPrice,
+        askPrice,
+        bidPrice.add(askPrice).divide(new BigDecimal("2")),
+        new BigDecimal(mark),
+        askPrice.subtract(bidPrice),
+        "test",
+        1781667600000L,
+        null,
+        null,
+        null,
+        null);
   }
 }

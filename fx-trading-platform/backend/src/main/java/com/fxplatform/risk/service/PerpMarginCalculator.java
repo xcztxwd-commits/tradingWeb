@@ -11,6 +11,54 @@ public class PerpMarginCalculator {
 
   private static final int MONEY_SCALE = 8;
 
+  /**
+   * Canonical Linear Perpetual entry point. Quantity is already normalized to BASE and must not
+   * be multiplied by contract metadata again.
+   */
+  public LinearMarginResult calculateLinear(
+      BigDecimal canonicalBaseQuantity,
+      BigDecimal entryPrice,
+      BigDecimal markPrice,
+      int leverage,
+      BigDecimal maintenanceMarginRate
+  ) {
+    BigDecimal quantity = requirePositive(canonicalBaseQuantity, "Canonical BASE quantity");
+    BigDecimal effectiveEntry = requirePositive(entryPrice, "Entry price");
+    BigDecimal effectiveMark = requirePositive(markPrice, "Mark price");
+    BigDecimal rate = requirePositive(maintenanceMarginRate, "Maintenance margin rate");
+    if (rate.compareTo(BigDecimal.ONE) >= 0) {
+      throw new IllegalArgumentException("Maintenance margin rate must be less than one");
+    }
+    if (leverage <= 0) {
+      throw new IllegalArgumentException("Leverage must be positive");
+    }
+    BigDecimal entryNotional = quantity
+        .multiply(effectiveEntry)
+        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    BigDecimal markNotional = quantity
+        .multiply(effectiveMark)
+        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    BigDecimal initialMargin = entryNotional.divide(
+        BigDecimal.valueOf(leverage),
+        MONEY_SCALE,
+        RoundingMode.HALF_UP);
+    BigDecimal maintenanceMargin = markNotional
+        .multiply(maintenanceMarginRate)
+        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    return new LinearMarginResult(
+        entryNotional,
+        markNotional,
+        initialMargin,
+        maintenanceMargin);
+  }
+
+  private BigDecimal requirePositive(BigDecimal value, String label) {
+    if (value == null || value.compareTo(BigDecimal.ZERO) <= 0) {
+      throw new IllegalArgumentException(label + " must be positive");
+    }
+    return value;
+  }
+
   public MarginResult calculate(
       InstrumentProfile profile,
       BigDecimal quantity,
@@ -72,6 +120,14 @@ public class PerpMarginCalculator {
 
   public record MarginResult(
       BigDecimal notional,
+      BigDecimal initialMargin,
+      BigDecimal maintenanceMargin
+  ) {
+  }
+
+  public record LinearMarginResult(
+      BigDecimal entryNotional,
+      BigDecimal markNotional,
       BigDecimal initialMargin,
       BigDecimal maintenanceMargin
   ) {

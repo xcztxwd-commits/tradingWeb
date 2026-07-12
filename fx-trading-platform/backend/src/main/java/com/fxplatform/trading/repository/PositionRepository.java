@@ -32,6 +32,16 @@ public interface PositionRepository extends FxBaseMapper<PositionEntity> {
         .orderByDesc(PositionEntity::getOpenedAt));
   }
 
+  default List<PositionEntity> findOpenLinearPerpByAccountId(UUID accountId) {
+    return selectList(new LambdaQueryWrapper<PositionEntity>()
+        .eq(PositionEntity::getAccountId, accountId)
+        .eq(PositionEntity::getProductType, com.fxplatform.market.model.ProductType.LINEAR_PERP)
+        .eq(PositionEntity::getStatus, PositionStatus.OPEN)
+        .orderByAsc(PositionEntity::getSymbol)
+        .orderByAsc(PositionEntity::getPositionSide)
+        .orderByAsc(PositionEntity::getId));
+  }
+
   default Optional<PositionEntity> findOpenNetPosition(UUID accountId, String symbol) {
     String normalizedSymbol = symbol == null ? "" : symbol.trim().toUpperCase();
     return selectList(new LambdaQueryWrapper<PositionEntity>()

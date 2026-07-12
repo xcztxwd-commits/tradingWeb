@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -34,8 +35,9 @@ import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.SpotPositionRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.Optional;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
@@ -148,17 +150,11 @@ class PositionServiceTest {
         new BigDecimal("63876.8"),
         new BigDecimal("63877.0"),
         new BigDecimal("63876.9"),
+        new BigDecimal("63876.9"),
         new BigDecimal("0.2"),
         "test",
-        1780660000000L));
-    when(pnlCalculator.floatingPnl(
-        InstrumentKind.LINEAR_PERPETUAL,
-        OrderSide.BUY,
-        new BigDecimal("0.01"),
-        new BigDecimal("63874.8"),
-        new BigDecimal("63876.9"),
-        BigDecimal.ONE))
-        .thenReturn(new BigDecimal("0.02000000"));
+        1780660000000L,
+        null, null, null, null));
 
     PositionService service = service();
 
@@ -171,11 +167,11 @@ class PositionServiceTest {
     assertThat(response.leverage()).isEqualTo(20);
     assertThat(response.positionUnit()).isEqualTo("CONTRACT");
     assertThat(response.markPrice()).isEqualByComparingTo("63876.9");
-    assertThat(response.notional()).isEqualByComparingTo("638.74800000");
-    assertThat(response.liquidationPrice()).isEqualByComparingTo("63867.80000000");
-    assertThat(response.maintenanceMargin()).isEqualByComparingTo("250.00000000");
-    assertThat(response.floatingPnl()).isEqualByComparingTo("0.020");
-    assertThat(response.floatingPnlRatio()).isEqualByComparingTo("0.28571429");
+    assertThat(response.notional()).isEqualByComparingTo("638.76900000");
+    assertThat(response.liquidationPrice()).isEqualByComparingTo("0.00000000");
+    assertThat(response.maintenanceMargin()).isEqualByComparingTo("3.19384500");
+    assertThat(response.floatingPnl()).isEqualByComparingTo("0.02100000");
+    assertThat(response.floatingPnlRatio()).isEqualByComparingTo("0.30000000");
     verify(pnlCalculator, never()).floatingPnl(eq(OrderSide.BUY), eq(new BigDecimal("0.01")), any(), any());
   }
 
@@ -1013,7 +1009,8 @@ class PositionServiceTest {
     when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
     when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(new QuoteResponse(
         "quote", "BTCUSDT-PERP", new BigDecimal("49999"), new BigDecimal("50001"),
-        new BigDecimal("50000"), new BigDecimal("2"), "test", 1780660000000L));
+        new BigDecimal("50000"), new BigDecimal("50000"), new BigDecimal("2"),
+        "test", 1780660000000L, null, null, null, null));
 
     PositionResponse response = service().openPositions(userId, accountId).get(0);
 
@@ -1022,6 +1019,216 @@ class PositionServiceTest {
     assertThat(response.positionSide()).isEqualTo(PositionSide.SHORT);
     assertThat(response.marginMode()).isEqualTo(MarginMode.ISOLATED.name());
     assertThat(response.leverage()).isEqualTo(20);
+  }
+
+  @Test
+  void openLinearPerpetualPositionUsesAuthorityMarkForEveryRiskField() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    PositionEntity position = openPosition(accountId, UUID.randomUUID());
+    position.setSymbol("BTCUSDT-PERP");
+    position.setProductType(ProductType.LINEAR_PERP);
+    position.setPositionMode(PositionMode.ONE_WAY);
+    position.setPositionSide(PositionSide.BOTH);
+    position.setMarginMode(MarginMode.ISOLATED);
+    position.setSide(OrderSide.BUY);
+    position.setLots(new BigDecimal("0.2"));
+    position.setOpenPrice(new BigDecimal("50000"));
+    position.setMarginHeld(new BigDecimal("1000"));
+    position.setFundingPnl(new BigDecimal("20"));
+    position.setLeverage(10);
+    position.setNotional(new BigDecimal("1"));
+    position.setMaintenanceMargin(new BigDecimal("1"));
+    when(accountRepository.findByIdAndUserId(accountId, userId))
+        .thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of(position));
+    SymbolEntity symbol = symbol(
+        "BTCUSDT-PERP", ProductType.LINEAR_PERP, "BTC", "USDT", BigDecimal.ONE,
+        new BigDecimal("0.01"), 100);
+    symbol.setContractMultiplier(new BigDecimal("10"));
+    symbol.setMaintenanceMarginRate(new BigDecimal("0.005"));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(new QuoteResponse(
+        "quote", "BTCUSDT-PERP",
+        new BigDecimal("50490"), new BigDecimal("50510"), new BigDecimal("50500"),
+        new BigDecimal("50600"), new BigDecimal("20"), "test", 1780660000000L,
+        null, null, null, null));
+
+    PositionResponse response = service().openPositions(userId, accountId).get(0);
+
+    assertThat(response.markPrice()).isEqualByComparingTo("50600.00000000");
+    assertThat(response.currentPrice()).isEqualByComparingTo("50490");
+    assertThat(response.notional()).isEqualByComparingTo("10120.00000000");
+    assertThat(response.floatingPnl()).isEqualByComparingTo("120.00000000");
+    assertThat(response.floatingPnlRatio()).isEqualByComparingTo("0.12000000");
+    assertThat(response.maintenanceMargin()).isEqualByComparingTo("50.60000000");
+    assertThat(response.liquidationPrice()).isEqualByComparingTo("45148.31573655");
+  }
+
+  @Test
+  void openDeltaNeutralHedgeCrossPositionsShareOneAccountLiquidationBoundary() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    PositionEntity longPosition = openPosition(accountId, UUID.randomUUID());
+    longPosition.setSymbol("BTCUSDT-PERP");
+    longPosition.setProductType(ProductType.LINEAR_PERP);
+    longPosition.setPositionMode(PositionMode.HEDGE);
+    longPosition.setPositionSide(PositionSide.LONG);
+    longPosition.setMarginMode(MarginMode.CROSS);
+    longPosition.setSide(OrderSide.BUY);
+    longPosition.setLots(BigDecimal.ONE);
+    longPosition.setOpenPrice(new BigDecimal("50000"));
+    longPosition.setMarginHeld(new BigDecimal("5000"));
+    longPosition.setLeverage(10);
+    PositionEntity shortPosition = openPosition(accountId, UUID.randomUUID());
+    shortPosition.setSymbol("BTCUSDT-PERP");
+    shortPosition.setProductType(ProductType.LINEAR_PERP);
+    shortPosition.setPositionMode(PositionMode.HEDGE);
+    shortPosition.setPositionSide(PositionSide.SHORT);
+    shortPosition.setMarginMode(MarginMode.CROSS);
+    shortPosition.setSide(OrderSide.SELL);
+    shortPosition.setLots(BigDecimal.ONE);
+    shortPosition.setOpenPrice(new BigDecimal("50000"));
+    shortPosition.setMarginHeld(new BigDecimal("5000"));
+    shortPosition.setLeverage(10);
+    when(accountRepository.findByIdAndUserId(accountId, userId))
+        .thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of(longPosition, shortPosition));
+    SymbolEntity symbol = symbol(
+        "BTCUSDT-PERP", ProductType.LINEAR_PERP, "BTC", "USDT", BigDecimal.ONE,
+        new BigDecimal("0.01"), 100);
+    symbol.setMaintenanceMarginRate(new BigDecimal("0.005"));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
+    QuoteResponse first = new QuoteResponse(
+        "quote", "BTCUSDT-PERP",
+        new BigDecimal("50590"), new BigDecimal("50610"), new BigDecimal("50600"),
+        new BigDecimal("50600"), new BigDecimal("20"), "test", 1780660000000L,
+        null, null, null, null);
+    QuoteResponse inconsistentSecond = new QuoteResponse(
+        "quote", "BTCUSDT-PERP",
+        new BigDecimal("50990"), new BigDecimal("51010"), new BigDecimal("51000"),
+        new BigDecimal("51000"), new BigDecimal("20"), "test", 1780660001000L,
+        null, null, null, null);
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(first, inconsistentSecond);
+
+    List<PositionResponse> responses = service().openPositions(userId, accountId);
+
+    assertThat(responses).extracting(PositionResponse::markPrice)
+        .allSatisfy(mark -> assertThat(mark).isEqualByComparingTo("50600"));
+    assertThat(responses).extracting(PositionResponse::liquidationPrice)
+        .allSatisfy(price -> assertThat(price).isEqualByComparingTo("909090.90909091"));
+    verify(quoteService, times(1)).freshQuote("BTCUSDT-PERP");
+  }
+
+  @Test
+  void openSingleCrossPositionFloorsANegativeAccountBoundaryAtZero() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    PositionEntity position = linearPerpetualPosition(
+        accountId,
+        "BTCUSDT-PERP",
+        OrderSide.BUY,
+        MarginMode.CROSS,
+        "0.1",
+        "50000",
+        "500");
+    when(accountRepository.findByIdAndUserId(accountId, userId))
+        .thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP"))
+        .thenReturn(Optional.of(linearPerpetualSymbol("BTCUSDT-PERP", "BTC", "USDT")));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(new QuoteResponse(
+        "quote", "BTCUSDT-PERP",
+        new BigDecimal("50590"), new BigDecimal("50610"), new BigDecimal("50600"),
+        new BigDecimal("50600"), new BigDecimal("20"), "test", 1780660000000L,
+        null, null, null, null));
+
+    PositionResponse response = service().openPositions(userId, accountId).getFirst();
+
+    assertThat(response.liquidationPrice()).isEqualByComparingTo("0.00000000");
+  }
+
+  @Test
+  void openCrossPositionsFixOtherSymbolsAtCachedMarksAndSubtractIsolatedPrincipal() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    PositionEntity btcCross = linearPerpetualPosition(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, MarginMode.CROSS,
+        "1", "50000", "5000");
+    PositionEntity ethCross = linearPerpetualPosition(
+        accountId, "ETHUSDT-PERP", OrderSide.BUY, MarginMode.CROSS,
+        "1", "1000", "100");
+    PositionEntity solIsolated = linearPerpetualPosition(
+        accountId, "SOLUSDT-PERP", OrderSide.BUY, MarginMode.ISOLATED,
+        "1", "100", "2000");
+    when(accountRepository.findByIdAndUserId(accountId, userId))
+        .thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN))
+        .thenReturn(List.of(btcCross, ethCross, solIsolated));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP"))
+        .thenReturn(Optional.of(linearPerpetualSymbol("BTCUSDT-PERP", "BTC", "USDT")));
+    when(symbolRepository.findBySymbol("ETHUSDT-PERP"))
+        .thenReturn(Optional.of(linearPerpetualSymbol("ETHUSDT-PERP", "ETH", "USDT")));
+    when(symbolRepository.findBySymbol("SOLUSDT-PERP"))
+        .thenReturn(Optional.of(linearPerpetualSymbol("SOLUSDT-PERP", "SOL", "USDT")));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(new QuoteResponse(
+        "quote", "BTCUSDT-PERP", new BigDecimal("50590"), new BigDecimal("50610"),
+        new BigDecimal("50600"), new BigDecimal("50600"), new BigDecimal("20"),
+        "test", 1780660000000L, null, null, null, null));
+    when(quoteService.freshQuote("ETHUSDT-PERP")).thenReturn(new QuoteResponse(
+        "quote", "ETHUSDT-PERP", new BigDecimal("1999"), new BigDecimal("2001"),
+        new BigDecimal("2000"), new BigDecimal("2000"), new BigDecimal("2"),
+        "test", 1780660000000L, null, null, null, null));
+    when(quoteService.freshQuote("SOLUSDT-PERP")).thenReturn(new QuoteResponse(
+        "quote", "SOLUSDT-PERP", new BigDecimal("99"), new BigDecimal("101"),
+        new BigDecimal("100"), new BigDecimal("100"), new BigDecimal("2"),
+        "test", 1780660000000L, null, null, null, null));
+
+    Map<String, PositionResponse> bySymbol = service().openPositions(userId, accountId).stream()
+        .collect(java.util.stream.Collectors.toMap(PositionResponse::symbol, response -> response));
+
+    assertThat(bySymbol.get("BTCUSDT-PERP").liquidationPrice())
+        .isEqualByComparingTo("41237.80794369");
+    assertThat(bySymbol.get("ETHUSDT-PERP").liquidationPrice())
+        .isEqualByComparingTo("0.00000000");
+    assertThat(bySymbol.get("SOLUSDT-PERP").liquidationPrice())
+        .isNotNull();
+    verify(quoteService, times(1)).freshQuote("BTCUSDT-PERP");
+    verify(quoteService, times(1)).freshQuote("ETHUSDT-PERP");
+    verify(quoteService, times(1)).freshQuote("SOLUSDT-PERP");
+  }
+
+  @Test
+  void openLinearPerpetualPositionRejectsQuoteWithoutAuthorityMark() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    PositionEntity position = openPosition(accountId, UUID.randomUUID());
+    position.setSymbol("BTCUSDT-PERP");
+    position.setProductType(ProductType.LINEAR_PERP);
+    position.setLots(new BigDecimal("0.2"));
+    position.setLeverage(10);
+    when(accountRepository.findByIdAndUserId(accountId, userId))
+        .thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of(position));
+    SymbolEntity symbol = symbol(
+        "BTCUSDT-PERP", ProductType.LINEAR_PERP, "BTC", "USDT", BigDecimal.ONE,
+        BigDecimal.ONE, 10);
+    symbol.setMaintenanceMarginRate(new BigDecimal("0.005"));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(new QuoteResponse(
+        "quote", "BTCUSDT-PERP", new BigDecimal("50490"), new BigDecimal("50510"),
+        new BigDecimal("50500"), new BigDecimal("20"), "test", 1780660000000L));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+        () -> service().openPositions(userId, accountId))
+        .isInstanceOf(BusinessException.class)
+        .satisfies(error -> assertThat(((BusinessException) error).getCode())
+            .isEqualTo("MARKET_DATA_UNAVAILABLE"));
   }
 
   private static SpotPositionEntity spotPosition(UUID accountId, String asset, String costAsset) {
@@ -1058,6 +1265,9 @@ class PositionServiceTest {
     symbol.setLotSize(lotSize);
     symbol.setContractSize(contractSize);
     symbol.setLeverage(leverage);
+    if (productType == ProductType.LINEAR_PERP) {
+      symbol.setMaintenanceMarginRate(new BigDecimal("0.005"));
+    }
     return symbol;
   }
 
@@ -1088,6 +1298,47 @@ class PositionServiceTest {
     position.setMarginHeld(new BigDecimal("110.02000000"));
     position.setStatus(PositionStatus.OPEN);
     return position;
+  }
+
+  private static PositionEntity linearPerpetualPosition(
+      UUID accountId,
+      String symbol,
+      OrderSide side,
+      MarginMode marginMode,
+      String quantity,
+      String entryPrice,
+      String marginHeld
+  ) {
+    PositionEntity position = openPosition(accountId, UUID.randomUUID());
+    position.setSymbol(symbol);
+    position.setProductType(ProductType.LINEAR_PERP);
+    position.setPositionMode(PositionMode.ONE_WAY);
+    position.setPositionSide(PositionSide.BOTH);
+    position.setMarginMode(marginMode);
+    position.setSide(side);
+    position.setLots(new BigDecimal(quantity));
+    position.setOpenPrice(new BigDecimal(entryPrice));
+    position.setMarginHeld(new BigDecimal(marginHeld));
+    position.setFundingPnl(BigDecimal.ZERO);
+    position.setLeverage(10);
+    return position;
+  }
+
+  private static SymbolEntity linearPerpetualSymbol(
+      String symbolName,
+      String baseAsset,
+      String quoteAsset
+  ) {
+    SymbolEntity symbol = symbol(
+        symbolName,
+        ProductType.LINEAR_PERP,
+        baseAsset,
+        quoteAsset,
+        BigDecimal.ONE,
+        new BigDecimal("0.01"),
+        100);
+    symbol.setMaintenanceMarginRate(new BigDecimal("0.005"));
+    return symbol;
   }
 
   private static TradingAccountEntity account(UUID userId, UUID accountId) {

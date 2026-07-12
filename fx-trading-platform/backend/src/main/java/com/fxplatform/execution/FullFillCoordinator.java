@@ -8,6 +8,7 @@ import com.fxplatform.trading.enums.LiquidityRole;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderType;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class FullFillCoordinator {
 
+  private static final int MONEY_SCALE = 8;
   private static final BigDecimal MAKER_FEE_RATE = new BigDecimal("0.0002");
   private static final BigDecimal TAKER_FEE_RATE = new BigDecimal("0.0005");
   private static final BigDecimal SLIPPAGE_RATE = new BigDecimal("0.0001");
@@ -88,6 +90,12 @@ public class FullFillCoordinator {
         ? referencePrice.multiply(SLIPPAGE_RATE)
         : BigDecimal.ZERO;
     BigDecimal filledPrice = fillPrice(side, executionPath, limitPrice, referencePrice, slippage);
+    if (productType == ProductType.LINEAR_PERP) {
+      filledPrice = money(filledPrice);
+      slippage = money(side == OrderSide.BUY
+          ? filledPrice.subtract(referencePrice)
+          : referencePrice.subtract(filledPrice));
+    }
     LiquidityRole role = executionPath.liquidityRole();
     BigDecimal feeRate = role == LiquidityRole.MAKER ? MAKER_FEE_RATE : TAKER_FEE_RATE;
     return new FullFillPricingProjection(
@@ -143,7 +151,12 @@ public class FullFillCoordinator {
     if (request.productType() == ProductType.CRYPTO_SPOT && request.side() == OrderSide.BUY) {
       return request.requestedBaseQuantity().multiply(feeRate);
     }
-    return request.requestedBaseQuantity().multiply(filledPrice).multiply(feeRate);
+    BigDecimal fee = request.requestedBaseQuantity().multiply(filledPrice).multiply(feeRate);
+    return request.productType() == ProductType.LINEAR_PERP ? money(fee) : fee;
+  }
+
+  private static BigDecimal money(BigDecimal value) {
+    return value.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
   }
 
   private String feeAsset(FullFillRequest request) {

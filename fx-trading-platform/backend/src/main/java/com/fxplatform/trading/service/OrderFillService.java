@@ -38,6 +38,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class OrderFillService {
 
+  private static final int MONEY_SCALE = 8;
   private final OrderRepository orderRepository;
   private final TradeRepository tradeRepository;
   private final PositionRepository positionRepository;
@@ -198,6 +199,33 @@ public class OrderFillService {
     return fill(order, order, account, fullFill, requiredMargin, marginDescription);
   }
 
+  /**
+   * Linear Perpetual full-fill entry point. The shell initially delegates to the historical fill
+   * path; the authority mark is made explicit so its position snapshot behavior can be driven by
+   * focused tests without changing Spot or legacy products.
+   */
+  public OrderEntity fillPerpetual(
+      OrderEntity order,
+      TradingAccountEntity account,
+      FullFillResult fullFill,
+      BigDecimal authorityMark,
+      int executionLeverage,
+      String marginDescription
+  ) {
+    requireFullFill(order, fullFill == null ? null : fullFill.filledQuantity(),
+        fullFill == null ? null : fullFill.remainingQuantity());
+    return fillInternal(
+        order,
+        order,
+        account,
+        fullFill.toExecutionResult(),
+        null,
+        marginDescription,
+        fullFill,
+        authorityMark,
+        executionLeverage);
+  }
+
   public OrderEntity fill(
       OrderEntity order,
       OrderEntity holdOwner,
@@ -215,7 +243,9 @@ public class OrderFillService {
         fullFill.toExecutionResult(),
         requiredMargin,
         marginDescription,
-        fullFill);
+        fullFill,
+        null,
+        null);
   }
 
   public OrderEntity fill(
@@ -228,7 +258,8 @@ public class OrderFillService {
     requireFullFill(order,
         execution == null ? null : execution.filledQuantity(),
         execution == null ? null : execution.remainingQuantity());
-    return fillInternal(order, order, account, execution, requiredMargin, marginDescription, null);
+    return fillInternal(
+        order, order, account, execution, requiredMargin, marginDescription, null, null, null);
   }
 
   private OrderEntity fillInternal(
@@ -238,18 +269,28 @@ public class OrderFillService {
       ExecutionResult execution,
       BigDecimal requiredMargin,
       String marginDescription,
-      FullFillResult canonicalFill
+      FullFillResult canonicalFill,
+      BigDecimal authorityMark,
+      Integer executionLeverage
   ) {
     BigDecimal orderQuantity = expectedFullQuantity(order);
     BigDecimal filledQuantity = execution.filledQuantity();
     BigDecimal remainingQuantity = BigDecimal.ZERO;
-    BigDecimal fee = orZero(execution.fee());
+    BigDecimal fee = authorityMark == null
+        ? orZero(execution.fee())
+        : orZero(execution.fee()).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
     BigDecimal slippage = orZero(execution.slippage());
     OrderEntity effectiveHoldOwner = holdOwner == null ? order : holdOwner;
     BigDecimal existingOrderHold = orZero(effectiveHoldOwner.getHoldAmount());
     BigDecimal fullMargin = requiredMargin != null ? requiredMargin : existingOrderHold;
-    BigDecimal marginToHold = executionMargin(order, account, execution.filledPrice(), filledQuantity)
-        .orElseGet(() -> proportionalMargin(fullMargin, filledQuantity, orderQuantity));
+    SymbolEntity symbol = symbolFor(order);
+    InstrumentProfile profile = instrumentClassifier.profile(symbol);
+    boolean canonicalPerpetual = profile.kind() == InstrumentKind.LINEAR_PERPETUAL
+        && authorityMark != null;
+    BigDecimal marginToHold = canonicalPerpetual
+        ? BigDecimal.ZERO
+        : executionMargin(order, account, execution.filledPrice(), filledQuantity)
+            .orElseGet(() -> proportionalMargin(fullMargin, filledQuantity, orderQuantity));
 
     order.setStatus(OrderStatus.FILLED);
     order.setExecutionPrice(execution.filledPrice());
@@ -287,10 +328,10 @@ public class OrderFillService {
     if (trade.getId() == null) {
       trade.setId(UUID.randomUUID());
     }
-    tradeRepository.save(trade);
 
-    SymbolEntity symbol = symbolFor(order);
-    InstrumentProfile profile = instrumentClassifier.profile(symbol);
+    if (!canonicalPerpetual) {
+      tradeRepository.save(trade);
+    }
     if (profile.kind() == InstrumentKind.SPOT) {
       settleSpotFill(order, effectiveHoldOwner, account, execution, symbol, filledQuantity, trade.getId());
       if (existingOrderHold.compareTo(BigDecimal.ZERO) > 0) {
@@ -299,9 +340,27 @@ public class OrderFillService {
       }
       return order;
     }
-    ExecutionResult normalizedFill = normalizeFill(execution, filledQuantity);
+    ExecutionResult normalizedFill = normalizeFill(execution, filledQuantity, fee);
     if (isNetPositionKind(profile.kind())) {
-      PositionEngine.PositionUpdateResult update = positionEngine.applyFill(
+      if (canonicalPerpetual) {
+        PositionEngine.PositionUpdateResult positionUpdate = positionEngine.applyPerpetualFill(
+            account,
+            order,
+            normalizedFill,
+            profile,
+            authorityMark,
+            executionLeverage,
+            marginDescription);
+        trade.setRealizedPnl(positionUpdate.realizedPnlDelta());
+        tradeRepository.save(trade);
+        effectiveHoldOwner.setHoldAmount(BigDecimal.ZERO);
+        orderRepository.save(effectiveHoldOwner);
+        applyCanonicalPerpetualTradeFee(account, fee);
+        positionEngine.recordPerpetualFillLedger(account, positionUpdate);
+        recordCanonicalPerpetualTradeFee(account, fee, trade.getId());
+        return order;
+      }
+      positionEngine.applyFill(
           account,
           order,
           normalizedFill,
@@ -435,6 +494,30 @@ public class OrderFillService {
     ledgerService.recordTradeFeeForTrade(account, fee, tradeId, "Trade fee charged");
   }
 
+  private void applyCanonicalPerpetualTradeFee(
+      TradingAccountEntity account,
+      BigDecimal fee
+  ) {
+    if (fee.compareTo(BigDecimal.ZERO) <= 0) {
+      return;
+    }
+    account.setBalance(orZero(account.getBalance()).subtract(fee));
+    account.setEquity(accountEquity(account).subtract(fee));
+    account.setFreeMargin(orZero(account.getFreeMargin()).subtract(fee));
+    accountRepository.save(account);
+  }
+
+  private void recordCanonicalPerpetualTradeFee(
+      TradingAccountEntity account,
+      BigDecimal fee,
+      java.util.UUID tradeId
+  ) {
+    if (fee.compareTo(BigDecimal.ZERO) <= 0) {
+      return;
+    }
+    ledgerService.recordTradeFeeForTrade(account, fee, tradeId, "Trade fee charged");
+  }
+
   private BigDecimal proportionalMargin(BigDecimal fullMargin, BigDecimal filledQuantity, BigDecimal orderQuantity) {
     if (orderQuantity == null || orderQuantity.compareTo(BigDecimal.ZERO) <= 0) {
       return BigDecimal.ZERO;
@@ -494,15 +577,20 @@ public class OrderFillService {
   }
 
   private ExecutionResult normalizeFill(ExecutionResult execution, BigDecimal filledQuantity) {
-    if (execution.filledQuantity() != null) {
-      return execution;
-    }
+    return normalizeFill(execution, filledQuantity, execution.fee());
+  }
+
+  private ExecutionResult normalizeFill(
+      ExecutionResult execution,
+      BigDecimal filledQuantity,
+      BigDecimal fee
+  ) {
     return new ExecutionResult(
         execution.filledPrice(),
         execution.filledAt(),
-        filledQuantity,
+        execution.filledQuantity() == null ? filledQuantity : execution.filledQuantity(),
         execution.remainingQuantity(),
-        execution.fee(),
+        fee,
         execution.feeAsset(),
         execution.slippage(),
         execution.rejectCode(),

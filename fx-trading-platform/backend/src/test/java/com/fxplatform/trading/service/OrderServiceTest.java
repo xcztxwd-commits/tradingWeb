@@ -37,6 +37,8 @@ import com.fxplatform.trading.entity.TradeEntity;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
+import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.ProtectionType;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
@@ -395,7 +397,7 @@ class OrderServiceTest {
   }
 
   @Test
-  void linearPerpLocksSortedPositionsBeforeWritingMarketOrder() {
+  void compatibilityConstructorFailsClosedForP0PerpetualCreation() {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
     UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
@@ -418,24 +420,15 @@ class OrderServiceTest {
     when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(
         userId, accountId, "client-perp-lock-order")).thenReturn(Optional.empty());
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
-    when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class)))
-        .thenReturn(new BigDecimal("100.00000000"));
-    when(riskCheckService.resolveEffectiveLeverage(eq(account), any(CreateOrderRequest.class))).thenReturn(10);
-    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any()))
-        .thenReturn(perpBundle(Instant.now().plusSeconds(2)));
-    when(fullFillCoordinator.execute(any(), any())).thenThrow(new BusinessException(
-        "EXECUTION_REJECTED",
-        "Demo execution rejected"));
-
     assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
         .createOrder(principal, request))
         .isInstanceOfSatisfying(BusinessException.class,
-            exception -> assertThat(exception.getCode()).isEqualTo("EXECUTION_REJECTED"));
+            exception -> assertThat(exception.getCode()).isEqualTo("EXECUTION_UNAVAILABLE"));
 
-    org.mockito.InOrder accountPositionOrder = org.mockito.Mockito.inOrder(
-        accountRepository, positionRepository, orderRepository);
-    accountPositionOrder.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
-    accountPositionOrder.verify(positionRepository).findOpenByAccountIdForUpdate(accountId);
+    verify(accountRepository, never()).findByIdAndUserIdForUpdate(any(), any());
+    verify(positionRepository, never()).findOpenByAccountIdForUpdate(any());
+    verify(marketBundleResolver, never()).resolvePerp(any(), any());
+    verify(riskCheckService, never()).checkOrder(any(), any());
     verify(orderRepository, never()).save(any(OrderEntity.class));
   }
 
@@ -1276,6 +1269,71 @@ class OrderServiceTest {
         marketBundleResolver,
         fullFillCoordinator,
         transactionExecutor);
+  }
+
+  @Test
+  void cancelCrossProtectionParentReleasesItsExternalPerpetualHold() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID orderId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    TradingAccountEntity account = demoAccount(userId, accountId);
+    account.setUsedMargin(new BigDecimal("10.00000000"));
+    account.setFreeMargin(new BigDecimal("9990.00000000"));
+    OrderEntity order = pendingOrderEntity(userId, accountId, orderId);
+    order.setSymbol("BTCUSDT-PERP");
+    order.setProductType(ProductType.LINEAR_PERP);
+    order.setMarginMode(MarginMode.CROSS);
+    order.setProtectionType(ProtectionType.TAKE_PROFIT);
+    order.setParentPositionId(UUID.randomUUID());
+    order.setHoldAmount(new BigDecimal("10.00000000"));
+    when(orderRepository.findByUserIdAndId(userId, orderId)).thenReturn(Optional.of(order));
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(accountRepository.findByIdAndUserIdForUpdate(accountId, userId))
+        .thenReturn(Optional.of(account));
+    when(orderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
+    when(orderRepository.cancelPending(order)).thenReturn(1);
+    when(accountRepository.save(account)).thenReturn(account);
+
+    OrderResponse response = orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .cancelOrder(principal, orderId);
+
+    assertThat(response.status()).isEqualTo(OrderStatus.CANCELED.name());
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("10000.00000000");
+    verify(ledgerService).recordOrderRelease(
+        account,
+        new BigDecimal("10.00000000"),
+        orderId,
+        "Pending Perpetual order canceled");
+  }
+
+  @Test
+  void compatibilityConstructorStillRejectsP0PerpetualModification() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID orderId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    OrderEntity order = pendingOrderEntity(userId, accountId, orderId);
+    order.setSymbol("BTCUSDT-PERP");
+    order.setProductType(ProductType.LINEAR_PERP);
+    order.setRequestedPrice(new BigDecimal("100"));
+    order.setPrice(new BigDecimal("100"));
+    when(orderRepository.findByUserIdAndId(userId, orderId)).thenReturn(Optional.of(order));
+
+    assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .modifyOrder(principal, orderId, new UpdateOrderRequest(
+            new BigDecimal("0.20"),
+            new BigDecimal("99"),
+            null,
+            null)))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("ORDER_NOT_MODIFIABLE"));
+
+    verify(orderRepository, never()).findByIdForUpdate(orderId);
+    verify(accountRepository, never()).findByIdAndUserIdForUpdate(any(), any());
+    verify(riskCheckService, never()).checkOrder(any(), any());
+    verify(orderRepository, never()).save(any(OrderEntity.class));
   }
 
   private static CreateOrderRequest p0MarketOrder(UUID accountId, String clientOrderId) {

@@ -140,6 +140,29 @@ class PendingOrderExecutionServiceTest {
   }
 
   @Test
+  void compatibilityConstructorFailsClosedForP0PerpetualPendingOrder() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity order = p0PendingOrder(accountId, "perp-missing-authority");
+    order.setSymbol("BTCUSDT-PERP");
+    order.setProductType(ProductType.LINEAR_PERP);
+    order.setOrderType(OrderType.STOP_MARKET);
+    order.setTriggerPrice(new BigDecimal("100"));
+    TradingAccountEntity account = account(accountId);
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+
+    assertThat(p0Service().executePendingOrders()).isZero();
+
+    assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+    verify(marketBundleResolver, never()).resolvePerp(any(), any());
+    verify(quoteService, never()).freshQuote(any());
+    verify(transactionExecutor, never()).execute(any());
+    verify(orderRepository, never()).claimPending(any());
+    verify(orderRepository, never()).save(any());
+    verify(tradeRepository, never()).save(any());
+  }
+
+  @Test
   void failedP0CandidateDoesNotPreventTheNextCandidateFromFilling() {
     UUID firstAccountId = UUID.randomUUID();
     UUID secondAccountId = UUID.randomUUID();
