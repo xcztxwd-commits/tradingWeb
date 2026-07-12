@@ -210,29 +210,10 @@ public class FullFillCoordinator {
       ProductType productType,
       ExecutableMarketSnapshot snapshot
   ) {
-    if (snapshot == null
-        || !normalize(platformSymbol).equals(normalize(snapshot.platformSymbol()))
-        || productType != snapshot.productType()
-        || blank(snapshot.providerCode())
-        || blank(snapshot.providerSymbol())
-        || snapshot.sourceMode() == null
-        || snapshot.asOf() == null
-        || snapshot.expiresAt() == null) {
-      throw incomplete("Executable market snapshot does not match the request");
-    }
-    requirePositive(snapshot.bid(), "Executable bid is missing");
-    requirePositive(snapshot.ask(), "Executable ask is missing");
-    requirePositive(snapshot.last(), "Executable last is missing");
-    if (productType == ProductType.LINEAR_PERP) {
-      requirePositive(snapshot.mark(), "Perpetual mark price is missing");
-      requirePositive(snapshot.index(), "Perpetual index price is missing");
-    }
+    ExecutableMarketSnapshots.requireComplete(platformSymbol, productType, snapshot);
     Instant now = clock.instant();
     if (!now.isBefore(snapshot.expiresAt())) {
       throw new BusinessException(ErrorCode.MARKET_DATA_STALE, "Executable market snapshot expired");
-    }
-    if (snapshot.asOf().isAfter(snapshot.expiresAt())) {
-      throw incomplete("Executable market snapshot timestamps are inconsistent");
     }
   }
 
@@ -256,10 +237,6 @@ public class FullFillCoordinator {
 
   private static BusinessException incomplete(String message) {
     return new BusinessException(ErrorCode.MARKET_BUNDLE_INCOMPLETE, message);
-  }
-
-  private static boolean blank(String value) {
-    return value == null || value.isBlank();
   }
 
   private static String normalize(String value) {

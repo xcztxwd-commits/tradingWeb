@@ -52,7 +52,7 @@ public class OrderResponseMapper {
         order.getTimeInForce(),
         order.getReduceOnly(),
         order.getOrderOrigin(),
-        order.getSystemReason(),
+        OrderSystemReasonPolicy.external(order),
         order.getFeeAsset(),
         order.getLiquidityRole(),
         order.getTriggerPrice(),

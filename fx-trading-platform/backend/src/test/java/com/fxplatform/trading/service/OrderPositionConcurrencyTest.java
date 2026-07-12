@@ -3,6 +3,7 @@ package com.fxplatform.trading.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -20,7 +21,6 @@ import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.risk.service.PnLCalculator;
-import com.fxplatform.risk.model.InstrumentKind;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.entity.OrderEntity;
@@ -137,7 +137,7 @@ class OrderPositionConcurrencyTest {
   }
 
   @Test
-  void manualCloseFetchesQuoteBeforeAccountFirstRowLocks() {
+  void manualPerpetualCloseDelegatesWithoutLegacyQuoteOrRowLocks() {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
     UUID positionId = UUID.randomUUID();
@@ -145,18 +145,10 @@ class OrderPositionConcurrencyTest {
         userId, accountId, new BigDecimal("10000.00000000"), new BigDecimal("80.00000000"));
     PositionEntity position = openPosition(accountId, positionId);
     position.setSymbol("BTCUSDT-PERP");
+    position.setProductType(ProductType.LINEAR_PERP);
     position.setLots(BigDecimal.ONE);
     position.setOpenPrice(new BigDecimal("50000.00000000"));
     position.setCurrentPrice(new BigDecimal("50000.00000000"));
-    QuoteResponse quote = new QuoteResponse(
-        "quote",
-        "BTCUSDT-PERP",
-        new BigDecimal("50010.00000000"),
-        new BigDecimal("50012.00000000"),
-        new BigDecimal("50011.00000000"),
-        new BigDecimal("2.00000000"),
-        "test",
-        1780660000000L);
     SymbolEntity symbol = new SymbolEntity();
     symbol.setSymbol("BTCUSDT-PERP");
     symbol.setProductType(ProductType.LINEAR_PERP);
@@ -176,20 +168,17 @@ class OrderPositionConcurrencyTest {
     LedgerService ledgerService = mock(LedgerService.class);
     SymbolRepository symbolRepository = mock(SymbolRepository.class);
     DemoExecutionGuard guard = mock(DemoExecutionGuard.class);
+    SystemCloseOrderService systemCloseOrderService = mock(SystemCloseOrderService.class);
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
-    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(quote);
-    when(accountRepository.findByIdAndUserIdForUpdate(accountId, userId)).thenReturn(Optional.of(account));
     when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
-    when(positionRepository.findByIdForUpdate(positionId)).thenReturn(Optional.of(position));
-    when(positionRepository.closeIfOpen(position)).thenReturn(1);
-    when(pnlCalculator.floatingPnl(
-        InstrumentKind.LINEAR_PERPETUAL,
-        OrderSide.BUY,
-        BigDecimal.ONE,
-        new BigDecimal("50000.00000000"),
-        new BigDecimal("50010.00000000"),
-        BigDecimal.ONE)).thenReturn(BigDecimal.ZERO);
+    when(systemCloseOrderService.closeUserWhole(
+        userId,
+        accountId,
+        positionId,
+        "position-close-" + positionId))
+        .thenReturn(new SystemCloseOrderService.CloseResult(
+            new OrderEntity(), position, account, false));
 
     PositionService service = new PositionService(
         positionRepository,
@@ -199,20 +188,19 @@ class OrderPositionConcurrencyTest {
         ledgerService,
         symbolRepository,
         guard);
+    service.setSystemCloseOrderService(systemCloseOrderService);
 
     service.closePosition(userId, accountId, positionId);
 
-    org.mockito.InOrder quoteBeforeLock = org.mockito.Mockito.inOrder(accountRepository, quoteService);
-    quoteBeforeLock.verify(accountRepository).findByIdAndUserId(accountId, userId);
-    quoteBeforeLock.verify(quoteService).freshQuote("BTCUSDT-PERP");
-    quoteBeforeLock.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
-
-    org.mockito.InOrder accountFirst = org.mockito.Mockito.inOrder(accountRepository, guard, positionRepository);
-    accountFirst.verify(accountRepository).findByIdAndUserId(accountId, userId);
-    accountFirst.verify(positionRepository).findById(positionId);
-    accountFirst.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
-    accountFirst.verify(guard).requireDemo(account, ProductType.LINEAR_PERP, "BTCUSDT-PERP");
-    accountFirst.verify(positionRepository).findByIdForUpdate(positionId);
+    verify(systemCloseOrderService).closeUserWhole(
+        userId,
+        accountId,
+        positionId,
+        "position-close-" + positionId);
+    verify(quoteService, never()).freshQuote(any());
+    verify(accountRepository, never()).findByIdAndUserIdForUpdate(any(), any());
+    verify(positionRepository, never()).findByIdForUpdate(any());
+    verify(positionRepository, never()).closeIfOpen(any());
   }
 
   @Test

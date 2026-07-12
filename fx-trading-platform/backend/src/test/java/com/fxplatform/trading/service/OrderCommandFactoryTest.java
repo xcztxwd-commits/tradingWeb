@@ -1,7 +1,10 @@
 package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.enums.OrderSide;
@@ -16,6 +19,28 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class OrderCommandFactoryTest {
+
+  @Test
+  void rejectsReservedSystemNamespaceInEitherUserControlledKey() {
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(
+        UUID.randomUUID(), "trader@example.com", "TRADER");
+    CreateOrderRequest reservedClient = requestWithKeys(
+        accountId, "normal-idempotency", "__SYSTEM__:forged-client");
+    CreateOrderRequest reservedIdempotency = requestWithKeys(
+        accountId, "__system__:forged-idempotency", "normal-client");
+
+    assertThatThrownBy(() -> new OrderCommandFactory().from(principal, reservedClient))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(ErrorCode.DUPLICATE_CLIENT_ORDER_ID));
+    assertThatThrownBy(() -> new OrderCommandFactory().from(principal, reservedIdempotency))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(ErrorCode.DUPLICATE_CLIENT_ORDER_ID));
+  }
 
   @Test
   void normalizesNewOrderFieldsWhileKeepingCompatibleAliases() {
@@ -91,5 +116,33 @@ class OrderCommandFactoryTest {
     assertThat(command.triggerPriceType()).isEqualTo(TriggerPriceType.LAST_PRICE);
     assertThat(command.toRequest().quantity()).isEqualByComparingTo("100.00");
     assertThat(command.toRequest().quantityUnit()).isEqualTo(QuantityUnit.QUOTE);
+  }
+
+  private static CreateOrderRequest requestWithKeys(
+      UUID accountId,
+      String idempotencyKey,
+      String clientOrderId
+  ) {
+    return new CreateOrderRequest(
+        accountId,
+        "BTCUSDT",
+        OrderSide.BUY,
+        OrderType.MARKET,
+        null,
+        null,
+        null,
+        null,
+        idempotencyKey,
+        clientOrderId,
+        new BigDecimal("0.01"),
+        null,
+        1,
+        PositionSide.BOTH,
+        QuantityUnit.BASE,
+        MarginMode.CASH,
+        null,
+        TriggerPriceType.LAST_PRICE,
+        false,
+        List.of());
   }
 }

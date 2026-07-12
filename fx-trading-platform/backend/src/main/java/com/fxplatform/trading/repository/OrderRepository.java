@@ -55,6 +55,19 @@ public interface OrderRepository extends FxBaseMapper<OrderEntity> {
         .eq(OrderEntity::getStatus, status));
   }
 
+  /** Reads only bound protection carriers; a Task 9 internal close parent is not a protection. */
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE status = #{status}
+        AND parent_position_id IS NOT NULL
+        AND protection_type IS NOT NULL
+        AND product_type = 'LINEAR_PERP'
+        AND order_origin = 'PROTECTIVE'
+      ORDER BY created_at, id
+      """)
+  List<OrderEntity> findBoundProtectionsByStatus(@Param("status") OrderStatus status);
+
   default List<OrderEntity> findByAccountIdAndStatusIn(UUID accountId, List<OrderStatus> statuses) {
     return selectList(new LambdaQueryWrapper<OrderEntity>()
         .eq(OrderEntity::getAccountId, accountId)
@@ -127,6 +140,20 @@ public interface OrderRepository extends FxBaseMapper<OrderEntity> {
   List<OrderEntity> findActiveLinearPerpBySymbolForUpdate(
       @Param("accountId") UUID accountId,
       @Param("symbol") String symbol);
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE parent_order_id = #{parentOrderId}
+        AND protection_type IS NOT NULL
+        AND product_type = 'LINEAR_PERP'
+        AND order_origin = 'PROTECTIVE'
+        AND status IN ('PENDING_ACTIVATION', 'PENDING', 'WORKING', 'CANCEL_PENDING')
+      ORDER BY created_at, id
+      FOR UPDATE
+      """)
+  List<OrderEntity> findProtectionsByParentOrderIdForUpdate(
+      @Param("parentOrderId") UUID parentOrderId);
 
   default List<OrderEntity> findByContingencyGroupId(UUID contingencyGroupId) {
     return selectList(new LambdaQueryWrapper<OrderEntity>()

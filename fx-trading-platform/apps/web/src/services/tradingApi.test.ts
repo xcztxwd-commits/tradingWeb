@@ -16,7 +16,8 @@ describe('trading api endpoint contracts', () => {
   it('keeps position reads and closes on the account-scoped backend routes', () => {
     assert.match(source, /apiGet<PositionResponse\[\]>\(`\/api\/trading\/positions\?accountId=\$\{accountId\}`/)
     assert.match(source, /apiGet<PositionResponse\[\]>\(`\/api\/trading\/positions\/history\?accountId=\$\{accountId\}`/)
-    assert.match(source, /apiPost<PositionResponse>\(`\/api\/trading\/positions\/\$\{positionId\}\/close\?accountId=\$\{accountId\}`/)
+    assert.match(source, /apiPost<PositionResponse>\(\s*`\/api\/trading\/positions\/\$\{positionId\}\/close\?accountId=\$\{accountId\}`/)
+    assert.match(source, /close\?accountId=\$\{accountId\}`,[\s\r\n]+undefined,[\s\r\n]+token/)
     assert.match(source, /apiPatch<PositionResponse>\(`\/api\/trading\/positions\/\$\{positionId\}\/protection\?accountId=\$\{accountId\}`/)
   })
 })

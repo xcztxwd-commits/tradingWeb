@@ -5,6 +5,9 @@ import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.request.CreateOcoOrderRequest;
 import com.fxplatform.trading.dto.request.AdjustPositionMarginRequest;
+import com.fxplatform.trading.dto.request.ClosePositionRequest;
+import com.fxplatform.trading.dto.request.CreateProtectionRequest;
+import com.fxplatform.trading.dto.request.UpdateProtectionRequest;
 import com.fxplatform.trading.dto.request.UpdatePositionProtectionRequest;
 import com.fxplatform.trading.dto.request.UpdateOrderRequest;
 import com.fxplatform.trading.dto.response.OrderEventResponse;
@@ -16,11 +19,14 @@ import com.fxplatform.trading.service.OrderService;
 import com.fxplatform.trading.service.OcoOrderService;
 import com.fxplatform.trading.service.PositionService;
 import com.fxplatform.trading.service.PositionMarginService;
+import com.fxplatform.trading.service.ProtectionOrderService;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -42,6 +48,7 @@ public class TradingController {
   private final PositionService positionService;
   private final OcoOrderService ocoOrderService;
   private final PositionMarginService positionMarginService;
+  private ProtectionOrderService protectionOrderService;
 
   /**
    * 处理 createOrder 提交接口请求。
@@ -140,8 +147,44 @@ public class TradingController {
   public ApiResponse<PositionResponse> closePosition(
       @AuthenticationPrincipal UserPrincipal principal,
       @RequestParam UUID accountId,
-      @PathVariable UUID positionId
+      @PathVariable UUID positionId,
+      @RequestBody(required = false) ClosePositionRequest request
   ) {
-    return ApiResponse.success(positionService.closePosition(principal.id(), accountId, positionId));
+    ClosePositionRequest normalizedRequest = request != null && request.isEmpty()
+        ? null
+        : request;
+    return ApiResponse.success(positionService.closePosition(
+        principal.id(), accountId, positionId, normalizedRequest));
+  }
+
+  @PostMapping("/positions/{positionId}/protections")
+  public ApiResponse<OrderResponse> createProtection(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @PathVariable UUID positionId,
+      @Valid @RequestBody CreateProtectionRequest request
+  ) {
+    return ApiResponse.success(protectionOrderService.create(principal.id(), positionId, request));
+  }
+
+  @PatchMapping("/protections/{orderId}")
+  public ApiResponse<OrderResponse> updateProtection(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @PathVariable UUID orderId,
+      @Valid @RequestBody UpdateProtectionRequest request
+  ) {
+    return ApiResponse.success(protectionOrderService.update(principal.id(), orderId, request));
+  }
+
+  @DeleteMapping("/protections/{orderId}")
+  public ApiResponse<OrderResponse> cancelProtection(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @PathVariable UUID orderId
+  ) {
+    return ApiResponse.success(protectionOrderService.cancel(principal.id(), orderId));
+  }
+
+  @Autowired
+  void setProtectionOrderService(ProtectionOrderService protectionOrderService) {
+    this.protectionOrderService = protectionOrderService;
   }
 }

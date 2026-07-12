@@ -449,24 +449,32 @@ class PositionEngineTest {
     assertThat(increased.getLots()).isEqualByComparingTo("2");
     assertThat(increased.getOpenPrice()).isEqualByComparingTo("110.00000000");
 
-    PositionEntity reduced = engine().applyFill(
+    PositionEngine.PositionUpdateResult reduction = engine().applyFill(
         account,
         perpetualOrder(accountId, "ETHUSDT-PERP", OrderSide.SELL, "0.5", PositionMode.ONE_WAY,
             PositionSide.BOTH, MarginMode.CROSS, 10, false),
-        fill(new BigDecimal("130"), new BigDecimal("0.5")), linearWithMaintenance()).position();
+        fill(new BigDecimal("130"), new BigDecimal("0.5")), linearWithMaintenance());
+    PositionEntity reduced = reduction.position();
     assertThat(reduced.getLots()).isEqualByComparingTo("1.5");
     assertThat(reduced.getOpenPrice()).isEqualByComparingTo("110.00000000");
+    assertThat(reduction.reducedPositionId()).isEqualTo(existing.getId());
+    assertThat(reduction.fromQuantity()).isEqualByComparingTo("2");
+    assertThat(reduction.toQuantity()).isEqualByComparingTo("1.5");
 
-    PositionEntity reversed = engine().applyFill(
+    PositionEngine.PositionUpdateResult reversal = engine().applyFill(
         account,
         perpetualOrder(accountId, "ETHUSDT-PERP", OrderSide.SELL, "2", PositionMode.ONE_WAY,
             PositionSide.BOTH, MarginMode.CROSS, 10, false),
-        fill(new BigDecimal("90"), new BigDecimal("2")), linearWithMaintenance()).position();
+        fill(new BigDecimal("90"), new BigDecimal("2")), linearWithMaintenance());
+    PositionEntity reversed = reversal.position();
     assertThat(existing.getStatus()).isEqualTo(PositionStatus.CLOSED);
     assertThat(reversed.getId()).isNotEqualTo(existing.getId());
     assertThat(reversed.getSide()).isEqualTo(OrderSide.SELL);
     assertThat(reversed.getLots()).isEqualByComparingTo("0.5");
     assertThat(reversed.getPositionSide()).isEqualTo(PositionSide.BOTH);
+    assertThat(reversal.reducedPositionId()).isEqualTo(existing.getId());
+    assertThat(reversal.fromQuantity()).isEqualByComparingTo("1.5");
+    assertThat(reversal.toQuantity()).isZero();
     verify(positionRepository, org.mockito.Mockito.times(3)).findOpenPerpetualSlotForUpdate(
         accountId, "ETHUSDT-PERP", PositionMode.ONE_WAY, PositionSide.BOTH);
   }

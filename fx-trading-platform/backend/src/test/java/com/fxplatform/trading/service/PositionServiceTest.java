@@ -22,15 +22,19 @@ import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.risk.model.InstrumentKind;
 import com.fxplatform.risk.service.PnLCalculator;
+import com.fxplatform.trading.dto.request.ClosePositionRequest;
 import com.fxplatform.trading.dto.request.UpdatePositionProtectionRequest;
 import com.fxplatform.trading.dto.response.PositionResponse;
+import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.entity.SpotPositionEntity;
 import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.enums.QuantityUnit;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.SpotPositionRepository;
 import java.math.BigDecimal;
@@ -71,6 +75,9 @@ class PositionServiceTest {
 
   @Mock
   private DemoExecutionGuard demoExecutionGuard;
+
+  @Mock
+  private SystemCloseOrderService systemCloseOrderService;
 
   @BeforeEach
   void rowLockQueriesReturnTheSameFixtureRows() {
@@ -708,6 +715,236 @@ class PositionServiceTest {
   }
 
   @Test
+  void linearPerpetualPartialCloseDelegatesToCanonicalSystemClosePath() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    TradingAccountEntity account = account(userId, accountId);
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSDT-PERP");
+    position.setProductType(ProductType.LINEAR_PERP);
+    position.setLots(new BigDecimal("1.0"));
+    PositionEntity reduced = openPosition(accountId, positionId);
+    reduced.setSymbol("BTCUSDT-PERP");
+    reduced.setProductType(ProductType.LINEAR_PERP);
+    reduced.setLots(new BigDecimal("0.4"));
+    ClosePositionRequest request = new ClosePositionRequest(
+        new BigDecimal("0.6"),
+        QuantityUnit.BASE,
+        "partial-close-1");
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol(
+        "BTCUSDT-PERP",
+        ProductType.LINEAR_PERP,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        100)));
+    when(systemCloseOrderService.closeUser(userId, accountId, positionId, request))
+        .thenReturn(new SystemCloseOrderService.CloseResult(
+            new OrderEntity(),
+            reduced,
+            account,
+            false));
+
+    PositionResponse response = service().closePosition(
+        userId,
+        accountId,
+        positionId,
+        request);
+
+    assertThat(response.lots()).isEqualByComparingTo("0.4");
+    verify(systemCloseOrderService).closeUser(userId, accountId, positionId, request);
+    verify(quoteService, never()).freshQuote(any());
+    verify(positionRepository, never()).closeIfOpen(any());
+    verify(ledgerService, never()).recordMarginRelease(any(), any(), any(), any());
+    verify(ledgerService, never()).recordTradePnl(any(), any(), any(), any());
+  }
+
+  @Test
+  void linearPerpetualNullCloseDelegatesWholeIntentWithoutSnapshottingQuantity() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    TradingAccountEntity account = account(userId, accountId);
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSDT-PERP");
+    position.setProductType(ProductType.LINEAR_PERP);
+    position.setLots(new BigDecimal("1.0"));
+    PositionEntity closed = openPosition(accountId, positionId);
+    closed.setSymbol("BTCUSDT-PERP");
+    closed.setProductType(ProductType.LINEAR_PERP);
+    closed.setLots(BigDecimal.ZERO);
+    closed.setStatus(PositionStatus.CLOSED);
+    String idempotencyKey = "position-close-" + positionId;
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol(
+        "BTCUSDT-PERP",
+        ProductType.LINEAR_PERP,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        100)));
+    when(systemCloseOrderService.closeUserWhole(
+        userId, accountId, positionId, idempotencyKey))
+        .thenReturn(new SystemCloseOrderService.CloseResult(
+            new OrderEntity(), closed, account, false));
+
+    PositionResponse response = service().closePosition(userId, accountId, positionId);
+
+    assertThat(response.status()).isEqualTo(PositionStatus.CLOSED.name());
+    verify(systemCloseOrderService).closeUserWhole(
+        userId, accountId, positionId, idempotencyKey);
+    verify(systemCloseOrderService, never()).closeUser(
+        any(), any(), any(), any(ClosePositionRequest.class));
+  }
+
+  @Test
+  void linearPerpetualPositionWithFxSymbolMetadataFailsClosedBeforeLegacySettlement() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    TradingAccountEntity account = account(userId, accountId);
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSDT-PERP");
+    position.setProductType(ProductType.LINEAR_PERP);
+    SymbolEntity drifted = symbol(
+        "BTCUSDT-PERP",
+        ProductType.FX_MARGIN,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        100);
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(drifted));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service().closePosition(userId, accountId, positionId))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo("INVALID_INSTRUMENT_RULES"));
+
+    verify(systemCloseOrderService, never()).closeUserWhole(any(), any(), any(), any());
+    verify(quoteService, never()).freshQuote(any());
+    verify(positionRepository, never()).closeIfOpen(any());
+    verify(ledgerService, never()).recordTradePnl(any(), any(), any(), any());
+  }
+
+  @Test
+  void p0PerpetualSymbolWithBothMetadataRowsMisclassifiedFailsClosed() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    TradingAccountEntity account = account(userId, accountId);
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSDT-PERP");
+    position.setProductType(ProductType.FX_MARGIN);
+    SymbolEntity drifted = symbol(
+        "BTCUSDT-PERP",
+        ProductType.FX_MARGIN,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        100);
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(drifted));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> service().closePosition(userId, accountId, positionId))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo("INVALID_INSTRUMENT_RULES"));
+
+    verify(systemCloseOrderService, never()).closeUserWhole(any(), any(), any(), any());
+    verify(quoteService, never()).freshQuote(any());
+    verify(accountRepository, never()).findByIdAndUserIdForUpdate(any(), any());
+    verify(positionRepository, never()).closeIfOpen(any());
+    verify(accountRepository, never()).save(any());
+    verify(ledgerService, never()).recordMarginRelease(any(), any(), any(), any());
+    verify(ledgerService, never()).recordTradePnl(any(), any(), any(), any());
+  }
+
+  @Test
+  void linearPerpetualSystemFacadesMapAdminAndLiquidationMetadata() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID adminPositionId = UUID.randomUUID();
+    UUID liquidationPositionId = UUID.randomUUID();
+    TradingAccountEntity account = account(userId, accountId);
+    PositionEntity adminPosition = openPosition(accountId, adminPositionId);
+    adminPosition.setSymbol("BTCUSDT-PERP");
+    adminPosition.setProductType(ProductType.LINEAR_PERP);
+    PositionEntity liquidationPosition = openPosition(accountId, liquidationPositionId);
+    liquidationPosition.setSymbol("BTCUSDT-PERP");
+    liquidationPosition.setProductType(ProductType.LINEAR_PERP);
+    PositionEntity adminClosed = openPosition(accountId, adminPositionId);
+    adminClosed.setSymbol("BTCUSDT-PERP");
+    adminClosed.setProductType(ProductType.LINEAR_PERP);
+    adminClosed.setStatus(PositionStatus.CLOSED);
+    PositionEntity liquidationClosed = openPosition(accountId, liquidationPositionId);
+    liquidationClosed.setSymbol("BTCUSDT-PERP");
+    liquidationClosed.setProductType(ProductType.LINEAR_PERP);
+    liquidationClosed.setStatus(PositionStatus.CLOSED);
+    SymbolEntity perpetual = symbol(
+        "BTCUSDT-PERP",
+        ProductType.LINEAR_PERP,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        100);
+    when(positionRepository.findById(adminPositionId)).thenReturn(Optional.of(adminPosition));
+    when(positionRepository.findById(liquidationPositionId))
+        .thenReturn(Optional.of(liquidationPosition));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(perpetual));
+    when(systemCloseOrderService.closeWhole(
+        accountId,
+        adminPositionId,
+        OrderOrigin.ADMIN_FORCE_CLOSE,
+        "ADMIN_FORCE_CLOSE",
+        "system-close-admin_force_close-" + adminPositionId))
+        .thenReturn(new SystemCloseOrderService.CloseResult(
+            new OrderEntity(), adminClosed, account, false));
+    when(systemCloseOrderService.closeWhole(
+        accountId,
+        liquidationPositionId,
+        OrderOrigin.LIQUIDATION,
+        "maintenance breach",
+        "system-close-liquidation-" + liquidationPositionId))
+        .thenReturn(new SystemCloseOrderService.CloseResult(
+            new OrderEntity(), liquidationClosed, account, false));
+
+    PositionService facade = service();
+    facade.closeSystemPosition(accountId, adminPositionId);
+    facade.closeSystemPosition(accountId, liquidationPositionId, "  maintenance breach  ");
+
+    verify(systemCloseOrderService).closeWhole(
+        accountId,
+        adminPositionId,
+        OrderOrigin.ADMIN_FORCE_CLOSE,
+        "ADMIN_FORCE_CLOSE",
+        "system-close-admin_force_close-" + adminPositionId);
+    verify(systemCloseOrderService).closeWhole(
+        accountId,
+        liquidationPositionId,
+        OrderOrigin.LIQUIDATION,
+        "maintenance breach",
+        "system-close-liquidation-" + liquidationPositionId);
+    verify(quoteService, never()).freshQuote(any());
+    verify(positionRepository, never()).closeIfOpen(any());
+  }
+
+  @Test
   void closePositionFallsBackForNullAccountAmountsAndPositionMargin() {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
@@ -973,7 +1210,7 @@ class PositionServiceTest {
         new BigDecimal("100000"),
         new BigDecimal("100000"),
         100)));
-    return new PositionService(
+    PositionService service = new PositionService(
         positionRepository,
         accountRepository,
         quoteService,
@@ -982,6 +1219,8 @@ class PositionServiceTest {
         symbolRepository,
         spotPositionRepository,
         demoExecutionGuard);
+    service.setSystemCloseOrderService(systemCloseOrderService);
+    return service;
   }
 
   @Test

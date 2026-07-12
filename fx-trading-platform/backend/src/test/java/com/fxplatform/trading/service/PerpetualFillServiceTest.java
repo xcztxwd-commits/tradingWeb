@@ -59,6 +59,7 @@ class PerpetualFillServiceTest {
   @Mock private TradingAccountRepository accountRepository;
   @Mock private LedgerService ledgerService;
   @Mock private SymbolRepository symbolRepository;
+  @Mock private ProtectionOrderService protectionOrderService;
 
   @Test
   void openingFillUsesActualEntryAndAuthorityMarkThenConsumesWorstPriceHold() {
@@ -67,6 +68,7 @@ class PerpetualFillServiceTest {
     // The fill authority is the submitted order snapshot, not a later account-mode value.
     account.setPositionMode(PositionMode.HEDGE);
     OrderEntity order = order(accountId, "10.25100000");
+    order.setSystemReason("risk operator cleanup");
     // Canonical execution uses the locked executionLeverage argument and must not touch legacy
     // order/account leverage or contract-size margin calculation.
     order.setLeverage(null);
@@ -106,6 +108,14 @@ class PerpetualFillServiceTest {
         "Perpetual position margin held");
 
     PositionEntity position = savedPosition.get();
+    verify(protectionOrderService).afterPerpetualFillLocked(
+        eq(order),
+        any(PositionEngine.PositionUpdateResult.class),
+        eq(new BigDecimal("100")));
+    org.mockito.ArgumentCaptor<TradeEntity> trade =
+        org.mockito.ArgumentCaptor.forClass(TradeEntity.class);
+    verify(tradeRepository).save(trade.capture());
+    assertThat(trade.getValue().getSystemReason()).isEqualTo("risk operator cleanup");
     assertAll(
         () -> assertThat(order.getStatus()).isEqualTo(OrderStatus.FILLED),
         () -> assertThat(order.getHoldAmount()).isEqualByComparingTo(BigDecimal.ZERO),
@@ -170,6 +180,7 @@ class PerpetualFillServiceTest {
     PositionEntity existing = openLong(accountId);
     order.setParentPositionId(existing.getId());
     order.setProtectionType(ProtectionType.TAKE_PROFIT);
+    order.setSystemReason("IDEMP:" + "A".repeat(43));
 
     when(symbolRepository.findBySymbol(SYMBOL)).thenReturn(Optional.of(linearSymbol()));
     when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -211,6 +222,7 @@ class PerpetualFillServiceTest {
         org.mockito.ArgumentCaptor.forClass(TradeEntity.class);
     verify(tradeRepository).save(trade.capture());
     assertThat(trade.getValue().getRealizedPnl()).isEqualByComparingTo("-101.00000000");
+    assertThat(trade.getValue().getSystemReason()).isNull();
     verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
     InOrder ledgerOrder = inOrder(ledgerService);
     ledgerOrder.verify(ledgerService).recordOrderRelease(
@@ -396,6 +408,16 @@ class PerpetualFillServiceTest {
         new BigDecimal("15.00000000"),
         position.getId(),
         "Position margin released");
+    org.mockito.ArgumentCaptor<PositionEngine.PositionUpdateResult> update =
+        org.mockito.ArgumentCaptor.forClass(PositionEngine.PositionUpdateResult.class);
+    verify(protectionOrderService).afterPerpetualFillLocked(
+        eq(order),
+        update.capture(),
+        eq(new BigDecimal("100")));
+    assertAll(
+        () -> assertThat(update.getValue().reducedPositionId()).isEqualTo(existing.getId()),
+        () -> assertThat(update.getValue().fromQuantity()).isEqualByComparingTo("2"),
+        () -> assertThat(update.getValue().toQuantity()).isEqualByComparingTo("1"));
   }
 
   @Test
@@ -535,7 +557,8 @@ class PerpetualFillServiceTest {
         symbolRepository,
         null,
         positionEngine,
-        null);
+        null,
+        protectionOrderService);
   }
 
   private static TradingAccountEntity account(UUID accountId, String usedMargin) {

@@ -95,6 +95,7 @@ public class OrderService {
   private final PerpetualOrderRiskService perpetualOrderRiskService;
   private final PerpetualAccountRiskSnapshotService perpetualAccountRiskSnapshotService;
   private OcoOrderService ocoOrderService;
+  private ProtectionOrderService protectionOrderService;
 
   @Autowired
   public OrderService(
@@ -322,6 +323,14 @@ public class OrderService {
   @Transactional
   public OrderResponse cancelOrder(UserPrincipal principal, UUID orderId) {
     OrderEntity orderSnapshot = requireOwnedOrder(principal.id(), orderId);
+    if (orderSnapshot.getProtectionType() != null) {
+      if (protectionOrderService == null) {
+        throw new BusinessException(
+            "EXECUTION_UNAVAILABLE",
+            "Perpetual protection service is unavailable");
+      }
+      return protectionOrderService.cancel(principal.id(), orderId);
+    }
     if (orderSnapshot.getContingencyGroupId() != null) {
       if (ocoOrderService == null) {
         throw new BusinessException("EXECUTION_UNAVAILABLE", "OCO order service is unavailable");
@@ -397,6 +406,16 @@ public class OrderService {
             "Pending spot order canceled");
       }
       order.setHoldAmount(BigDecimal.ZERO);
+    }
+    if (productType == ProductType.LINEAR_PERP
+        && isP0Symbol(order.getSymbol())
+        && !Boolean.TRUE.equals(order.getReduceOnly())) {
+      if (protectionOrderService == null) {
+        throw new BusinessException(
+            ErrorCode.EXECUTION_UNAVAILABLE,
+            "Perpetual protection service is unavailable");
+      }
+      protectionOrderService.expireAttachedForCanceledParentLocked(order, account);
     }
     orderEventService.record(
         order.getId(),
@@ -1102,7 +1121,7 @@ public class OrderService {
     PositionEntity isolatedHoldPosition = isolatedCloseHoldPosition(risk, positions);
     if (isolatedHoldPosition != null) {
       order.setParentPositionId(isolatedHoldPosition.getId());
-      validateAggregateIsolatedCloseHolds(
+      PerpetualIsolatedCloseHoldValidator.validate(
           isolatedHoldPosition,
           risk,
           activeOrders);
@@ -1141,6 +1160,11 @@ public class OrderService {
     }
     order.setStatus(path == null ? OrderStatus.PENDING : OrderStatus.ACCEPTED);
     orderRepository.save(order);
+    if (!publicRequest.attachedProtections().isEmpty()) {
+      protectionOrderService.createAttachedLocked(
+          order,
+          publicRequest.attachedProtections());
+    }
     ledgerService.recordOrderHold(
         account,
         risk.holdAmount(),
@@ -1198,11 +1222,15 @@ public class OrderService {
           "Unsupported P0 Linear Perpetual order contract");
     }
     if (request.stopLoss() != null
-        || request.takeProfit() != null
-        || !request.attachedProtections().isEmpty()) {
+        || request.takeProfit() != null) {
       throw new BusinessException(
           ErrorCode.PRODUCT_NOT_ALLOWED,
-          "Perpetual attached protections are outside Task 9");
+          "Legacy scalar Perpetual protections are not accepted for new orders");
+    }
+    if (!request.attachedProtections().isEmpty() && protectionOrderService == null) {
+      throw new BusinessException(
+          "EXECUTION_UNAVAILABLE",
+          "Perpetual protection service is unavailable");
     }
     switch (request.orderType()) {
       case MARKET -> {
@@ -1632,6 +1660,11 @@ public class OrderService {
     this.ocoOrderService = ocoOrderService;
   }
 
+  @Autowired
+  void setProtectionOrderService(ProtectionOrderService protectionOrderService) {
+    this.protectionOrderService = protectionOrderService;
+  }
+
   private OrderResponse createP0MarketWithRetry(
       OrderCommand command,
       CreateOrderRequest request,
@@ -1937,46 +1970,6 @@ public class OrderService {
         .orElseThrow(() -> new BusinessException(
             ErrorCode.REDUCE_ONLY_EXCEEDS_POSITION,
             "Isolated close requires one locked position slot"));
-  }
-
-  private void validateAggregateIsolatedCloseHolds(
-      PositionEntity position,
-      PerpetualOrderRiskService.OrderRisk newRisk,
-      List<OrderEntity> activeOrders
-  ) {
-    BigDecimal existingClosing = BigDecimal.ZERO;
-    BigDecimal existingHolds = BigDecimal.ZERO;
-    for (OrderEntity active : activeOrders) {
-      if (!position.getId().equals(active.getParentPositionId())
-          || active.getProtectionType() != null) {
-        continue;
-      }
-      existingClosing = existingClosing.add(activeRemainingBase(active));
-      existingHolds = existingHolds.add(orZero(active.getHoldAmount()));
-    }
-    if (existingClosing.add(newRisk.closingBase()).compareTo(abs(position.getLots())) > 0) {
-      throw new BusinessException(
-          ErrorCode.REDUCE_ONLY_EXCEEDS_POSITION,
-          "Aggregate Isolated close orders exceed the locked position slot");
-    }
-    if (existingHolds.add(newRisk.holdAmount())
-        .compareTo(newRisk.isolatedHoldCapacity()) >= 0) {
-      throw new BusinessException(
-          ErrorCode.MARGIN_REDUCTION_UNSAFE,
-          "Aggregate Isolated close holds exceed the position risk buffer");
-    }
-  }
-
-  private static BigDecimal activeRemainingBase(OrderEntity order) {
-    if (order.getRemainingQuantity() != null
-        && order.getRemainingQuantity().compareTo(BigDecimal.ZERO) > 0) {
-      return order.getRemainingQuantity();
-    }
-    return orZero(order.getBaseQuantity());
-  }
-
-  private static BigDecimal abs(BigDecimal value) {
-    return value == null ? BigDecimal.ZERO : value.abs();
   }
 
   private void releasePerpetualOrderHold(

@@ -1272,14 +1272,12 @@ class OrderServiceTest {
   }
 
   @Test
-  void cancelCrossProtectionParentReleasesItsExternalPerpetualHold() {
+  void cancelProtectionCarrierDelegatesToProtectionStateAuthority() {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
     UUID orderId = UUID.randomUUID();
     UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
     TradingAccountEntity account = demoAccount(userId, accountId);
-    account.setUsedMargin(new BigDecimal("10.00000000"));
-    account.setFreeMargin(new BigDecimal("9990.00000000"));
     OrderEntity order = pendingOrderEntity(userId, accountId, orderId);
     order.setSymbol("BTCUSDT-PERP");
     order.setProductType(ProductType.LINEAR_PERP);
@@ -1288,24 +1286,20 @@ class OrderServiceTest {
     order.setParentPositionId(UUID.randomUUID());
     order.setHoldAmount(new BigDecimal("10.00000000"));
     when(orderRepository.findByUserIdAndId(userId, orderId)).thenReturn(Optional.of(order));
-    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
-    when(accountRepository.findByIdAndUserIdForUpdate(accountId, userId))
-        .thenReturn(Optional.of(account));
-    when(orderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(order));
-    when(orderRepository.cancelPending(order)).thenReturn(1);
-    when(accountRepository.save(account)).thenReturn(account);
+    ProtectionOrderService protectionOrderService =
+        org.mockito.Mockito.mock(ProtectionOrderService.class);
+    order.setStatus(OrderStatus.CANCELED);
+    when(protectionOrderService.cancel(userId, orderId))
+        .thenReturn(new OrderResponseMapper().toResponse(order));
+    OrderService service = orderService(org.mockito.Mockito.mock(OrderEventService.class));
+    service.setProtectionOrderService(protectionOrderService);
 
-    OrderResponse response = orderService(org.mockito.Mockito.mock(OrderEventService.class))
-        .cancelOrder(principal, orderId);
+    OrderResponse response = service.cancelOrder(principal, orderId);
 
     assertThat(response.status()).isEqualTo(OrderStatus.CANCELED.name());
-    assertThat(account.getUsedMargin()).isEqualByComparingTo("0.00000000");
-    assertThat(account.getFreeMargin()).isEqualByComparingTo("10000.00000000");
-    verify(ledgerService).recordOrderRelease(
-        account,
-        new BigDecimal("10.00000000"),
-        orderId,
-        "Pending Perpetual order canceled");
+    verify(protectionOrderService).cancel(userId, orderId);
+    verify(accountRepository, never()).findByIdAndUserIdForUpdate(any(), any());
+    verify(ledgerService, never()).recordOrderRelease(any(), any(), any(), any());
   }
 
   @Test

@@ -13,8 +13,9 @@ import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.entity.SymbolEntity;
-import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.market.model.MarketBundleProducts;
 import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.market.service.SymbolProductTypes;
 import com.fxplatform.risk.model.InstrumentKind;
@@ -26,11 +27,13 @@ import com.fxplatform.risk.service.PerpetualRiskService.PositionRisk;
 import com.fxplatform.risk.service.PnLCalculator;
 import com.fxplatform.risk.service.TradingAlgorithmEngine;
 import com.fxplatform.risk.service.TradingInstrumentClassifier;
+import com.fxplatform.trading.dto.request.ClosePositionRequest;
 import com.fxplatform.trading.dto.request.UpdatePositionProtectionRequest;
 import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.entity.SpotPositionEntity;
 import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.PositionRepository;
@@ -65,6 +68,7 @@ public class PositionService {
   private final TradingAlgorithmEngine tradingAlgorithmEngine = new TradingAlgorithmEngine();
   private final PerpMarginCalculator perpMarginCalculator = new PerpMarginCalculator();
   private final PerpetualRiskService perpetualRiskService = new PerpetualRiskService(perpMarginCalculator);
+  private SystemCloseOrderService systemCloseOrderService;
 
   @Autowired
   public PositionService(
@@ -156,13 +160,40 @@ public class PositionService {
    */
   @Transactional
   public PositionResponse closePosition(UUID userId, UUID accountId, UUID positionId) {
+    return closePosition(userId, accountId, positionId, null);
+  }
+
+  @Transactional
+  public PositionResponse closePosition(
+      UUID userId,
+      UUID accountId,
+      UUID positionId,
+      ClosePositionRequest request
+  ) {
     requireOwnedAccount(userId, accountId);
     PositionEntity positionSnapshot = requireOwnedPosition(accountId, positionId);
+    SymbolEntity symbolSnapshot = symbolFor(positionSnapshot);
+    ProductType productType = symbolSnapshot.getProductType();
+    if (isP0LinearPerpetual(positionSnapshot, symbolSnapshot)) {
+      requireSystemCloseService();
+      SystemCloseOrderService.CloseResult result = request == null
+          ? systemCloseOrderService.closeUserWhole(
+              userId,
+              accountId,
+              positionId,
+              "position-close-" + positionId)
+          : systemCloseOrderService.closeUser(userId, accountId, positionId, request);
+      return toResponse(result.position(), result.account());
+    }
+    if (request != null) {
+      throw new BusinessException(
+          "PRODUCT_NOT_ALLOWED",
+          "Explicit partial close is available only for Linear Perpetual positions");
+    }
     requireOpen(positionSnapshot, "Only open positions can be closed");
     QuoteResponse quote = quoteService.freshQuote(positionSnapshot.getSymbol());
 
     TradingAccountEntity account = requireOwnedAccountForUpdate(userId, accountId);
-    ProductType productType = symbolFor(positionSnapshot).getProductType();
     demoExecutionGuard.requireDemo(account, productType, positionSnapshot.getSymbol());
     PositionEntity position = requireOwnedPositionForUpdate(accountId, positionId);
     return closeOwnedPosition(account, position, quote, null);
@@ -200,15 +231,44 @@ public class PositionService {
   @Transactional
   public PositionResponse closeSystemPosition(UUID accountId, UUID positionId, String forcedCloseReason) {
     PositionEntity positionSnapshot = requireOwnedPosition(accountId, positionId);
+    SymbolEntity symbolSnapshot = symbolFor(positionSnapshot);
+    ProductType productType = symbolSnapshot.getProductType();
+    if (isP0LinearPerpetual(positionSnapshot, symbolSnapshot)) {
+      requireSystemCloseService();
+      boolean liquidation = forcedCloseReason != null && !forcedCloseReason.isBlank();
+      OrderOrigin origin = liquidation
+          ? OrderOrigin.LIQUIDATION
+          : OrderOrigin.ADMIN_FORCE_CLOSE;
+      String reason = liquidation ? forcedCloseReason.trim() : "ADMIN_FORCE_CLOSE";
+      SystemCloseOrderService.CloseResult result = systemCloseOrderService.closeWhole(
+          accountId,
+          positionId,
+          origin,
+          reason,
+          "system-close-" + origin.name().toLowerCase() + "-" + positionId);
+      return toResponse(result.position(), result.account());
+    }
     requireOpen(positionSnapshot, "Only open positions can be closed");
     QuoteResponse quote = quoteService.freshQuote(positionSnapshot.getSymbol());
 
     TradingAccountEntity account = accountRepository.findByIdForUpdate(accountId)
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
-    ProductType productType = symbolFor(positionSnapshot).getProductType();
     demoExecutionGuard.requireDemo(account, productType, positionSnapshot.getSymbol());
     PositionEntity position = requireOwnedPositionForUpdate(accountId, positionId);
     return closeOwnedPosition(account, position, quote, forcedCloseReason);
+  }
+
+  private void requireSystemCloseService() {
+    if (systemCloseOrderService == null) {
+      throw new BusinessException(
+          "EXECUTION_UNAVAILABLE",
+          "Canonical Perpetual close service is unavailable");
+    }
+  }
+
+  @Autowired
+  void setSystemCloseOrderService(SystemCloseOrderService systemCloseOrderService) {
+    this.systemCloseOrderService = systemCloseOrderService;
   }
 
   private PositionResponse closeOwnedPosition(
@@ -804,6 +864,22 @@ public class PositionService {
 
   private SymbolEntity requireProductType(SymbolEntity symbol) {
     return SymbolProductTypes.requireExplicit(symbol);
+  }
+
+  private boolean isP0LinearPerpetual(
+      PositionEntity position,
+      SymbolEntity symbol
+  ) {
+    boolean storedPerpetual = position.getProductType() == ProductType.LINEAR_PERP;
+    boolean configuredPerpetual = symbol.getProductType() == ProductType.LINEAR_PERP;
+    boolean p0PerpetualSymbol = MarketBundleProducts.isPerpetual(position.getSymbol());
+    if (storedPerpetual != configuredPerpetual
+        || (p0PerpetualSymbol && (!storedPerpetual || !configuredPerpetual))) {
+      throw new BusinessException(
+          "INVALID_INSTRUMENT_RULES",
+          "Position and symbol Perpetual product metadata do not match");
+    }
+    return storedPerpetual && p0PerpetualSymbol;
   }
 
   private record RealtimePositionContext(

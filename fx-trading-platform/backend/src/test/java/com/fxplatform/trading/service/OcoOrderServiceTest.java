@@ -13,6 +13,7 @@ import com.fxplatform.account.enums.AccountStatus;
 import com.fxplatform.account.enums.AccountType;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.DemoExecutionGuard;
@@ -81,6 +82,29 @@ class OcoOrderServiceTest {
   void inlineTransaction() {
     org.mockito.Mockito.lenient().when(transactionExecutor.execute(any()))
         .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
+  }
+
+  @Test
+  void createRejectsReservedSystemNamespaceBeforeAccountOrProviderReads() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    CreateOcoOrderRequest request = request(
+        accountId,
+        OrderSide.SELL,
+        "55000",
+        "49000",
+        "normal-oco-key",
+        "__SYSTEM__:forged-oco");
+
+    assertThatThrownBy(() -> service().create(principal(userId), request))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(ErrorCode.DUPLICATE_CLIENT_ORDER_ID));
+
+    verify(accountRepository, never()).findByIdAndUserId(any(), any());
+    verify(marketBundleResolver, never()).resolveSpot(any(), any());
+    verify(orderRepository, never()).save(any());
   }
 
   @Test

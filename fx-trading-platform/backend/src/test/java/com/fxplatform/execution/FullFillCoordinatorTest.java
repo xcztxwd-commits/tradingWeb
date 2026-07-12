@@ -211,6 +211,28 @@ class FullFillCoordinatorTest {
     assertCode("MARKET_BUNDLE_INCOMPLETE", () -> coordinator.execute(request, snapshot));
   }
 
+  @Test
+  void sharedSnapshotValidatorRejectsAProductMismatch() {
+    ExecutableMarketSnapshot wrongProduct = new ExecutableMarketSnapshot(
+        "BTCUSDT-PERP",
+        ProductType.CRYPTO_SPOT,
+        "binance-usdm",
+        "BTCUSDT",
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        new BigDecimal("99"),
+        new BigDecimal("100"),
+        new BigDecimal("99.5"),
+        new BigDecimal("99.6"),
+        new BigDecimal("99.4"),
+        NOW.minusSeconds(1),
+        NOW.plusSeconds(2));
+
+    assertCode(
+        "MARKET_BUNDLE_INCOMPLETE",
+        () -> ExecutableMarketSnapshots.requireComplete(
+            "BTCUSDT-PERP", ProductType.LINEAR_PERP, wrongProduct));
+  }
+
   static Stream<Arguments> missingRequiredMarketPrices() {
     FullFillRequest spotRequest = request(
         "BTCUSDT", ProductType.CRYPTO_SPOT, OrderSide.BUY,

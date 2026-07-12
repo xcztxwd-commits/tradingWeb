@@ -19,6 +19,10 @@ public class OrderCommandFactory {
       java.math.BigDecimal canonicalBaseQuantity
   ) {
     String clientOrderId = request.clientOrderId();
+    String idempotencyKey = hasText(request.idempotencyKey())
+        ? request.idempotencyKey()
+        : clientOrderId;
+    OrderIdempotencyKeyPolicy.requireUserControlled(clientOrderId, idempotencyKey);
     return new OrderCommand(
         principal.id(),
         request.accountId(),
@@ -30,7 +34,7 @@ public class OrderCommandFactory {
         request.stopLoss(),
         request.takeProfit(),
         clientOrderId,
-        hasText(request.idempotencyKey()) ? request.idempotencyKey() : clientOrderId,
+        idempotencyKey,
         request.leverage(),
         request.quantity(),
         canonicalBaseQuantity,

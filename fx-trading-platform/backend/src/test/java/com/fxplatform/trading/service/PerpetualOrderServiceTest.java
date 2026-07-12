@@ -103,6 +103,7 @@ class PerpetualOrderServiceTest {
   @Mock private SymbolRepository symbolRepository;
   @Mock private InstrumentRulesEngine instrumentRulesEngine;
   @Mock private AccountSymbolSettingRepository accountSymbolSettingRepository;
+  @Mock private ProtectionOrderService protectionOrderService;
 
   private UUID userId;
   private UUID accountId;
@@ -183,6 +184,7 @@ class PerpetualOrderServiceTest {
         executionAdapter,
         Clock.fixed(NOW, ZoneOffset.UTC)));
     service = newService(fullFillCoordinator);
+    service.setProtectionOrderService(protectionOrderService);
   }
 
   private OrderService newService(FullFillCoordinator coordinator) {
@@ -684,8 +686,28 @@ class PerpetualOrderServiceTest {
   }
 
   @Test
-  void task10ProtectionsAndStopContractAreRejectedBeforeProviderOrWrites() {
+  void attachedProtectionsAreCreatedBeforeImmediateParentFill() {
     CreateOrderRequest protectedRequest = protectedRequest("protected-market");
+
+    OrderResponse response = service.createOrder(principal(), protectedRequest);
+
+    assertThat(response.status()).isEqualTo(OrderStatus.FILLED.name());
+    InOrder mutationOrder = inOrder(orderRepository, protectionOrderService, orderFillService);
+    mutationOrder.verify(orderRepository).save(any(OrderEntity.class));
+    mutationOrder.verify(protectionOrderService).createAttachedLocked(
+        any(OrderEntity.class),
+        eq(protectedRequest.attachedProtections()));
+    mutationOrder.verify(orderFillService).fillPerpetual(
+        any(OrderEntity.class),
+        eq(account),
+        any(FullFillResult.class),
+        eq(new BigDecimal("100")),
+        eq(10),
+        eq("Perpetual position margin held"));
+  }
+
+  @Test
+  void stopContractIsRejectedBeforeProviderOrWrites() {
     CreateOrderRequest stopRequest = request(
         OrderSide.BUY,
         OrderType.STOP,
@@ -698,11 +720,9 @@ class PerpetualOrderServiceTest {
         MarginMode.CROSS,
         "unsupported-stop");
 
-    Object protectedResult = capture(() -> service.createOrder(principal(), protectedRequest));
     Object stopResult = capture(() -> service.createOrder(principal(), stopRequest));
 
     assertAll(
-        () -> assertThat(businessCode(protectedResult)).isEqualTo(ErrorCode.PRODUCT_NOT_ALLOWED),
         () -> assertThat(businessCode(stopResult)).isEqualTo("INVALID_PERPETUAL_ORDER_TYPE"),
         () -> verify(marketBundleResolver, never()).resolvePerp(anyString(), any()),
         () -> verify(accountRepository, never()).save(any()),
@@ -777,6 +797,48 @@ class PerpetualOrderServiceTest {
         new BigDecimal("1.05939505"),
         order.getId(),
         "Pending Perpetual order canceled");
+  }
+
+  @Test
+  void cancelPendingOpeningParentExpiresAttachedProtectionsInsideCancelMutation() {
+    OrderEntity parent = new OrderEntity();
+    parent.setId(UUID.randomUUID());
+    parent.setUserId(userId);
+    parent.setAccountId(accountId);
+    parent.setSymbol(SYMBOL);
+    parent.setProductType(ProductType.LINEAR_PERP);
+    parent.setPositionMode(PositionMode.ONE_WAY);
+    parent.setPositionSide(PositionSide.BOTH);
+    parent.setMarginMode(MarginMode.CROSS);
+    parent.setSide(OrderSide.BUY);
+    parent.setOrderType(OrderType.LIMIT);
+    parent.setStatus(OrderStatus.PENDING);
+    parent.setQuantity(BigDecimal.ONE);
+    parent.setOriginalQuantity(BigDecimal.ONE);
+    parent.setBaseQuantity(BigDecimal.ONE);
+    parent.setLots(BigDecimal.ONE);
+    parent.setRemainingQuantity(BigDecimal.ONE);
+    parent.setHoldAmount(BigDecimal.ZERO);
+    parent.setVersion(0L);
+    when(orderRepository.findByUserIdAndId(userId, parent.getId()))
+        .thenReturn(Optional.of(parent));
+    when(orderRepository.findByIdForUpdate(parent.getId())).thenReturn(Optional.of(parent));
+    when(orderRepository.cancelPending(parent)).thenReturn(1);
+
+    OrderResponse canceled = service.cancelOrder(principal(), parent.getId());
+
+    assertThat(canceled.status()).isEqualTo(OrderStatus.CANCELED.name());
+    InOrder lifecycle = inOrder(orderRepository, protectionOrderService, orderEventService);
+    lifecycle.verify(orderRepository).cancelPending(parent);
+    lifecycle.verify(protectionOrderService)
+        .expireAttachedForCanceledParentLocked(parent, account);
+    lifecycle.verify(orderEventService).record(
+        parent.getId(),
+        "ORDER_CANCELED",
+        OrderStatus.PENDING,
+        OrderStatus.CANCELED,
+        null,
+        "Pending order canceled");
   }
 
   @Test
@@ -908,8 +970,8 @@ class PerpetualOrderServiceTest {
         OrderType.MARKET,
         null,
         null,
-        new BigDecimal("90"),
-        new BigDecimal("120"),
+        null,
+        null,
         key,
         key,
         new BigDecimal("1.0000"),

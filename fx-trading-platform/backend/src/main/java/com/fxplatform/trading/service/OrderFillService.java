@@ -48,6 +48,7 @@ public class OrderFillService {
   private final SpotSettlementService spotSettlementService;
   private final PositionEngine positionEngine;
   private final WalletService walletService;
+  private final ProtectionOrderService protectionOrderService;
   private final MarginCalculator marginCalculator = new MarginCalculator();
   private final PerpMarginCalculator perpMarginCalculator = new PerpMarginCalculator();
   private final TradingInstrumentClassifier instrumentClassifier = new TradingInstrumentClassifier();
@@ -64,7 +65,8 @@ public class OrderFillService {
       SymbolRepository symbolRepository,
       SpotSettlementService spotSettlementService,
       PositionEngine positionEngine,
-      WalletService walletService
+      WalletService walletService,
+      ProtectionOrderService protectionOrderService
   ) {
     this.orderRepository = orderRepository;
     this.tradeRepository = tradeRepository;
@@ -75,6 +77,31 @@ public class OrderFillService {
     this.spotSettlementService = spotSettlementService;
     this.positionEngine = positionEngine;
     this.walletService = walletService;
+    this.protectionOrderService = protectionOrderService;
+  }
+
+  public OrderFillService(
+      OrderRepository orderRepository,
+      TradeRepository tradeRepository,
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      SymbolRepository symbolRepository,
+      SpotSettlementService spotSettlementService,
+      PositionEngine positionEngine,
+      WalletService walletService
+  ) {
+    this(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        spotSettlementService,
+        positionEngine,
+        walletService,
+        null);
   }
 
   public OrderFillService(
@@ -319,7 +346,7 @@ public class OrderFillService {
     trade.setFee(fee);
     trade.setFeeAsset(execution.feeAsset());
     trade.setLiquidityRole(canonicalFill == null ? order.getLiquidityRole() : canonicalFill.liquidityRole());
-    trade.setSystemReason(order.getSystemReason());
+    trade.setSystemReason(OrderSystemReasonPolicy.external(order));
     if (canonicalFill != null) {
       trade.setSourceMode(canonicalFill.sourceMode().name());
       trade.setProviderCode(canonicalFill.providerCode());
@@ -358,6 +385,12 @@ public class OrderFillService {
         applyCanonicalPerpetualTradeFee(account, fee);
         positionEngine.recordPerpetualFillLedger(account, positionUpdate);
         recordCanonicalPerpetualTradeFee(account, fee, trade.getId());
+        if (protectionOrderService != null) {
+          protectionOrderService.afterPerpetualFillLocked(
+              order,
+              positionUpdate,
+              authorityMark);
+        }
         return order;
       }
       positionEngine.applyFill(

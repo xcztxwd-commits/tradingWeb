@@ -31,7 +31,11 @@ export function getPositionHistory(accountId: string, token: string) {
 }
 
 export function closePosition(accountId: string, positionId: string, token: string) {
-  return apiPost<PositionResponse>(`/api/trading/positions/${positionId}/close?accountId=${accountId}`, {}, token)
+  return apiPost<PositionResponse>(
+    `/api/trading/positions/${positionId}/close?accountId=${accountId}`,
+    undefined,
+    token
+  )
 }
 
 export function updatePositionProtection(

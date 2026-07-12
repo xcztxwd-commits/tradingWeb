@@ -412,6 +412,7 @@ public class OcoOrderService {
         || request.idempotencyKey().isBlank()
         ? clientRoot
         : request.idempotencyKey();
+    OrderIdempotencyKeyPolicy.requireUserControlled(clientRoot, idempotencyRoot);
     return new LegKeys(
         deriveLegKey(clientRoot, "L"),
         deriveLegKey(clientRoot, "S"),

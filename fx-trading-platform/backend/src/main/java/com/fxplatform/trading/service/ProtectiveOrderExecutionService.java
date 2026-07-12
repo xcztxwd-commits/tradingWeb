@@ -3,107 +3,155 @@ package com.fxplatform.trading.service;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
+import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.execution.DemoExecutionGuard;
-import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.execution.ExecutableMarketSnapshot;
+import com.fxplatform.market.model.CandleRequest;
 import com.fxplatform.market.model.ProductType;
-import com.fxplatform.market.service.QuoteService;
-import com.fxplatform.trading.entity.PositionEntity;
-import com.fxplatform.trading.enums.OrderSide;
-import com.fxplatform.trading.enums.PositionStatus;
-import com.fxplatform.trading.repository.PositionRepository;
+import com.fxplatform.market.provider.MarketBundleResolver;
+import com.fxplatform.trading.entity.OrderEntity;
+import com.fxplatform.trading.enums.OrderStatus;
+import com.fxplatform.trading.repository.OrderRepository;
 import java.math.BigDecimal;
-import lombok.RequiredArgsConstructor;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-/**
- * ProtectiveOrderExecutionService 是交易模块的业务服务。
- */
+/** Scans untriggered position-bound protection carriers and delegates canonical close execution. */
 @Service
-@RequiredArgsConstructor
-@ConditionalOnProperty(prefix = "trading", name = "protective-order-execution-enabled", havingValue = "true")
+@Slf4j
+@ConditionalOnProperty(
+    prefix = "trading",
+    name = "protective-order-execution-enabled",
+    havingValue = "true")
 public class ProtectiveOrderExecutionService {
 
-  private final PositionRepository positionRepository;
+  private final OrderRepository orderRepository;
+  private final MarketBundleResolver marketBundleResolver;
+  private final ProtectionOrderService protectionOrderService;
+  private final SystemCloseOrderService systemCloseOrderService;
   private final TradingAccountRepository accountRepository;
-  private final QuoteService quoteService;
-  private final PositionService positionService;
   private final DemoExecutionGuard demoExecutionGuard;
 
-  /**
-   * 定时扫描只读取 OPEN 持仓；实际平仓仍委托 PositionService 保证结算一致性。
-   */
+  @Autowired
+  public ProtectiveOrderExecutionService(
+      OrderRepository orderRepository,
+      MarketBundleResolver marketBundleResolver,
+      ProtectionOrderService protectionOrderService,
+      SystemCloseOrderService systemCloseOrderService,
+      TradingAccountRepository accountRepository,
+      DemoExecutionGuard demoExecutionGuard
+  ) {
+    this.orderRepository = orderRepository;
+    this.marketBundleResolver = marketBundleResolver;
+    this.protectionOrderService = protectionOrderService;
+    this.systemCloseOrderService = systemCloseOrderService;
+    this.accountRepository = accountRepository;
+    this.demoExecutionGuard = demoExecutionGuard;
+  }
+
   @Scheduled(fixedDelayString = "${trading.protective-order-scan-ms:1000}")
   public int executeProtectiveOrders() {
-    int closed = 0;
-    for (PositionEntity position : positionRepository.findByStatus(PositionStatus.OPEN)) {
-      TradingAccountEntity account = accountRepository.findById(position.getAccountId())
-          .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
-      demoExecutionGuard.requireDemo(account, requestedProduct(position.getSymbol()), position.getSymbol());
-      QuoteResponse quote;
-      try {
-        quote = quoteService.freshQuote(position.getSymbol());
-      } catch (BusinessException ex) {
+    List<OrderEntity> candidates = orderRepository.findBoundProtectionsByStatus(
+        OrderStatus.PENDING_ACTIVATION);
+    if (candidates == null || candidates.isEmpty()) {
+      return 0;
+    }
+
+    int executed = 0;
+    for (OrderEntity protection : candidates) {
+      if (!isBoundProtection(protection)) {
         continue;
       }
-      if (shouldClose(position, quote)) {
-        // 止盈止损只负责判断触发条件，真正平仓复用 PositionService 的保证金和流水逻辑。
-        try {
-          positionService.closeSystemPosition(position.getAccountId(), position.getId());
-          closed++;
-        } catch (BusinessException ex) {
-          if (!"POSITION_NOT_OPEN".equals(ex.getCode())) {
-            throw ex;
-          }
+      try {
+        requireDemoAccount(protection);
+        if (executeCandidateWithRetry(protection)) {
+          executed++;
+        }
+      } catch (BusinessException exception) {
+        log.debug(
+            "Protection order {} was not executed after business rejection {}",
+            protection.getId(),
+            exception.getCode());
+      } catch (RuntimeException exception) {
+        log.warn(
+            "Protection order {} failed without aborting later candidates: {}: {}",
+            protection.getId(),
+            exception.getClass().getSimpleName(),
+            exception.getMessage());
+      }
+    }
+    return executed;
+  }
+
+  private boolean executeCandidateWithRetry(OrderEntity protection) {
+    for (int attempt = 0; attempt < 2; attempt++) {
+      ExecutableMarketSnapshot snapshot = resolveSnapshot(protection);
+      if (!protectionOrderService.isTriggered(protection, snapshot.mark())) {
+        return false;
+      }
+      try {
+        systemCloseOrderService.executeProtection(protection.getId(), snapshot);
+        return true;
+      } catch (BusinessException exception) {
+        if (!ErrorCode.MARKET_DATA_STALE.equals(exception.getCode()) || attempt > 0) {
+          throw exception;
         }
       }
     }
-    return closed;
+    return false;
   }
 
-  /**
-   * 止盈止损只扫描 OPEN 持仓；并发重复触发交给 PositionService 的 OPEN 条件更新兜底。
-   */
-  private boolean shouldClose(PositionEntity position, QuoteResponse quote) {
-    BigDecimal price = closingPrice(position, quote);
-    return isStopLossTriggered(position, price) || isTakeProfitTriggered(position, price);
+  private void requireDemoAccount(OrderEntity protection) {
+    TradingAccountEntity account = accountRepository.findById(protection.getAccountId())
+        .orElseThrow(() -> new BusinessException(
+            ErrorCode.ACCOUNT_NOT_FOUND,
+            "Protection account not found"));
+    demoExecutionGuard.requireDemo(
+        account,
+        ProductType.LINEAR_PERP,
+        protection.getSymbol());
   }
 
-  /**
-   * 多单止损看 bid 下穿，空单止损看 ask 上穿。
-   */
-  private boolean isStopLossTriggered(PositionEntity position, BigDecimal price) {
-    BigDecimal stopLoss = position.getStopLoss();
-    if (stopLoss == null) {
-      return false;
+  private boolean isBoundProtection(OrderEntity order) {
+    return order != null
+        && order.getId() != null
+        && order.getAccountId() != null
+        && order.getSymbol() != null
+        && !order.getSymbol().isBlank()
+        && order.getProductType() == ProductType.LINEAR_PERP
+        && order.getStatus() == OrderStatus.PENDING_ACTIVATION
+        && order.getProtectionType() != null
+        && order.getParentPositionId() != null;
+  }
+
+  private ExecutableMarketSnapshot resolveSnapshot(OrderEntity protection) {
+    Instant to = Instant.now();
+    CandleRequest candles = new CandleRequest(
+        "1m",
+        to.minus(Duration.ofMinutes(30)),
+        to);
+    ExecutableMarketSnapshot snapshot = ExecutableMarketSnapshot.from(
+        marketBundleResolver.resolvePerp(protection.getSymbol(), candles));
+    if (snapshot.productType() != ProductType.LINEAR_PERP
+        || snapshot.platformSymbol() == null
+        || !SymbolNormalizer.normalize(protection.getSymbol()).equals(
+            SymbolNormalizer.normalize(snapshot.platformSymbol()))
+        || !positive(snapshot.mark())) {
+      throw new BusinessException(
+          ErrorCode.MARKET_BUNDLE_INCOMPLETE,
+          "Protection trigger requires a matching positive Perpetual authority mark");
     }
-    return position.getSide() == OrderSide.BUY
-        ? price.compareTo(stopLoss) <= 0
-        : price.compareTo(stopLoss) >= 0;
+    return snapshot;
   }
 
-  /**
-   * 多单止盈看 bid 上穿，空单止盈看 ask 下穿。
-   */
-  private boolean isTakeProfitTriggered(PositionEntity position, BigDecimal price) {
-    BigDecimal takeProfit = position.getTakeProfit();
-    if (takeProfit == null) {
-      return false;
-    }
-    return position.getSide() == OrderSide.BUY
-        ? price.compareTo(takeProfit) >= 0
-        : price.compareTo(takeProfit) <= 0;
-  }
-
-  /**
-   * 保护单判断使用真实可平仓价，而不是 mid 价。
-   */
-  private BigDecimal closingPrice(PositionEntity position, QuoteResponse quote) {
-    return position.getSide() == OrderSide.BUY ? quote.bid() : quote.ask();
-  }
-
-  private ProductType requestedProduct(String canonicalSymbol) {
-    return canonicalSymbol.endsWith("-PERP") ? ProductType.LINEAR_PERP : ProductType.CRYPTO_SPOT;
+  private boolean positive(BigDecimal value) {
+    return value != null && value.compareTo(BigDecimal.ZERO) > 0;
   }
 }

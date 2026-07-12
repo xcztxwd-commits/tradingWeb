@@ -401,7 +401,8 @@ public class PositionEngine {
           existing,
           existing,
           realized,
-          existing);
+          existing)
+          .withReduction(existing.getId(), oldQuantity, BigDecimal.ZERO);
     }
 
     BigDecimal newMargin = proportionalMargin(oldMargin, remainingQuantity, oldQuantity);
@@ -434,7 +435,8 @@ public class PositionEngine {
         existing,
         saved,
         realized,
-        saved);
+        saved)
+        .withReduction(existing.getId(), oldQuantity, remainingQuantity);
   }
 
   private PositionUpdateResult reverseAuthorityPosition(
@@ -487,7 +489,8 @@ public class PositionEngine {
         saved,
         "Reversed position margin held");
     addTradePnlEffect(ledgerEffects, realized, existing);
-    return new PositionUpdateResult(saved, realized, List.copyOf(ledgerEffects));
+    return new PositionUpdateResult(saved, realized, List.copyOf(ledgerEffects))
+        .withReduction(existing.getId(), oldQuantity, BigDecimal.ZERO);
   }
 
   private void validatePerpetualSlot(FillContext fill) {
@@ -587,7 +590,8 @@ public class PositionEngine {
       saveAccount(account);
       recordMarginRelease(account, oldMargin, existingPosition);
       recordTradePnl(account, realizedPnl, existingPosition);
-      return new PositionUpdateResult(existingPosition);
+      return new PositionUpdateResult(existingPosition)
+          .withReduction(existingPosition.getId(), oldQty, BigDecimal.ZERO);
     }
 
     existingPosition.setLots(remainingQty);
@@ -603,7 +607,8 @@ public class PositionEngine {
     saveAccount(account);
     recordMarginRelease(account, marginToRelease, existingPosition);
     recordTradePnl(account, realizedPnl, existingPosition);
-    return new PositionUpdateResult(existingPosition);
+    return new PositionUpdateResult(existingPosition)
+        .withReduction(existingPosition.getId(), oldQty, remainingQty);
   }
 
   private PositionUpdateResult reversePosition(
@@ -634,7 +639,8 @@ public class PositionEngine {
     recordMarginRelease(account, oldMargin, existingPosition);
     recordMarginHold(account, marginHoldAfterOrderHold(newMargin, fill), saved, DEFAULT_MARGIN_DESCRIPTION);
     recordTradePnl(account, realizedPnl, existingPosition);
-    return new PositionUpdateResult(saved);
+    return new PositionUpdateResult(saved)
+        .withReduction(existingPosition.getId(), oldQty, BigDecimal.ZERO);
   }
 
   private PositionUpdateResult reduceOrReverse(
@@ -1091,15 +1097,40 @@ public class PositionEngine {
   public record PositionUpdateResult(
       PositionEntity position,
       BigDecimal realizedPnlDelta,
-      List<PerpetualLedgerEffect> ledgerEffects
+      List<PerpetualLedgerEffect> ledgerEffects,
+      UUID reducedPositionId,
+      BigDecimal fromQuantity,
+      BigDecimal toQuantity
   ) {
 
     public PositionUpdateResult(PositionEntity position) {
-      this(position, BigDecimal.ZERO, List.of());
+      this(position, BigDecimal.ZERO, List.of(), null, null, null);
     }
 
     public PositionUpdateResult(PositionEntity position, BigDecimal realizedPnlDelta) {
-      this(position, realizedPnlDelta, List.of());
+      this(position, realizedPnlDelta, List.of(), null, null, null);
+    }
+
+    public PositionUpdateResult(
+        PositionEntity position,
+        BigDecimal realizedPnlDelta,
+        List<PerpetualLedgerEffect> ledgerEffects
+    ) {
+      this(position, realizedPnlDelta, ledgerEffects, null, null, null);
+    }
+
+    public PositionUpdateResult withReduction(
+        UUID reducedPositionId,
+        BigDecimal fromQuantity,
+        BigDecimal toQuantity
+    ) {
+      return new PositionUpdateResult(
+          position,
+          realizedPnlDelta,
+          ledgerEffects,
+          reducedPositionId,
+          fromQuantity,
+          toQuantity);
     }
   }
 
