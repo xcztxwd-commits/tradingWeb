@@ -131,6 +131,49 @@ class AccountSnapshotServiceTest {
   }
 
   @Test
+  void linearPerpetualSnapshotUsesCanonicalBaseWithoutApplyingContractFactorTwice() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    PositionEntity position = openForexPosition(
+        accountId,
+        OrderSide.BUY,
+        "50000.00000000",
+        "5000.00000000");
+    position.setSymbol("BTCUSDT-PERP");
+    position.setLots(BigDecimal.ONE);
+    position.setLeverage(10);
+    position.setInitialMargin(new BigDecimal("5000.00000000"));
+    position.setMaintenanceMargin(new BigDecimal("250.00000000"));
+    position.setMarkPrice(new BigDecimal("50000.00000000"));
+    position.setNotional(new BigDecimal("50000.00000000"));
+
+    SymbolEntity symbol = symbol(
+        "BTCUSDT-PERP",
+        ProductType.LINEAR_PERP,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        new BigDecimal("0.01"),
+        100);
+    symbol.setContractMultiplier(new BigDecimal("10"));
+    symbol.setMaintenanceMarginRate(new BigDecimal("0.005"));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(
+        quote("BTCUSDT-PERP", "50100.00000000", "50102.00000000"));
+
+    AccountSnapshot snapshot = service().snapshot(account);
+
+    assertThat(snapshot.openFloatingPnl()).isEqualByComparingTo("101.00000000");
+    assertThat(snapshot.equity()).isEqualByComparingTo("10101.00000000");
+    assertThat(snapshot.positionValue()).isEqualByComparingTo("50101.00000000");
+    assertThat(snapshot.maintenanceMargin()).isEqualByComparingTo("250.50500000");
+    assertThat(snapshot.usedMargin()).isEqualByComparingTo("5000.00000000");
+    assertThat(snapshot.freeMargin()).isEqualByComparingTo("5101.00000000");
+  }
+
+  @Test
   void snapshotUsesOpenPositionMarginWhenPersistedUsedMarginIsStale() {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId);

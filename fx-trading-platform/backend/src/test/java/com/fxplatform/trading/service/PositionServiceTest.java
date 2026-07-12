@@ -25,7 +25,10 @@ import com.fxplatform.trading.dto.request.UpdatePositionProtectionRequest;
 import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.entity.SpotPositionEntity;
+import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.OrderSide;
+import com.fxplatform.trading.enums.PositionMode;
+import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.SpotPositionRepository;
@@ -983,6 +986,42 @@ class PositionServiceTest {
         symbolRepository,
         spotPositionRepository,
         demoExecutionGuard);
+  }
+
+  @Test
+  void openPerpetualPositionReturnsPersistedModeSideAndMarginSnapshots() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    PositionEntity position = openPosition(accountId, UUID.randomUUID());
+    position.setSymbol("BTCUSDT-PERP");
+    position.setProductType(ProductType.LINEAR_PERP);
+    position.setPositionMode(PositionMode.HEDGE);
+    position.setPositionSide(PositionSide.SHORT);
+    position.setMarginMode(MarginMode.ISOLATED);
+    position.setSide(OrderSide.SELL);
+    position.setLots(new BigDecimal("0.2"));
+    position.setLeverage(20);
+    position.setMarkPrice(new BigDecimal("50000"));
+    when(accountRepository.findByIdAndUserId(accountId, userId))
+        .thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of(position));
+    SymbolEntity symbol = symbol(
+        "BTCUSDT-PERP", ProductType.LINEAR_PERP, "BTC", "USDT", BigDecimal.ONE,
+        new BigDecimal("0.01"), 100);
+    symbol.setContractMultiplier(new BigDecimal("10"));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
+    when(quoteService.freshQuote("BTCUSDT-PERP")).thenReturn(new QuoteResponse(
+        "quote", "BTCUSDT-PERP", new BigDecimal("49999"), new BigDecimal("50001"),
+        new BigDecimal("50000"), new BigDecimal("2"), "test", 1780660000000L));
+
+    PositionResponse response = service().openPositions(userId, accountId).get(0);
+
+    assertThat(response.productType()).isEqualTo(ProductType.LINEAR_PERP);
+    assertThat(response.positionMode()).isEqualTo(PositionMode.HEDGE);
+    assertThat(response.positionSide()).isEqualTo(PositionSide.SHORT);
+    assertThat(response.marginMode()).isEqualTo(MarginMode.ISOLATED.name());
+    assertThat(response.leverage()).isEqualTo(20);
   }
 
   private static SpotPositionEntity spotPosition(UUID accountId, String asset, String costAsset) {

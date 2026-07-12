@@ -181,8 +181,11 @@ public class InstrumentRulesEngine {
     if (canonicalBaseQuantity == null || price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
       return;
     }
-    BigDecimal notional = canonicalBaseQuantity.multiply(price)
-        .multiply(instrumentClassifier.profile(symbol).unitSize());
+    InstrumentProfile profile = instrumentClassifier.profile(symbol);
+    BigDecimal canonicalUnitSize = profile.kind() == InstrumentKind.LINEAR_PERPETUAL
+        ? BigDecimal.ONE
+        : profile.unitSize();
+    BigDecimal notional = canonicalBaseQuantity.multiply(price).multiply(canonicalUnitSize);
     if (rules.minNotional() != null && notional.compareTo(rules.minNotional()) < 0) {
       throw new BusinessException("ORDER_NOTIONAL_TOO_SMALL", "Order notional is below minimum");
     }

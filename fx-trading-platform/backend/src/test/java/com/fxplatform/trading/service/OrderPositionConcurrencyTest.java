@@ -28,7 +28,10 @@ import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
+import com.fxplatform.trading.enums.PositionMode;
+import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.repository.AccountSymbolSettingRepository;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.SpotPositionRepository;
@@ -69,6 +72,24 @@ class OrderPositionConcurrencyTest {
         "ORDER BY symbol, position_side, id",
         UUID.class);
     assertForUpdate(
+        PositionRepository.class,
+        "findOpenPerpetualSlotForUpdate",
+        UUID.class,
+        String.class,
+        PositionMode.class,
+        PositionSide.class);
+    assertSortedForUpdate(
+        PositionRepository.class,
+        "findOpenLinearPerpByAccountIdForUpdate",
+        "ORDER BY symbol, position_side, id",
+        UUID.class);
+    assertSortedForUpdate(
+        PositionRepository.class,
+        "findOpenLinearPerpBySymbolForUpdate",
+        "ORDER BY symbol, position_side, id",
+        UUID.class,
+        String.class);
+    assertForUpdate(
         SpotPositionRepository.class,
         "findBySlotForUpdate",
         UUID.class,
@@ -82,6 +103,37 @@ class OrderPositionConcurrencyTest {
         UUID.class);
     assertForUpdate(OrderRepository.class, "findByIdForUpdate", UUID.class);
     assertSortedForUpdate(OrderRepository.class, "findPendingByAccountIdForUpdate", "ORDER BY id", UUID.class);
+    assertSortedForUpdate(
+        OrderRepository.class,
+        "findActiveLinearPerpByAccountIdForUpdate",
+        "ORDER BY id",
+        UUID.class);
+    assertSortedForUpdate(
+        OrderRepository.class,
+        "findActiveLinearPerpBySymbolForUpdate",
+        "ORDER BY id",
+        UUID.class,
+        String.class);
+    assertForUpdate(
+        AccountSymbolSettingRepository.class,
+        "findByAccountIdAndSymbolForUpdate",
+        UUID.class,
+        String.class);
+  }
+
+  @Test
+  void perpetualSettingsLocksUseExactProductScopeAndAllActiveStatuses() throws Exception {
+    String accountOrders = selectSql(OrderRepository.class.getMethod(
+        "findActiveLinearPerpByAccountIdForUpdate", UUID.class));
+    String symbolOrders = selectSql(OrderRepository.class.getMethod(
+        "findActiveLinearPerpBySymbolForUpdate", UUID.class, String.class));
+    for (String sql : List.of(accountOrders, symbolOrders)) {
+      assertThat(sql).contains("product_type = 'LINEAR_PERP'");
+      assertThat(sql).contains(
+          "'RECEIVED'", "'VALIDATING'", "'ACCEPTED'", "'PENDING_ACTIVATION'",
+          "'PENDING'", "'WORKING'", "'PARTIALLY_FILLED'", "'CANCEL_PENDING'");
+      assertThat(sql).doesNotContain("'FILLED'", "'CANCELED'", "'REJECTED'", "'EXPIRED'");
+    }
   }
 
   @Test

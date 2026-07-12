@@ -18,6 +18,72 @@ public class QuantityConversionService {
   /** Legacy orders/trades quantity columns are NUMERIC(12,4); V46 canonical columns are wider. */
   private static final BigDecimal PERSISTED_QUANTITY_INCREMENT = new BigDecimal("0.0001");
 
+  public Conversion convertPerpetual(
+      QuantityUnit quantityUnit,
+      BigDecimal originalQuantity,
+      BigDecimal stepSize,
+      BigDecimal contractSize,
+      BigDecimal contractMultiplier,
+      BigDecimal authorityMark,
+      BigDecimal minNotional
+  ) {
+    requirePositive(originalQuantity, "BAD_QUANTITY", "Quantity must be greater than zero");
+    requirePositive(stepSize, "INVALID_INSTRUMENT_RULES", "Instrument step size must be positive");
+    requirePositive(authorityMark, "MARKET_BUNDLE_INCOMPLETE", "Authority mark price is required");
+    if (quantityUnit == null) {
+      throw new BusinessException("INVALID_QUANTITY_UNIT", "Perpetual quantity unit is required");
+    }
+
+    BigDecimal effectiveStep = storageCompatibleStep(stepSize);
+    BigDecimal baseQuantity = switch (quantityUnit) {
+      case BASE -> originalQuantity;
+      case QUOTE -> originalQuantity.divide(authorityMark, 24, RoundingMode.DOWN)
+          .divide(effectiveStep, 0, RoundingMode.DOWN)
+          .multiply(effectiveStep);
+      case CONTRACTS -> {
+        if (originalQuantity.remainder(BigDecimal.ONE).compareTo(BigDecimal.ZERO) != 0) {
+          throw new BusinessException(
+              "CONTRACT_QUANTITY_NOT_INTEGRAL",
+              "Perpetual contract quantity must be integral");
+        }
+        requirePositive(
+            contractSize,
+            "INVALID_INSTRUMENT_RULES",
+            "Perpetual contract size must be positive");
+        requirePositive(
+            contractMultiplier,
+            "INVALID_INSTRUMENT_RULES",
+            "Perpetual contract multiplier must be positive");
+        yield originalQuantity.multiply(contractSize).multiply(contractMultiplier);
+      }
+    };
+
+    if (baseQuantity.compareTo(BigDecimal.ZERO) <= 0) {
+      throw new BusinessException(
+          "QUANTITY_CONVERTS_TO_ZERO",
+          "Quantity is below one effective instrument step");
+    }
+    if (baseQuantity.remainder(effectiveStep).compareTo(BigDecimal.ZERO) != 0) {
+      throw new BusinessException(
+          "QUANTITY_STEP_MISMATCH",
+          "Quantity cannot be represented exactly by instrument and persistence steps");
+    }
+
+    BigDecimal notional = baseQuantity.multiply(authorityMark);
+    if (minNotional != null
+        && minNotional.compareTo(BigDecimal.ZERO) > 0
+        && notional.compareTo(minNotional) < 0) {
+      throw new BusinessException(
+          "ORDER_NOTIONAL_TOO_SMALL",
+          "Order notional is below minimum");
+    }
+    return new Conversion(
+        originalQuantity,
+        quantityUnit,
+        baseQuantity,
+        notional.setScale(WALLET_SCALE, RoundingMode.HALF_UP));
+  }
+
   public Conversion convertSpot(
       OrderSide side,
       OrderType orderType,

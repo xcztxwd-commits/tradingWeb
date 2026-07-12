@@ -8,6 +8,7 @@ import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.risk.model.InstrumentKind;
 import com.fxplatform.risk.model.InstrumentProfile;
 import com.fxplatform.risk.service.MarginCalculator;
@@ -15,7 +16,10 @@ import com.fxplatform.risk.service.PerpMarginCalculator;
 import com.fxplatform.risk.service.PnLCalculator;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
+import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.OrderSide;
+import com.fxplatform.trading.enums.PositionMode;
+import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
@@ -88,6 +92,9 @@ public class PositionEngine {
       String marginDescription
   ) {
     FillContext context = FillContext.from(account, order, fill, symbolProfile, marginDescription);
+    if (symbolProfile.kind() == InstrumentKind.LINEAR_PERPETUAL) {
+      return applyLinearPerpetualFill(account, context);
+    }
     return positionRepository.findOpenNetPosition(account.getId(), context.symbol())
         .map(position -> sameSide(position, context)
             ? increasePosition(account, position, context)
@@ -95,7 +102,92 @@ public class PositionEngine {
         .orElseGet(() -> increasePosition(account, null, context));
   }
 
-  public PositionUpdateResult increasePosition(
+  private PositionUpdateResult applyLinearPerpetualFill(
+      TradingAccountEntity account,
+      FillContext fill
+  ) {
+    validatePerpetualSlot(fill);
+    PositionEntity existing = positionRepository.findOpenPerpetualSlotForUpdate(
+        account.getId(),
+        fill.symbol(),
+        fill.positionMode(),
+        fill.positionSide()).orElse(null);
+    if (existing != null
+        && fill.positionMode() == PositionMode.HEDGE
+        && existing.getSide() != openingSide(fill.positionSide())) {
+      throw new BusinessException(
+          "INVALID_POSITION_SIDE",
+          "Existing HEDGE slot direction is inconsistent with its position side");
+    }
+    boolean increasesSlot = fill.positionMode() == PositionMode.ONE_WAY
+        ? existing == null || existing.getSide() == fill.side()
+        : fill.side() == openingSide(fill.positionSide());
+
+    if (existing == null) {
+      if (!increasesSlot) {
+        throw new BusinessException(
+            "REDUCE_ONLY_EXCEEDS_POSITION",
+            "Perpetual close quantity exceeds the open slot");
+      }
+      if (fill.reduceOnly()) {
+        throw new BusinessException(
+            "REDUCE_ONLY_WOULD_INCREASE",
+            "Reduce-only order cannot open a Perpetual position");
+      }
+      return increasePosition(account, null, fill);
+    }
+
+    if (increasesSlot) {
+      if (fill.reduceOnly()) {
+        throw new BusinessException(
+            "REDUCE_ONLY_WOULD_INCREASE",
+            "Reduce-only order cannot increase a Perpetual position");
+      }
+      return increasePosition(account, existing, fill);
+    }
+
+    BigDecimal fillQuantity = abs(fill.quantity());
+    BigDecimal openQuantity = abs(existing.getLots());
+    if (fillQuantity.compareTo(openQuantity) > 0) {
+      if (fill.positionMode() == PositionMode.ONE_WAY && !fill.reduceOnly()) {
+        return reversePosition(account, existing, fill);
+      }
+      throw new BusinessException(
+          "REDUCE_ONLY_EXCEEDS_POSITION",
+          "Perpetual close quantity exceeds the open slot");
+    }
+    return reducePosition(account, existing, fill);
+  }
+
+  private void validatePerpetualSlot(FillContext fill) {
+    if (fill.side() == null) {
+      throw new BusinessException("INVALID_ORDER_SIDE", "Perpetual order side is required");
+    }
+    if (fill.positionMode() == PositionMode.ONE_WAY
+        && fill.positionSide() != PositionSide.BOTH) {
+      throw new BusinessException(
+          "INVALID_POSITION_SIDE",
+          "ONE_WAY Perpetual orders require the BOTH slot");
+    }
+    if (fill.positionMode() == PositionMode.HEDGE
+        && fill.positionSide() != PositionSide.LONG
+        && fill.positionSide() != PositionSide.SHORT) {
+      throw new BusinessException(
+          "INVALID_POSITION_SIDE",
+          "HEDGE Perpetual orders require a LONG or SHORT slot");
+    }
+    if (fill.marginMode() != MarginMode.CROSS && fill.marginMode() != MarginMode.ISOLATED) {
+      throw new BusinessException(
+          "INVALID_MARGIN_MODE",
+          "Perpetual margin mode must be CROSS or ISOLATED");
+    }
+  }
+
+  private OrderSide openingSide(PositionSide side) {
+    return side == PositionSide.LONG ? OrderSide.BUY : OrderSide.SELL;
+  }
+
+  private PositionUpdateResult increasePosition(
       TradingAccountEntity account,
       PositionEntity existingPosition,
       FillContext fill
@@ -139,7 +231,7 @@ public class PositionEngine {
     return new PositionUpdateResult(saved);
   }
 
-  public PositionUpdateResult reducePosition(
+  private PositionUpdateResult reducePosition(
       TradingAccountEntity account,
       PositionEntity existingPosition,
       FillContext fill
@@ -183,7 +275,7 @@ public class PositionEngine {
     return new PositionUpdateResult(existingPosition);
   }
 
-  public PositionUpdateResult reversePosition(
+  private PositionUpdateResult reversePosition(
       TradingAccountEntity account,
       PositionEntity existingPosition,
       FillContext fill
@@ -235,6 +327,12 @@ public class PositionEngine {
     position.setStopLoss(fill.stopLoss());
     position.setTakeProfit(fill.takeProfit());
     position.setLeverage(fill.leverage());
+    if (fill.profile().kind() == InstrumentKind.LINEAR_PERPETUAL) {
+      position.setProductType(ProductType.LINEAR_PERP);
+      position.setPositionMode(fill.positionMode());
+      position.setPositionSide(fill.positionSide());
+      position.setMarginMode(fill.marginMode());
+    }
     return position;
   }
 
@@ -317,7 +415,16 @@ public class PositionEngine {
     if (!isPerpetual(profile.kind())) {
       return requiredMargin(profile, quantity, markPrice, leverage);
     }
-    PerpMarginCalculator.MarginResult margin = perpMarginCalculator.calculate(profile, quantity, markPrice, leverage);
+    PerpMarginCalculator.MarginResult margin = profile.kind() == InstrumentKind.LINEAR_PERPETUAL
+        ? perpMarginCalculator.calculate(
+            InstrumentKind.LINEAR_PERPETUAL,
+            quantity,
+            BigDecimal.ONE,
+            BigDecimal.ONE,
+            markPrice,
+            leverage,
+            profile.maintenanceMarginRate())
+        : perpMarginCalculator.calculate(profile, quantity, markPrice, leverage);
     position.setNotional(margin.notional());
     position.setInitialMargin(margin.initialMargin());
     position.setMaintenanceMargin(margin.maintenanceMargin());
@@ -359,9 +466,11 @@ public class PositionEngine {
       BigDecimal closePrice,
       InstrumentProfile profile
   ) {
-    BigDecimal unitSize = profile.kind() == InstrumentKind.INVERSE_PERPETUAL
-        ? inverseContractValue(profile)
-        : profile.unitSize();
+    BigDecimal unitSize = switch (profile.kind()) {
+      case LINEAR_PERPETUAL -> BigDecimal.ONE;
+      case INVERSE_PERPETUAL -> inverseContractValue(profile);
+      default -> profile.unitSize();
+    };
     return pnlCalculator.floatingPnl(
         profile.kind(),
         position.getSide(),
@@ -437,6 +546,10 @@ public class PositionEngine {
       java.util.UUID accountId,
       String symbol,
       OrderSide side,
+      PositionMode positionMode,
+      PositionSide positionSide,
+      MarginMode marginMode,
+      boolean reduceOnly,
       BigDecimal quantity,
       BigDecimal price,
       Instant filledAt,
@@ -467,6 +580,10 @@ public class PositionEngine {
           account.getId(),
           normalizeSymbol(order.getSymbol()),
           order.getSide(),
+          effectivePositionMode(account),
+          effectivePositionSide(order),
+          effectiveMarginMode(order),
+          Boolean.TRUE.equals(order.getReduceOnly()),
           quantity,
           fill.filledPrice(),
           fill.filledAt(),
@@ -483,6 +600,10 @@ public class PositionEngine {
           accountId,
           symbol,
           side,
+          positionMode,
+          positionSide,
+          marginMode,
+          reduceOnly,
           quantity,
           price,
           filledAt,
@@ -492,6 +613,18 @@ public class PositionEngine {
           takeProfit,
           profile,
           marginDescription);
+    }
+
+    private static PositionMode effectivePositionMode(TradingAccountEntity account) {
+      return account.getPositionMode() == null ? PositionMode.ONE_WAY : account.getPositionMode();
+    }
+
+    private static PositionSide effectivePositionSide(OrderEntity order) {
+      return order.getPositionSide() == null ? PositionSide.BOTH : order.getPositionSide();
+    }
+
+    private static MarginMode effectiveMarginMode(OrderEntity order) {
+      return order.getMarginMode() == null ? MarginMode.CROSS : order.getMarginMode();
     }
 
     private static void requireNettable(InstrumentKind kind) {

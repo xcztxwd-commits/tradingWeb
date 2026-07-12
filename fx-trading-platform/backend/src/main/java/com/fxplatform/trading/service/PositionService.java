@@ -332,7 +332,7 @@ public class PositionService {
         position.getSymbol(),
         position.getSide().name(),
         profile.instrumentType(),
-        marginMode(profile),
+        marginMode(position, profile),
         displayLeverage(position, account, profile),
         profile.positionUnit(),
         position.getLots(),
@@ -354,7 +354,10 @@ public class PositionService {
         null,
         position.getStatus().name(),
         position.getOpenedAt(),
-        position.getClosedAt());
+        position.getClosedAt(),
+        position.getProductType(),
+        position.getPositionMode(),
+        position.getPositionSide());
   }
 
   /**
@@ -374,7 +377,7 @@ public class PositionService {
         position.getSymbol(),
         position.getSide().name(),
         profile.instrumentType(),
-        marginMode(profile),
+        marginMode(position, profile),
         displayLeverage(position, account, profile),
         profile.positionUnit(),
         position.getLots(),
@@ -396,7 +399,10 @@ public class PositionService {
         null,
         position.getStatus().name(),
         position.getOpenedAt(),
-        position.getClosedAt());
+        position.getClosedAt(),
+        position.getProductType(),
+        position.getPositionMode(),
+        position.getPositionSide());
   }
 
   private PositionResponse toRealtimeSpotResponse(SpotPositionEntity position) {
@@ -534,7 +540,13 @@ public class PositionService {
           position.getOpenPrice(),
           currentPrice);
     }
-    return pnlCalculator.floatingPnl(profile.kind(), position.getSide(), position.getLots(), position.getOpenPrice(), currentPrice, profile.unitSize());
+    return pnlCalculator.floatingPnl(
+        profile.kind(),
+        position.getSide(),
+        position.getLots(),
+        position.getOpenPrice(),
+        currentPrice,
+        canonicalUnitSize(profile));
   }
 
   private BigDecimal liquidationPrice(PositionEntity position, InstrumentProfile profile) {
@@ -544,7 +556,7 @@ public class PositionService {
         position.getLots(),
         position.getOpenPrice(),
         position.getMarginHeld(),
-        profile.unitSize());
+        canonicalUnitSize(profile));
   }
 
   private BigDecimal markPrice(QuoteResponse quote, BigDecimal closeoutPrice) {
@@ -565,7 +577,18 @@ public class PositionService {
     if (stored.compareTo(BigDecimal.ZERO) > 0) {
       return stored;
     }
-    return perpMarginCalculator.calculate(profile, position.getLots(), markPrice, leverage).maintenanceMargin();
+    if (profile.kind() == InstrumentKind.LINEAR_PERPETUAL) {
+      return perpMarginCalculator.calculate(
+          InstrumentKind.LINEAR_PERPETUAL,
+          position.getLots(),
+          BigDecimal.ONE,
+          BigDecimal.ONE,
+          markPrice,
+          leverage,
+          profile.maintenanceMarginRate()).maintenanceMargin();
+    }
+    return perpMarginCalculator.calculate(profile, position.getLots(), markPrice, leverage)
+        .maintenanceMargin();
   }
 
   private BigDecimal maintenanceMarginRate(InstrumentProfile profile) {
@@ -576,8 +599,19 @@ public class PositionService {
     return kind == InstrumentKind.LINEAR_PERPETUAL || kind == InstrumentKind.INVERSE_PERPETUAL;
   }
 
-  private String marginMode(InstrumentProfile profile) {
-    return profile.kind() == InstrumentKind.SPOT ? "CASH" : "CROSS";
+  private String marginMode(PositionEntity position, InstrumentProfile profile) {
+    if (profile.kind() == InstrumentKind.SPOT) {
+      return "CASH";
+    }
+    return profile.kind() == InstrumentKind.LINEAR_PERPETUAL && position.getMarginMode() != null
+        ? position.getMarginMode().name()
+        : "CROSS";
+  }
+
+  private BigDecimal canonicalUnitSize(InstrumentProfile profile) {
+    return profile.kind() == InstrumentKind.LINEAR_PERPETUAL
+        ? BigDecimal.ONE
+        : profile.unitSize();
   }
 
   private Integer displayLeverage(PositionEntity position, TradingAccountEntity account, InstrumentProfile profile) {

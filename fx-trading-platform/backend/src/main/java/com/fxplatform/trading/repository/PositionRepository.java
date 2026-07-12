@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.enums.PositionMode;
+import com.fxplatform.trading.enums.PositionSide;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -78,6 +80,48 @@ public interface PositionRepository extends FxBaseMapper<PositionEntity> {
       FOR UPDATE
       """)
   List<PositionEntity> findOpenByAccountIdForUpdate(@Param("accountId") UUID accountId);
+
+  @Select("""
+      SELECT *
+      FROM trading.positions
+      WHERE account_id = #{accountId}
+        AND symbol = #{symbol}
+        AND product_type = 'LINEAR_PERP'
+        AND position_mode = #{positionMode}
+        AND position_side = #{positionSide}
+        AND status = 'OPEN'
+      FOR UPDATE
+      """)
+  Optional<PositionEntity> findOpenPerpetualSlotForUpdate(
+      @Param("accountId") UUID accountId,
+      @Param("symbol") String symbol,
+      @Param("positionMode") PositionMode positionMode,
+      @Param("positionSide") PositionSide positionSide);
+
+  @Select("""
+      SELECT *
+      FROM trading.positions
+      WHERE account_id = #{accountId}
+        AND product_type = 'LINEAR_PERP'
+        AND status = 'OPEN'
+      ORDER BY symbol, position_side, id
+      FOR UPDATE
+      """)
+  List<PositionEntity> findOpenLinearPerpByAccountIdForUpdate(@Param("accountId") UUID accountId);
+
+  @Select("""
+      SELECT *
+      FROM trading.positions
+      WHERE account_id = #{accountId}
+        AND symbol = #{symbol}
+        AND product_type = 'LINEAR_PERP'
+        AND status = 'OPEN'
+      ORDER BY symbol, position_side, id
+      FOR UPDATE
+      """)
+  List<PositionEntity> findOpenLinearPerpBySymbolForUpdate(
+      @Param("accountId") UUID accountId,
+      @Param("symbol") String symbol);
 
   /** 按 OPEN 状态条件平仓，保证重复触发不会重复结算保证金和 PnL。 */
   default int closeIfOpen(PositionEntity position) {

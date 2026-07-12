@@ -1,29 +1,37 @@
 package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.risk.model.InstrumentKind;
 import com.fxplatform.risk.model.InstrumentProfile;
 import com.fxplatform.risk.service.MarginCalculator;
 import com.fxplatform.risk.service.PnLCalculator;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
+import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.OrderSide;
+import com.fxplatform.trading.enums.PositionMode;
+import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -42,6 +50,14 @@ class PositionEngineTest {
 
   @Mock
   private LedgerService ledgerService;
+
+  @BeforeEach
+  void canonicalOneWaySlotDelegatesToExistingNetFixtures() {
+    lenient().when(positionRepository.findOpenPerpetualSlotForUpdate(
+        any(UUID.class), any(String.class), eq(PositionMode.ONE_WAY), eq(PositionSide.BOTH)))
+        .thenAnswer(invocation -> positionRepository.findOpenNetPosition(
+            invocation.getArgument(0), invocation.getArgument(1)));
+  }
 
   @Test
   void forexSameSideBuyFillsMergeLotsAndAverageEntry() {
@@ -302,6 +318,296 @@ class PositionEngineTest {
     verify(ledgerService).recordTradePnl(account, new BigDecimal("5.00000000"), existing.getId(), "Position realized PnL");
   }
 
+  @Test
+  void oneWayPerpetualWritesCanonicalBothSlotAndOrderSnapshots() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, new BigDecimal("20000"), BigDecimal.ZERO, 10);
+    account.setPositionMode(PositionMode.ONE_WAY);
+    OrderEntity order = perpetualOrder(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "0.1000",
+        PositionMode.ONE_WAY, PositionSide.BOTH, MarginMode.ISOLATED, 20, false);
+    lenient().when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.ONE_WAY, PositionSide.BOTH))
+        .thenReturn(Optional.empty());
+    lenient().when(positionRepository.findOpenNetPosition(accountId, "BTCUSDT-PERP"))
+        .thenReturn(Optional.empty());
+    when(accountRepository.reserveMarginIfAvailable(eq(accountId), any(BigDecimal.class))).thenReturn(1);
+    when(positionRepository.save(any(PositionEntity.class))).thenAnswer(invocation -> withId(invocation.getArgument(0)));
+    org.mockito.Mockito.clearInvocations(positionRepository);
+
+    PositionEntity opened = engine().applyFill(
+        account, order, fill(new BigDecimal("50000"), new BigDecimal("0.1000")),
+        canonicalLinear("0.01", "10")).position();
+
+    assertThat(opened.getProductType()).isEqualTo(ProductType.LINEAR_PERP);
+    assertThat(opened.getPositionMode()).isEqualTo(PositionMode.ONE_WAY);
+    assertThat(opened.getPositionSide()).isEqualTo(PositionSide.BOTH);
+    assertThat(opened.getMarginMode()).isEqualTo(MarginMode.ISOLATED);
+    assertThat(opened.getLeverage()).isEqualTo(20);
+    assertThat(opened.getLots()).isEqualByComparingTo("0.1000");
+    assertThat(opened.getNotional()).isEqualByComparingTo("5000.00000000");
+    verify(positionRepository).findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.ONE_WAY, PositionSide.BOTH);
+  }
+
+  @Test
+  void oneWayReduceOnlyRejectsIncreaseAndOverCloseBeforeMutation() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, new BigDecimal("20000"), new BigDecimal("5000"), 10);
+    account.setPositionMode(PositionMode.ONE_WAY);
+    PositionEntity existing = canonicalPosition(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "50000", "5000",
+        PositionMode.ONE_WAY, PositionSide.BOTH);
+    lenient().when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.ONE_WAY, PositionSide.BOTH))
+        .thenReturn(Optional.of(existing));
+    lenient().when(positionRepository.findOpenNetPosition(accountId, "BTCUSDT-PERP"))
+        .thenReturn(Optional.of(existing));
+
+    assertCode("REDUCE_ONLY_EXCEEDS_POSITION", () -> engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.SELL, "2", PositionMode.ONE_WAY,
+            PositionSide.BOTH, MarginMode.CROSS, 10, true),
+        fill(new BigDecimal("51000"), new BigDecimal("2")), linearWithMaintenance()));
+    assertCode("REDUCE_ONLY_WOULD_INCREASE", () -> engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.BUY, "0.1", PositionMode.ONE_WAY,
+            PositionSide.BOTH, MarginMode.CROSS, 10, true),
+        fill(new BigDecimal("51000"), new BigDecimal("0.1")), linearWithMaintenance()));
+
+    assertThat(existing.getLots()).isEqualByComparingTo("1");
+    assertThat(existing.getStatus()).isEqualTo(PositionStatus.OPEN);
+    verify(positionRepository, never()).save(any(PositionEntity.class));
+    verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
+    verify(accountRepository, never()).save(any(TradingAccountEntity.class));
+    org.mockito.Mockito.verifyNoInteractions(ledgerService);
+  }
+
+  @Test
+  void oneWayExactOppositeFillClosesTheBothSlot() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, new BigDecimal("20000"), new BigDecimal("5000"), 10);
+    account.setPositionMode(PositionMode.ONE_WAY);
+    PositionEntity existing = canonicalPosition(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "50000", "5000",
+        PositionMode.ONE_WAY, PositionSide.BOTH);
+    when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.ONE_WAY, PositionSide.BOTH))
+        .thenReturn(Optional.of(existing));
+    when(positionRepository.save(existing)).thenReturn(existing);
+
+    PositionEntity closed = engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.SELL, "1", PositionMode.ONE_WAY,
+            PositionSide.BOTH, MarginMode.CROSS, 10, true),
+        fill(new BigDecimal("51000"), BigDecimal.ONE), linearWithMaintenance()).position();
+
+    assertThat(closed.getStatus()).isEqualTo(PositionStatus.CLOSED);
+    assertThat(closed.getMarginHeld()).isZero();
+    assertThat(closed.getRealizedPnl()).isEqualByComparingTo("1000.00000000");
+  }
+
+  @Test
+  void reduceOnlyCannotOpenAnEmptyOneWaySlot() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, new BigDecimal("20000"), BigDecimal.ZERO, 10);
+    account.setPositionMode(PositionMode.ONE_WAY);
+    when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.ONE_WAY, PositionSide.BOTH))
+        .thenReturn(Optional.empty());
+
+    assertCode("REDUCE_ONLY_WOULD_INCREASE", () -> engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.BUY, "0.1", PositionMode.ONE_WAY,
+            PositionSide.BOTH, MarginMode.CROSS, 10, true),
+        fill(new BigDecimal("50000"), new BigDecimal("0.1")), linearWithMaintenance()));
+    verify(positionRepository, never()).save(any(PositionEntity.class));
+  }
+
+  @Test
+  void oneWayPerpetualIncreasesReducesAndReversesTheBothSlot() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, new BigDecimal("20000"), new BigDecimal("10"), 10);
+    account.setPositionMode(PositionMode.ONE_WAY);
+    PositionEntity existing = canonicalPosition(
+        accountId, "ETHUSDT-PERP", OrderSide.BUY, "1", "100", "10",
+        PositionMode.ONE_WAY, PositionSide.BOTH);
+    when(positionRepository.save(any(PositionEntity.class))).thenAnswer(invocation -> withId(invocation.getArgument(0)));
+    when(accountRepository.reserveMarginIfAvailable(eq(accountId), any(BigDecimal.class))).thenReturn(1);
+    lenient().when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "ETHUSDT-PERP", PositionMode.ONE_WAY, PositionSide.BOTH))
+        .thenReturn(Optional.of(existing));
+    lenient().when(positionRepository.findOpenNetPosition(accountId, "ETHUSDT-PERP"))
+        .thenReturn(Optional.of(existing));
+    org.mockito.Mockito.clearInvocations(positionRepository);
+
+    PositionEntity increased = engine().applyFill(
+        account,
+        perpetualOrder(accountId, "ETHUSDT-PERP", OrderSide.BUY, "1", PositionMode.ONE_WAY,
+            PositionSide.BOTH, MarginMode.CROSS, 10, false),
+        fill(new BigDecimal("120"), BigDecimal.ONE), linearWithMaintenance()).position();
+    assertThat(increased.getLots()).isEqualByComparingTo("2");
+    assertThat(increased.getOpenPrice()).isEqualByComparingTo("110.00000000");
+
+    PositionEntity reduced = engine().applyFill(
+        account,
+        perpetualOrder(accountId, "ETHUSDT-PERP", OrderSide.SELL, "0.5", PositionMode.ONE_WAY,
+            PositionSide.BOTH, MarginMode.CROSS, 10, false),
+        fill(new BigDecimal("130"), new BigDecimal("0.5")), linearWithMaintenance()).position();
+    assertThat(reduced.getLots()).isEqualByComparingTo("1.5");
+    assertThat(reduced.getOpenPrice()).isEqualByComparingTo("110.00000000");
+
+    PositionEntity reversed = engine().applyFill(
+        account,
+        perpetualOrder(accountId, "ETHUSDT-PERP", OrderSide.SELL, "2", PositionMode.ONE_WAY,
+            PositionSide.BOTH, MarginMode.CROSS, 10, false),
+        fill(new BigDecimal("90"), new BigDecimal("2")), linearWithMaintenance()).position();
+    assertThat(existing.getStatus()).isEqualTo(PositionStatus.CLOSED);
+    assertThat(reversed.getId()).isNotEqualTo(existing.getId());
+    assertThat(reversed.getSide()).isEqualTo(OrderSide.SELL);
+    assertThat(reversed.getLots()).isEqualByComparingTo("0.5");
+    assertThat(reversed.getPositionSide()).isEqualTo(PositionSide.BOTH);
+    verify(positionRepository, org.mockito.Mockito.times(3)).findOpenPerpetualSlotForUpdate(
+        accountId, "ETHUSDT-PERP", PositionMode.ONE_WAY, PositionSide.BOTH);
+  }
+
+  @Test
+  void hedgePerpetualMaintainsIndependentLongAndShortSlotsAndCloseDirections() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, new BigDecimal("30000"), BigDecimal.ZERO, 10);
+    account.setPositionMode(PositionMode.HEDGE);
+    when(positionRepository.save(any(PositionEntity.class))).thenAnswer(invocation -> withId(invocation.getArgument(0)));
+    when(accountRepository.reserveMarginIfAvailable(eq(accountId), any(BigDecimal.class))).thenReturn(1);
+    lenient().when(positionRepository.findOpenNetPosition(accountId, "BTCUSDT-PERP"))
+        .thenReturn(Optional.empty());
+    lenient().when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.HEDGE, PositionSide.LONG))
+        .thenReturn(Optional.empty());
+
+    PositionEntity longLeg = engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", PositionMode.HEDGE,
+            PositionSide.LONG, MarginMode.ISOLATED, 20, false),
+        fill(new BigDecimal("50000"), BigDecimal.ONE), linearWithMaintenance()).position();
+
+    lenient().when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.HEDGE, PositionSide.SHORT))
+        .thenReturn(Optional.empty());
+    PositionEntity shortLeg = engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.SELL, "2", PositionMode.HEDGE,
+            PositionSide.SHORT, MarginMode.ISOLATED, 20, false),
+        fill(new BigDecimal("50010"), new BigDecimal("2")), linearWithMaintenance()).position();
+
+    assertThat(longLeg.getPositionSide()).isEqualTo(PositionSide.LONG);
+    assertThat(longLeg.getSide()).isEqualTo(OrderSide.BUY);
+    assertThat(shortLeg.getPositionSide()).isEqualTo(PositionSide.SHORT);
+    assertThat(shortLeg.getSide()).isEqualTo(OrderSide.SELL);
+    assertThat(longLeg.getId()).isNotEqualTo(shortLeg.getId());
+    assertThat(longLeg.getLeverage()).isEqualTo(shortLeg.getLeverage()).isEqualTo(20);
+    assertThat(longLeg.getMarginMode()).isEqualTo(shortLeg.getMarginMode()).isEqualTo(MarginMode.ISOLATED);
+
+    lenient().when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.HEDGE, PositionSide.LONG))
+        .thenReturn(Optional.of(longLeg));
+    lenient().when(positionRepository.findOpenNetPosition(accountId, "BTCUSDT-PERP"))
+        .thenReturn(Optional.of(longLeg));
+    PositionEntity reducedLong = engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.SELL, "0.4", PositionMode.HEDGE,
+            PositionSide.LONG, MarginMode.ISOLATED, 20, true),
+        fill(new BigDecimal("50100"), new BigDecimal("0.4")), linearWithMaintenance()).position();
+
+    assertThat(reducedLong.getLots()).isEqualByComparingTo("0.6");
+    assertThat(shortLeg.getLots()).isEqualByComparingTo("2");
+
+    lenient().when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.HEDGE, PositionSide.SHORT))
+        .thenReturn(Optional.of(shortLeg));
+    PositionEntity reducedShort = engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.BUY, "0.5", PositionMode.HEDGE,
+            PositionSide.SHORT, MarginMode.ISOLATED, 20, true),
+        fill(new BigDecimal("49900"), new BigDecimal("0.5")), linearWithMaintenance()).position();
+    assertThat(reducedShort.getLots()).isEqualByComparingTo("1.5");
+    assertThat(reducedLong.getLots()).isEqualByComparingTo("0.6");
+  }
+
+  @Test
+  void hedgeRejectsBothSlotBeforeOpeningAnyPosition() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, new BigDecimal("30000"), BigDecimal.ZERO, 10);
+    account.setPositionMode(PositionMode.HEDGE);
+    lenient().when(positionRepository.findOpenNetPosition(accountId, "BTCUSDT-PERP"))
+        .thenReturn(Optional.empty());
+
+    assertCode("INVALID_POSITION_SIDE", () -> engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", PositionMode.HEDGE,
+            PositionSide.BOTH, MarginMode.CROSS, 10, false),
+        fill(new BigDecimal("50000"), BigDecimal.ONE), linearWithMaintenance()));
+  }
+
+  @Test
+  void hedgeMalformedExistingSlotDirectionRejectsBeforeMutation() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(
+        accountId, new BigDecimal("30000"), new BigDecimal("5000"), 10);
+    account.setPositionMode(PositionMode.HEDGE);
+    PositionEntity malformedLong = canonicalPosition(
+        accountId,
+        "BTCUSDT-PERP",
+        OrderSide.SELL,
+        "1",
+        "50000",
+        "5000",
+        PositionMode.HEDGE,
+        PositionSide.LONG);
+    when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.HEDGE, PositionSide.LONG))
+        .thenReturn(Optional.of(malformedLong));
+
+    assertCode("INVALID_POSITION_SIDE", () -> engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.BUY, "0.1", PositionMode.HEDGE,
+            PositionSide.LONG, MarginMode.CROSS, 10, false),
+        fill(new BigDecimal("50100"), new BigDecimal("0.1")),
+        linearWithMaintenance()));
+
+    verify(positionRepository, never()).save(any(PositionEntity.class));
+    verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
+    verify(accountRepository, never()).save(any(TradingAccountEntity.class));
+    org.mockito.Mockito.verifyNoInteractions(ledgerService);
+  }
+
+  @Test
+  void hedgeOverCloseRejectsWithoutClampingOrOpeningTheOppositeLeg() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, new BigDecimal("30000"), new BigDecimal("5000"), 10);
+    account.setPositionMode(PositionMode.HEDGE);
+    PositionEntity longLeg = canonicalPosition(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "50000", "5000",
+        PositionMode.HEDGE, PositionSide.LONG);
+    lenient().when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.HEDGE, PositionSide.LONG))
+        .thenReturn(Optional.of(longLeg));
+    lenient().when(positionRepository.findOpenNetPosition(accountId, "BTCUSDT-PERP"))
+        .thenReturn(Optional.of(longLeg));
+
+    assertCode("REDUCE_ONLY_EXCEEDS_POSITION", () -> engine().applyFill(
+        account,
+        perpetualOrder(accountId, "BTCUSDT-PERP", OrderSide.SELL, "2", PositionMode.HEDGE,
+            PositionSide.LONG, MarginMode.CROSS, 10, false),
+        fill(new BigDecimal("51000"), new BigDecimal("2")), linearWithMaintenance()));
+
+    assertThat(longLeg.getLots()).isEqualByComparingTo("1");
+    assertThat(longLeg.getStatus()).isEqualTo(PositionStatus.OPEN);
+    verify(positionRepository, never()).save(any(PositionEntity.class));
+    verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
+    verify(accountRepository, never()).save(any(TradingAccountEntity.class));
+    org.mockito.Mockito.verifyNoInteractions(ledgerService);
+  }
+
   private PositionEngine engine() {
     return new PositionEngine(
         positionRepository,
@@ -332,6 +638,30 @@ class PositionEngineTest {
     order.setLots(quantity);
     order.setQuantity(quantity);
     order.setLeverage(leverage);
+    if (!"EURUSD".equals(symbol)) {
+      order.setProductType(ProductType.LINEAR_PERP);
+    }
+    return order;
+  }
+
+  private static OrderEntity perpetualOrder(
+      UUID accountId,
+      String symbol,
+      OrderSide side,
+      String quantity,
+      PositionMode positionMode,
+      PositionSide positionSide,
+      MarginMode marginMode,
+      int leverage,
+      boolean reduceOnly
+  ) {
+    OrderEntity order = order(accountId, symbol, side, new BigDecimal(quantity), leverage);
+    order.setProductType(ProductType.LINEAR_PERP);
+    order.setPositionMode(positionMode);
+    order.setPositionSide(positionSide);
+    order.setMarginMode(marginMode);
+    order.setReduceOnly(reduceOnly);
+    order.setBaseQuantity(new BigDecimal(quantity));
     return order;
   }
 
@@ -382,6 +712,51 @@ class PositionEngineTest {
         new BigDecimal("0.005"),
         "USDT",
         "USDT");
+  }
+
+  private static InstrumentProfile canonicalLinear(String contractSize, String contractMultiplier) {
+    return new InstrumentProfile(
+        InstrumentKind.LINEAR_PERPETUAL,
+        new BigDecimal(contractSize).multiply(new BigDecimal(contractMultiplier)),
+        "SWAP",
+        "CONTRACT",
+        new BigDecimal(contractSize),
+        new BigDecimal(contractMultiplier),
+        new BigDecimal("0.005"),
+        "USDT",
+        "USDT");
+  }
+
+  private static PositionEntity canonicalPosition(
+      UUID accountId,
+      String symbol,
+      OrderSide side,
+      String quantity,
+      String openPrice,
+      String margin,
+      PositionMode positionMode,
+      PositionSide positionSide
+  ) {
+    PositionEntity position = openPosition(
+        accountId, symbol, side, quantity, openPrice, margin, 10);
+    position.setProductType(ProductType.LINEAR_PERP);
+    position.setPositionMode(positionMode);
+    position.setPositionSide(positionSide);
+    position.setMarginMode(MarginMode.CROSS);
+    position.setNotional(new BigDecimal(quantity).multiply(new BigDecimal(openPrice)));
+    position.setInitialMargin(new BigDecimal(margin));
+    position.setMaintenanceMargin(new BigDecimal("1"));
+    position.setMarkPrice(new BigDecimal(openPrice));
+    return position;
+  }
+
+  private static void assertCode(
+      String code,
+      org.assertj.core.api.ThrowableAssert.ThrowingCallable action
+  ) {
+    assertThatThrownBy(action)
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo(code));
   }
 
   private static PositionEntity withId(PositionEntity position) {

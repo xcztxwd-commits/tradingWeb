@@ -102,7 +102,7 @@ public class AccountSnapshotService {
     BigDecimal valuationPrice = isPerpetual(profile.kind()) ? markPrice(quote, closeoutPrice) : closeoutPrice;
     BigDecimal floatingPnl = floatingPnl(position, account.getBaseCurrency(), symbol, profile, valuationPrice);
     if (isPerpetual(profile.kind())) {
-      PerpMarginCalculator.MarginResult margin = perpMarginCalculator.calculate(
+      PerpMarginCalculator.MarginResult margin = perpetualMargin(
           profile,
           position.getLots(),
           valuationPrice,
@@ -137,7 +137,32 @@ public class AccountSnapshotService {
         position.getLots(),
         position.getOpenPrice(),
         valuationPrice,
-        profile.unitSize());
+        canonicalUnitSize(profile));
+  }
+
+  private PerpMarginCalculator.MarginResult perpetualMargin(
+      InstrumentProfile profile,
+      BigDecimal quantity,
+      BigDecimal markPrice,
+      int leverage
+  ) {
+    if (profile.kind() == InstrumentKind.LINEAR_PERPETUAL) {
+      return perpMarginCalculator.calculate(
+          InstrumentKind.LINEAR_PERPETUAL,
+          quantity,
+          BigDecimal.ONE,
+          BigDecimal.ONE,
+          markPrice,
+          leverage,
+          profile.maintenanceMarginRate());
+    }
+    return perpMarginCalculator.calculate(profile, quantity, markPrice, leverage);
+  }
+
+  private BigDecimal canonicalUnitSize(InstrumentProfile profile) {
+    return profile.kind() == InstrumentKind.LINEAR_PERPETUAL
+        ? BigDecimal.ONE
+        : profile.unitSize();
   }
 
   private BigDecimal closeoutPrice(PositionEntity position, QuoteResponse quote) {

@@ -102,6 +102,73 @@ class QuantityConversionServiceTest {
     assertThat(conversion.baseQuantity().stripTrailingZeros().scale()).isLessThanOrEqualTo(4);
   }
 
+  @Test
+  void perpetualBasePreservesExactCanonicalQuantityAndValidatesNotional() {
+    QuantityConversionService.Conversion conversion = service.convertPerpetual(
+        QuantityUnit.BASE,
+        new BigDecimal("0.1234"),
+        new BigDecimal("0.00001"),
+        new BigDecimal("0.01"),
+        new BigDecimal("10"),
+        new BigDecimal("50000"),
+        new BigDecimal("5"));
+
+    assertThat(conversion.originalQuantity()).isEqualByComparingTo("0.1234");
+    assertThat(conversion.originalUnit()).isEqualTo(QuantityUnit.BASE);
+    assertThat(conversion.baseQuantity()).isEqualByComparingTo("0.1234");
+    assertThat(conversion.projectedQuoteSpend()).isEqualByComparingTo("6170.00000000");
+  }
+
+  @Test
+  void perpetualQuoteRoundsDownToStorageCompatibleStep() {
+    QuantityConversionService.Conversion conversion = service.convertPerpetual(
+        QuantityUnit.QUOTE,
+        new BigDecimal("100"),
+        new BigDecimal("0.00003"),
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        new BigDecimal("50000"),
+        new BigDecimal("5"));
+
+    assertThat(conversion.baseQuantity()).isEqualByComparingTo("0.0018");
+    assertThat(conversion.baseQuantity().remainder(new BigDecimal("0.00003"))).isZero();
+    assertThat(conversion.baseQuantity().stripTrailingZeros().scale()).isLessThanOrEqualTo(4);
+    assertThat(conversion.projectedQuoteSpend()).isEqualByComparingTo("90.00000000");
+  }
+
+  @Test
+  void perpetualContractsApplyContractSizeAndMultiplierExactlyOnce() {
+    QuantityConversionService.Conversion conversion = service.convertPerpetual(
+        QuantityUnit.CONTRACTS,
+        new BigDecimal("3"),
+        new BigDecimal("0.0001"),
+        new BigDecimal("0.01"),
+        new BigDecimal("10"),
+        new BigDecimal("50000"),
+        new BigDecimal("5"));
+
+    assertThat(conversion.originalQuantity()).isEqualByComparingTo("3");
+    assertThat(conversion.originalUnit()).isEqualTo(QuantityUnit.CONTRACTS);
+    assertThat(conversion.baseQuantity()).isEqualByComparingTo("0.30");
+    assertThat(conversion.projectedQuoteSpend()).isEqualByComparingTo("15000.00000000");
+  }
+
+  @Test
+  void perpetualRejectsNonIntegralContractsStepMismatchDustAndMinimumNotional() {
+    assertCode("CONTRACT_QUANTITY_NOT_INTEGRAL", () -> service.convertPerpetual(
+        QuantityUnit.CONTRACTS, new BigDecimal("1.5"), new BigDecimal("0.0001"),
+        new BigDecimal("0.01"), BigDecimal.ONE, new BigDecimal("50000"), new BigDecimal("5")));
+    assertCode("QUANTITY_STEP_MISMATCH", () -> service.convertPerpetual(
+        QuantityUnit.CONTRACTS, BigDecimal.ONE, new BigDecimal("0.0001"),
+        new BigDecimal("0.00015"), BigDecimal.ONE, new BigDecimal("50000"), new BigDecimal("5")));
+    assertCode("QUANTITY_CONVERTS_TO_ZERO", () -> service.convertPerpetual(
+        QuantityUnit.QUOTE, BigDecimal.ONE, new BigDecimal("0.0001"),
+        BigDecimal.ONE, BigDecimal.ONE, new BigDecimal("50000"), new BigDecimal("5")));
+    assertCode("ORDER_NOTIONAL_TOO_SMALL", () -> service.convertPerpetual(
+        QuantityUnit.BASE, new BigDecimal("0.0001"), new BigDecimal("0.0001"),
+        BigDecimal.ONE, BigDecimal.ONE, new BigDecimal("10000"), new BigDecimal("5")));
+  }
+
   private static FullFillPricingProjection marketPricing(String price) {
     return new FullFillPricingProjection(
         new BigDecimal(price),

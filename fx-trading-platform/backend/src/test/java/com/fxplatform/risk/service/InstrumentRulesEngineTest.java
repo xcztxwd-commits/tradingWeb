@@ -307,6 +307,35 @@ class InstrumentRulesEngineTest {
             exception -> assertThat(exception.getCode()).isEqualTo("ORDER_NOTIONAL_TOO_SMALL"));
   }
 
+  @Test
+  void linearPerpetualCanonicalBaseNotionalDoesNotApplyContractSizeTwice() {
+    SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setSymbol("BTCUSDT-PERP");
+    symbol.setProductType(ProductType.LINEAR_PERP);
+    symbol.setAssetClass("LINEAR_PERP");
+    symbol.setContractSize(new BigDecimal("0.01"));
+    symbol.setContractMultiplier(new BigDecimal("10"));
+    symbol.setMinLot(new BigDecimal("0.0001"));
+    SymbolProviderBindingEntity binding = binding(
+        symbol.getId(), UUID.randomUUID(), UUID.randomUUID(), "BTCUSDT");
+    ProviderInstrumentEntity instrument = providerInstrument(
+        binding.getProviderInstrumentId(), binding.getProviderId(), "BTCUSDT",
+        """
+        {"rules":{"stepSize":"0.0001","minNotional":"5.00000000"}}
+        """);
+    when(bindingRepository.findEnabledBySymbolIdOrderByPriority(symbol.getId()))
+        .thenReturn(List.of(binding));
+    when(providerInstrumentRepository.findById(binding.getProviderInstrumentId()))
+        .thenReturn(Optional.of(instrument));
+
+    assertThatCode(() -> engine().validateCanonicalOrder(
+        limitOrder("BTCUSDT-PERP", "0.001", "5000"),
+        symbol,
+        new BigDecimal("0.001"),
+        new BigDecimal("5000")))
+        .doesNotThrowAnyException();
+  }
+
   private InstrumentRulesEngine engine() {
     return new InstrumentRulesEngine(
         symbolRepository,
