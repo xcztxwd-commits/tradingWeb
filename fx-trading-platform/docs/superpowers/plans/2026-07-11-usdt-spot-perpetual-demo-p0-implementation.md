@@ -610,14 +610,22 @@ The scheduler loop must invoke a separate transactional worker per order so one 
 
 **Files:**
 - Create: backend/src/main/java/com/fxplatform/trading/dto/request/CreateOcoOrderRequest.java
-- Create: backend/src/main/java/com/fxplatform/trading/dto/response/OcoOrderResponse.java
+- Create: backend/src/main/java/com/fxplatform/trading/dto/response/OcoOrderGroupResponse.java
 - Create: backend/src/main/java/com/fxplatform/trading/service/QuantityConversionService.java
 - Create: backend/src/main/java/com/fxplatform/trading/service/OrderHoldCalculator.java
 - Create: backend/src/main/java/com/fxplatform/trading/service/OcoOrderService.java
 - Create: backend/src/main/java/com/fxplatform/trading/service/PendingOrderExecutionProcessor.java
+- Modify: backend/src/main/java/com/fxplatform/trading/dto/request/CreateOrderRequest.java
+- Modify: backend/src/main/java/com/fxplatform/trading/service/OrderCommand.java
+- Modify: backend/src/main/java/com/fxplatform/trading/service/OrderCommandFactory.java
+- Modify: backend/src/main/java/com/fxplatform/trading/service/OrderEntityFactory.java
+- Modify: backend/src/main/java/com/fxplatform/trading/service/OrderResponseMapper.java
+- Modify: backend/src/main/java/com/fxplatform/execution/FullFillCoordinator.java
 - Modify: backend/src/main/java/com/fxplatform/risk/service/RiskCheckService.java
+- Modify: backend/src/main/java/com/fxplatform/risk/service/InstrumentRulesEngine.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/OrderService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/PendingOrderExecutionService.java
+- Modify: backend/src/main/java/com/fxplatform/trading/service/OrderFillService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/SpotSettlementService.java
 - Modify: backend/src/main/java/com/fxplatform/wallet/service/WalletService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/repository/OrderRepository.java
@@ -626,20 +634,39 @@ The scheduler loop must invoke a separate transactional worker per order so one 
 - Test: backend/src/test/java/com/fxplatform/trading/service/OrderHoldCalculatorTest.java
 - Test: backend/src/test/java/com/fxplatform/trading/service/OcoOrderServiceTest.java
 - Test: backend/src/test/java/com/fxplatform/trading/service/SpotSettlementServiceTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/dto/request/CreateOrderRequestTest.java
+- Test: backend/src/test/java/com/fxplatform/risk/service/InstrumentRulesEngineTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/service/OrderServiceTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/service/PendingOrderExecutionProcessorTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/service/OrderResponseMapperTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/controller/TradingControllerTest.java
+- Test: backend/src/test/java/com/fxplatform/trading/service/Task6PostgresSpotIT.java
 
 **Interfaces:**
-- Spot MARKET BUY consumes QUOTE USDT budget; MARKET SELL consumes BASE quantity.
-- LIMIT, STOP_MARKET and both OCO legs consume BASE quantity.
-- OCO is two rows in trading.orders with one contingencyGroupId and one holdOwnerOrderId.
+- Spot MARKET BUY consumes a QUOTE USDT budget; its public quantity/unit and
+  `originalQuantity` remain QUOTE, while the backend converts it from the same whole bundle
+  to a step-rounded-down canonical `baseQuantity` before rules and execution. MARKET SELL
+  consumes BASE.
+- LIMIT, STOP_MARKET and both OCO legs consume BASE. Spot persists `CASH`, `BOTH`, GTC and
+  `reduceOnly=false`; reject CONTRACTS, legacy STOP and attached protections.
+- Immediate marketable LIMIT is taker; resting GTC LIMIT is maker. STOP_MARKET uses last for
+  triggering and bid/ask plus slippage for filling, never the trigger price.
+- OCO is two rows in `trading.orders` with one `contingencyGroupId`. Both rows reference the
+  same `holdOwnerOrderId`; only the owner row stores a positive hold. Filling one leg atomically
+  cancels the other, and canceling either leg cancels the group and releases once.
+- Reuse V46/V47; Task 6 adds no table or Flyway migration.
 
 - [ ] **Step 1: Write RED quantity and hold tests**
 
 Cover:
 
-    MARKET BUY QUOTE budget is not converted on the client contract
+    MARKET BUY public contract and originalQuantity stay QUOTE; backend execution is canonical BASE
     MARKET SELL, LIMIT, STOP_MARKET and OCO use BASE
-    BUY hold includes worst-case spend; SELL hold is base quantity
-    tick/step/min notional come from market.symbols
+    conversion rounds BASE down to the aggregated instrument step and leaves quote dust available
+    LIMIT BUY hold uses limit price; STOP BUY uses max(trigger, ask) plus slippage; BUY OCO takes max
+    SELL hold is one base quantity; quote holds round upward at wallet scale
+    tick/step/min/max/min-notional come from InstrumentRulesEngine provider-first aggregation
+    P0 Spot makes no QuoteService call and uses one whole bundle per attempt
 
 - [ ] **Step 2: Write RED Spot fee tests**
 
@@ -650,24 +677,40 @@ Assert BUY receives base minus 0.05% taker or 0.02% maker fee with feeAsset=base
     BUY limit >= current ask => immediate full fill
     SELL limit <= current bid => immediate full fill
     otherwise PENDING
-    STOP_MARKET uses last price trigger
+    STOP_MARKET uses last price trigger and market execution price
+    already-triggered STOP_MARKET fills immediately; otherwise it stays PENDING
     cancelled pending order releases hold exactly once
+    snapshot stale after lock wait rolls back and re-resolves outside the transaction at most once
 
 - [ ] **Step 4: Write RED OCO matrix**
 
-Cover BUY and SELL price validation, one shared hold, one-leg-fill-cancels-other, manual cancel cancels group, replay returns same group, and concurrent leg triggers create at most one Trade.
+Cover BUY and SELL price validation, one shared hold/owner, non-owner-leg settlement,
+one-leg-fill-cancels-other, manual cancel cancels the group, ordinary single-leg modify rejection,
+replay/concurrent replay returns one group, fill-vs-cancel rollback safety, and concurrent leg
+triggers create at most one Trade.
 
 - [ ] **Step 5: Run RED**
 
-    & $mvn -f backend/pom.xml "-Dtest=QuantityConversionServiceTest,OrderHoldCalculatorTest,SpotSettlementServiceTest,OcoOrderServiceTest,PendingOrderExecutionServiceTest" test
+    & $mvn -f backend/pom.xml "-Dtest=CreateOrderRequestTest,QuantityConversionServiceTest,OrderHoldCalculatorTest,InstrumentRulesEngineTest,OrderServiceTest,SpotSettlementServiceTest,OcoOrderServiceTest,PendingOrderExecutionProcessorTest,PendingOrderExecutionServiceTest,OrderResponseMapperTest,TradingControllerTest" test
 
 - [ ] **Step 6: Implement Spot semantics**
 
-Perform hold and order creation in one account/wallet transaction. PendingOrderExecutionProcessor invokes the Task 5 TradingTransactionExecutor (`REQUIRES_NEW`) per order rather than defining another transaction boundary. OCO group claim and peer cancellation occur under ordered row locks.
+Perform hold and order creation in one account/wallet transaction. Resolve each whole bundle
+outside locks. `PendingOrderExecutionProcessor` defines no second transaction policy; it invokes
+the Task 5 `TradingTransactionExecutor` (`REQUIRES_NEW`) once per candidate. Use account -> sorted
+wallet -> Spot position -> UUID-sorted group-order locks. Recheck status, peer, trigger and freshness
+after locks; claim winner, cancel peer, consume/release the shared hold and fill in one transaction.
+Do not duplicate Task 5 pricing or fee constants; expose a side-effect-free projection from the
+shared policy if conversion/hold calculation requires it.
 
 - [ ] **Step 7: Run GREEN and wallet regression**
 
-    & $mvn -f backend/pom.xml "-Dtest=QuantityConversionServiceTest,OrderHoldCalculatorTest,SpotSettlementServiceTest,OcoOrderServiceTest,PendingOrderExecutionServiceTest,WalletServiceTest,SpotPositionServiceTest,WalletReconciliationServiceTest" test
+    & $mvn -f backend/pom.xml "-Dtest=CreateOrderRequestTest,QuantityConversionServiceTest,OrderHoldCalculatorTest,InstrumentRulesEngineTest,OrderServiceTest,SpotSettlementServiceTest,OcoOrderServiceTest,PendingOrderExecutionProcessorTest,PendingOrderExecutionServiceTest,OrderResponseMapperTest,TradingControllerTest,WalletServiceTest,SpotPositionServiceTest,WalletReconciliationServiceTest" test
+
+Run `Task6PostgresSpotIT` explicitly for concurrent group create/fill/cancel, failure rollback,
+non-owner hold consumption, stale lock wait and balance invariants. If Docker is unavailable,
+record the exact skips and do not claim PostgreSQL behavior passed. Then run the full backend suite
+and static-check that P0 Spot has no QuoteService dependency or new PARTIALLY_FILLED write.
 
 - [ ] **Step 8: Commit**
 
