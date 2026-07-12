@@ -1,6 +1,10 @@
 package com.fxplatform.account.controller;
 
 import com.fxplatform.account.dto.AccountResponse;
+import com.fxplatform.account.dto.AccountTransferRequest;
+import com.fxplatform.account.dto.AccountTransferResponse;
+import com.fxplatform.account.dto.DemoResetRequest;
+import com.fxplatform.account.dto.DemoResetResponse;
 import com.fxplatform.account.dto.AssetConversionRequest;
 import com.fxplatform.account.dto.AssetConversionResponse;
 import com.fxplatform.account.dto.AssetLedgerEntryResponse;
@@ -88,6 +92,32 @@ public class AccountController {
       @Valid @RequestBody AssetConversionRequest request
   ) {
     return ApiResponse.success(accountService.convertAsset(principal.id(), accountId, request));
+  }
+
+  @PostMapping("/{accountId}/transfers")
+  public ApiResponse<AccountTransferResponse> transfer(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @PathVariable UUID accountId,
+      @Valid @RequestBody AccountTransferRequest request
+  ) {
+    return ApiResponse.success(accountService.transfer(principal.id(), accountId, request));
+  }
+
+  @GetMapping("/{accountId}/transfers")
+  public ApiResponse<List<AccountTransferResponse>> transferHistory(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @PathVariable UUID accountId
+  ) {
+    return ApiResponse.success(accountService.transferHistory(principal.id(), accountId));
+  }
+
+  @PostMapping("/{accountId}/demo-reset")
+  public ApiResponse<DemoResetResponse> resetDemo(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @PathVariable UUID accountId,
+      @Valid @RequestBody DemoResetRequest request
+  ) {
+    return ApiResponse.success(accountService.resetDemo(principal.id(), accountId, request.requestId()));
   }
 
   /**

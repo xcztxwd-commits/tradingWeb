@@ -2,12 +2,16 @@ package com.fxplatform.account.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.dto.AssetConversionRequest;
 import com.fxplatform.account.dto.AssetConversionResponse;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.service.AssetConversionService;
@@ -65,6 +69,7 @@ class AccountAssetConversionTest {
         conversionId);
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(assetConversionService.convert(
+        userId,
         accountId,
         WalletType.USDT_PERP,
         "USDT",
@@ -85,6 +90,7 @@ class AccountAssetConversionTest {
     assertThat(response.fromWalletType()).isEqualTo("USDT_PERP");
     assertThat(response.toAsset()).isEqualTo("USD");
     verify(assetConversionService).convert(
+        userId,
         accountId,
         WalletType.USDT_PERP,
         "USDT",
@@ -92,5 +98,27 @@ class AccountAssetConversionTest {
         "USD",
         new BigDecimal("250.00000000"),
         conversionId);
+  }
+
+  @Test
+  void wrongOwnerDoesNotReachTheConversionWriter() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    AssetConversionRequest request = new AssetConversionRequest(
+        "SPOT", "USDT", "FX_MARGIN", "USD", BigDecimal.ONE, UUID.randomUUID());
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.empty());
+    AccountService service = new AccountService(
+        accountRepository,
+        ledgerService,
+        accountSnapshotService,
+        walletService,
+        assetConversionService);
+
+    assertThatThrownBy(() -> service.convertAsset(userId, accountId, request))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("ACCOUNT_NOT_FOUND"));
+
+    verify(assetConversionService, never()).convert(
+        any(), any(), any(), any(), any(), any(), any(), any());
   }
 }

@@ -5,6 +5,11 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.dto.AssetConversionRequest;
+import com.fxplatform.account.dto.AccountTransferRequest;
+import com.fxplatform.account.dto.AccountTransferRequest.Direction;
+import com.fxplatform.account.dto.AccountTransferResponse;
+import com.fxplatform.account.dto.DemoResetRequest;
+import com.fxplatform.account.dto.DemoResetResponse;
 import com.fxplatform.account.dto.AssetConversionResponse;
 import com.fxplatform.account.dto.AssetLedgerEntryResponse;
 import com.fxplatform.account.dto.WalletBalanceResponse;
@@ -108,5 +113,60 @@ class AccountControllerWalletTest {
         request);
 
     assertThat(response.data()).isEqualTo(conversion);
+  }
+
+  @Test
+  void transferEndpointBindsTheAuthenticatedOwnerAndRequestId() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID requestId = UUID.randomUUID();
+    AccountTransferRequest request = new AccountTransferRequest(
+        Direction.SPOT_TO_PERP, new BigDecimal("250.00000000"), requestId);
+    AccountTransferResponse expected = new AccountTransferResponse(
+        accountId, requestId, Direction.SPOT_TO_PERP, request.amount(),
+        new BigDecimal("49750.00000000"), new BigDecimal("50250.00000000"),
+        new BigDecimal("50250.00000000"), false, Instant.now());
+    AccountService accountService = org.mockito.Mockito.mock(AccountService.class);
+    when(accountService.transfer(userId, accountId, request)).thenReturn(expected);
+    AccountController controller = new AccountController(accountService);
+
+    var response = controller.transfer(
+        new UserPrincipal(userId, "trader@example.com", "TRADER"), accountId, request);
+
+    assertThat(response.data()).isEqualTo(expected);
+  }
+
+  @Test
+  void demoResetEndpointBindsTheAuthenticatedOwnerAndRequestId() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID requestId = UUID.randomUUID();
+    DemoResetRequest request = new DemoResetRequest(requestId);
+    DemoResetResponse expected = new DemoResetResponse(
+        accountId, requestId, 2L, new BigDecimal("50000.00000000"),
+        new BigDecimal("50000.00000000"), new BigDecimal("50000.00000000"),
+        Instant.now(), false);
+    AccountService accountService = org.mockito.Mockito.mock(AccountService.class);
+    when(accountService.resetDemo(userId, accountId, requestId)).thenReturn(expected);
+    AccountController controller = new AccountController(accountService);
+
+    var response = controller.resetDemo(
+        new UserPrincipal(userId, "trader@example.com", "TRADER"), accountId, request);
+
+    assertThat(response.data()).isEqualTo(expected);
+  }
+
+  @Test
+  void transferHistoryEndpointUsesTheAuthenticatedOwner() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    AccountService accountService = org.mockito.Mockito.mock(AccountService.class);
+    when(accountService.transferHistory(userId, accountId)).thenReturn(List.of());
+    AccountController controller = new AccountController(accountService);
+
+    var response = controller.transferHistory(
+        new UserPrincipal(userId, "trader@example.com", "TRADER"), accountId);
+
+    assertThat(response.data()).isEmpty();
   }
 }

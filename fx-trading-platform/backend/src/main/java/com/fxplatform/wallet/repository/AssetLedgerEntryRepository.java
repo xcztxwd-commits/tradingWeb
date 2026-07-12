@@ -36,6 +36,19 @@ public interface AssetLedgerEntryRepository extends FxBaseMapper<AssetLedgerEntr
         .orderByDesc(AssetLedgerEntryEntity::getCreatedAt));
   }
 
+  default List<AssetLedgerEntryEntity> findByReference(
+      UUID accountId,
+      String referenceType,
+      UUID referenceId
+  ) {
+    return selectList(new LambdaQueryWrapper<AssetLedgerEntryEntity>()
+        .eq(AssetLedgerEntryEntity::getAccountId, accountId)
+        .eq(AssetLedgerEntryEntity::getReferenceType, referenceType)
+        .eq(AssetLedgerEntryEntity::getReferenceId, referenceId)
+        .orderByAsc(AssetLedgerEntryEntity::getCreatedAt)
+        .orderByAsc(AssetLedgerEntryEntity::getId));
+  }
+
   default List<AssetLedgerEntryEntity> findByFilters(
       UUID accountId,
       String walletType,

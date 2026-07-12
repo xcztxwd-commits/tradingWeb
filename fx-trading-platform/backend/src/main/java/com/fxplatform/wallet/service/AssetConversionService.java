@@ -1,24 +1,40 @@
 package com.fxplatform.wallet.service;
 
+import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.wallet.enums.WalletType;
 import java.math.BigDecimal;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@RequiredArgsConstructor
 public class AssetConversionService {
 
   private static final BigDecimal DEMO_USDT_USD_RATE = BigDecimal.ONE;
 
+  private final TradingAccountRepository accountRepository;
   private final WalletService walletService;
+  private final DemoExecutionGuard demoExecutionGuard;
+
+  public AssetConversionService(
+      TradingAccountRepository accountRepository,
+      WalletService walletService,
+      DemoExecutionGuard demoExecutionGuard
+  ) {
+    this.accountRepository = accountRepository;
+    this.walletService = walletService;
+    this.demoExecutionGuard = demoExecutionGuard;
+  }
 
   @Transactional
   public ConversionResult convert(
+      UUID userId,
       UUID accountId,
       WalletType fromWalletType,
       String fromAsset,
@@ -27,11 +43,24 @@ public class AssetConversionService {
       BigDecimal amount,
       UUID conversionId
   ) {
+    var account = accountRepository.findByIdAndUserIdForUpdate(accountId, userId)
+        .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
+    demoExecutionGuard.requireDemoAccount(account);
+
     String normalizedFromAsset = normalizeAsset(fromAsset);
     String normalizedToAsset = normalizeAsset(toAsset);
     if (!"USDT".equals(normalizedFromAsset) || !"USD".equals(normalizedToAsset)) {
       throw new BusinessException("UNSUPPORTED_CONVERSION_PAIR", "Only USDT to USD demo conversion is supported");
     }
+    List<WalletService.WalletKey> walletKeys = List.of(
+            new WalletService.WalletKey(fromWalletType, normalizedFromAsset),
+            new WalletService.WalletKey(toWalletType, normalizedToAsset))
+        .stream()
+        .sorted(Comparator
+            .comparing((WalletService.WalletKey key) -> key.walletType().code())
+            .thenComparing(WalletService.WalletKey::asset))
+        .toList();
+    walletService.lockWalletsInOrder(accountId, walletKeys);
     walletService.debitAvailableWithEntryType(
         accountId,
         fromWalletType,

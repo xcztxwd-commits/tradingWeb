@@ -2,6 +2,7 @@ package com.fxplatform.execution;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.enums.AccountType;
+import com.fxplatform.account.enums.AccountStatus;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.common.market.SymbolNormalizer;
@@ -42,6 +43,11 @@ public class DemoExecutionGuard {
       ProductType productType,
       String canonicalSymbol
   ) {
+    requireDemoAccount(account);
+    requireAllowedProduct(productType, canonicalSymbol);
+  }
+
+  public void requireDemoAccount(TradingAccountEntity account) {
     if (executionProperties.mode() != ExecutionMode.DEMO) {
       throw new BusinessException(
           ErrorCode.EXECUTION_DISABLED,
@@ -52,6 +58,14 @@ public class DemoExecutionGuard {
           ErrorCode.DEMO_ACCOUNT_REQUIRED,
           "Trading writes require a demo account");
     }
+    if (account.getStatus() != AccountStatus.ACTIVE) {
+      throw new BusinessException(
+          ErrorCode.ACCOUNT_NOT_ACTIVE,
+          "Trading writes require an active account");
+    }
+  }
+
+  private void requireAllowedProduct(ProductType productType, String canonicalSymbol) {
     if (productType != ProductType.CRYPTO_SPOT && productType != ProductType.LINEAR_PERP) {
       throw new BusinessException(
           ErrorCode.PRODUCT_NOT_ALLOWED,

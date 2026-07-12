@@ -16,6 +16,8 @@ import com.fxplatform.ledger.enums.LedgerEntryType;
 import com.fxplatform.ledger.repository.LedgerEntryRepository;
 import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
+import com.fxplatform.account.dto.AccountTransferRequest.Direction;
+import com.fxplatform.common.exception.BusinessException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -141,6 +143,90 @@ class LedgerServiceTest {
     assertThat(entry.getCurrency()).isEqualTo("USD");
     assertThat(entry.getReferenceType()).isEqualTo("POSITION");
     assertThat(entry.getReferenceId()).isEqualTo(positionId);
+  }
+
+  @Test
+  void transferPairIsReconstructedFromOppositeCashAndSpotLedgerEntries() {
+    UUID accountId = UUID.randomUUID();
+    UUID transferId = UUID.randomUUID();
+    LedgerEntryEntity cash = new LedgerEntryEntity();
+    cash.setAccountId(accountId);
+    cash.setEntryType(LedgerEntryType.TRANSFER_IN);
+    cash.setOperationType("TRANSFER_IN");
+    cash.setAmount(new BigDecimal("250.00000000"));
+    cash.setCreatedAt(Instant.parse("2026-07-12T00:00:00Z"));
+    AssetLedgerEntryEntity spot = new AssetLedgerEntryEntity();
+    spot.setAccountId(accountId);
+    spot.setOperationType("TRANSFER_OUT");
+    spot.setAmount(new BigDecimal("-250.00000000"));
+    when(ledgerEntryRepository.findByReference(accountId, "TRANSFER", transferId))
+        .thenReturn(List.of(cash));
+    when(assetLedgerEntryRepository.findByReference(accountId, "TRANSFER", transferId))
+        .thenReturn(List.of(spot));
+
+    var record = new LedgerService(
+        ledgerEntryRepository, accountRepository, assetLedgerEntryRepository)
+        .findTransfer(accountId, transferId)
+        .orElseThrow();
+
+    assertThat(record.direction()).isEqualTo(Direction.SPOT_TO_PERP);
+    assertThat(record.amount()).isEqualByComparingTo("250.00000000");
+  }
+
+  @Test
+  void incompleteOrAmountMismatchedTransferPairFailsClosed() {
+    UUID accountId = UUID.randomUUID();
+    UUID transferId = UUID.randomUUID();
+    LedgerEntryEntity cash = new LedgerEntryEntity();
+    cash.setOperationType("TRANSFER_OUT");
+    cash.setAmount(new BigDecimal("20.00000000"));
+    AssetLedgerEntryEntity spot = new AssetLedgerEntryEntity();
+    spot.setOperationType("TRANSFER_IN");
+    spot.setAmount(new BigDecimal("19.00000000"));
+    when(ledgerEntryRepository.findByReference(accountId, "TRANSFER", transferId))
+        .thenReturn(List.of(cash));
+    when(assetLedgerEntryRepository.findByReference(accountId, "TRANSFER", transferId))
+        .thenReturn(List.of(spot));
+    LedgerService service = new LedgerService(
+        ledgerEntryRepository, accountRepository, assetLedgerEntryRepository);
+
+    assertThatThrownBy(() -> service.findTransfer(accountId, transferId))
+        .isInstanceOfSatisfying(BusinessException.class,
+            ex -> assertThat(ex.getCode()).isEqualTo("TRANSFER_REQUEST_CONFLICT"));
+
+    when(assetLedgerEntryRepository.findByReference(accountId, "TRANSFER", transferId))
+        .thenReturn(List.of());
+    assertThatThrownBy(() -> service.findTransfer(accountId, transferId))
+        .isInstanceOfSatisfying(BusinessException.class,
+            ex -> assertThat(ex.getCode()).isEqualTo("TRANSFER_REQUEST_CONFLICT"));
+  }
+
+  @Test
+  void demoInitResetAndTransferUseStableV47LedgerEntryTypes() {
+    UUID accountId = UUID.randomUUID();
+    UUID resetId = UUID.randomUUID();
+    UUID transferId = UUID.randomUUID();
+    TradingAccountEntity account = new TradingAccountEntity();
+    account.setId(accountId);
+    account.setBaseCurrency("USDT");
+    account.setBalance(new BigDecimal("50000.00000000"));
+    when(ledgerEntryRepository.save(any(LedgerEntryEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    LedgerService service = new LedgerService(ledgerEntryRepository, accountRepository);
+
+    LedgerEntryEntity init = service.recordDemoInit(account, new BigDecimal("50000.00000000"));
+    LedgerEntryEntity reset = service.recordDemoReset(account, new BigDecimal("1000.00000000"), resetId);
+    LedgerEntryEntity transfer = service.recordTransfer(
+        account, LedgerEntryType.TRANSFER_OUT, new BigDecimal("-50.00000000"), transferId,
+        "Perpetual to Spot transfer");
+
+    assertThat(init.getEntryType()).isEqualTo(LedgerEntryType.DEMO_INIT);
+    assertThat(init.getReferenceType()).isEqualTo("DEMO_ACCOUNT");
+    assertThat(reset.getEntryType()).isEqualTo(LedgerEntryType.DEMO_RESET);
+    assertThat(reset.getReferenceType()).isEqualTo("DEMO_RESET");
+    assertThat(transfer.getEntryType()).isEqualTo(LedgerEntryType.TRANSFER_OUT);
+    assertThat(transfer.getReferenceType()).isEqualTo("TRANSFER");
+    assertThat(LedgerEntryType.valueOf("DEMO_INIT")).isEqualTo(LedgerEntryType.DEMO_INIT);
   }
 
   @Test

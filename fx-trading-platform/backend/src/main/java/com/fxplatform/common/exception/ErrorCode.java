@@ -36,6 +36,10 @@ public final class ErrorCode {
   public static final String OCO_GROUP_INCOMPLETE = "OCO_GROUP_INCOMPLETE";
   public static final String OCO_ORDER_NOT_MODIFIABLE = "OCO_ORDER_NOT_MODIFIABLE";
   public static final String ORDER_HOLD_INVALID = "ORDER_HOLD_INVALID";
+  public static final String DEMO_RESET_BLOCKED = "DEMO_RESET_BLOCKED";
+  public static final String TRANSFER_AMOUNT_INVALID = "TRANSFER_AMOUNT_INVALID";
+  public static final String TRANSFER_AMOUNT_UNAVAILABLE = "TRANSFER_AMOUNT_UNAVAILABLE";
+  public static final String TRANSFER_REQUEST_CONFLICT = "TRANSFER_REQUEST_CONFLICT";
 
   private static final Set<String> STANDARD_CODES = Set.of(
       AUTH_TOKEN_EXPIRED,
@@ -69,7 +73,11 @@ public final class ErrorCode {
       OCO_PRICE_RELATION_INVALID,
       OCO_GROUP_INCOMPLETE,
       OCO_ORDER_NOT_MODIFIABLE,
-      ORDER_HOLD_INVALID);
+      ORDER_HOLD_INVALID,
+      DEMO_RESET_BLOCKED,
+      TRANSFER_AMOUNT_INVALID,
+      TRANSFER_AMOUNT_UNAVAILABLE,
+      TRANSFER_REQUEST_CONFLICT);
 
   private ErrorCode() {
   }

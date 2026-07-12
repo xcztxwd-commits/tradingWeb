@@ -11,6 +11,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -23,6 +24,9 @@ import org.springframework.util.StringUtils;
 @Service
 @RequiredArgsConstructor
 public class WalletService {
+
+  public record WalletKey(WalletType walletType, String asset) {
+  }
 
   private static final int MONEY_SCALE = 8;
   private static final WalletType DEFAULT_WALLET_TYPE = WalletType.SPOT;
@@ -46,6 +50,46 @@ public class WalletService {
   }
 
   @Transactional
+  public List<WalletBalanceEntity> lockAllBalances(UUID accountId) {
+    return walletBalanceRepository.findByAccountIdForUpdate(accountId);
+  }
+
+  @Transactional
+  public WalletBalanceEntity resetBalance(
+      UUID accountId,
+      WalletType walletType,
+      String asset,
+      BigDecimal target,
+      UUID requestId,
+      String description
+  ) {
+    if (target == null || target.signum() < 0 || requestId == null) {
+      throw new BusinessException("INVALID_RESET_BALANCE", "Reset balance is invalid");
+    }
+    BigDecimal normalizedTarget = scale(target);
+    WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, asset);
+    if (findExistingOperation(
+        balance,
+        AssetLedgerEntryType.DEMO_RESET.name(),
+        "DEMO_RESET",
+        requestId) != null) {
+      return balance;
+    }
+    BigDecimal delta = normalizedTarget.subtract(scale(balance.getTotal()));
+    balance.setTotal(normalizedTarget);
+    balance.setAvailable(normalizedTarget);
+    balance.setLocked(BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.HALF_UP));
+    persist(
+        balance,
+        delta,
+        AssetLedgerEntryType.DEMO_RESET.name(),
+        "DEMO_RESET",
+        requestId,
+        description);
+    return balance;
+  }
+
+  @Transactional
   public List<WalletBalanceEntity> lockBalancesInOrder(UUID accountId, Collection<String> assets) {
     return assets.stream()
         .map(WalletService::normalizeAsset)
@@ -53,6 +97,26 @@ public class WalletService {
         .distinct()
         .sorted()
         .map(asset -> getOrCreateBalance(accountId, DEFAULT_WALLET_TYPE, asset))
+        .toList();
+  }
+
+  @Transactional
+  public List<WalletBalanceEntity> lockWalletsInOrder(
+      UUID accountId,
+      List<WalletKey> walletKeys
+  ) {
+    if (walletKeys == null) {
+      throw new BusinessException("WALLET_KEYS_REQUIRED", "Wallet keys are required");
+    }
+    return walletKeys.stream()
+        .map(key -> new WalletKey(
+            key == null || key.walletType() == null ? DEFAULT_WALLET_TYPE : key.walletType(),
+            normalizeAsset(key == null ? null : key.asset())))
+        .distinct()
+        .sorted(Comparator
+            .comparing((WalletKey key) -> key.walletType().code())
+            .thenComparing(WalletKey::asset))
+        .map(key -> getOrCreateBalance(accountId, key.walletType(), key.asset()))
         .toList();
   }
 

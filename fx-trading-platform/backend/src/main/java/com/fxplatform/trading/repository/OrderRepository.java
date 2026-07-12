@@ -84,6 +84,19 @@ public interface OrderRepository extends FxBaseMapper<OrderEntity> {
       """)
   List<OrderEntity> findPendingByAccountIdForUpdate(@Param("accountId") UUID accountId);
 
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE account_id = #{accountId}
+        AND status IN (
+          'RECEIVED', 'VALIDATING', 'ACCEPTED', 'PENDING_ACTIVATION', 'PENDING',
+          'WORKING', 'PARTIALLY_FILLED', 'CANCEL_PENDING'
+        )
+      ORDER BY id
+      FOR UPDATE
+      """)
+  List<OrderEntity> findActiveByAccountIdForUpdate(@Param("accountId") UUID accountId);
+
   default List<OrderEntity> findByContingencyGroupId(UUID contingencyGroupId) {
     return selectList(new LambdaQueryWrapper<OrderEntity>()
         .eq(OrderEntity::getContingencyGroupId, contingencyGroupId)

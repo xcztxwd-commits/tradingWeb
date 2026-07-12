@@ -60,7 +60,7 @@ public class AuthService {
     userRepository.save(user);
 
     // 注册即创建 DEMO 账户，并通过 LedgerService 写入初始模拟入金流水。
-    accountService.createDemoAccount(user.getId());
+    accountService.getOrCreateDemoAccount(user.getId());
 
     return newSessionTokenResponse(user, context);
   }

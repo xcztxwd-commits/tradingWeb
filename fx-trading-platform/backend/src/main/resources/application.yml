@@ -124,9 +124,9 @@ execution:
     account-id: ${EXECUTION_LP_ACCOUNT_ID:}
 
 trading:
-  default-demo-balance: ${DEFAULT_DEMO_BALANCE:10000}
-  default-account-currency: ${DEFAULT_ACCOUNT_CURRENCY:USD}
-  default-leverage: ${DEFAULT_LEVERAGE:100}
+  default-demo-balance: ${DEFAULT_DEMO_BALANCE:50000}
+  default-account-currency: ${DEFAULT_ACCOUNT_CURRENCY:USDT}
+  default-leverage: ${DEFAULT_LEVERAGE:10}
   margin-call-level: ${MARGIN_CALL_LEVEL:100}
   stop-out-level: ${STOP_OUT_LEVEL:50}
   pending-order-execution-enabled: ${TRADING_PENDING_ORDER_EXECUTION_ENABLED:false}

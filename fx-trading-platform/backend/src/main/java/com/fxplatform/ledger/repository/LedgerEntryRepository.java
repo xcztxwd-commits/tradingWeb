@@ -30,4 +30,17 @@ public interface LedgerEntryRepository extends FxBaseMapper<LedgerEntryEntity> {
         .eq(LedgerEntryEntity::getAccountId, accountId)
         .orderByDesc(LedgerEntryEntity::getCreatedAt));
   }
+
+  default List<LedgerEntryEntity> findByReference(
+      UUID accountId,
+      String referenceType,
+      UUID referenceId
+  ) {
+    return selectList(new LambdaQueryWrapper<LedgerEntryEntity>()
+        .eq(LedgerEntryEntity::getAccountId, accountId)
+        .eq(LedgerEntryEntity::getReferenceType, referenceType)
+        .eq(LedgerEntryEntity::getReferenceId, referenceId)
+        .orderByAsc(LedgerEntryEntity::getCreatedAt)
+        .orderByAsc(LedgerEntryEntity::getId));
+  }
 }

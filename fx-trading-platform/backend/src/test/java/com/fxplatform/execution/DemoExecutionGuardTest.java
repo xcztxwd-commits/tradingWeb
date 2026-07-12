@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.enums.AccountType;
+import com.fxplatform.account.enums.AccountStatus;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.model.ProductType;
@@ -62,6 +63,19 @@ class DemoExecutionGuardTest {
         ProductType.CRYPTO_SPOT,
         "BTCUSDT"))
         .doesNotThrowAnyException();
+  }
+
+  @Test
+  void accountOnlyGuardAcceptsOnlyActiveDemoAccountsInDemoMode() {
+    TradingAccountEntity demo = account(AccountType.DEMO);
+    assertThatCode(() -> guard.requireDemoAccount(demo)).doesNotThrowAnyException();
+
+    TradingAccountEntity frozen = account(AccountType.DEMO);
+    frozen.setStatus(AccountStatus.FROZEN);
+    assertCode("ACCOUNT_NOT_ACTIVE", () -> guard.requireDemoAccount(frozen));
+    assertCode("DEMO_ACCOUNT_REQUIRED", () -> guard.requireDemoAccount(account(AccountType.LIVE)));
+    properties.setMode(ExecutionMode.DISABLED);
+    assertCode("EXECUTION_DISABLED", () -> guard.requireDemoAccount(demo));
   }
 
   @Test

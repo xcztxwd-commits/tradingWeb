@@ -1,0 +1,261 @@
+package com.fxplatform.account.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.fxplatform.account.dto.AccountTransferRequest.Direction;
+import com.fxplatform.account.entity.TradingAccountEntity;
+import com.fxplatform.account.enums.AccountStatus;
+import com.fxplatform.account.enums.AccountType;
+import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.execution.DemoExecutionGuard;
+import com.fxplatform.ledger.enums.LedgerEntryType;
+import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.wallet.entity.WalletBalanceEntity;
+import com.fxplatform.wallet.enums.WalletType;
+import com.fxplatform.wallet.service.WalletService;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+@ExtendWith(MockitoExtension.class)
+class AccountTransferServiceTest {
+
+  @Mock TradingAccountRepository accountRepository;
+  @Mock WalletService walletService;
+  @Mock LedgerService ledgerService;
+  @Mock DemoExecutionGuard demoExecutionGuard;
+
+  private UUID accountId;
+  private UUID userId;
+  private TradingAccountEntity account;
+  private WalletBalanceEntity spot;
+  private AccountTransferService service;
+
+  @BeforeEach
+  void setUp() {
+    accountId = UUID.randomUUID();
+    userId = UUID.randomUUID();
+    account = demoAccount(accountId, "50000.00000000", "50000.00000000");
+    account.setUserId(userId);
+    spot = spotWallet(accountId, "50000.00000000", "50000.00000000", "0.00000000");
+    service = new AccountTransferService(accountRepository, walletService, ledgerService, demoExecutionGuard);
+    org.mockito.Mockito.lenient().when(accountRepository.findByIdAndUserIdForUpdate(accountId, userId))
+        .thenReturn(Optional.of(account));
+    org.mockito.Mockito.lenient().when(walletService.lockBalancesInOrder(accountId, List.of("USDT")))
+        .thenReturn(List.of(spot));
+    org.mockito.Mockito.lenient().when(ledgerService.findTransfer(eq(accountId), any(UUID.class)))
+        .thenReturn(Optional.empty());
+  }
+
+  @Test
+  void spotToPerpUsesOnlyAvailableAndWritesOppositePairedLedgers() {
+    UUID requestId = UUID.randomUUID();
+    BigDecimal amount = new BigDecimal("1250.00000000");
+    when(walletService.debitAvailableWithEntryType(
+        accountId, WalletType.SPOT, "USDT", amount, "TRANSFER", requestId,
+        "Spot to perpetual transfer", "TRANSFER_OUT"))
+        .thenAnswer(invocation -> {
+          spot.setAvailable(new BigDecimal("48750.00000000"));
+          spot.setTotal(new BigDecimal("48750.00000000"));
+          return spot;
+        });
+
+    var response = service.transfer(userId, accountId, Direction.SPOT_TO_PERP, amount, requestId);
+
+    assertThat(response.transferId()).isEqualTo(requestId);
+    assertThat(response.direction()).isEqualTo(Direction.SPOT_TO_PERP);
+    assertThat(response.amount()).isEqualByComparingTo(amount);
+    assertThat(response.spotAvailable()).isEqualByComparingTo("48750.00000000");
+    assertThat(response.perpBalance()).isEqualByComparingTo("51250.00000000");
+    assertThat(response.perpFreeMargin()).isEqualByComparingTo("51250.00000000");
+    assertThat(response.replayed()).isFalse();
+    assertThat(account.getEquity()).isEqualByComparingTo("51250.00000000");
+    verify(ledgerService).recordTransfer(
+        account, LedgerEntryType.TRANSFER_IN, amount, requestId, "Spot to perpetual transfer");
+    verify(demoExecutionGuard).requireDemoAccount(account);
+  }
+
+  @Test
+  void perpToSpotUsesOnlyFreeMarginAndConservesTheTwoBalances() {
+    UUID requestId = UUID.randomUUID();
+    BigDecimal amount = new BigDecimal("3000.00000000");
+    account.setUsedMargin(new BigDecimal("10000.00000000"));
+    account.setFreeMargin(new BigDecimal("40000.00000000"));
+    when(walletService.creditAvailableWithEntryType(
+        accountId, WalletType.SPOT, "USDT", amount, "TRANSFER", requestId,
+        "Perpetual to Spot transfer", "TRANSFER_IN"))
+        .thenAnswer(invocation -> {
+          spot.setAvailable(new BigDecimal("53000.00000000"));
+          spot.setTotal(new BigDecimal("53000.00000000"));
+          return spot;
+        });
+
+    var response = service.transfer(userId, accountId, Direction.PERP_TO_SPOT, amount, requestId);
+
+    assertThat(response.spotAvailable().add(response.perpBalance()))
+        .isEqualByComparingTo("100000.00000000");
+    assertThat(response.perpBalance()).isEqualByComparingTo("47000.00000000");
+    assertThat(response.perpFreeMargin()).isEqualByComparingTo("37000.00000000");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("10000.00000000");
+    verify(ledgerService).recordTransfer(
+        account, LedgerEntryType.TRANSFER_OUT, amount.negate(), requestId,
+        "Perpetual to Spot transfer");
+  }
+
+  @Test
+  void rejectsSpotLockedFundsAndPerpUsedMarginWithoutAnyLedgerMutation() {
+    spot.setTotal(new BigDecimal("1000.00000000"));
+    spot.setAvailable(new BigDecimal("100.00000000"));
+    spot.setLocked(new BigDecimal("900.00000000"));
+
+    assertThatThrownBy(() -> service.transfer(
+        userId, accountId, Direction.SPOT_TO_PERP, new BigDecimal("101.00000000"), UUID.randomUUID()))
+        .isInstanceOfSatisfying(BusinessException.class,
+            ex -> assertThat(ex.getCode()).isEqualTo("TRANSFER_AMOUNT_UNAVAILABLE"));
+
+    verify(walletService, never()).debitAvailableWithEntryType(
+        any(), any(WalletType.class), any(), any(), any(), any(), any(), any());
+    verify(ledgerService, never()).recordTransfer(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void rejectsPerpTransferAboveFreeMarginEvenWhenBalanceIsLarger() {
+    account.setBalance(new BigDecimal("50000.00000000"));
+    account.setEquity(new BigDecimal("50000.00000000"));
+    account.setUsedMargin(new BigDecimal("49000.00000000"));
+    account.setFreeMargin(new BigDecimal("1000.00000000"));
+
+    assertThatThrownBy(() -> service.transfer(
+        userId, accountId, Direction.PERP_TO_SPOT, new BigDecimal("1000.00000001"), UUID.randomUUID()))
+        .isInstanceOfSatisfying(BusinessException.class,
+            ex -> assertThat(ex.getCode()).isEqualTo("TRANSFER_AMOUNT_UNAVAILABLE"));
+
+    verify(walletService, never()).creditAvailableWithEntryType(
+        any(), any(WalletType.class), any(), any(), any(), any(), any(), any());
+    verify(ledgerService, never()).recordTransfer(any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void sameRequestAndSemanticsReplaysWhileConflictingSemanticsFailClosed() {
+    UUID requestId = UUID.randomUUID();
+    BigDecimal amount = new BigDecimal("25.00000000");
+    when(ledgerService.findTransfer(accountId, requestId)).thenReturn(Optional.of(
+        new LedgerService.TransferRecord(Direction.SPOT_TO_PERP, amount,
+            Instant.parse("2026-07-12T00:00:00Z"))));
+
+    var replay = service.transfer(userId, accountId, Direction.SPOT_TO_PERP, amount, requestId);
+
+    assertThat(replay.replayed()).isTrue();
+    verify(walletService, never()).debitAvailableWithEntryType(
+        any(), any(WalletType.class), any(), any(), any(), any(), any(), any());
+    verify(ledgerService, never()).recordTransfer(any(), any(), any(), any(), any());
+
+    assertThatThrownBy(() -> service.transfer(userId, accountId, Direction.PERP_TO_SPOT, amount, requestId))
+        .isInstanceOfSatisfying(BusinessException.class,
+            ex -> assertThat(ex.getCode()).isEqualTo("TRANSFER_REQUEST_CONFLICT"));
+  }
+
+  @Test
+  void serializesAccountThenSpotWalletThenReadsLedger() {
+    UUID requestId = UUID.randomUUID();
+    BigDecimal amount = new BigDecimal("1.00000000");
+    when(walletService.debitAvailableWithEntryType(
+        eq(accountId), eq(WalletType.SPOT), eq("USDT"), eq(amount), eq("TRANSFER"), eq(requestId),
+        any(), eq("TRANSFER_OUT"))).thenReturn(spot);
+
+    service.transfer(userId, accountId, Direction.SPOT_TO_PERP, amount, requestId);
+
+    InOrder locks = inOrder(accountRepository, walletService, ledgerService);
+    locks.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
+    locks.verify(walletService).lockBalancesInOrder(accountId, List.of("USDT"));
+    locks.verify(ledgerService).findTransfer(accountId, requestId);
+  }
+
+  @Test
+  void rejectsNonPositiveAmountBeforeTakingMutationLocks() {
+    assertThatThrownBy(() -> service.transfer(
+        userId, accountId, Direction.SPOT_TO_PERP, BigDecimal.ZERO, UUID.randomUUID()))
+        .isInstanceOfSatisfying(BusinessException.class,
+            ex -> assertThat(ex.getCode()).isEqualTo("TRANSFER_AMOUNT_INVALID"));
+
+    verify(accountRepository, never()).findByIdAndUserIdForUpdate(any(), any());
+  }
+
+  @Test
+  void rejectsAnAccountNotOwnedByThePrincipalBeforeWalletOrLedgerMutation() {
+    UUID attacker = UUID.randomUUID();
+    when(accountRepository.findByIdAndUserIdForUpdate(accountId, attacker)).thenReturn(Optional.empty());
+
+    assertThatThrownBy(() -> service.transfer(
+        attacker, accountId, Direction.SPOT_TO_PERP, BigDecimal.ONE, UUID.randomUUID()))
+        .isInstanceOfSatisfying(BusinessException.class,
+            ex -> assertThat(ex.getCode()).isEqualTo("ACCOUNT_NOT_FOUND"));
+
+    verify(walletService, never()).lockBalancesInOrder(any(), anyList());
+    verify(ledgerService, never()).findTransfer(any(), any());
+  }
+
+  @Test
+  void transferHistoryIsOwnerBoundAndAggregatesOneResponsePerTransferId() {
+    UUID transferId = UUID.randomUUID();
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(ledgerService.transferRecords(accountId)).thenReturn(List.of(
+        new LedgerService.TransferHistoryRecord(
+            transferId,
+            Direction.PERP_TO_SPOT,
+            new BigDecimal("75.00000000"),
+            new BigDecimal("50075.00000000"),
+            new BigDecimal("49925.00000000"),
+            Instant.parse("2026-07-12T02:00:00Z"))));
+
+    var history = service.history(userId, accountId);
+
+    assertThat(history).hasSize(1);
+    assertThat(history.getFirst().transferId()).isEqualTo(transferId);
+    assertThat(history.getFirst().direction()).isEqualTo(Direction.PERP_TO_SPOT);
+    assertThat(history.getFirst().spotAvailable()).isEqualByComparingTo("50075.00000000");
+    assertThat(history.getFirst().perpBalance()).isEqualByComparingTo("49925.00000000");
+  }
+
+  private static TradingAccountEntity demoAccount(UUID id, String balance, String freeMargin) {
+    TradingAccountEntity account = new TradingAccountEntity();
+    account.setId(id);
+    account.setAccountType(AccountType.DEMO);
+    account.setStatus(AccountStatus.ACTIVE);
+    account.setBaseCurrency("USDT");
+    account.setBalance(new BigDecimal(balance));
+    account.setEquity(new BigDecimal(balance));
+    account.setUsedMargin(BigDecimal.ZERO.setScale(8));
+    account.setFreeMargin(new BigDecimal(freeMargin));
+    return account;
+  }
+
+  private static WalletBalanceEntity spotWallet(UUID accountId, String total, String available, String locked) {
+    WalletBalanceEntity wallet = new WalletBalanceEntity();
+    wallet.setId(UUID.randomUUID());
+    wallet.setAccountId(accountId);
+    wallet.setWalletType(WalletType.SPOT.code());
+    wallet.setAsset("USDT");
+    wallet.setTotal(new BigDecimal(total));
+    wallet.setAvailable(new BigDecimal(available));
+    wallet.setLocked(new BigDecimal(locked));
+    return wallet;
+  }
+}

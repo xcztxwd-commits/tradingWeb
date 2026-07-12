@@ -4,6 +4,10 @@ import com.fxplatform.common.exception.BusinessException;
 import java.util.Locale;
 
 public enum AssetLedgerEntryType {
+  DEMO_INIT,
+  DEMO_RESET,
+  TRANSFER_IN,
+  TRANSFER_OUT,
   CREDIT_AVAILABLE,
   DEBIT_AVAILABLE,
   LOCK_AVAILABLE,
