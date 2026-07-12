@@ -13,7 +13,9 @@ import com.fxplatform.trading.enums.LiquidityRole;
 import com.fxplatform.trading.enums.OrderSide;
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.stream.Stream;
 import java.util.UUID;
@@ -106,6 +108,88 @@ class FullFillCoordinatorTest {
     assertThat(result.filledPrice()).isEqualByComparingTo("100.0100");
     assertThat(result.fee()).isEqualByComparingTo("0.10001000");
     assertThat(result.feeAsset()).isEqualTo("USDT");
+  }
+
+  @Test
+  void rejectsTheFillWhenTheAdapterCrossesTheSnapshotExpiry() {
+    MutableClock mutableClock = new MutableClock(NOW);
+    coordinator = new FullFillCoordinator(executionAdapter, mutableClock);
+    when(executionAdapter.execute(any(CreateOrderRequest.class))).thenAnswer(invocation -> {
+      mutableClock.advance(Duration.ofSeconds(3));
+      return intentResult(new BigDecimal("2"), BigDecimal.ZERO);
+    });
+
+    assertCode("MARKET_DATA_STALE", () -> coordinator.execute(
+        request("BTCUSDT", ProductType.CRYPTO_SPOT, OrderSide.BUY,
+            FullFillExecutionPath.MARKET, "2", null),
+        spotSnapshot("BTCUSDT")));
+  }
+
+  @Test
+  void exposesAReusableFreshnessGuardForTheCanonicalFullFillResult() {
+    MutableClock mutableClock = new MutableClock(NOW);
+    coordinator = new FullFillCoordinator(executionAdapter, mutableClock);
+    stubFullIntent("2");
+    FullFillResult result = coordinator.execute(
+        request("BTCUSDT", ProductType.CRYPTO_SPOT, OrderSide.BUY,
+            FullFillExecutionPath.MARKET, "2", null),
+        spotSnapshot("BTCUSDT"));
+
+    mutableClock.advance(Duration.ofSeconds(2));
+
+    assertCode("MARKET_DATA_STALE", () -> coordinator.requireFresh(result));
+  }
+
+  @Test
+  void stopMarketSellUsesBidSideSlippageAndTakerFee() {
+    stubFullIntent("2");
+
+    FullFillResult result = coordinator.execute(
+        request("BTCUSDT", ProductType.CRYPTO_SPOT, OrderSide.SELL,
+            FullFillExecutionPath.TRIGGERED_STOP_MARKET, "2", null),
+        spotSnapshot("BTCUSDT"));
+
+    assertThat(result.filledPrice()).isEqualByComparingTo("98.9901");
+    assertThat(result.slippage()).isEqualByComparingTo("0.0099");
+    assertThat(result.liquidityRole()).isEqualTo(LiquidityRole.TAKER);
+    assertThat(result.fee()).isEqualByComparingTo("0.09899010");
+    assertThat(result.feeAsset()).isEqualTo("USDT");
+  }
+
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("missingRequiredMarketPrices")
+  void rejectsEveryMissingRequiredMarketPrice(
+      String scenario,
+      FullFillRequest request,
+      ExecutableMarketSnapshot snapshot
+  ) {
+    assertCode("MARKET_BUNDLE_INCOMPLETE", () -> coordinator.execute(request, snapshot));
+  }
+
+  static Stream<Arguments> missingRequiredMarketPrices() {
+    FullFillRequest spotRequest = request(
+        "BTCUSDT", ProductType.CRYPTO_SPOT, OrderSide.BUY,
+        FullFillExecutionPath.MARKET, "2", null);
+    FullFillRequest perpRequest = request(
+        "BTCUSDT-PERP", ProductType.LINEAR_PERP, OrderSide.BUY,
+        FullFillExecutionPath.MARKET, "2", null);
+    return Stream.of(
+        Arguments.of("spot bid", spotRequest,
+            snapshot(ProductType.CRYPTO_SPOT, null, "100", "99.5", null, null)),
+        Arguments.of("spot ask", spotRequest,
+            snapshot(ProductType.CRYPTO_SPOT, "99", null, "99.5", null, null)),
+        Arguments.of("spot last", spotRequest,
+            snapshot(ProductType.CRYPTO_SPOT, "99", "100", null, null, null)),
+        Arguments.of("perpetual bid", perpRequest,
+            snapshot(ProductType.LINEAR_PERP, null, "100", "99.5", "99.6", "99.4")),
+        Arguments.of("perpetual ask", perpRequest,
+            snapshot(ProductType.LINEAR_PERP, "99", null, "99.5", "99.6", "99.4")),
+        Arguments.of("perpetual last", perpRequest,
+            snapshot(ProductType.LINEAR_PERP, "99", "100", null, "99.6", "99.4")),
+        Arguments.of("perpetual mark", perpRequest,
+            snapshot(ProductType.LINEAR_PERP, "99", "100", "99.5", null, "99.4")),
+        Arguments.of("perpetual index", perpRequest,
+            snapshot(ProductType.LINEAR_PERP, "99", "100", "99.5", "99.6", null)));
   }
 
   @Test
@@ -314,6 +398,65 @@ class FullFillCoordinatorTest {
         new BigDecimal("99.4"),
         NOW.minusSeconds(1),
         NOW.plusSeconds(2));
+  }
+
+  private static ExecutableMarketSnapshot snapshot(
+      ProductType productType,
+      String bid,
+      String ask,
+      String last,
+      String mark,
+      String index
+  ) {
+    boolean perpetual = productType == ProductType.LINEAR_PERP;
+    return new ExecutableMarketSnapshot(
+        perpetual ? "BTCUSDT-PERP" : "BTCUSDT",
+        productType,
+        perpetual ? "binance-usdm" : "binance",
+        "BTCUSDT",
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        decimal(bid),
+        decimal(ask),
+        decimal(last),
+        decimal(mark),
+        decimal(index),
+        NOW.minusSeconds(1),
+        NOW.plusSeconds(2));
+  }
+
+  private static BigDecimal decimal(String value) {
+    return value == null ? null : new BigDecimal(value);
+  }
+
+  private static final class MutableClock extends Clock {
+
+    private Instant current;
+
+    private MutableClock(Instant current) {
+      this.current = current;
+    }
+
+    private void advance(Duration duration) {
+      current = current.plus(duration);
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      if (!ZoneOffset.UTC.equals(zone)) {
+        throw new UnsupportedOperationException("Test clock only supports UTC");
+      }
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      return current;
+    }
   }
 
   private static void assertCode(String code, org.assertj.core.api.ThrowableAssert.ThrowingCallable action) {

@@ -197,6 +197,65 @@ class OrderServiceTest {
   }
 
   @Test
+  void p0MarketFinalFreshnessFailureAfterEnsureRollsBackAndRefetchesOutsideTransaction() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = p0MarketOrder(accountId, "final-stale-retry");
+    TradingAccountEntity account = demoAccount(userId, accountId);
+    FullFillResult first = fullFill("0.10", "100.0100");
+    FullFillResult second = fullFill("0.10", "100.0200");
+    AtomicBoolean insideMutation = new AtomicBoolean();
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(
+        userId, accountId, "final-stale-retry")).thenReturn(Optional.empty());
+    when(orderRepository.findByUserIdAndIdempotencyKey(userId, "final-stale-retry"))
+        .thenReturn(Optional.empty());
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(riskCheckService.checkOrder(eq(account), any())).thenReturn(BigDecimal.ZERO);
+    when(riskCheckService.resolveEffectiveLeverage(eq(account), any())).thenReturn(1);
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any()))
+        .thenAnswer(invocation -> {
+          assertThat(insideMutation.get()).isFalse();
+          return spotBundle("binance", Instant.now().plusSeconds(2));
+        });
+    when(fullFillCoordinator.execute(any(), any())).thenReturn(first, second);
+    org.mockito.Mockito.doThrow(new BusinessException("MARKET_DATA_STALE", "expired after ensure"))
+        .doNothing()
+        .when(fullFillCoordinator).requireFresh(any(FullFillResult.class));
+    org.mockito.Mockito.doAnswer(invocation -> {
+      insideMutation.set(true);
+      try {
+        return ((Supplier<?>) invocation.getArgument(0)).get();
+      } finally {
+        insideMutation.set(false);
+      }
+    }).when(transactionExecutor).execute(any());
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
+      OrderEntity order = invocation.getArgument(0);
+      if (order.getId() == null) {
+        order.setId(UUID.randomUUID());
+      }
+      return order;
+    });
+
+    OrderResponse response = orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, request);
+
+    assertThat(response.status()).isEqualTo(OrderStatus.FILLED.name());
+    verify(marketBundleResolver, org.mockito.Mockito.times(2)).resolveSpot(eq("BTCUSDT"), any());
+    verify(transactionExecutor, org.mockito.Mockito.times(2)).execute(any());
+    verify(fullFillCoordinator, org.mockito.Mockito.times(2)).execute(any(), any());
+    verify(fullFillCoordinator, org.mockito.Mockito.times(2)).requireFresh(any(FullFillResult.class));
+    verify(walletService, org.mockito.Mockito.times(2))
+        .lockBalancesInOrder(accountId, List.of("BTC", "USDT"));
+    verify(spotPositionService, org.mockito.Mockito.times(2))
+        .lockOrCreate(accountId, "BTC", "USDT");
+    verify(orderRepository, org.mockito.Mockito.times(2)).save(any(OrderEntity.class));
+    verify(tradeRepository).save(any(TradeEntity.class));
+  }
+
+  @Test
   void p0MarketReplayReturnsBeforeGuardAndBundleResolution() {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();

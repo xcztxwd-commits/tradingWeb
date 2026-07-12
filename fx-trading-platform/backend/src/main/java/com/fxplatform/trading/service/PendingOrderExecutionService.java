@@ -183,7 +183,7 @@ public class PendingOrderExecutionService {
     TradingAccountEntity account = accountRepository.findByIdForUpdate(candidate.accountId())
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
     demoExecutionGuard.requireDemo(account, candidate.productType(), candidate.symbol());
-    lockMutationState(account.getId(), candidate.productType(), candidate.symbol());
+    lockExistingP0State(account.getId(), candidate.productType());
     OrderEntity lockedOrder = orderRepository.findByIdForUpdate(candidate.orderId())
         .orElseThrow(() -> new BusinessException("ORDER_NOT_FOUND", "Order not found"));
     if (lockedOrder.getStatus() != OrderStatus.PENDING || !isTriggered(lockedOrder, candidate.snapshot())) {
@@ -206,7 +206,9 @@ public class PendingOrderExecutionService {
             path == FullFillExecutionPath.RESTING_LIMIT ? currentPrice(lockedOrder) : null),
         candidate.snapshot());
 
-    // Snapshot/trigger/full-quantity validation above must complete before the first claim/write.
+    ensureP0MutationState(account.getId(), candidate.productType(), lockedOrder.getSymbol());
+    // The final freshness gate must stay adjacent to the first claim/write.
+    fullFillCoordinator.requireFresh(fullFill);
     if (orderRepository.claimPending(lockedOrder.getId()) != 1) {
       return false;
     }
@@ -399,6 +401,31 @@ public class PendingOrderExecutionService {
       return;
     }
     positionRepository.findOpenByAccountIdForUpdate(accountId);
+  }
+
+  private void lockExistingP0State(UUID accountId, ProductType productType) {
+    if (productType == ProductType.CRYPTO_SPOT) {
+      walletBalanceRepository.findByAccountIdForUpdate(accountId);
+      spotPositionService.lockExisting(accountId);
+      return;
+    }
+    positionRepository.findOpenByAccountIdForUpdate(accountId);
+  }
+
+  private void ensureP0MutationState(
+      UUID accountId,
+      ProductType productType,
+      String canonicalSymbol
+  ) {
+    if (productType != ProductType.CRYPTO_SPOT
+        || canonicalSymbol == null
+        || !canonicalSymbol.endsWith("USDT")
+        || canonicalSymbol.length() <= 4) {
+      return;
+    }
+    String baseAsset = canonicalSymbol.substring(0, canonicalSymbol.length() - 4);
+    walletService.lockBalancesInOrder(accountId, List.of(baseAsset, "USDT"));
+    spotPositionService.lockOrCreate(accountId, baseAsset, "USDT");
   }
 
   private record PendingCandidate(

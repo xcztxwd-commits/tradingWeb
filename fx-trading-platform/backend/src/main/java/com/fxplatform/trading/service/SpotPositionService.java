@@ -5,6 +5,7 @@ import com.fxplatform.trading.repository.SpotPositionRepository;
 import com.fxplatform.wallet.enums.WalletType;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -75,6 +76,12 @@ public class SpotPositionService {
       String costAsset
   ) {
     return position(accountId, asset, costAsset);
+  }
+
+  /** Locks only rows that already exist; never creates a zero position as a lock side effect. */
+  @Transactional
+  public List<SpotPositionEntity> lockExisting(UUID accountId) {
+    return spotPositionRepository.findByAccountIdForUpdate(accountId);
   }
 
   private SpotPositionEntity position(UUID accountId, String asset, String costAsset) {

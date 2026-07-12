@@ -392,7 +392,7 @@ public class OrderService {
     TradingAccountEntity account = accountRepository.findByIdAndUserIdForUpdate(command.accountId(), command.userId())
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
     demoExecutionGuard.requireDemo(account, productType, command.symbol());
-    lockMutationState(account.getId(), productType, command.symbol());
+    lockExistingP0State(account.getId(), productType);
 
     OrderEntity order = preparedOrder(command, request, productType, effectiveLeverage);
     FullFillResult fullFill = fullFillCoordinator.execute(
@@ -406,7 +406,9 @@ public class OrderService {
             null),
         snapshot);
 
+    ensureP0MutationState(account.getId(), productType, command.symbol());
     order.setStatus(orderStatusPolicy.acceptedStatus(command.orderType()));
+    fullFillCoordinator.requireFresh(fullFill);
     orderRepository.save(order);
     orderFillService.fill(order, account, fullFill, requiredMargin, "Market order margin hold");
     orderEventService.record(
@@ -670,6 +672,31 @@ public class OrderService {
       return;
     }
     positionRepository.findOpenByAccountIdForUpdate(accountId);
+  }
+
+  private void lockExistingP0State(UUID accountId, ProductType productType) {
+    if (productType == ProductType.CRYPTO_SPOT) {
+      walletBalanceRepository.findByAccountIdForUpdate(accountId);
+      spotPositionService.lockExisting(accountId);
+      return;
+    }
+    positionRepository.findOpenByAccountIdForUpdate(accountId);
+  }
+
+  private void ensureP0MutationState(
+      UUID accountId,
+      ProductType productType,
+      String canonicalSymbol
+  ) {
+    if (productType != ProductType.CRYPTO_SPOT
+        || canonicalSymbol == null
+        || !canonicalSymbol.endsWith("USDT")
+        || canonicalSymbol.length() <= 4) {
+      return;
+    }
+    String baseAsset = canonicalSymbol.substring(0, canonicalSymbol.length() - 4);
+    walletService.lockBalancesInOrder(accountId, List.of(baseAsset, "USDT"));
+    spotPositionService.lockOrCreate(accountId, baseAsset, "USDT");
   }
 
 }

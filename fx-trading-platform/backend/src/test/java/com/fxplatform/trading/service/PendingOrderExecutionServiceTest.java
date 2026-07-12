@@ -183,11 +183,105 @@ class PendingOrderExecutionServiceTest {
         .requireDemo(account, ProductType.CRYPTO_SPOT, "BTCUSDT");
     guardBeforeProvider.verify(marketBundleResolver).resolveSpot(eq("BTCUSDT"), any());
     org.mockito.InOrder lockAndValidate = org.mockito.Mockito.inOrder(
-        accountRepository, walletService, orderRepository, fullFillCoordinator);
+        accountRepository,
+        walletBalanceRepository,
+        spotPositionService,
+        orderRepository,
+        fullFillCoordinator);
     lockAndValidate.verify(accountRepository).findByIdForUpdate(accountId);
-    lockAndValidate.verify(walletService).lockBalancesInOrder(accountId, List.of("BTC", "USDT"));
+    lockAndValidate.verify(walletBalanceRepository).findByAccountIdForUpdate(accountId);
+    lockAndValidate.verify(spotPositionService).lockExisting(accountId);
     lockAndValidate.verify(orderRepository).findByIdForUpdate(order.getId());
     lockAndValidate.verify(fullFillCoordinator).execute(any(), any());
+    verify(walletService, never()).lockBalancesInOrder(any(), any());
+    verify(spotPositionService, never()).lockOrCreate(any(), any(), any());
+  }
+
+  @Test
+  void p0StatusChangeAfterExistingStateLocksDoesNotEnsureMissingSpotRows() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity scanned = p0PendingOrder(accountId, "status-changed");
+    OrderEntity locked = p0PendingOrder(accountId, "status-changed");
+    locked.setId(scanned.getId());
+    locked.setStatus(OrderStatus.CANCELED);
+    TradingAccountEntity account = account(accountId);
+
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(scanned));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    org.mockito.Mockito.doReturn(Optional.of(locked))
+        .when(orderRepository).findByIdForUpdate(scanned.getId());
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(spotBundle());
+
+    assertThat(p0Service().executePendingOrders()).isZero();
+
+    verify(walletBalanceRepository).findByAccountIdForUpdate(accountId);
+    verify(spotPositionService).lockExisting(accountId);
+    verify(walletService, never()).lockBalancesInOrder(any(), any());
+    verify(spotPositionService, never()).lockOrCreate(any(), any(), any());
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderRepository, never()).claimPending(any());
+  }
+
+  @Test
+  void p0TriggerChangeAfterOrderLockDoesNotEnsureMissingSpotRows() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity scanned = p0PendingOrder(accountId, "trigger-changed");
+    OrderEntity locked = p0PendingOrder(accountId, "trigger-changed");
+    locked.setId(scanned.getId());
+    locked.setRequestedPrice(new BigDecimal("99"));
+    locked.setPrice(new BigDecimal("99"));
+    TradingAccountEntity account = account(accountId);
+
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(scanned));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    org.mockito.Mockito.doReturn(Optional.of(locked))
+        .when(orderRepository).findByIdForUpdate(scanned.getId());
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(spotBundle());
+
+    assertThat(p0Service().executePendingOrders()).isZero();
+
+    verify(walletBalanceRepository).findByAccountIdForUpdate(accountId);
+    verify(spotPositionService).lockExisting(accountId);
+    verify(walletService, never()).lockBalancesInOrder(any(), any());
+    verify(spotPositionService, never()).lockOrCreate(any(), any(), any());
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderRepository, never()).claimPending(any());
+  }
+
+  @Test
+  void p0FinalFreshnessFailureAfterEnsureLeavesClaimOrderAndTradeUntouchedInRequiredOrder() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity order = p0PendingOrder(accountId, "final-stale");
+    TradingAccountEntity account = account(accountId);
+    FullFillResult result = fullFill();
+
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(spotBundle());
+    when(fullFillCoordinator.execute(any(), any())).thenReturn(result);
+    org.mockito.Mockito.doThrow(new BusinessException("MARKET_DATA_STALE", "expired after ensure"))
+        .when(fullFillCoordinator).requireFresh(result);
+
+    assertThat(p0Service().executePendingOrders()).isZero();
+
+    org.mockito.InOrder sequence = org.mockito.Mockito.inOrder(
+        accountRepository,
+        walletBalanceRepository,
+        spotPositionService,
+        orderRepository,
+        fullFillCoordinator,
+        walletService);
+    sequence.verify(accountRepository).findByIdForUpdate(accountId);
+    sequence.verify(walletBalanceRepository).findByAccountIdForUpdate(accountId);
+    sequence.verify(spotPositionService).lockExisting(accountId);
+    sequence.verify(orderRepository).findByIdForUpdate(order.getId());
+    sequence.verify(fullFillCoordinator).execute(any(), any());
+    sequence.verify(walletService).lockBalancesInOrder(accountId, List.of("BTC", "USDT"));
+    sequence.verify(spotPositionService).lockOrCreate(accountId, "BTC", "USDT");
+    sequence.verify(fullFillCoordinator).requireFresh(result);
+    verify(orderRepository, never()).claimPending(order.getId());
+    verify(orderRepository, never()).save(any());
+    verify(tradeRepository, never()).save(any());
   }
 
   @Test

@@ -53,7 +53,7 @@ public class FullFillCoordinator {
     BigDecimal feeRate = role == LiquidityRole.MAKER ? MAKER_FEE_RATE : TAKER_FEE_RATE;
     BigDecimal fee = fee(request, filledPrice, feeRate);
 
-    return new FullFillResult(
+    FullFillResult result = new FullFillResult(
         filledPrice,
         clock.instant(),
         request.requestedBaseQuantity(),
@@ -68,6 +68,19 @@ public class FullFillCoordinator {
         snapshot.providerSymbol(),
         snapshot.asOf(),
         snapshot.expiresAt());
+    requireFresh(result);
+    return result;
+  }
+
+  /** Final strict gate used immediately before the first persistence mutation. */
+  public void requireFresh(FullFillResult result) {
+    if (result == null || result.filledAt() == null || result.expiresAt() == null) {
+      throw incomplete("Canonical full-fill freshness metadata is incomplete");
+    }
+    if (!result.filledAt().isBefore(result.expiresAt())
+        || !clock.instant().isBefore(result.expiresAt())) {
+      throw new BusinessException(ErrorCode.MARKET_DATA_STALE, "Executable market snapshot expired");
+    }
   }
 
   private BigDecimal fillPrice(FullFillRequest request, BigDecimal referencePrice, BigDecimal slippage) {
