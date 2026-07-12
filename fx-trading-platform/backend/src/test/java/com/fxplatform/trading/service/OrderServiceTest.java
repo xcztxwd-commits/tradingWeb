@@ -1,6 +1,7 @@
 package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -14,8 +15,16 @@ import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.ExecutionAdapter;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.execution.ExecutionResult;
+import com.fxplatform.execution.ExecutableMarketSnapshot;
+import com.fxplatform.execution.FullFillCoordinator;
+import com.fxplatform.execution.FullFillRequest;
+import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.market.model.MarketSourceMode;
 import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.model.SpotMarketBundle;
+import com.fxplatform.market.model.PerpetualMarketBundle;
+import com.fxplatform.market.provider.MarketBundleResolver;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.request.UpdateOrderRequest;
@@ -39,6 +48,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -83,12 +94,189 @@ class OrderServiceTest {
   @Mock
   private SpotPositionService spotPositionService;
 
+  @Mock
+  private MarketBundleResolver marketBundleResolver;
+
+  @Mock
+  private FullFillCoordinator fullFillCoordinator;
+
+  @Mock
+  private TradingTransactionExecutor transactionExecutor;
+
   @BeforeEach
   void lockedAccountLookupUsesTheOwnedAccountFixture() {
     org.mockito.Mockito.lenient()
         .when(accountRepository.findByIdAndUserIdForUpdate(any(UUID.class), any(UUID.class)))
         .thenAnswer(invocation -> accountRepository.findByIdAndUserId(
             invocation.getArgument(0), invocation.getArgument(1)));
+    org.mockito.Mockito.lenient()
+        .when(transactionExecutor.execute(any()))
+        .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
+  }
+
+  @Test
+  void p0MarketGuardFailureStopsBeforeBundleResolution() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = p0MarketOrder(accountId, "guard-first");
+    TradingAccountEntity account = demoAccount(userId, accountId);
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "guard-first"))
+        .thenReturn(Optional.empty());
+    when(orderRepository.findByUserIdAndIdempotencyKey(userId, "guard-first"))
+        .thenReturn(Optional.empty());
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    org.mockito.Mockito.doThrow(new BusinessException("SYMBOL_NOT_ALLOWED", "blocked"))
+        .when(demoExecutionGuard)
+        .requireDemo(account, ProductType.CRYPTO_SPOT, "BTCUSDT");
+
+    assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, request))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("SYMBOL_NOT_ALLOWED"));
+
+    verify(marketBundleResolver, never()).resolveSpot(any(), any());
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(transactionExecutor, never()).execute(any());
+  }
+
+  @Test
+  void p0MarketRetryResolvesOutsideTransactionAndWritesOnlyTheFreshAttempt() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = p0MarketOrder(accountId, "stale-retry");
+    TradingAccountEntity account = demoAccount(userId, accountId);
+    AtomicBoolean insideMutation = new AtomicBoolean();
+    AtomicBoolean freshResultGranted = new AtomicBoolean();
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "stale-retry"))
+        .thenReturn(Optional.empty());
+    when(orderRepository.findByUserIdAndIdempotencyKey(userId, "stale-retry"))
+        .thenReturn(Optional.empty());
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(BigDecimal.ZERO);
+    when(riskCheckService.resolveEffectiveLeverage(account, request)).thenReturn(1);
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any()))
+        .thenAnswer(invocation -> {
+          assertThat(insideMutation.get()).isFalse();
+          return spotBundle("binance", Instant.now().plusSeconds(2));
+        });
+    when(fullFillCoordinator.execute(any(FullFillRequest.class), any(ExecutableMarketSnapshot.class)))
+        .thenThrow(new BusinessException("MARKET_DATA_STALE", "lock wait expired snapshot"))
+        .thenAnswer(invocation -> {
+          freshResultGranted.set(true);
+          return fullFill("0.10", "100.0100");
+        });
+    org.mockito.Mockito.doAnswer(invocation -> {
+      insideMutation.set(true);
+      try {
+        return ((Supplier<?>) invocation.getArgument(0)).get();
+      } finally {
+        insideMutation.set(false);
+      }
+    }).when(transactionExecutor).execute(any());
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
+      assertThat(freshResultGranted.get()).isTrue();
+      OrderEntity order = invocation.getArgument(0);
+      if (order.getId() == null) {
+        order.setId(UUID.randomUUID());
+      }
+      return order;
+    });
+
+    OrderResponse response = orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, request);
+
+    assertThat(response.status()).isEqualTo(OrderStatus.FILLED.name());
+    verify(marketBundleResolver, org.mockito.Mockito.times(2)).resolveSpot(eq("BTCUSDT"), any());
+    verify(transactionExecutor, org.mockito.Mockito.times(2)).execute(any());
+    verify(fullFillCoordinator, org.mockito.Mockito.times(2)).execute(any(), any());
+    verify(tradeRepository, org.mockito.Mockito.times(1)).save(any(TradeEntity.class));
+  }
+
+  @Test
+  void p0MarketReplayReturnsBeforeGuardAndBundleResolution() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = p0MarketOrder(accountId, "existing-p0");
+    OrderEntity existing = pendingOrderEntity(userId, accountId, UUID.randomUUID());
+    existing.setSymbol("BTCUSDT");
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "existing-p0"))
+        .thenReturn(Optional.of(existing));
+
+    OrderResponse response = orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, request);
+
+    assertThat(response.id()).isEqualTo(existing.getId());
+    verify(demoExecutionGuard, never()).requireDemo(any(), any(), any());
+    verify(marketBundleResolver, never()).resolveSpot(any(), any());
+    verify(transactionExecutor, never()).execute(any());
+  }
+
+  @Test
+  void p0MarketStopsAfterTwoStaleAttemptsWithoutWriting() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = p0MarketOrder(accountId, "stale-twice");
+    TradingAccountEntity account = demoAccount(userId, accountId);
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "stale-twice"))
+        .thenReturn(Optional.empty());
+    when(orderRepository.findByUserIdAndIdempotencyKey(userId, "stale-twice"))
+        .thenReturn(Optional.empty());
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(riskCheckService.checkOrder(eq(account), any())).thenReturn(BigDecimal.ZERO);
+    when(riskCheckService.resolveEffectiveLeverage(eq(account), any())).thenReturn(1);
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any()))
+        .thenReturn(spotBundle("binance", Instant.now().plusSeconds(2)));
+    when(fullFillCoordinator.execute(any(), any()))
+        .thenThrow(new BusinessException("MARKET_DATA_STALE", "expired behind lock"));
+
+    assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, request))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("MARKET_DATA_STALE"));
+
+    verify(marketBundleResolver, org.mockito.Mockito.times(2)).resolveSpot(eq("BTCUSDT"), any());
+    verify(transactionExecutor, org.mockito.Mockito.times(2)).execute(any());
+    verify(orderRepository, never()).save(any());
+    verify(tradeRepository, never()).save(any());
+  }
+
+  @Test
+  void p0MarketDoesNotRetryNonStaleMutationFailure() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = p0MarketOrder(accountId, "non-stale");
+    TradingAccountEntity account = demoAccount(userId, accountId);
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "non-stale"))
+        .thenReturn(Optional.empty());
+    when(orderRepository.findByUserIdAndIdempotencyKey(userId, "non-stale"))
+        .thenReturn(Optional.empty());
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(riskCheckService.checkOrder(eq(account), any())).thenReturn(BigDecimal.ZERO);
+    when(riskCheckService.resolveEffectiveLeverage(eq(account), any())).thenReturn(1);
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any()))
+        .thenReturn(spotBundle("binance", Instant.now().plusSeconds(2)));
+    when(fullFillCoordinator.execute(any(), any()))
+        .thenThrow(new BusinessException("INSUFFICIENT_MARGIN", "changed while waiting"));
+
+    assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, request))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("INSUFFICIENT_MARGIN"));
+
+    verify(marketBundleResolver, org.mockito.Mockito.times(1)).resolveSpot(eq("BTCUSDT"), any());
+    verify(transactionExecutor, org.mockito.Mockito.times(1)).execute(any());
+    verify(orderRepository, never()).save(any());
+    verify(tradeRepository, never()).save(any());
   }
 
   @Test
@@ -106,7 +294,8 @@ class OrderServiceTest {
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(requiredMargin);
     when(accountRepository.reserveMarginIfAvailable(accountId, filledMargin)).thenReturn(1);
-    when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(new BigDecimal("1.10020"), filledAt));
+    when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(
+        fullExecution("1.10020", filledAt, "0.10"));
     when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
       OrderEntity order = invocation.getArgument(0);
       order.setId(UUID.randomUUID());
@@ -173,22 +362,22 @@ class OrderServiceTest {
     when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class)))
         .thenReturn(new BigDecimal("100.00000000"));
     when(riskCheckService.resolveEffectiveLeverage(eq(account), any(CreateOrderRequest.class))).thenReturn(10);
-    when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(ExecutionResult.rejected(
+    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any()))
+        .thenReturn(perpBundle(Instant.now().plusSeconds(2)));
+    when(fullFillCoordinator.execute(any(), any())).thenThrow(new BusinessException(
         "EXECUTION_REJECTED",
         "Demo execution rejected"));
-    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
-      OrderEntity order = invocation.getArgument(0);
-      order.setId(UUID.randomUUID());
-      return order;
-    });
 
-    orderService(org.mockito.Mockito.mock(OrderEventService.class)).createOrder(principal, request);
+    assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, request))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("EXECUTION_REJECTED"));
 
     org.mockito.InOrder accountPositionOrder = org.mockito.Mockito.inOrder(
         accountRepository, positionRepository, orderRepository);
     accountPositionOrder.verify(accountRepository).findByIdAndUserIdForUpdate(accountId, userId);
     accountPositionOrder.verify(positionRepository).findOpenByAccountIdForUpdate(accountId);
-    accountPositionOrder.verify(orderRepository, org.mockito.Mockito.atLeastOnce()).save(any(OrderEntity.class));
+    verify(orderRepository, never()).save(any(OrderEntity.class));
   }
 
   @Test
@@ -206,7 +395,8 @@ class OrderServiceTest {
     when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(requiredMargin);
     when(riskCheckService.resolveEffectiveLeverage(eq(account), any(CreateOrderRequest.class))).thenReturn(20);
     when(accountRepository.reserveMarginIfAvailable(accountId, requiredMargin)).thenReturn(1);
-    when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(new BigDecimal("1.10020"), filledAt));
+    when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(
+        fullExecution("1.10020", filledAt, "0.10"));
     when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
       OrderEntity order = invocation.getArgument(0);
       order.setId(UUID.randomUUID());
@@ -289,7 +479,7 @@ class OrderServiceTest {
   }
 
   @Test
-  void partialMarketExecutionRecordsFeeSlippageAndPartialPosition() {
+  void partialMarketExecutionIsRejectedBeforeAnyMutation() {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
     UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
@@ -301,7 +491,6 @@ class OrderServiceTest {
     when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "idem-partial-1")).thenReturn(Optional.empty());
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(requiredMargin);
-    when(accountRepository.reserveMarginIfAvailable(accountId, new BigDecimal("44.04000000"))).thenReturn(1);
     when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(
         new BigDecimal("1.10100"),
         filledAt,
@@ -311,38 +500,18 @@ class OrderServiceTest {
         new BigDecimal("0.00010"),
         null,
         null));
-    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
-      OrderEntity order = invocation.getArgument(0);
-      order.setId(UUID.randomUUID());
-      return order;
-    });
-    when(positionRepository.save(any(PositionEntity.class))).thenAnswer(invocation -> {
-      PositionEntity position = invocation.getArgument(0);
-      position.setId(UUID.randomUUID());
-      return position;
-    });
-
     OrderEventService orderEventService = org.mockito.Mockito.mock(OrderEventService.class);
     OrderService service = orderService(orderEventService);
 
-    OrderResponse response = service.createOrder(principal, request);
+    assertThatThrownBy(() -> service.createOrder(principal, request))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("PARTIAL_FILL_NOT_SUPPORTED"));
 
-    assertThat(response.status()).isEqualTo(OrderStatus.PARTIALLY_FILLED.name());
-    assertThat(response.filledQuantity()).isEqualByComparingTo("0.04");
-    assertThat(response.remainingQuantity()).isEqualByComparingTo("0.06");
-    assertThat(response.fee()).isEqualByComparingTo("0.44");
-    assertThat(response.slippage()).isEqualByComparingTo("0.00010");
-    assertThat(account.getUsedMargin()).isEqualByComparingTo("44.04000000");
-    assertThat(account.getBalance()).isEqualByComparingTo("9999.56000000");
-    assertThat(account.getEquity()).isEqualByComparingTo("9999.56000000");
-    assertThat(account.getFreeMargin()).isEqualByComparingTo("9955.52000000");
-
-    ArgumentCaptor<PositionEntity> positionCaptor = ArgumentCaptor.forClass(PositionEntity.class);
-    verify(positionRepository).save(positionCaptor.capture());
-    assertThat(positionCaptor.getValue().getLots()).isEqualByComparingTo("0.04");
-    assertThat(positionCaptor.getValue().getMarginHeld()).isEqualByComparingTo("44.04000000");
-    verify(ledgerService).recordMarginHold(eq(account), eq(new BigDecimal("44.04000000")), any(UUID.class), eq("Market order margin hold"));
-    verify(ledgerService).recordTradeFeeForTrade(eq(account), eq(new BigDecimal("0.44")), any(UUID.class), eq("Trade fee charged"));
+    verify(orderRepository, never()).save(any());
+    verify(tradeRepository, never()).save(any());
+    verify(positionRepository, never()).save(any());
+    verify(accountRepository, never()).reserveMarginIfAvailable(any(), any());
+    verify(ledgerService, never()).recordMarginHold(any(), any(), any(), any());
   }
 
   @Test
@@ -364,8 +533,8 @@ class OrderServiceTest {
     when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(
         new BigDecimal("1.10100"),
         filledAt,
-        null,
-        null,
+        new BigDecimal("0.10"),
+        BigDecimal.ZERO,
         new BigDecimal("0.44"),
         BigDecimal.ZERO,
         null,
@@ -712,7 +881,8 @@ class OrderServiceTest {
     when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(requiredMargin);
     when(accountRepository.reserveMarginIfAvailable(accountId, requiredMargin)).thenReturn(1);
     when(executionAdapter.execute(any(CreateOrderRequest.class)))
-        .thenReturn(new ExecutionResult(new BigDecimal("1.10020"), Instant.parse("2026-06-05T12:00:00Z")));
+        .thenReturn(fullExecution(
+            "1.10020", Instant.parse("2026-06-05T12:00:00Z"), "0.10"));
     when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
       OrderEntity order = invocation.getArgument(0);
       if (order.getId() == null) {
@@ -1038,6 +1208,92 @@ class OrderServiceTest {
         demoExecutionGuard,
         walletBalanceRepository,
         positionRepository,
-        spotPositionService);
+        spotPositionService,
+        marketBundleResolver,
+        fullFillCoordinator,
+        transactionExecutor);
+  }
+
+  private static CreateOrderRequest p0MarketOrder(UUID accountId, String clientOrderId) {
+    return new CreateOrderRequest(
+        accountId,
+        "BTCUSDT",
+        OrderSide.BUY,
+        OrderType.MARKET,
+        new BigDecimal("0.10"),
+        null,
+        null,
+        null,
+        clientOrderId,
+        clientOrderId,
+        new BigDecimal("0.10"),
+        null,
+        1);
+  }
+
+  private static SpotMarketBundle spotBundle(String providerCode, Instant expiresAt) {
+    return new SpotMarketBundle(
+        "BTCUSDT",
+        "BTCUSDT",
+        providerCode,
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        new BigDecimal("99"),
+        new BigDecimal("100"),
+        new BigDecimal("99.5"),
+        null,
+        List.of(),
+        List.of(),
+        expiresAt.minusSeconds(1),
+        expiresAt);
+  }
+
+  private static FullFillResult fullFill(String quantity, String price) {
+    Instant now = Instant.now();
+    return new FullFillResult(
+        new BigDecimal(price),
+        now,
+        new BigDecimal(quantity),
+        BigDecimal.ZERO,
+        new BigDecimal("0.0005"),
+        new BigDecimal(quantity).multiply(new BigDecimal("0.0005")),
+        "BTC",
+        com.fxplatform.trading.enums.LiquidityRole.TAKER,
+        new BigDecimal("0.0100"),
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        "binance",
+        "BTCUSDT",
+        now.minusSeconds(1),
+        now.plusSeconds(2));
+  }
+
+  private static PerpetualMarketBundle perpBundle(Instant expiresAt) {
+    return new PerpetualMarketBundle(
+        "BTCUSDT-PERP",
+        "BTCUSDT",
+        "binance-usdm",
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        new BigDecimal("99"),
+        new BigDecimal("100"),
+        new BigDecimal("99.5"),
+        new BigDecimal("99.6"),
+        new BigDecimal("99.4"),
+        null,
+        List.of(),
+        List.of(),
+        expiresAt.minusSeconds(1),
+        expiresAt);
+  }
+
+  private static ExecutionResult fullExecution(String price, Instant filledAt, String quantity) {
+    return new ExecutionResult(
+        new BigDecimal(price),
+        filledAt,
+        new BigDecimal(quantity),
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        null,
+        BigDecimal.ZERO,
+        null,
+        null);
   }
 }

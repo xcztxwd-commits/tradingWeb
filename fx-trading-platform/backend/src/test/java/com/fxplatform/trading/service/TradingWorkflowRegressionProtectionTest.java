@@ -129,8 +129,8 @@ class TradingWorkflowRegressionProtectionTest {
     when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(
         new BigDecimal("1.10020"),
         filledAt,
-        null,
-        null,
+        new BigDecimal("0.10"),
+        BigDecimal.ZERO,
         expectedFee,
         BigDecimal.ZERO,
         null,
@@ -140,14 +140,14 @@ class TradingWorkflowRegressionProtectionTest {
 
     OrderResponse response = orderService().createOrder(principal, request);
 
-    assertThat(response.status()).isIn(OrderStatus.FILLED.name(), OrderStatus.PARTIALLY_FILLED.name());
+    assertThat(response.status()).isEqualTo(OrderStatus.FILLED.name());
     assertThat(response.executionPrice()).isEqualByComparingTo("1.10020");
     assertThat(account.getUsedMargin()).isEqualByComparingTo(expectedMargin);
     assertThat(account.getFreeMargin()).isLessThan(new BigDecimal("10000.00000000"));
 
     ArgumentCaptor<OrderEntity> orderCaptor = ArgumentCaptor.forClass(OrderEntity.class);
     verify(orderRepository, atLeastOnce()).save(orderCaptor.capture());
-    assertThat(orderCaptor.getAllValues().getLast().getStatus()).isIn(OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED);
+    assertThat(orderCaptor.getAllValues().getLast().getStatus()).isEqualTo(OrderStatus.FILLED);
 
     ArgumentCaptor<PositionEntity> positionCaptor = ArgumentCaptor.forClass(PositionEntity.class);
     verify(positionRepository).save(positionCaptor.capture());
@@ -209,7 +209,14 @@ class TradingWorkflowRegressionProtectionTest {
         .thenReturn(Optional.of(wallet(accountId, "USDT", "20000.00000000")));
     when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(
         new BigDecimal("50000.00000000"),
-        Instant.parse("2026-06-16T01:05:00Z")));
+        Instant.parse("2026-06-16T01:05:00Z"),
+        new BigDecimal("0.20"),
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        null,
+        BigDecimal.ZERO,
+        null,
+        null));
     when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> withOrderId(invocation.getArgument(0)));
 
     OrderResponse order = orderService().createOrder(principal, request);

@@ -7,12 +7,21 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
+import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.ExecutionAdapter;
 import com.fxplatform.execution.DemoExecutionGuard;
+import com.fxplatform.execution.ExecutableMarketSnapshot;
 import com.fxplatform.execution.ExecutionResult;
+import com.fxplatform.execution.FullFillCoordinator;
+import com.fxplatform.execution.FullFillExecutionPath;
+import com.fxplatform.execution.FullFillRequest;
+import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.market.model.CandleRequest;
 import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.provider.MarketBundleResolver;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.request.UpdateOrderRequest;
@@ -26,17 +35,23 @@ import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.dao.DataIntegrityViolationException;
 
 @Service
-@RequiredArgsConstructor
 public class OrderService {
+
+  private static final int MAX_MARKET_ATTEMPTS = 2;
+  private static final Set<String> P0_SYMBOLS = Set.of(
+      "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+      "BTCUSDT-PERP", "ETHUSDT-PERP", "BNBUSDT-PERP", "SOLUSDT-PERP", "XRPUSDT-PERP");
 
   private final OrderRepository orderRepository;
   private final TradingAccountRepository accountRepository;
@@ -54,13 +69,99 @@ public class OrderService {
   private final WalletBalanceRepository walletBalanceRepository;
   private final PositionRepository positionRepository;
   private final SpotPositionService spotPositionService;
+  private final MarketBundleResolver marketBundleResolver;
+  private final FullFillCoordinator fullFillCoordinator;
+  private final TradingTransactionExecutor transactionExecutor;
 
-  @Transactional
+  @Autowired
+  public OrderService(
+      OrderRepository orderRepository,
+      TradingAccountRepository accountRepository,
+      RiskCheckService riskCheckService,
+      ExecutionAdapter executionAdapter,
+      OrderFillService orderFillService,
+      LedgerService ledgerService,
+      WalletService walletService,
+      OrderEventService orderEventService,
+      OrderCommandFactory orderCommandFactory,
+      OrderEntityFactory orderEntityFactory,
+      OrderResponseMapper orderResponseMapper,
+      OrderStatusPolicy orderStatusPolicy,
+      DemoExecutionGuard demoExecutionGuard,
+      WalletBalanceRepository walletBalanceRepository,
+      PositionRepository positionRepository,
+      SpotPositionService spotPositionService,
+      MarketBundleResolver marketBundleResolver,
+      FullFillCoordinator fullFillCoordinator,
+      TradingTransactionExecutor transactionExecutor
+  ) {
+    this.orderRepository = orderRepository;
+    this.accountRepository = accountRepository;
+    this.riskCheckService = riskCheckService;
+    this.executionAdapter = executionAdapter;
+    this.orderFillService = orderFillService;
+    this.ledgerService = ledgerService;
+    this.walletService = walletService;
+    this.orderEventService = orderEventService;
+    this.orderCommandFactory = orderCommandFactory;
+    this.orderEntityFactory = orderEntityFactory;
+    this.orderResponseMapper = orderResponseMapper;
+    this.orderStatusPolicy = orderStatusPolicy;
+    this.demoExecutionGuard = demoExecutionGuard;
+    this.walletBalanceRepository = walletBalanceRepository;
+    this.positionRepository = positionRepository;
+    this.spotPositionService = spotPositionService;
+    this.marketBundleResolver = marketBundleResolver;
+    this.fullFillCoordinator = fullFillCoordinator;
+    this.transactionExecutor = transactionExecutor;
+  }
+
+  /** Compatibility constructor for unit fixtures that exercise unreachable legacy products. */
+  public OrderService(
+      OrderRepository orderRepository,
+      TradingAccountRepository accountRepository,
+      RiskCheckService riskCheckService,
+      ExecutionAdapter executionAdapter,
+      OrderFillService orderFillService,
+      LedgerService ledgerService,
+      WalletService walletService,
+      OrderEventService orderEventService,
+      OrderCommandFactory orderCommandFactory,
+      OrderEntityFactory orderEntityFactory,
+      OrderResponseMapper orderResponseMapper,
+      OrderStatusPolicy orderStatusPolicy,
+      DemoExecutionGuard demoExecutionGuard,
+      WalletBalanceRepository walletBalanceRepository,
+      PositionRepository positionRepository,
+      SpotPositionService spotPositionService
+  ) {
+    this(
+        orderRepository,
+        accountRepository,
+        riskCheckService,
+        executionAdapter,
+        orderFillService,
+        ledgerService,
+        walletService,
+        orderEventService,
+        orderCommandFactory,
+        orderEntityFactory,
+        orderResponseMapper,
+        orderStatusPolicy,
+        demoExecutionGuard,
+        walletBalanceRepository,
+        positionRepository,
+        spotPositionService,
+        null,
+        null,
+        new TradingTransactionExecutor());
+  }
+
   public OrderResponse createOrder(UserPrincipal principal, CreateOrderRequest request) {
     OrderCommand command = orderCommandFactory.from(principal, request);
     return findExistingOrder(command)
         .map(orderResponseMapper::toResponse)
-        .orElseGet(() -> createNewOrderOrReturnExisting(command));
+        .orElseGet(() -> createNewOrderOrReturnExisting(command, request));
   }
 
   public List<OrderResponse> orders(UserPrincipal principal) {
@@ -204,8 +305,7 @@ public class OrderService {
     return orderResponseMapper.toResponse(order);
   }
 
-  private OrderResponse createNewOrder(OrderCommand command) {
-    CreateOrderRequest request = command.toRequest();
+  private OrderResponse createNewOrder(OrderCommand command, CreateOrderRequest request) {
     TradingAccountEntity accountSnapshot = accountRepository.findByIdAndUserId(command.accountId(), command.userId())
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
     ProductType productType = requestedProduct(command.symbol());
@@ -221,18 +321,121 @@ public class OrderService {
     String holdCurrency = spotWalletHold
         ? riskCheckService.resolveHoldCurrency(accountSnapshot, request)
         : accountSnapshot.getBaseCurrency();
+
+    if (command.orderType() == OrderType.MARKET
+        && isP0Symbol(command.symbol())
+        && marketBundleResolver != null
+        && fullFillCoordinator != null) {
+      return createP0MarketWithRetry(
+          command,
+          request,
+          productType,
+          requiredMargin,
+          effectiveLeverage);
+    }
+
     ExecutionResult execution = command.orderType() == OrderType.MARKET
         ? executionAdapter.execute(request)
         : null;
+    if (execution != null && !execution.rejected()) {
+      requireFullLegacyExecution(command.quantity(), execution);
+    }
+    return transactionExecutor.execute(() -> persistPreparedOrder(
+        command,
+        request,
+        productType,
+        requiredMargin,
+        effectiveLeverage,
+        spotWalletHold,
+        holdCurrency,
+        execution));
+  }
+
+  private OrderResponse createP0MarketWithRetry(
+      OrderCommand command,
+      CreateOrderRequest request,
+      ProductType productType,
+      BigDecimal requiredMargin,
+      int effectiveLeverage
+  ) {
+    BusinessException lastStale = null;
+    for (int attempt = 0; attempt < MAX_MARKET_ATTEMPTS; attempt++) {
+      ExecutableMarketSnapshot snapshot = resolveExecutableSnapshot(command.symbol(), productType);
+      try {
+        return transactionExecutor.execute(() -> persistP0Market(
+            command,
+            request,
+            productType,
+            requiredMargin,
+            effectiveLeverage,
+            snapshot));
+      } catch (BusinessException exception) {
+        if (!ErrorCode.MARKET_DATA_STALE.equals(exception.getCode())) {
+          throw exception;
+        }
+        lastStale = exception;
+      }
+    }
+    throw new BusinessException(
+        ErrorCode.MARKET_DATA_STALE,
+        lastStale == null ? "No fresh executable market snapshot" : lastStale.getMessage());
+  }
+
+  private OrderResponse persistP0Market(
+      OrderCommand command,
+      CreateOrderRequest request,
+      ProductType productType,
+      BigDecimal requiredMargin,
+      int effectiveLeverage,
+      ExecutableMarketSnapshot snapshot
+  ) {
+    TradingAccountEntity account = accountRepository.findByIdAndUserIdForUpdate(command.accountId(), command.userId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(account, productType, command.symbol());
+    lockMutationState(account.getId(), productType, command.symbol());
+
+    OrderEntity order = preparedOrder(command, request, productType, effectiveLeverage);
+    FullFillResult fullFill = fullFillCoordinator.execute(
+        new FullFillRequest(
+            request,
+            command.symbol(),
+            productType,
+            command.side(),
+            FullFillExecutionPath.MARKET,
+            command.quantity(),
+            null),
+        snapshot);
+
+    order.setStatus(orderStatusPolicy.acceptedStatus(command.orderType()));
+    orderRepository.save(order);
+    orderFillService.fill(order, account, fullFill, requiredMargin, "Market order margin hold");
+    orderEventService.record(
+        order.getId(),
+        "ORDER_FILLED",
+        OrderStatus.ACCEPTED,
+        OrderStatus.FILLED,
+        null,
+        "Market order filled");
+    return orderResponseMapper.toResponse(order);
+  }
+
+  private OrderResponse persistPreparedOrder(
+      OrderCommand command,
+      CreateOrderRequest request,
+      ProductType productType,
+      BigDecimal requiredMargin,
+      int effectiveLeverage,
+      boolean spotWalletHold,
+      String holdCurrency,
+      ExecutionResult execution
+  ) {
 
     TradingAccountEntity account = accountRepository.findByIdAndUserIdForUpdate(command.accountId(), command.userId())
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
     demoExecutionGuard.requireDemo(account, productType, command.symbol());
     lockMutationState(account.getId(), productType, command.symbol());
 
-    OrderEntity order = orderEntityFactory.createReceived(command);
-    order.setProductType(productType);
-    order.setLeverage(effectiveLeverage);
+    OrderEntity order = preparedOrder(command, request, productType, effectiveLeverage);
 
     if (command.orderType() != OrderType.MARKET) {
       order.setStatus(orderStatusPolicy.acceptedStatus(command.orderType()));
@@ -262,17 +465,66 @@ public class OrderService {
     orderFillService.fill(order, account, execution, requiredMargin, "Market order margin hold");
     orderEventService.record(
         order.getId(),
-        order.getStatus() == OrderStatus.PARTIALLY_FILLED ? "ORDER_PARTIALLY_FILLED" : "ORDER_FILLED",
+        "ORDER_FILLED",
         OrderStatus.ACCEPTED,
-        order.getStatus(),
+        OrderStatus.FILLED,
         null,
-        order.getStatus() == OrderStatus.PARTIALLY_FILLED ? "Market order partially filled" : "Market order filled");
+        "Market order filled");
     return orderResponseMapper.toResponse(order);
   }
 
-  private OrderResponse createNewOrderOrReturnExisting(OrderCommand command) {
+  private OrderEntity preparedOrder(
+      OrderCommand command,
+      CreateOrderRequest request,
+      ProductType productType,
+      int effectiveLeverage
+  ) {
+    OrderEntity order = orderEntityFactory.createReceived(command);
+    order.setProductType(productType);
+    order.setLeverage(effectiveLeverage);
+    order.setPositionSide(request.positionSide());
+    order.setMarginMode(request.marginMode());
+    order.setQuantityUnit(request.quantityUnit());
+    order.setOriginalQuantity(request.quantity());
+    order.setBaseQuantity(command.quantity());
+    order.setReduceOnly(request.reduceOnly());
+    order.setTriggerPrice(request.triggerPrice());
+    order.setTriggerPriceType(request.triggerPriceType());
+    return order;
+  }
+
+  private ExecutableMarketSnapshot resolveExecutableSnapshot(String symbol, ProductType productType) {
+    if (marketBundleResolver == null) {
+      throw new BusinessException("MARKET_DATA_UNAVAILABLE", "Market bundle resolver is unavailable");
+    }
+    Instant to = Instant.now();
+    CandleRequest candles = new CandleRequest("1m", to.minus(Duration.ofMinutes(30)), to);
+    return productType == ProductType.CRYPTO_SPOT
+        ? ExecutableMarketSnapshot.from(marketBundleResolver.resolveSpot(symbol, candles))
+        : ExecutableMarketSnapshot.from(marketBundleResolver.resolvePerp(symbol, candles));
+  }
+
+  private void requireFullLegacyExecution(BigDecimal requestedQuantity, ExecutionResult execution) {
+    if (execution.filledQuantity() == null
+        || execution.remainingQuantity() == null
+        || execution.filledQuantity().compareTo(requestedQuantity) != 0
+        || execution.remainingQuantity().compareTo(BigDecimal.ZERO) != 0) {
+      throw new BusinessException(
+          ErrorCode.PARTIAL_FILL_NOT_SUPPORTED,
+          "Demo execution supports one full fill only");
+    }
+  }
+
+  private boolean isP0Symbol(String symbol) {
+    return symbol != null && P0_SYMBOLS.contains(SymbolNormalizer.normalize(symbol));
+  }
+
+  private OrderResponse createNewOrderOrReturnExisting(
+      OrderCommand command,
+      CreateOrderRequest request
+  ) {
     try {
-      return createNewOrder(command);
+      return createNewOrder(command, request);
     } catch (DataIntegrityViolationException ex) {
       return findExistingOrder(command)
           .map(orderResponseMapper::toResponse)

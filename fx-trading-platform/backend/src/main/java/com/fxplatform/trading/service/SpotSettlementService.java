@@ -1,6 +1,7 @@
 package com.fxplatform.trading.service;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.model.SymbolAssets;
@@ -18,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class SpotSettlementService {
 
-  private static final BigDecimal DEFAULT_FEE_RATE = new BigDecimal("0.0010");
   private static final int SCALE = 8;
   private static final String TRADE_REFERENCE = "TRADE";
   private static final String ORDER_REFERENCE = "ORDER";
@@ -66,6 +66,7 @@ public class SpotSettlementService {
       UUID referenceId
   ) {
     SymbolAssets assets = SymbolAssetResolver.resolve(symbolProfile);
+    requireFeeAsset(fill, assets.baseAsset());
     if (walletService.hasBusinessOperation(
         account.getId(),
         WalletType.SPOT,
@@ -77,7 +78,7 @@ public class SpotSettlementService {
     }
     BigDecimal filledBase = scaled(fillQuantity(order, fill));
     BigDecimal grossQuote = scaled(filledBase.multiply(fill.filledPrice()));
-    BigDecimal feeBase = scaled(filledBase.multiply(feeRate(fill, grossQuote)));
+    BigDecimal feeBase = scaled(explicitFee(fill));
     BigDecimal netBase = scaled(filledBase.subtract(feeBase));
 
     debitSpentAsset(
@@ -146,6 +147,7 @@ public class SpotSettlementService {
       UUID referenceId
   ) {
     SymbolAssets assets = SymbolAssetResolver.resolve(symbolProfile);
+    requireFeeAsset(fill, assets.quoteAsset());
     if (walletService.hasBusinessOperation(
         account.getId(),
         WalletType.SPOT,
@@ -157,7 +159,7 @@ public class SpotSettlementService {
     }
     BigDecimal soldBase = scaled(fillQuantity(order, fill));
     BigDecimal grossQuote = scaled(soldBase.multiply(fill.filledPrice()));
-    BigDecimal feeQuote = scaled(grossQuote.multiply(feeRate(fill, grossQuote)));
+    BigDecimal feeQuote = scaled(explicitFee(fill));
 
     debitSpentAsset(
         order,
@@ -254,12 +256,25 @@ public class SpotSettlementService {
         && order.getHoldCurrency().equalsIgnoreCase(asset);
   }
 
-  private static BigDecimal feeRate(ExecutionResult fill, BigDecimal grossQuote) {
-    BigDecimal fee = fill.fee();
-    if (fee == null || fee.compareTo(BigDecimal.ZERO) <= 0 || grossQuote.compareTo(BigDecimal.ZERO) <= 0) {
-      return DEFAULT_FEE_RATE;
+  private static BigDecimal explicitFee(ExecutionResult fill) {
+    return fill.fee() == null ? BigDecimal.ZERO : fill.fee();
+  }
+
+  private static void requireFeeAsset(ExecutionResult fill, String expectedAsset) {
+    BigDecimal fee = explicitFee(fill);
+    if (fee.compareTo(BigDecimal.ZERO) < 0) {
+      throw new BusinessException(
+          "INVALID_FEE_AMOUNT",
+          "Spot fee amount cannot be negative");
     }
-    return fee.divide(grossQuote, 10, RoundingMode.HALF_UP);
+    if (fee.compareTo(BigDecimal.ZERO) > 0
+        && (fill.feeAsset() == null
+        || fill.feeAsset().isBlank()
+        || !expectedAsset.equalsIgnoreCase(fill.feeAsset()))) {
+      throw new BusinessException(
+          "INVALID_FEE_ASSET",
+          "Spot fee asset must match the received asset");
+    }
   }
 
   private static BigDecimal scaled(BigDecimal value) {

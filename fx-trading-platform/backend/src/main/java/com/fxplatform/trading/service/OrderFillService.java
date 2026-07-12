@@ -6,7 +6,9 @@ import static com.fxplatform.common.money.MoneyAmount.orZero;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.execution.ExecutionResult;
+import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.repository.SymbolRepository;
@@ -168,7 +170,40 @@ public class OrderFillService {
       BigDecimal requiredMargin,
       String marginDescription
   ) {
-    return fill(order, account, new ExecutionResult(executionPrice, filledAt), requiredMargin, marginDescription);
+    BigDecimal quantity = expectedFullQuantity(order);
+    return fill(
+        order,
+        account,
+        new ExecutionResult(
+            executionPrice,
+            filledAt,
+            quantity,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            null,
+            BigDecimal.ZERO,
+            null,
+            null),
+        requiredMargin,
+        marginDescription);
+  }
+
+  public OrderEntity fill(
+      OrderEntity order,
+      TradingAccountEntity account,
+      FullFillResult fullFill,
+      BigDecimal requiredMargin,
+      String marginDescription
+  ) {
+    requireFullFill(order, fullFill == null ? null : fullFill.filledQuantity(),
+        fullFill == null ? null : fullFill.remainingQuantity());
+    return fillInternal(
+        order,
+        account,
+        fullFill.toExecutionResult(),
+        requiredMargin,
+        marginDescription,
+        fullFill);
   }
 
   public OrderEntity fill(
@@ -178,11 +213,23 @@ public class OrderFillService {
       BigDecimal requiredMargin,
       String marginDescription
   ) {
-    BigDecimal orderQuantity = order.getQuantity() != null ? order.getQuantity() : order.getLots();
-    BigDecimal filledQuantity = execution.filledQuantity() != null ? execution.filledQuantity() : orderQuantity;
-    BigDecimal remainingQuantity = execution.remainingQuantity() != null
-        ? execution.remainingQuantity()
-        : orderQuantity.subtract(filledQuantity).max(BigDecimal.ZERO);
+    requireFullFill(order,
+        execution == null ? null : execution.filledQuantity(),
+        execution == null ? null : execution.remainingQuantity());
+    return fillInternal(order, account, execution, requiredMargin, marginDescription, null);
+  }
+
+  private OrderEntity fillInternal(
+      OrderEntity order,
+      TradingAccountEntity account,
+      ExecutionResult execution,
+      BigDecimal requiredMargin,
+      String marginDescription,
+      FullFillResult canonicalFill
+  ) {
+    BigDecimal orderQuantity = expectedFullQuantity(order);
+    BigDecimal filledQuantity = execution.filledQuantity();
+    BigDecimal remainingQuantity = BigDecimal.ZERO;
     BigDecimal fee = orZero(execution.fee());
     BigDecimal slippage = orZero(execution.slippage());
     BigDecimal existingOrderHold = orZero(order.getHoldAmount());
@@ -190,12 +237,16 @@ public class OrderFillService {
     BigDecimal marginToHold = executionMargin(order, account, execution.filledPrice(), filledQuantity)
         .orElseGet(() -> proportionalMargin(fullMargin, filledQuantity, orderQuantity));
 
-    order.setStatus(remainingQuantity.compareTo(BigDecimal.ZERO) > 0 ? OrderStatus.PARTIALLY_FILLED : OrderStatus.FILLED);
+    order.setStatus(OrderStatus.FILLED);
     order.setExecutionPrice(execution.filledPrice());
     order.setAvgFillPrice(execution.filledPrice());
     order.setFilledQuantity(filledQuantity);
     order.setRemainingQuantity(remainingQuantity);
     order.setFee(fee);
+    order.setFeeAsset(execution.feeAsset());
+    if (canonicalFill != null) {
+      order.setLiquidityRole(canonicalFill.liquidityRole());
+    }
     order.setSlippage(slippage);
     order.setFilledAt(execution.filledAt());
     orderRepository.save(order);
@@ -204,9 +255,21 @@ public class OrderFillService {
     trade.setOrderId(order.getId());
     trade.setAccountId(account.getId());
     trade.setSymbol(order.getSymbol());
+    trade.setProductType(order.getProductType());
+    trade.setPositionSide(order.getPositionSide());
+    trade.setMarginMode(order.getMarginMode());
     trade.setSide(order.getSide());
     trade.setLots(filledQuantity);
     trade.setPrice(execution.filledPrice());
+    trade.setFee(fee);
+    trade.setFeeAsset(execution.feeAsset());
+    trade.setLiquidityRole(canonicalFill == null ? order.getLiquidityRole() : canonicalFill.liquidityRole());
+    trade.setSystemReason(order.getSystemReason());
+    if (canonicalFill != null) {
+      trade.setSourceMode(canonicalFill.sourceMode().name());
+      trade.setProviderCode(canonicalFill.providerCode());
+    }
+    trade.setExecutedAt(execution.filledAt());
     if (trade.getId() == null) {
       trade.setId(UUID.randomUUID());
     }
@@ -272,6 +335,33 @@ public class OrderFillService {
     chargeTradeFee(account, fee, execution.feeAsset(), profile.kind(), trade.getId());
 
     return order;
+  }
+
+  private void requireFullFill(
+      OrderEntity order,
+      BigDecimal filledQuantity,
+      BigDecimal remainingQuantity
+  ) {
+    BigDecimal expected = expectedFullQuantity(order);
+    if (expected == null
+        || filledQuantity == null
+        || remainingQuantity == null
+        || filledQuantity.compareTo(expected) != 0
+        || remainingQuantity.compareTo(BigDecimal.ZERO) != 0) {
+      throw new BusinessException(
+          ErrorCode.PARTIAL_FILL_NOT_SUPPORTED,
+          "Demo execution supports one full fill only");
+    }
+  }
+
+  private BigDecimal expectedFullQuantity(OrderEntity order) {
+    if (order == null) {
+      return null;
+    }
+    if (order.getBaseQuantity() != null) {
+      return order.getBaseQuantity();
+    }
+    return order.getQuantity() != null ? order.getQuantity() : order.getLots();
   }
 
   private boolean isNetPositionKind(InstrumentKind kind) {

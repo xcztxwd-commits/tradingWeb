@@ -1,10 +1,12 @@
 package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.trading.entity.OrderEntity;
@@ -43,11 +45,11 @@ class SpotSettlementServiceTest {
 
   @BeforeEach
   void setUpRepositories() {
-    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+    org.mockito.Mockito.lenient().when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
         any(UUID.class), any(String.class), any(String.class)))
         .thenAnswer(invocation -> Optional.ofNullable(
             balances.get(key(invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)))));
-    when(walletBalanceRepository.save(any(WalletBalanceEntity.class))).thenAnswer(invocation -> {
+    org.mockito.Mockito.lenient().when(walletBalanceRepository.save(any(WalletBalanceEntity.class))).thenAnswer(invocation -> {
       WalletBalanceEntity balance = invocation.getArgument(0);
       if (balance.getId() == null) {
         balance.setId(UUID.randomUUID());
@@ -55,7 +57,7 @@ class SpotSettlementServiceTest {
       balances.put(key(balance.getAccountId(), balance.getWalletType(), balance.getAsset()), balance);
       return balance;
     });
-    when(assetLedgerEntryRepository.save(any(AssetLedgerEntryEntity.class))).thenAnswer(invocation -> {
+    org.mockito.Mockito.lenient().when(assetLedgerEntryRepository.save(any(AssetLedgerEntryEntity.class))).thenAnswer(invocation -> {
       AssetLedgerEntryEntity entry = invocation.getArgument(0);
       ledgerEntries.add(entry);
       return entry;
@@ -70,14 +72,14 @@ class SpotSettlementServiceTest {
 
     service.settleBuyFill(
         order(account.getId(), OrderSide.BUY, "0.1"),
-        execution("50000.00000000", "0.1", "5.00000000"),
+        execution("50000.00000000", "0.1", "0.00005000", "BTC"),
         btcUsdt(),
         account);
 
     assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable()).isEqualByComparingTo("5000.00000000");
     assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getTotal()).isEqualByComparingTo("5000.00000000");
-    assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable()).isEqualByComparingTo("0.09990000");
-    assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getTotal()).isEqualByComparingTo("0.09990000");
+    assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable()).isEqualByComparingTo("0.09995000");
+    assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getTotal()).isEqualByComparingTo("0.09995000");
     assertThat(account.getUsedMargin()).isEqualByComparingTo("0");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
@@ -93,18 +95,73 @@ class SpotSettlementServiceTest {
 
     service.settleSellFill(
         order(account.getId(), OrderSide.SELL, "0.1"),
-        execution("55000.00000000", "0.1", "5.50000000"),
+        execution("55000.00000000", "0.1", "2.75000000", "USDT"),
         btcUsdt(),
         account);
 
     assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable()).isEqualByComparingTo("0.00000000");
     assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getTotal()).isEqualByComparingTo("0.00000000");
-    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable()).isEqualByComparingTo("5494.50000000");
-    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getTotal()).isEqualByComparingTo("5494.50000000");
+    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable()).isEqualByComparingTo("5497.25000000");
+    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getTotal()).isEqualByComparingTo("5497.25000000");
     assertThat(account.getUsedMargin()).isEqualByComparingTo("0");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
         .containsExactly("SPOT_SELL_DEBIT", "SPOT_SELL_CREDIT", "TRADE_FEE");
+  }
+
+  @Test
+  void rejectsFeeAssetMismatchBeforeAnyWalletMutation() {
+    TradingAccountEntity account = account();
+    putBalance(account.getId(), "USDT", "10000.00000000", "10000.00000000", "0");
+    SpotSettlementService service = service();
+
+    assertThatThrownBy(() -> service.settleBuyFill(
+        order(account.getId(), OrderSide.BUY, "0.1"),
+        execution("50000.00000000", "0.1", "0.00005000", "USDT"),
+        btcUsdt(),
+        account))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("INVALID_FEE_ASSET"));
+
+    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable())
+        .isEqualByComparingTo("10000.00000000");
+    assertThat(ledgerEntries).isEmpty();
+  }
+
+  @Test
+  void rejectsPositiveFeeWithoutAssetBeforeAnyWalletMutation() {
+    TradingAccountEntity account = account();
+    putBalance(account.getId(), "USDT", "10000.00000000", "10000.00000000", "0");
+
+    assertThatThrownBy(() -> service().settleBuyFill(
+        order(account.getId(), OrderSide.BUY, "0.1"),
+        execution("50000.00000000", "0.1", "0.00005000", null),
+        btcUsdt(),
+        account))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("INVALID_FEE_ASSET"));
+
+    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable())
+        .isEqualByComparingTo("10000.00000000");
+    assertThat(ledgerEntries).isEmpty();
+  }
+
+  @Test
+  void rejectsNegativeFeeBeforeAnyWalletMutation() {
+    TradingAccountEntity account = account();
+    putBalance(account.getId(), "USDT", "10000.00000000", "10000.00000000", "0");
+
+    assertThatThrownBy(() -> service().settleBuyFill(
+        order(account.getId(), OrderSide.BUY, "0.1"),
+        execution("50000.00000000", "0.1", "-0.00005000", "BTC"),
+        btcUsdt(),
+        account))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("INVALID_FEE_AMOUNT"));
+
+    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable())
+        .isEqualByComparingTo("10000.00000000");
+    assertThat(ledgerEntries).isEmpty();
   }
 
   @Test
@@ -115,14 +172,14 @@ class SpotSettlementServiceTest {
 
     service.settleBuyFill(
         pendingOrder(account.getId(), OrderSide.BUY, "0.10", "5000.00000000", "USDT"),
-        execution("49000.00000000", "0.04", "1.96000000"),
+        execution("49000.00000000", "0.04", "0.00002000", "BTC"),
         btcUsdt(),
         account);
 
     assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getTotal()).isEqualByComparingTo("4040.00000000");
     assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable()).isEqualByComparingTo("4040.00000000");
     assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getLocked()).isEqualByComparingTo("0.00000000");
-    assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable()).isEqualByComparingTo("0.03996000");
+    assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable()).isEqualByComparingTo("0.03998000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
         .containsExactly("SPOT_BUY_DEBIT", "ORDER_RELEASE", "SPOT_BUY_CREDIT", "TRADE_FEE");
@@ -137,14 +194,14 @@ class SpotSettlementServiceTest {
 
     service.settleSellFill(
         pendingOrder(account.getId(), OrderSide.SELL, "0.10", "0.10000000", "BTC"),
-        execution("49000.00000000", "0.04", "1.96000000"),
+        execution("49000.00000000", "0.04", "0.98000000", "USDT"),
         btcUsdt(),
         account);
 
     assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getTotal()).isEqualByComparingTo("0.06000000");
     assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable()).isEqualByComparingTo("0.06000000");
     assertThat(balance(account.getId(), WalletType.SPOT, "BTC").getLocked()).isEqualByComparingTo("0.00000000");
-    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable()).isEqualByComparingTo("1958.04000000");
+    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable()).isEqualByComparingTo("1959.02000000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
         .containsExactly("SPOT_SELL_DEBIT", "ORDER_RELEASE", "SPOT_SELL_CREDIT", "TRADE_FEE");
@@ -205,13 +262,14 @@ class SpotSettlementServiceTest {
     return order;
   }
 
-  private static ExecutionResult execution(String price, String quantity, String fee) {
+  private static ExecutionResult execution(String price, String quantity, String fee, String feeAsset) {
     return new ExecutionResult(
         new BigDecimal(price),
         Instant.parse("2026-06-16T01:00:00Z"),
         new BigDecimal(quantity),
         BigDecimal.ZERO,
         new BigDecimal(fee),
+        feeAsset,
         BigDecimal.ZERO,
         null,
         null);

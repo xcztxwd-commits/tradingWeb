@@ -71,12 +71,12 @@ class Step05SpotWalletSettlementAuditTest {
 
     service().settleBuyFill(
         order(account.getId(), OrderSide.BUY, "0.1"),
-        execution("50000.00000000", "0.1", "5.00000000"),
+        execution("50000.00000000", "0.1", "0.00005000", "BTC"),
         btcUsdt(),
         account);
 
     AuditAssertions.assertAmountClose(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable(), "5000.00000000");
-    AuditAssertions.assertBtcClose(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable(), "0.09990000");
+    AuditAssertions.assertBtcClose(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable(), "0.09995000");
     AuditAssertions.assertAmountClose(account.getUsedMargin(), "0.00000000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
@@ -91,12 +91,12 @@ class Step05SpotWalletSettlementAuditTest {
 
     service().settleSellFill(
         order(account.getId(), OrderSide.SELL, "0.1"),
-        execution("55000.00000000", "0.1", "5.50000000"),
+        execution("55000.00000000", "0.1", "2.75000000", "USDT"),
         btcUsdt(),
         account);
 
     AuditAssertions.assertBtcClose(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable(), "0.00000000");
-    AuditAssertions.assertAmountClose(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable(), "5494.50000000");
+    AuditAssertions.assertAmountClose(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable(), "5497.25000000");
     AuditAssertions.assertAmountClose(account.getUsedMargin(), "0.00000000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
@@ -145,13 +145,14 @@ class Step05SpotWalletSettlementAuditTest {
     return order;
   }
 
-  private static ExecutionResult execution(String price, String quantity, String fee) {
+  private static ExecutionResult execution(String price, String quantity, String fee, String feeAsset) {
     return new ExecutionResult(
         new BigDecimal(price),
         Instant.parse("2026-06-16T01:00:00Z"),
         new BigDecimal(quantity),
         BigDecimal.ZERO,
         new BigDecimal(fee),
+        feeAsset,
         BigDecimal.ZERO,
         null,
         null);

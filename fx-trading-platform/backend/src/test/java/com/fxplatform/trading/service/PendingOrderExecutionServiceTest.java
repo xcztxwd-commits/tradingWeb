@@ -12,9 +12,17 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.DemoExecutionGuard;
+import com.fxplatform.execution.ExecutableMarketSnapshot;
+import com.fxplatform.execution.FullFillCoordinator;
+import com.fxplatform.execution.FullFillExecutionPath;
+import com.fxplatform.execution.FullFillRequest;
+import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.model.MarketSourceMode;
+import com.fxplatform.market.model.SpotMarketBundle;
+import com.fxplatform.market.provider.MarketBundleResolver;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
@@ -34,6 +42,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -83,6 +95,12 @@ class PendingOrderExecutionServiceTest {
   @Mock
   private TradingTransactionExecutor transactionExecutor;
 
+  @Mock
+  private MarketBundleResolver marketBundleResolver;
+
+  @Mock
+  private FullFillCoordinator fullFillCoordinator;
+
   @BeforeEach
   void rowLockQueriesReturnTheScannedFixtures() {
     org.mockito.Mockito.lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
@@ -93,6 +111,122 @@ class PendingOrderExecutionServiceTest {
             .findFirst());
     org.mockito.Mockito.lenient().when(transactionExecutor.execute(any()))
         .thenAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+  }
+
+  @Test
+  void failedP0CandidateDoesNotPreventTheNextCandidateFromFilling() {
+    UUID firstAccountId = UUID.randomUUID();
+    UUID secondAccountId = UUID.randomUUID();
+    OrderEntity first = p0PendingOrder(firstAccountId, "first");
+    OrderEntity second = p0PendingOrder(secondAccountId, "second");
+    TradingAccountEntity firstAccount = account(firstAccountId);
+    TradingAccountEntity secondAccount = account(secondAccountId);
+    AtomicBoolean insideMutation = new AtomicBoolean();
+
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(first, second));
+    when(accountRepository.findById(firstAccountId)).thenReturn(Optional.of(firstAccount));
+    when(accountRepository.findById(secondAccountId)).thenReturn(Optional.of(secondAccount));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any()))
+        .thenAnswer(invocation -> {
+          assertThat(insideMutation.get()).isFalse();
+          return spotBundle();
+        });
+    when(fullFillCoordinator.execute(any(), any()))
+        .thenThrow(new IllegalStateException("first locked mutation failed"))
+        .thenReturn(fullFill());
+    when(orderRepository.claimPending(second.getId())).thenReturn(1);
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    org.mockito.Mockito.doAnswer(invocation -> {
+      insideMutation.set(true);
+      try {
+        return ((java.util.function.Supplier<?>) invocation.getArgument(0)).get();
+      } finally {
+        insideMutation.set(false);
+      }
+    }).when(transactionExecutor).execute(any());
+
+    int filled = p0Service().executePendingOrders();
+
+    assertThat(filled).isEqualTo(1);
+    assertThat(first.getStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(first.getHoldAmount()).isEqualByComparingTo("100");
+    assertThat(second.getStatus()).isEqualTo(OrderStatus.FILLED);
+    verify(marketBundleResolver, org.mockito.Mockito.times(2)).resolveSpot(eq("BTCUSDT"), any());
+    verify(transactionExecutor, org.mockito.Mockito.times(2)).execute(any());
+    verify(tradeRepository, org.mockito.Mockito.times(1)).save(any(TradeEntity.class));
+  }
+
+  @Test
+  void staleP0SnapshotAfterLocksLeavesPendingHoldAndNeverClaims() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity order = p0PendingOrder(accountId, "stale");
+    TradingAccountEntity account = account(accountId);
+
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(spotBundle());
+    when(fullFillCoordinator.execute(any(), any()))
+        .thenThrow(new BusinessException("MARKET_DATA_STALE", "expired after row locks"));
+
+    int filled = p0Service().executePendingOrders();
+
+    assertThat(filled).isZero();
+    assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(order.getHoldAmount()).isEqualByComparingTo("100");
+    verify(orderRepository, never()).claimPending(order.getId());
+    verify(orderRepository, never()).save(any());
+    verify(tradeRepository, never()).save(any());
+    org.mockito.InOrder guardBeforeProvider = org.mockito.Mockito.inOrder(
+        demoExecutionGuard, marketBundleResolver);
+    guardBeforeProvider.verify(demoExecutionGuard)
+        .requireDemo(account, ProductType.CRYPTO_SPOT, "BTCUSDT");
+    guardBeforeProvider.verify(marketBundleResolver).resolveSpot(eq("BTCUSDT"), any());
+    org.mockito.InOrder lockAndValidate = org.mockito.Mockito.inOrder(
+        accountRepository, walletService, orderRepository, fullFillCoordinator);
+    lockAndValidate.verify(accountRepository).findByIdForUpdate(accountId);
+    lockAndValidate.verify(walletService).lockBalancesInOrder(accountId, List.of("BTC", "USDT"));
+    lockAndValidate.verify(orderRepository).findByIdForUpdate(order.getId());
+    lockAndValidate.verify(fullFillCoordinator).execute(any(), any());
+  }
+
+  @Test
+  void concurrentP0WorkersCreateAtMostOneTradeForOnePendingOrder() throws Exception {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity order = p0PendingOrder(accountId, "concurrent");
+    TradingAccountEntity account = account(accountId);
+    AtomicBoolean claimed = new AtomicBoolean();
+    CountDownLatch start = new CountDownLatch(1);
+
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(spotBundle());
+    when(fullFillCoordinator.execute(any(), any())).thenReturn(fullFill());
+    when(orderRepository.claimPending(order.getId()))
+        .thenAnswer(invocation -> claimed.compareAndSet(false, true) ? 1 : 0);
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+    PendingOrderExecutionService service = p0Service();
+    try (var workers = Executors.newFixedThreadPool(2)) {
+      var first = workers.submit(() -> {
+        start.await(2, TimeUnit.SECONDS);
+        return service.executePendingOrders();
+      });
+      var second = workers.submit(() -> {
+        start.await(2, TimeUnit.SECONDS);
+        return service.executePendingOrders();
+      });
+      start.countDown();
+
+      assertThat(first.get(3, TimeUnit.SECONDS) + second.get(3, TimeUnit.SECONDS)).isEqualTo(1);
+    }
+
+    verify(orderRepository, org.mockito.Mockito.atLeastOnce()).claimPending(order.getId());
+    verify(tradeRepository, org.mockito.Mockito.times(1)).save(any(TradeEntity.class));
+    ArgumentCaptor<FullFillRequest> request = ArgumentCaptor.forClass(FullFillRequest.class);
+    verify(fullFillCoordinator, org.mockito.Mockito.atLeastOnce()).execute(request.capture(), any());
+    assertThat(request.getAllValues())
+        .allSatisfy(value -> assertThat(value.executionPath()).isEqualTo(FullFillExecutionPath.RESTING_LIMIT));
   }
 
   @Test
@@ -297,6 +431,7 @@ class PendingOrderExecutionServiceTest {
     OrderEntity order = pendingOrder(accountId, OrderSide.BUY, OrderType.LIMIT, new BigDecimal("1.08000"));
 
     when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account(accountId)));
     when(quoteService.freshQuote("EURUSD")).thenReturn(quote(new BigDecimal("1.08010"), new BigDecimal("1.08012")));
 
     PendingOrderExecutionService service = new PendingOrderExecutionService(
@@ -317,7 +452,7 @@ class PendingOrderExecutionServiceTest {
 
     assertThat(filled).isZero();
     assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
-    verify(accountRepository, never()).findById(any());
+    verify(accountRepository).findById(accountId);
     verify(orderRepository, never()).save(order);
     verify(tradeRepository, never()).save(any());
     verify(positionRepository, never()).save(any());
@@ -329,6 +464,7 @@ class PendingOrderExecutionServiceTest {
     OrderEntity order = pendingOrder(accountId, OrderSide.BUY, OrderType.LIMIT, new BigDecimal("1.08000"));
 
     when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account(accountId)));
     when(quoteService.freshQuote("EURUSD")).thenThrow(new BusinessException("QUOTE_STALE", "Quote is stale"));
 
     PendingOrderExecutionService service = new PendingOrderExecutionService(
@@ -349,7 +485,7 @@ class PendingOrderExecutionServiceTest {
 
     assertThat(filled).isZero();
     assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
-    verify(accountRepository, never()).findById(any());
+    verify(accountRepository).findById(accountId);
   }
 
   private static OrderEntity pendingOrder(UUID accountId, OrderSide side, OrderType type, BigDecimal requestedPrice) {
@@ -381,5 +517,84 @@ class PendingOrderExecutionServiceTest {
     account.setFreeMargin(new BigDecimal("10000.00000000"));
     account.setLeverage(100);
     return account;
+  }
+
+  private PendingOrderExecutionService p0Service() {
+    return new PendingOrderExecutionService(
+        orderRepository,
+        accountRepository,
+        quoteService,
+        riskCheckService,
+        new OrderFillService(
+            orderRepository,
+            tradeRepository,
+            positionRepository,
+            accountRepository,
+            ledgerService),
+        orderEventService,
+        demoExecutionGuard,
+        walletBalanceRepository,
+        walletService,
+        spotPositionService,
+        positionRepository,
+        transactionExecutor,
+        marketBundleResolver,
+        fullFillCoordinator);
+  }
+
+  private static OrderEntity p0PendingOrder(UUID accountId, String clientOrderId) {
+    OrderEntity order = pendingOrder(
+        accountId,
+        OrderSide.BUY,
+        OrderType.LIMIT,
+        new BigDecimal("101"));
+    order.setSymbol("BTCUSDT");
+    order.setClientOrderId(clientOrderId);
+    order.setIdempotencyKey(clientOrderId);
+    order.setLots(new BigDecimal("0.01"));
+    order.setQuantity(new BigDecimal("0.01"));
+    order.setBaseQuantity(new BigDecimal("0.01"));
+    order.setRemainingQuantity(new BigDecimal("0.01"));
+    order.setHoldAmount(new BigDecimal("100"));
+    order.setHoldCurrency("USDT");
+    order.setLeverage(1);
+    order.setProductType(ProductType.CRYPTO_SPOT);
+    return order;
+  }
+
+  private static SpotMarketBundle spotBundle() {
+    Instant now = Instant.now();
+    return new SpotMarketBundle(
+        "BTCUSDT",
+        "BTCUSDT",
+        "binance",
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        new BigDecimal("99"),
+        new BigDecimal("100"),
+        new BigDecimal("99.5"),
+        null,
+        List.of(),
+        List.of(),
+        now.minusSeconds(1),
+        now.plusSeconds(2));
+  }
+
+  private static FullFillResult fullFill() {
+    Instant now = Instant.now();
+    return new FullFillResult(
+        new BigDecimal("100"),
+        now,
+        new BigDecimal("0.01"),
+        BigDecimal.ZERO,
+        new BigDecimal("0.0002"),
+        new BigDecimal("0.000002"),
+        "BTC",
+        com.fxplatform.trading.enums.LiquidityRole.MAKER,
+        BigDecimal.ZERO,
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        "binance",
+        "BTCUSDT",
+        now.minusSeconds(1),
+        now.plusSeconds(2));
   }
 }

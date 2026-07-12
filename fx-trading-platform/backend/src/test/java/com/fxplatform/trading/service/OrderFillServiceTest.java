@@ -1,6 +1,7 @@
 package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -11,14 +12,19 @@ import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.ExecutionResult;
+import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.market.model.MarketSourceMode;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
+import com.fxplatform.trading.enums.LiquidityRole;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
@@ -31,6 +37,7 @@ import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -136,7 +143,6 @@ class OrderFillServiceTest {
     TradingAccountEntity account = account(accountId);
     OrderEntity order = order(accountId);
 
-    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol("BTCUSDT", "SPOT", "BTC", "USDT")));
     SpotSettlementService spotSettlementService = org.mockito.Mockito.mock(SpotSettlementService.class);
 
     OrderFillService service = new OrderFillService(
@@ -175,7 +181,6 @@ class OrderFillServiceTest {
     OrderEntity order = order(accountId);
     order.setSide(OrderSide.SELL);
 
-    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol("BTCUSDT", "SPOT", "BTC", "USDT")));
     SpotSettlementService spotSettlementService = org.mockito.Mockito.mock(SpotSettlementService.class);
 
     OrderFillService service = new OrderFillService(
@@ -206,15 +211,18 @@ class OrderFillServiceTest {
   }
 
   @Test
-  void spotPartialPendingFillClearsOrderHoldAfterSettlementReleasesRemainder() {
+  void spotPartialPendingFillIsRejectedBeforeAnyMutation() {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId);
     OrderEntity order = order(accountId);
     order.setStatus(OrderStatus.PENDING);
+    order.setLots(new BigDecimal("0.10"));
+    order.setQuantity(new BigDecimal("0.10"));
+    order.setBaseQuantity(new BigDecimal("0.10"));
+    order.setRemainingQuantity(new BigDecimal("0.10"));
     order.setHoldAmount(new BigDecimal("5000.00000000"));
     order.setHoldCurrency("USDT");
 
-    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol("BTCUSDT", "SPOT", "BTC", "USDT")));
     SpotSettlementService spotSettlementService = org.mockito.Mockito.mock(SpotSettlementService.class);
 
     OrderFillService service = new OrderFillService(
@@ -226,7 +234,7 @@ class OrderFillServiceTest {
         symbolRepository,
         spotSettlementService);
 
-    service.fill(
+    assertThatThrownBy(() -> service.fill(
         order,
         account,
         new ExecutionResult(
@@ -239,19 +247,118 @@ class OrderFillServiceTest {
             null,
             null),
         order.getHoldAmount(),
-        "Spot pending wallet hold");
+        "Spot pending wallet hold"))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("PARTIAL_FILL_NOT_SUPPORTED"));
 
-    assertThat(order.getStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
-    assertThat(order.getRemainingQuantity()).isEqualByComparingTo("0.06");
-    assertThat(order.getHoldAmount()).isEqualByComparingTo("0");
-    verify(spotSettlementService).settleBuyFill(
-        eq(order),
-        any(ExecutionResult.class),
-        any(SymbolEntity.class),
-        eq(account),
-        any(UUID.class));
+    assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(order.getRemainingQuantity()).isEqualByComparingTo("0.10");
+    assertThat(order.getHoldAmount()).isEqualByComparingTo("5000.00000000");
+    verify(orderRepository, never()).save(any(OrderEntity.class));
+    verify(tradeRepository, never()).save(any());
+    verify(spotSettlementService, never()).settleBuyFill(
+        any(), any(), any(), any(), any());
     verify(positionRepository, never()).save(any(PositionEntity.class));
     verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
+  }
+
+  @Test
+  void canonicalFullFillCopiesFeeRoleAndSourceMetadataToOneTrade() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    OrderEntity order = order(accountId);
+    order.setProductType(ProductType.CRYPTO_SPOT);
+    order.setBaseQuantity(new BigDecimal("0.20"));
+    SpotSettlementService spotSettlementService = org.mockito.Mockito.mock(SpotSettlementService.class);
+    when(symbolRepository.findBySymbol("BTCUSDT"))
+        .thenReturn(Optional.of(symbol("BTCUSDT", "SPOT", "BTC", "USDT")));
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(tradeRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    Instant filledAt = Instant.parse("2026-07-12T02:00:00Z");
+    FullFillResult fill = new FullFillResult(
+        new BigDecimal("50005.00000000"),
+        filledAt,
+        new BigDecimal("0.20"),
+        BigDecimal.ZERO,
+        new BigDecimal("0.0005"),
+        new BigDecimal("0.00010000"),
+        "BTC",
+        LiquidityRole.TAKER,
+        new BigDecimal("5.00000000"),
+        MarketSourceMode.LOCAL_SIMULATED,
+        "local-spot",
+        "BTCUSDT",
+        filledAt.minusSeconds(1),
+        filledAt.plusSeconds(2));
+    OrderFillService service = new OrderFillService(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        spotSettlementService);
+
+    service.fill(order, account, fill, BigDecimal.ZERO, "canonical fill");
+
+    assertThat(order.getStatus()).isEqualTo(OrderStatus.FILLED);
+    assertThat(order.getFee()).isEqualByComparingTo(fill.fee());
+    assertThat(order.getFeeAsset()).isEqualTo("BTC");
+    assertThat(order.getLiquidityRole()).isEqualTo(LiquidityRole.TAKER);
+    ArgumentCaptor<com.fxplatform.trading.entity.TradeEntity> tradeCaptor =
+        ArgumentCaptor.forClass(com.fxplatform.trading.entity.TradeEntity.class);
+    verify(tradeRepository, times(1)).save(tradeCaptor.capture());
+    assertThat(tradeCaptor.getValue().getFee()).isEqualByComparingTo(fill.fee());
+    assertThat(tradeCaptor.getValue().getFeeAsset()).isEqualTo("BTC");
+    assertThat(tradeCaptor.getValue().getLiquidityRole()).isEqualTo(LiquidityRole.TAKER);
+    assertThat(tradeCaptor.getValue().getProductType()).isEqualTo(ProductType.CRYPTO_SPOT);
+    assertThat(tradeCaptor.getValue().getSourceMode()).isEqualTo("LOCAL_SIMULATED");
+    assertThat(tradeCaptor.getValue().getProviderCode()).isEqualTo("local-spot");
+  }
+
+  @Test
+  void finalFillBoundaryRejectsLowerGreaterNullAndNonZeroRemainingQuantities() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    OrderFillService service = new OrderFillService(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService);
+    Instant filledAt = Instant.parse("2026-07-12T02:00:00Z");
+    List<ExecutionResult> invalid = List.of(
+        execution("0.10", "0"),
+        execution("0.30", "0"),
+        new ExecutionResult(
+            new BigDecimal("100"), filledAt, null, BigDecimal.ZERO,
+            BigDecimal.ZERO, null, BigDecimal.ZERO, null, null),
+        execution("0.20", "0.01"));
+
+    for (ExecutionResult execution : invalid) {
+      OrderEntity order = order(accountId);
+      order.setBaseQuantity(new BigDecimal("0.20"));
+      assertThatThrownBy(() -> service.fill(order, account, execution, BigDecimal.ZERO, "invalid"))
+          .isInstanceOfSatisfying(BusinessException.class,
+              exception -> assertThat(exception.getCode()).isEqualTo("PARTIAL_FILL_NOT_SUPPORTED"));
+    }
+
+    verify(orderRepository, never()).save(any());
+    verify(tradeRepository, never()).save(any());
+    verify(positionRepository, never()).save(any());
+  }
+
+  private static ExecutionResult execution(String filled, String remaining) {
+    return new ExecutionResult(
+        new BigDecimal("100"),
+        Instant.parse("2026-07-12T02:00:00Z"),
+        new BigDecimal(filled),
+        new BigDecimal(remaining),
+        BigDecimal.ZERO,
+        null,
+        BigDecimal.ZERO,
+        null,
+        null);
   }
 
   @Test

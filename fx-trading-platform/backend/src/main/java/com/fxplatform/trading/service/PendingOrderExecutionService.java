@@ -1,12 +1,19 @@
 package com.fxplatform.trading.service;
-import cn.hutool.core.date.DateUtil;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.execution.DemoExecutionGuard;
+import com.fxplatform.execution.ExecutableMarketSnapshot;
+import com.fxplatform.execution.FullFillCoordinator;
+import com.fxplatform.execution.FullFillExecutionPath;
+import com.fxplatform.execution.FullFillRequest;
+import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.market.model.CandleRequest;
 import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.provider.MarketBundleResolver;
 import com.fxplatform.market.service.QuoteService;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
@@ -19,21 +26,28 @@ import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
-import java.util.ArrayList;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/**
- * PendingOrderExecutionService 是交易模块的业务服务。
- */
+/** Scans pending orders and executes each candidate in its own local transaction. */
 @Service
-@RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "trading", name = "pending-order-execution-enabled", havingValue = "true")
 public class PendingOrderExecutionService {
+
+  private static final Logger log = LoggerFactory.getLogger(PendingOrderExecutionService.class);
+
+  private static final Set<String> P0_SYMBOLS = Set.of(
+      "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
+      "BTCUSDT-PERP", "ETHUSDT-PERP", "BNBUSDT-PERP", "SOLUSDT-PERP", "XRPUSDT-PERP");
 
   private final OrderRepository orderRepository;
   private final TradingAccountRepository accountRepository;
@@ -47,59 +61,200 @@ public class PendingOrderExecutionService {
   private final SpotPositionService spotPositionService;
   private final PositionRepository positionRepository;
   private final TradingTransactionExecutor transactionExecutor;
+  private final MarketBundleResolver marketBundleResolver;
+  private final FullFillCoordinator fullFillCoordinator;
 
-  /**
-   * 定时扫描仅处理仍处于 PENDING 的挂单；每笔订单在 tryExecute 内再次抢占状态。
-   */
+  @Autowired
+  public PendingOrderExecutionService(
+      OrderRepository orderRepository,
+      TradingAccountRepository accountRepository,
+      QuoteService quoteService,
+      RiskCheckService riskCheckService,
+      OrderFillService orderFillService,
+      OrderEventService orderEventService,
+      DemoExecutionGuard demoExecutionGuard,
+      WalletBalanceRepository walletBalanceRepository,
+      WalletService walletService,
+      SpotPositionService spotPositionService,
+      PositionRepository positionRepository,
+      TradingTransactionExecutor transactionExecutor,
+      MarketBundleResolver marketBundleResolver,
+      FullFillCoordinator fullFillCoordinator
+  ) {
+    this.orderRepository = orderRepository;
+    this.accountRepository = accountRepository;
+    this.quoteService = quoteService;
+    this.riskCheckService = riskCheckService;
+    this.orderFillService = orderFillService;
+    this.orderEventService = orderEventService;
+    this.demoExecutionGuard = demoExecutionGuard;
+    this.walletBalanceRepository = walletBalanceRepository;
+    this.walletService = walletService;
+    this.spotPositionService = spotPositionService;
+    this.positionRepository = positionRepository;
+    this.transactionExecutor = transactionExecutor;
+    this.marketBundleResolver = marketBundleResolver;
+    this.fullFillCoordinator = fullFillCoordinator;
+  }
+
+  /** Compatibility constructor for historical non-P0 unit fixtures. */
+  public PendingOrderExecutionService(
+      OrderRepository orderRepository,
+      TradingAccountRepository accountRepository,
+      QuoteService quoteService,
+      RiskCheckService riskCheckService,
+      OrderFillService orderFillService,
+      OrderEventService orderEventService,
+      DemoExecutionGuard demoExecutionGuard,
+      WalletBalanceRepository walletBalanceRepository,
+      WalletService walletService,
+      SpotPositionService spotPositionService,
+      PositionRepository positionRepository,
+      TradingTransactionExecutor transactionExecutor
+  ) {
+    this(
+        orderRepository,
+        accountRepository,
+        quoteService,
+        riskCheckService,
+        orderFillService,
+        orderEventService,
+        demoExecutionGuard,
+        walletBalanceRepository,
+        walletService,
+        spotPositionService,
+        positionRepository,
+        transactionExecutor,
+        null,
+        null);
+  }
+
   @Scheduled(fixedDelayString = "${trading.pending-order-scan-ms:1000}")
   public int executePendingOrders() {
-    List<PendingCandidate> candidates = new ArrayList<>();
-    for (OrderEntity order : orderRepository.findByStatus(OrderStatus.PENDING)) {
-      if (order.getRequestedPrice() == null) {
-        continue;
-      }
-      try {
-        QuoteResponse quote = quoteService.freshQuote(order.getSymbol());
-        if (isTriggered(order, quote)) {
-          ProductType productType = requestedProduct(order.getSymbol());
-          TradingAccountEntity accountSnapshot = accountRepository.findById(order.getAccountId())
-              .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
-          demoExecutionGuard.requireDemo(accountSnapshot, productType, order.getSymbol());
-          CreateOrderRequest request = toRequest(order);
-          BigDecimal requiredMargin = order.getHoldAmount() != null
-              ? order.getHoldAmount()
-              : riskCheckService.checkOrder(accountSnapshot, request);
-          candidates.add(new PendingCandidate(
-              order,
-              quote,
-              productType,
-              requiredMargin,
-              executablePrice(order, quote)));
-        }
-      } catch (BusinessException ignored) {
-        // A stale or unavailable public quote leaves the order pending for the next scan.
-      }
-    }
-
     int filled = 0;
-    for (PendingCandidate candidate : candidates) {
-      if (transactionExecutor.execute(() -> tryExecute(candidate))) {
-        filled++;
+    for (OrderEntity order : orderRepository.findByStatus(OrderStatus.PENDING)) {
+      try {
+        boolean executed = isP0Order(order)
+            ? prepareAndExecuteP0(order)
+            : prepareAndExecuteLegacy(order);
+        if (executed) {
+          filled++;
+        }
+      } catch (BusinessException exception) {
+        log.debug(
+            "Pending order {} remains pending after business rejection {}",
+            order.getId(),
+            exception.getCode());
+      } catch (RuntimeException exception) {
+        log.warn(
+            "Pending order {} failed without aborting later candidates: {}: {}",
+            order.getId(),
+            exception.getClass().getSimpleName(),
+            exception.getMessage());
       }
     }
     return filled;
   }
 
-  /**
-   * 挂单触价后先抢占 PENDING 状态，只有抢占成功的实例可以继续成交。
-   */
-  private boolean tryExecute(PendingCandidate candidate) {
-    OrderEntity order = candidate.order();
-    TradingAccountEntity account = accountRepository.findByIdForUpdate(order.getAccountId())
+  private boolean prepareAndExecuteP0(OrderEntity order) {
+    TradingAccountEntity accountSnapshot = accountRepository.findById(order.getAccountId())
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
-    demoExecutionGuard.requireDemo(account, candidate.productType(), order.getSymbol());
-    lockMutationState(account.getId(), candidate.productType(), order.getSymbol());
-    OrderEntity lockedOrder = orderRepository.findByIdForUpdate(order.getId())
+    ProductType productType = requestedProduct(order.getSymbol());
+    demoExecutionGuard.requireDemo(accountSnapshot, productType, order.getSymbol());
+
+    ExecutableMarketSnapshot snapshot = resolveExecutableSnapshot(order.getSymbol(), productType);
+    if (!isTriggered(order, snapshot)) {
+      return false;
+    }
+    BigDecimal requiredMargin = order.getHoldAmount() != null
+        ? order.getHoldAmount()
+        : riskCheckService.checkOrder(accountSnapshot, toRequest(order, canonicalQuantity(order)));
+    PendingCandidate candidate = new PendingCandidate(
+        order.getId(),
+        order.getAccountId(),
+        order.getSymbol(),
+        productType,
+        requiredMargin,
+        snapshot);
+    return transactionExecutor.execute(() -> tryExecuteP0(candidate));
+  }
+
+  private boolean tryExecuteP0(PendingCandidate candidate) {
+    TradingAccountEntity account = accountRepository.findByIdForUpdate(candidate.accountId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(account, candidate.productType(), candidate.symbol());
+    lockMutationState(account.getId(), candidate.productType(), candidate.symbol());
+    OrderEntity lockedOrder = orderRepository.findByIdForUpdate(candidate.orderId())
+        .orElseThrow(() -> new BusinessException("ORDER_NOT_FOUND", "Order not found"));
+    if (lockedOrder.getStatus() != OrderStatus.PENDING || !isTriggered(lockedOrder, candidate.snapshot())) {
+      return false;
+    }
+
+    BigDecimal quantity = canonicalQuantity(lockedOrder);
+    FullFillExecutionPath path = lockedOrder.getOrderType() == OrderType.LIMIT
+        ? FullFillExecutionPath.RESTING_LIMIT
+        : FullFillExecutionPath.TRIGGERED_STOP_MARKET;
+    CreateOrderRequest executionIntent = toRequest(lockedOrder, quantity);
+    FullFillResult fullFill = fullFillCoordinator.execute(
+        new FullFillRequest(
+            executionIntent,
+            lockedOrder.getSymbol(),
+            candidate.productType(),
+            lockedOrder.getSide(),
+            path,
+            quantity,
+            path == FullFillExecutionPath.RESTING_LIMIT ? currentPrice(lockedOrder) : null),
+        candidate.snapshot());
+
+    // Snapshot/trigger/full-quantity validation above must complete before the first claim/write.
+    if (orderRepository.claimPending(lockedOrder.getId()) != 1) {
+      return false;
+    }
+    lockedOrder.setStatus(OrderStatus.WORKING);
+    BigDecimal lockedRequiredMargin = lockedOrder.getHoldAmount() != null
+        ? lockedOrder.getHoldAmount()
+        : candidate.requiredMargin();
+    orderFillService.fill(
+        lockedOrder,
+        account,
+        fullFill,
+        lockedRequiredMargin,
+        "Pending order margin hold");
+    recordFill(lockedOrder);
+    return true;
+  }
+
+  private boolean prepareAndExecuteLegacy(OrderEntity order) {
+    if (order.getRequestedPrice() == null) {
+      return false;
+    }
+    ProductType productType = requestedProduct(order.getSymbol());
+    TradingAccountEntity accountSnapshot = accountRepository.findById(order.getAccountId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(accountSnapshot, productType, order.getSymbol());
+    QuoteResponse quote = quoteService.freshQuote(order.getSymbol());
+    if (!isTriggered(order, quote)) {
+      return false;
+    }
+    BigDecimal requiredMargin = order.getHoldAmount() != null
+        ? order.getHoldAmount()
+        : riskCheckService.checkOrder(accountSnapshot, toRequest(order, canonicalQuantity(order)));
+    LegacyPendingCandidate candidate = new LegacyPendingCandidate(
+        order,
+        quote,
+        productType,
+        requiredMargin,
+        executablePrice(order, quote));
+    return transactionExecutor.execute(() -> tryExecuteLegacy(candidate));
+  }
+
+  private boolean tryExecuteLegacy(LegacyPendingCandidate candidate) {
+    OrderEntity snapshotOrder = candidate.order();
+    TradingAccountEntity account = accountRepository.findByIdForUpdate(snapshotOrder.getAccountId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(account, candidate.productType(), snapshotOrder.getSymbol());
+    lockMutationState(account.getId(), candidate.productType(), snapshotOrder.getSymbol());
+    OrderEntity lockedOrder = orderRepository.findByIdForUpdate(snapshotOrder.getId())
         .orElseThrow(() -> new BusinessException("ORDER_NOT_FOUND", "Order not found"));
     if (lockedOrder.getStatus() != OrderStatus.PENDING || !isTriggered(lockedOrder, candidate.quote())) {
       return false;
@@ -108,32 +263,52 @@ public class PendingOrderExecutionService {
       return false;
     }
     lockedOrder.setStatus(OrderStatus.WORKING);
-
-    // 挂单触价后复用统一成交写入路径，保证订单、成交、仓位、保证金流水一致。
     orderFillService.fill(
         lockedOrder,
         account,
         candidate.executionPrice(),
-        DateUtil.date().toInstant(),
+        Instant.now(),
         candidate.requiredMargin(),
         "Pending order margin hold");
+    recordFill(lockedOrder);
+    return true;
+  }
+
+  private void recordFill(OrderEntity order) {
     orderEventService.record(
-        lockedOrder.getId(),
+        order.getId(),
         "ORDER_FILLED",
         OrderStatus.WORKING,
         OrderStatus.FILLED,
         null,
         "Pending order filled");
-    return true;
   }
 
-  /**
-   * LIMIT 和 STOP 的触价方向相反，这里只判断价格条件，不修改订单状态。
-   */
+  private boolean isTriggered(OrderEntity order, ExecutableMarketSnapshot snapshot) {
+    BigDecimal requested = triggerOrRequestedPrice(order);
+    if (requested == null) {
+      return false;
+    }
+    if (order.getOrderType() == OrderType.LIMIT) {
+      BigDecimal executable = order.getSide() == OrderSide.BUY ? snapshot.ask() : snapshot.bid();
+      return executable != null && (order.getSide() == OrderSide.BUY
+          ? executable.compareTo(requested) <= 0
+          : executable.compareTo(requested) >= 0);
+    }
+    if (order.getOrderType() == OrderType.STOP || order.getOrderType() == OrderType.STOP_MARKET) {
+      return snapshot.last() != null && (order.getSide() == OrderSide.BUY
+          ? snapshot.last().compareTo(requested) >= 0
+          : snapshot.last().compareTo(requested) <= 0);
+    }
+    return false;
+  }
+
   private boolean isTriggered(OrderEntity order, QuoteResponse quote) {
     BigDecimal price = executablePrice(order, quote);
     BigDecimal requestedPrice = order.getRequestedPrice();
-
+    if (requestedPrice == null) {
+      return false;
+    }
     if (order.getOrderType() == OrderType.LIMIT) {
       return order.getSide() == OrderSide.BUY
           ? price.compareTo(requestedPrice) <= 0
@@ -147,44 +322,76 @@ public class PendingOrderExecutionService {
     return false;
   }
 
-  /**
-   * 买单按卖价成交、卖单按买价成交，保持与即时单成交口径一致。
-   */
   private BigDecimal executablePrice(OrderEntity order, QuoteResponse quote) {
     return order.getSide() == OrderSide.BUY ? quote.ask() : quote.bid();
   }
 
-  /**
-   * 将已接收的挂单字段还原为风控请求，复用统一保证金校验。
-   */
-  private CreateOrderRequest toRequest(OrderEntity order) {
+  private CreateOrderRequest toRequest(OrderEntity order, BigDecimal quantity) {
+    OrderType executionType = order.getOrderType() == OrderType.STOP
+        ? OrderType.STOP_MARKET
+        : order.getOrderType();
     return new CreateOrderRequest(
         order.getAccountId(),
         order.getSymbol(),
         order.getSide(),
-        order.getOrderType(),
+        executionType,
         order.getLots(),
         order.getRequestedPrice(),
         order.getStopLoss(),
         order.getTakeProfit(),
         order.getIdempotencyKey(),
         order.getClientOrderId(),
-        order.getQuantity(),
+        quantity,
         order.getPrice(),
-        order.getLeverage());
+        order.getLeverage(),
+        order.getPositionSide(),
+        order.getQuantityUnit(),
+        order.getMarginMode(),
+        order.getTriggerPrice(),
+        order.getTriggerPriceType(),
+        order.getReduceOnly(),
+        List.of());
+  }
+
+  private ExecutableMarketSnapshot resolveExecutableSnapshot(String symbol, ProductType productType) {
+    Instant to = Instant.now();
+    CandleRequest candles = new CandleRequest("1m", to.minus(Duration.ofMinutes(30)), to);
+    return productType == ProductType.CRYPTO_SPOT
+        ? ExecutableMarketSnapshot.from(marketBundleResolver.resolveSpot(symbol, candles))
+        : ExecutableMarketSnapshot.from(marketBundleResolver.resolvePerp(symbol, candles));
   }
 
   private ProductType requestedProduct(String canonicalSymbol) {
     return canonicalSymbol.endsWith("-PERP") ? ProductType.LINEAR_PERP : ProductType.CRYPTO_SPOT;
   }
 
+  private boolean isP0Order(OrderEntity order) {
+    return marketBundleResolver != null
+        && fullFillCoordinator != null
+        && order.getSymbol() != null
+        && P0_SYMBOLS.contains(SymbolNormalizer.normalize(order.getSymbol()));
+  }
+
+  private BigDecimal canonicalQuantity(OrderEntity order) {
+    if (order.getBaseQuantity() != null) {
+      return order.getBaseQuantity();
+    }
+    return order.getQuantity() != null ? order.getQuantity() : order.getLots();
+  }
+
+  private BigDecimal currentPrice(OrderEntity order) {
+    return order.getPrice() != null ? order.getPrice() : order.getRequestedPrice();
+  }
+
+  private BigDecimal triggerOrRequestedPrice(OrderEntity order) {
+    return order.getTriggerPrice() != null ? order.getTriggerPrice() : order.getRequestedPrice();
+  }
+
   private void lockMutationState(UUID accountId, ProductType productType, String canonicalSymbol) {
     if (productType == ProductType.CRYPTO_SPOT) {
       if (canonicalSymbol != null && canonicalSymbol.endsWith("USDT") && canonicalSymbol.length() > 4) {
         String baseAsset = canonicalSymbol.substring(0, canonicalSymbol.length() - 4);
-        walletService.lockBalancesInOrder(
-            accountId,
-            List.of(baseAsset, "USDT"));
+        walletService.lockBalancesInOrder(accountId, List.of(baseAsset, "USDT"));
         spotPositionService.lockOrCreate(accountId, baseAsset, "USDT");
       } else {
         walletBalanceRepository.findByAccountIdForUpdate(accountId);
@@ -195,10 +402,21 @@ public class PendingOrderExecutionService {
   }
 
   private record PendingCandidate(
+      UUID orderId,
+      UUID accountId,
+      String symbol,
+      ProductType productType,
+      BigDecimal requiredMargin,
+      ExecutableMarketSnapshot snapshot
+  ) {
+  }
+
+  private record LegacyPendingCandidate(
       OrderEntity order,
       QuoteResponse quote,
       ProductType productType,
       BigDecimal requiredMargin,
-      BigDecimal executionPrice) {
+      BigDecimal executionPrice
+  ) {
   }
 }
