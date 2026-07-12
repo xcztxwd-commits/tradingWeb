@@ -26,6 +26,16 @@ public interface DataProviderRepository extends FxBaseMapper<DataProviderEntity>
         .in(DataProviderEntity::getId, providerIds));
   }
 
+  default List<DataProviderEntity> findByIdsForUpdate(Collection<UUID> providerIds) {
+    if (providerIds == null || providerIds.isEmpty()) {
+      return List.of();
+    }
+    return selectList(new LambdaQueryWrapper<DataProviderEntity>()
+        .in(DataProviderEntity::getId, providerIds)
+        .orderByAsc(DataProviderEntity::getId)
+        .last("FOR UPDATE"));
+  }
+
   @Update("""
       UPDATE market.data_providers
       SET health_status = 'UP',

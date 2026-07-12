@@ -17,6 +17,7 @@ import com.fxplatform.market.repository.PriceAdjustmentRepository;
 import com.fxplatform.market.repository.SymbolAdminEventRepository;
 import com.fxplatform.market.repository.SymbolCategoryRepository;
 import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.trading.repository.FundingRateRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -33,6 +34,7 @@ class AdminMarketManagementServiceTest {
   private final SymbolCategoryRepository categoryRepository = Mockito.mock(SymbolCategoryRepository.class);
   private final PriceAdjustmentRepository priceAdjustmentRepository = Mockito.mock(PriceAdjustmentRepository.class);
   private final AuditLogService auditLogService = Mockito.mock(AuditLogService.class);
+  private final FundingRateRepository fundingRateRepository = Mockito.mock(FundingRateRepository.class);
 
   @Test
   void managesCategoriesAndCancelsPriceAdjustment() {
@@ -80,7 +82,8 @@ class AdminMarketManagementServiceTest {
     AdminMarketQueryService queryService = new AdminMarketQueryService(
         symbolRepository,
         categoryRepository,
-        priceAdjustmentRepository);
+        priceAdjustmentRepository,
+        fundingRateRepository);
 
     var created = commandService.createCategory(actorUserId, new AdminSymbolCategoryRequest(
         "Forex",
@@ -122,7 +125,8 @@ class AdminMarketManagementServiceTest {
     AdminMarketQueryService queryService = new AdminMarketQueryService(
         symbolRepository,
         categoryRepository,
-        priceAdjustmentRepository);
+        priceAdjustmentRepository,
+        fundingRateRepository);
 
     var categories = queryService.categories(0, 20);
 

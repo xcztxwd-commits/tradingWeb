@@ -6,6 +6,7 @@ import com.fxplatform.admin.dto.request.AdminBalanceAdjustmentRequest;
 import com.fxplatform.admin.dto.request.AdminCancelOrderRequest;
 import com.fxplatform.admin.dto.request.AdminDataProviderRequest;
 import com.fxplatform.admin.dto.request.AdminForceClosePositionRequest;
+import com.fxplatform.admin.dto.request.AdminFundingConfigRequest;
 import com.fxplatform.admin.dto.request.AdminFundOrderReviewRequest;
 import com.fxplatform.admin.dto.request.AdminReasonRequest;
 import com.fxplatform.admin.dto.request.AdminSymbolRequest;
@@ -78,6 +79,18 @@ class AdminActionPermissionContractTest {
         UserPrincipal.class,
         UUID.class,
         AdminSymbolStatusRequest.class);
+    assertPreAuthorizeContains(
+        AdminMarketController.class,
+        "fundingConfig",
+        "market:symbol:update",
+        UUID.class);
+    assertPreAuthorizeContains(
+        AdminMarketController.class,
+        "updateFundingConfig",
+        "market:symbol:update",
+        UserPrincipal.class,
+        UUID.class,
+        AdminFundingConfigRequest.class);
     assertPreAuthorizeContains(
         AdminMarketDataProviderController.class,
         "updateProvider",

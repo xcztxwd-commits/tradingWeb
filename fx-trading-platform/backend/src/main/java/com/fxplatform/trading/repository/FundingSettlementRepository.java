@@ -20,7 +20,14 @@ public interface FundingSettlementRepository extends FxBaseMapper<FundingSettlem
         funding_rate,
         amount,
         asset,
-        ledger_entry_id
+        ledger_entry_id,
+        position_side,
+        margin_mode,
+        mark_price,
+        source,
+        balance_after,
+        isolated_margin_after,
+        shortfall
       ) VALUES (
         #{id},
         #{positionId},
@@ -30,7 +37,14 @@ public interface FundingSettlementRepository extends FxBaseMapper<FundingSettlem
         #{fundingRate},
         #{amount},
         #{asset},
-        #{ledgerEntryId}
+        #{ledgerEntryId},
+        #{positionSide},
+        #{marginMode},
+        #{markPrice},
+        #{source},
+        #{balanceAfter},
+        #{isolatedMarginAfter},
+        #{shortfall}
       )
       ON CONFLICT (position_id, funding_time) DO NOTHING
       """)

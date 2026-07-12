@@ -25,6 +25,7 @@ import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.OrderRepository;
+import com.fxplatform.trading.repository.FundingRateRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
 import java.math.BigDecimal;
@@ -63,6 +64,9 @@ class AdminQueryServicesTest {
 
   @Mock
   private PriceAdjustmentRepository priceAdjustmentRepository;
+
+  @Mock
+  private FundingRateRepository fundingRateRepository;
 
   @Test
   void accountsReturnPagedAdminDto() {
@@ -196,7 +200,8 @@ class AdminQueryServicesTest {
     var symbolPage = new AdminMarketQueryService(
         symbolRepository,
         symbolCategoryRepository,
-        priceAdjustmentRepository).symbols(0, 20);
+        priceAdjustmentRepository,
+        fundingRateRepository).symbols(0, 20);
 
     assertThat(ledgerPage.items().get(0).entryType()).isEqualTo("DEMO_DEPOSIT");
     assertThat(ledgerPage.items().get(0).amount()).isEqualByComparingTo("250.00");

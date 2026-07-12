@@ -7,6 +7,7 @@ import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionSide;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -17,6 +18,19 @@ import org.apache.ibatis.annotations.Select;
  * PositionRepository 通过 MyBatis-Plus 访问持仓。
  */
 public interface PositionRepository extends FxBaseMapper<PositionEntity> {
+
+  @Select("""
+      SELECT MIN(p.opened_at)
+      FROM trading.positions p
+      JOIN core.trading_accounts a
+        ON a.id = p.account_id
+       AND a.account_type = 'DEMO'
+       AND a.status = 'ACTIVE'
+      WHERE p.symbol = #{symbol}
+        AND p.product_type = 'LINEAR_PERP'
+        AND p.status = 'OPEN'
+      """)
+  Optional<Instant> findEarliestOpenLinearPerpTimeBySymbol(@Param("symbol") String symbol);
 
   /** 按账户和状态倒序查询持仓。 */
   default List<PositionEntity> findByAccountIdAndStatusOrderByOpenedAtDesc(UUID accountId, PositionStatus status) {

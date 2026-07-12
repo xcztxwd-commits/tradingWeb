@@ -10,6 +10,7 @@ import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.risk.service.TradingInstrumentClassifier;
 import com.fxplatform.trading.entity.FundingRateEntity;
@@ -82,7 +83,8 @@ class Step08FundingServiceAuditTest {
   ) {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId, "10000.00000000");
-    PositionEntity position = position(accountId, "BTCUSDT", side, "1", "50000");
+    PositionEntity position = position(
+        accountId, "BTCUSDT", ProductType.LINEAR_PERP, side, "1", "50000");
 
     when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
     when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(perpSymbol(
@@ -113,7 +115,8 @@ class Step08FundingServiceAuditTest {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId, "1.00000000");
     account.setBaseCurrency("BTC");
-    PositionEntity position = position(accountId, "BTCUSD", OrderSide.BUY, "100", "50000");
+    PositionEntity position = position(
+        accountId, "BTCUSD", ProductType.INVERSE_PERP, OrderSide.BUY, "100", "50000");
 
     when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
     when(symbolRepository.findBySymbol("BTCUSD")).thenReturn(Optional.of(perpSymbol(
@@ -143,7 +146,8 @@ class Step08FundingServiceAuditTest {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId, "1.00000000");
     account.setBaseCurrency("BTC");
-    PositionEntity position = position(accountId, "BTCUSD", OrderSide.SELL, "100", "50000");
+    PositionEntity position = position(
+        accountId, "BTCUSD", ProductType.INVERSE_PERP, OrderSide.SELL, "100", "50000");
 
     when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
     when(symbolRepository.findBySymbol("BTCUSD")).thenReturn(Optional.of(perpSymbol(
@@ -192,11 +196,19 @@ class Step08FundingServiceAuditTest {
     return account;
   }
 
-  private PositionEntity position(UUID accountId, String symbol, OrderSide side, String lots, String markPrice) {
+  private PositionEntity position(
+      UUID accountId,
+      String symbol,
+      ProductType productType,
+      OrderSide side,
+      String lots,
+      String markPrice
+  ) {
     PositionEntity position = new PositionEntity();
     position.setId(UUID.randomUUID());
     position.setAccountId(accountId);
     position.setSymbol(symbol);
+    position.setProductType(productType);
     position.setSide(side);
     position.setLots(new BigDecimal(lots));
     position.setOpenPrice(new BigDecimal(markPrice));
@@ -230,6 +242,9 @@ class Step08FundingServiceAuditTest {
     SymbolEntity symbol = new SymbolEntity();
     symbol.setSymbol(symbolCode);
     symbol.setAssetClass(assetClass);
+    symbol.setProductType(assetClass.startsWith("INVERSE")
+        ? ProductType.INVERSE_PERP
+        : ProductType.LINEAR_PERP);
     symbol.setBaseCurrency(baseCurrency);
     symbol.setQuoteCurrency(quoteCurrency);
     symbol.setLotSize(new BigDecimal(contractSize));

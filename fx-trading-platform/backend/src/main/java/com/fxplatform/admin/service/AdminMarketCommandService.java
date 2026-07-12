@@ -2,10 +2,12 @@ package com.fxplatform.admin.service;
 
 import com.fxplatform.admin.dto.request.AdminPriceAdjustmentRequest;
 import com.fxplatform.admin.dto.request.AdminPriceAdjustmentCancelRequest;
+import com.fxplatform.admin.dto.request.AdminFundingConfigRequest;
 import com.fxplatform.admin.dto.request.AdminSymbolRequest;
 import com.fxplatform.admin.dto.request.AdminSymbolCategoryRequest;
 import com.fxplatform.admin.dto.request.AdminSymbolStatusRequest;
 import com.fxplatform.admin.dto.response.AdminPriceAdjustmentResponse;
+import com.fxplatform.admin.dto.response.AdminFundingConfigResponse;
 import com.fxplatform.admin.dto.response.AdminSymbolCategoryResponse;
 import com.fxplatform.admin.dto.response.AdminSymbolResponse;
 import com.fxplatform.audit.service.AuditDetailsBuilder;
@@ -23,6 +25,10 @@ import com.fxplatform.market.repository.SymbolCategoryRepository;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.SymbolProductTypes;
 import java.util.Objects;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -35,6 +41,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AdminMarketCommandService {
 
+  private static final List<String> FUNDING_SOURCES = List.of("BINANCE", "OKX", "FIXED");
+
   /** 品种仓储，用于加载和保存产品状态。 */
   private final SymbolRepository symbolRepository;
   /** 产品后台事件仓储，用于记录产品参数和状态变更。 */
@@ -45,6 +53,53 @@ public class AdminMarketCommandService {
   private final PriceAdjustmentRepository priceAdjustmentRepository;
   /** 审计服务，用于记录后台产品高风险操作。 */
   private final AuditLogService auditLogService;
+
+  @Transactional
+  public AdminFundingConfigResponse updateFundingConfig(
+      UUID actorUserId,
+      UUID symbolId,
+      AdminFundingConfigRequest request
+  ) {
+    SymbolEntity symbol = findSymbol(symbolId);
+    requireLinearPerpetual(symbol);
+    List<String> priority = normalizedFundingPriority(request == null
+        ? null
+        : request.fundingSourcePriority());
+    validateFixedRate(request.fixedFundingRate());
+    if (request.fixedFundingIntervalMinutes() == null
+        || request.fixedFundingIntervalMinutes() <= 0) {
+      throw new BusinessException(
+          "FUNDING_CONFIG_INTERVAL_INVALID",
+          "Fixed funding interval must be positive");
+    }
+    if (request.fundingStaleSeconds() == null || request.fundingStaleSeconds() <= 0) {
+      throw new BusinessException(
+          "FUNDING_CONFIG_STALENESS_INVALID",
+          "Funding provider staleness threshold must be positive");
+    }
+
+    String before = fundingConfigValue(symbol);
+    symbol.setFundingSourcePriority(priority);
+    symbol.setFixedFundingRate(request.fixedFundingRate());
+    symbol.setFixedFundingIntervalMinutes(request.fixedFundingIntervalMinutes());
+    symbol.setFundingStaleSeconds(request.fundingStaleSeconds());
+    SymbolEntity saved = symbolRepository.save(symbol);
+    String after = fundingConfigValue(saved);
+    recordSymbolEvent(
+        actorUserId,
+        symbolId,
+        "FUNDING_CONFIG_UPDATE",
+        before,
+        after,
+        request.reason());
+    auditLogService.record(
+        actorUserId,
+        "ADMIN_FUNDING_CONFIG_UPDATE",
+        "SYMBOL",
+        symbolId.toString(),
+        details(request.reason(), before, after));
+    return AdminFundingConfigResponse.from(saved, null);
+  }
 
   /**
    * 更新产品启停状态，并写入产品事件和审计日志。
@@ -276,6 +331,51 @@ public class AdminMarketCommandService {
   private SymbolEntity findSymbol(UUID symbolId) {
     return symbolRepository.findById(symbolId)
         .orElseThrow(() -> new BusinessException("SYMBOL_NOT_FOUND", "Symbol not found"));
+  }
+
+  private List<String> normalizedFundingPriority(List<String> configured) {
+    if (configured == null || configured.size() != FUNDING_SOURCES.size()) {
+      throw invalidFundingPriority();
+    }
+    List<String> normalized = configured.stream()
+        .map(value -> value == null ? "" : value.trim().toUpperCase(Locale.ROOT))
+        .toList();
+    Set<String> unique = new HashSet<>(normalized);
+    if (unique.size() != FUNDING_SOURCES.size()
+        || !unique.equals(Set.copyOf(FUNDING_SOURCES))
+        || !"FIXED".equals(normalized.getLast())) {
+      throw invalidFundingPriority();
+    }
+    return List.copyOf(normalized);
+  }
+
+  private BusinessException invalidFundingPriority() {
+    return new BusinessException(
+        "FUNDING_CONFIG_PRIORITY_INVALID",
+        "Funding priority must contain BINANCE, OKX and FIXED exactly once, with FIXED last");
+  }
+
+  private void validateFixedRate(java.math.BigDecimal rate) {
+    if (rate == null || rate.scale() > 10 || rate.precision() - rate.scale() > 8) {
+      throw new BusinessException(
+          "FUNDING_CONFIG_RATE_INVALID",
+          "Fixed funding rate exceeds NUMERIC(18,10)");
+    }
+  }
+
+  private void requireLinearPerpetual(SymbolEntity symbol) {
+    if (symbol.getProductType() != ProductType.LINEAR_PERP) {
+      throw new BusinessException(
+          "FUNDING_CONFIG_PRODUCT_TYPE_UNSUPPORTED",
+          "Funding configuration is supported only for linear perpetual symbols");
+    }
+  }
+
+  private String fundingConfigValue(SymbolEntity symbol) {
+    return String.join(",", symbol.getFundingSourcePriority())
+        + ":" + symbol.getFixedFundingRate().toPlainString()
+        + ":" + symbol.getFixedFundingIntervalMinutes()
+        + ":" + symbol.getFundingStaleSeconds();
   }
 
   /**
