@@ -3,7 +3,12 @@ package com.fxplatform.trading.service;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderType;
+import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.PositionSide;
+import com.fxplatform.trading.enums.QuantityUnit;
+import com.fxplatform.trading.enums.TriggerPriceType;
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -21,7 +26,16 @@ public record OrderCommand(
     BigDecimal takeProfit,
     String clientOrderId,
     String idempotencyKey,
-    Integer leverage
+    Integer leverage,
+    BigDecimal originalQuantity,
+    BigDecimal baseQuantity,
+    QuantityUnit quantityUnit,
+    MarginMode marginMode,
+    PositionSide positionSide,
+    Boolean reduceOnly,
+    BigDecimal triggerPrice,
+    TriggerPriceType triggerPriceType,
+    List<CreateOrderRequest.AttachedProtectionRequest> attachedProtections
 ) {
 
   public CreateOrderRequest toRequest() {
@@ -36,8 +50,15 @@ public record OrderCommand(
         takeProfit,
         idempotencyKey,
         clientOrderId,
-        quantity,
+        originalQuantity,
         price,
-        leverage);
+        leverage,
+        positionSide,
+        quantityUnit,
+        marginMode,
+        triggerPrice,
+        triggerPriceType,
+        reduceOnly,
+        attachedProtections);
   }
 }

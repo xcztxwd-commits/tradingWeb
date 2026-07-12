@@ -101,6 +101,9 @@ class PendingOrderExecutionServiceTest {
   @Mock
   private FullFillCoordinator fullFillCoordinator;
 
+  @Mock
+  private PendingOrderExecutionProcessor pendingOrderExecutionProcessor;
+
   @BeforeEach
   void rowLockQueriesReturnTheScannedFixtures() {
     org.mockito.Mockito.lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
@@ -111,6 +114,29 @@ class PendingOrderExecutionServiceTest {
             .findFirst());
     org.mockito.Mockito.lenient().when(transactionExecutor.execute(any()))
         .thenAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+  }
+
+  @Test
+  void spotScannerRetriesOneFreshBundleAndDelegatesWithoutAnOuterTransaction() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity order = p0PendingOrder(accountId, "scanner-retry");
+    TradingAccountEntity account = account(accountId);
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any()))
+        .thenReturn(spotBundle(), spotBundle());
+    when(pendingOrderExecutionProcessor.process(eq(order), any()))
+        .thenThrow(new BusinessException("MARKET_DATA_STALE", "first bundle expired"))
+        .thenReturn(true);
+
+    PendingOrderExecutionService service = p0Service();
+    service.setPendingOrderExecutionProcessor(pendingOrderExecutionProcessor);
+
+    assertThat(service.executePendingOrders()).isEqualTo(1);
+    verify(marketBundleResolver, org.mockito.Mockito.times(2)).resolveSpot(eq("BTCUSDT"), any());
+    verify(pendingOrderExecutionProcessor, org.mockito.Mockito.times(2)).process(eq(order), any());
+    verify(transactionExecutor, never()).execute(any());
+    verify(riskCheckService, never()).checkOrder(any(), any());
   }
 
   @Test

@@ -468,7 +468,7 @@ class Task5PostgresFullFillIT {
   }
 
   private CreateOrderRequest marketRequest(UUID accountId, String key) {
-    BigDecimal quantity = new BigDecimal("0.0100");
+    BigDecimal quantity = new BigDecimal("100.00000000");
     return new CreateOrderRequest(
         accountId,
         SYMBOL,
@@ -484,7 +484,7 @@ class Task5PostgresFullFillIT {
         null,
         1,
         PositionSide.BOTH,
-        QuantityUnit.BASE,
+        QuantityUnit.QUOTE,
         MarginMode.CASH,
         null,
         null,

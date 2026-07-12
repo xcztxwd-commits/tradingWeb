@@ -10,6 +10,14 @@ import org.springframework.stereotype.Component;
 public class OrderCommandFactory {
 
   public OrderCommand from(UserPrincipal principal, CreateOrderRequest request) {
+    return from(principal, request, request.quantity());
+  }
+
+  public OrderCommand from(
+      UserPrincipal principal,
+      CreateOrderRequest request,
+      java.math.BigDecimal canonicalBaseQuantity
+  ) {
     String clientOrderId = request.clientOrderId();
     return new OrderCommand(
         principal.id(),
@@ -17,13 +25,22 @@ public class OrderCommandFactory {
         SymbolNormalizer.normalize(request.symbol()),
         request.side(),
         request.orderType(),
-        request.quantity(),
+        canonicalBaseQuantity,
         request.price(),
         request.stopLoss(),
         request.takeProfit(),
         clientOrderId,
         hasText(request.idempotencyKey()) ? request.idempotencyKey() : clientOrderId,
-        request.leverage());
+        request.leverage(),
+        request.quantity(),
+        canonicalBaseQuantity,
+        request.quantityUnit(),
+        request.marginMode(),
+        request.positionSide(),
+        request.reduceOnly(),
+        request.triggerPrice(),
+        request.triggerPriceType(),
+        request.attachedProtections());
   }
 
   private boolean hasText(String value) {

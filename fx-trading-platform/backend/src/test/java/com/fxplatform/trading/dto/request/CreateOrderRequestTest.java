@@ -190,4 +190,33 @@ class CreateOrderRequestTest {
               "attachedProtections[0].triggerExecutionType");
     }
   }
+
+  @Test
+  void acceptsPositiveSpotQuantityBelowGenericOneCentThreshold() {
+    CreateOrderRequest request = new CreateOrderRequest(
+        UUID.randomUUID(),
+        "BTCUSDT",
+        OrderSide.SELL,
+        OrderType.MARKET,
+        null,
+        null,
+        null,
+        null,
+        "spot-small-btc",
+        "spot-small-btc",
+        new BigDecimal("0.0001"),
+        null,
+        1,
+        PositionSide.BOTH,
+        QuantityUnit.BASE,
+        MarginMode.CASH,
+        null,
+        null,
+        false,
+        List.of());
+
+    try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+      assertThat(factory.getValidator().validate(request)).isEmpty();
+    }
+  }
 }

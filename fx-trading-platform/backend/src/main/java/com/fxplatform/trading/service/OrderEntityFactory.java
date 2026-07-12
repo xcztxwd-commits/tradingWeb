@@ -4,6 +4,7 @@ import cn.hutool.core.date.DateUtil;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderStatus;
 import java.time.Instant;
+import java.util.UUID;
 import org.springframework.stereotype.Component;
 
 /**
@@ -14,16 +15,25 @@ public class OrderEntityFactory {
 
   public OrderEntity createReceived(OrderCommand command) {
     OrderEntity order = new OrderEntity();
+    order.setId(UUID.randomUUID());
     order.setUserId(command.userId());
     order.setAccountId(command.accountId());
     order.setSymbol(command.symbol());
     order.setSide(command.side());
     order.setOrderType(command.orderType());
     order.setStatus(OrderStatus.RECEIVED);
-    order.setLots(command.quantity());
+    order.setLots(command.baseQuantity());
     order.setRequestedPrice(command.price());
     order.setClientOrderId(command.clientOrderId());
-    order.setQuantity(command.quantity());
+    order.setQuantity(command.originalQuantity());
+    order.setOriginalQuantity(command.originalQuantity());
+    order.setBaseQuantity(command.baseQuantity());
+    order.setQuantityUnit(command.quantityUnit());
+    order.setMarginMode(command.marginMode());
+    order.setPositionSide(command.positionSide());
+    order.setReduceOnly(command.reduceOnly());
+    order.setTriggerPrice(command.triggerPrice());
+    order.setTriggerPriceType(command.triggerPriceType());
     order.setPrice(command.price());
     order.setStopLoss(command.stopLoss());
     order.setTakeProfit(command.takeProfit());

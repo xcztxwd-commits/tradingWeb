@@ -43,7 +43,17 @@ public class SpotSettlementService {
       SymbolEntity symbolProfile,
       TradingAccountEntity account
   ) {
-    settleBuyFill(order, fill, symbolProfile, account, ORDER_REFERENCE, order.getId());
+    settleBuyFill(order, order, fill, symbolProfile, account, ORDER_REFERENCE, order.getId());
+  }
+
+  public void settleBuyFillUsingHoldOwner(
+      OrderEntity order,
+      OrderEntity holdOwner,
+      ExecutionResult fill,
+      SymbolEntity symbolProfile,
+      TradingAccountEntity account
+  ) {
+    settleBuyFill(order, holdOwner, fill, symbolProfile, account, ORDER_REFERENCE, order.getId());
   }
 
   @Transactional
@@ -54,11 +64,23 @@ public class SpotSettlementService {
       TradingAccountEntity account,
       UUID tradeId
   ) {
-    settleBuyFill(order, fill, symbolProfile, account, TRADE_REFERENCE, tradeId);
+    settleBuyFill(order, order, fill, symbolProfile, account, TRADE_REFERENCE, tradeId);
+  }
+
+  public void settleBuyFill(
+      OrderEntity order,
+      OrderEntity holdOwner,
+      ExecutionResult fill,
+      SymbolEntity symbolProfile,
+      TradingAccountEntity account,
+      UUID tradeId
+  ) {
+    settleBuyFill(order, holdOwner, fill, symbolProfile, account, TRADE_REFERENCE, tradeId);
   }
 
   private void settleBuyFill(
       OrderEntity order,
+      OrderEntity holdOwner,
       ExecutionResult fill,
       SymbolEntity symbolProfile,
       TradingAccountEntity account,
@@ -83,6 +105,7 @@ public class SpotSettlementService {
 
     debitSpentAsset(
         order,
+        holdOwner,
         account,
         assets.quoteAsset(),
         grossQuote,
@@ -124,7 +147,17 @@ public class SpotSettlementService {
       SymbolEntity symbolProfile,
       TradingAccountEntity account
   ) {
-    settleSellFill(order, fill, symbolProfile, account, ORDER_REFERENCE, order.getId());
+    settleSellFill(order, order, fill, symbolProfile, account, ORDER_REFERENCE, order.getId());
+  }
+
+  public void settleSellFillUsingHoldOwner(
+      OrderEntity order,
+      OrderEntity holdOwner,
+      ExecutionResult fill,
+      SymbolEntity symbolProfile,
+      TradingAccountEntity account
+  ) {
+    settleSellFill(order, holdOwner, fill, symbolProfile, account, ORDER_REFERENCE, order.getId());
   }
 
   @Transactional
@@ -135,11 +168,23 @@ public class SpotSettlementService {
       TradingAccountEntity account,
       UUID tradeId
   ) {
-    settleSellFill(order, fill, symbolProfile, account, TRADE_REFERENCE, tradeId);
+    settleSellFill(order, order, fill, symbolProfile, account, TRADE_REFERENCE, tradeId);
+  }
+
+  public void settleSellFill(
+      OrderEntity order,
+      OrderEntity holdOwner,
+      ExecutionResult fill,
+      SymbolEntity symbolProfile,
+      TradingAccountEntity account,
+      UUID tradeId
+  ) {
+    settleSellFill(order, holdOwner, fill, symbolProfile, account, TRADE_REFERENCE, tradeId);
   }
 
   private void settleSellFill(
       OrderEntity order,
+      OrderEntity holdOwner,
       ExecutionResult fill,
       SymbolEntity symbolProfile,
       TradingAccountEntity account,
@@ -163,6 +208,7 @@ public class SpotSettlementService {
 
     debitSpentAsset(
         order,
+        holdOwner,
         account,
         assets.baseAsset(),
         soldBase,
@@ -199,25 +245,49 @@ public class SpotSettlementService {
 
   private void debitSpentAsset(
       OrderEntity order,
+      OrderEntity holdOwner,
       TradingAccountEntity account,
       String asset,
       BigDecimal amount,
       String referenceType,
       UUID referenceId,
       String description,
-      String entryType
+    String entryType
   ) {
-    if (usesLockedHold(order, asset)) {
+    if (usesLockedHold(holdOwner, asset)) {
+      BigDecimal spentAmount = scaled(amount);
+      BigDecimal ownerHold = scaled(holdOwner.getHoldAmount());
+      if (spentAmount.compareTo(ownerHold) > 0) {
+        throw new BusinessException(
+            "LOCKED_BALANCE_NOT_ENOUGH",
+            "Order hold is not enough for the filled amount");
+      }
       walletService.debitLockedWithEntryType(
           account.getId(),
           asset,
-          amount,
+          spentAmount,
           referenceType,
           referenceId,
           description,
           entryType);
-      releaseRemainingHold(order, account, asset, amount);
+      releaseRemainingHold(holdOwner, account, asset, spentAmount);
       return;
+    }
+    if (holdOwner.getHoldAmount() != null
+        && holdOwner.getHoldAmount().compareTo(BigDecimal.ZERO) > 0) {
+      boolean oco = holdOwner != order
+          || order.getContingencyGroupId() != null
+          || holdOwner.getContingencyGroupId() != null;
+      throw new BusinessException(
+          oco ? "OCO_GROUP_INCOMPLETE" : com.fxplatform.common.exception.ErrorCode.ORDER_HOLD_INVALID,
+          "Pending settlement hold currency does not match the spent asset");
+    }
+    if (holdOwner != order
+        || order.getContingencyGroupId() != null
+        || holdOwner.getContingencyGroupId() != null) {
+      throw new BusinessException(
+          "OCO_GROUP_INCOMPLETE",
+          "OCO settlement requires one positive hold in the spent asset");
     }
     walletService.debitAvailableWithEntryType(
         account.getId(),

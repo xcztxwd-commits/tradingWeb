@@ -195,10 +195,22 @@ public class OrderFillService {
       BigDecimal requiredMargin,
       String marginDescription
   ) {
+    return fill(order, order, account, fullFill, requiredMargin, marginDescription);
+  }
+
+  public OrderEntity fill(
+      OrderEntity order,
+      OrderEntity holdOwner,
+      TradingAccountEntity account,
+      FullFillResult fullFill,
+      BigDecimal requiredMargin,
+      String marginDescription
+  ) {
     requireFullFill(order, fullFill == null ? null : fullFill.filledQuantity(),
         fullFill == null ? null : fullFill.remainingQuantity());
     return fillInternal(
         order,
+        holdOwner,
         account,
         fullFill.toExecutionResult(),
         requiredMargin,
@@ -216,11 +228,12 @@ public class OrderFillService {
     requireFullFill(order,
         execution == null ? null : execution.filledQuantity(),
         execution == null ? null : execution.remainingQuantity());
-    return fillInternal(order, account, execution, requiredMargin, marginDescription, null);
+    return fillInternal(order, order, account, execution, requiredMargin, marginDescription, null);
   }
 
   private OrderEntity fillInternal(
       OrderEntity order,
+      OrderEntity holdOwner,
       TradingAccountEntity account,
       ExecutionResult execution,
       BigDecimal requiredMargin,
@@ -232,7 +245,8 @@ public class OrderFillService {
     BigDecimal remainingQuantity = BigDecimal.ZERO;
     BigDecimal fee = orZero(execution.fee());
     BigDecimal slippage = orZero(execution.slippage());
-    BigDecimal existingOrderHold = orZero(order.getHoldAmount());
+    OrderEntity effectiveHoldOwner = holdOwner == null ? order : holdOwner;
+    BigDecimal existingOrderHold = orZero(effectiveHoldOwner.getHoldAmount());
     BigDecimal fullMargin = requiredMargin != null ? requiredMargin : existingOrderHold;
     BigDecimal marginToHold = executionMargin(order, account, execution.filledPrice(), filledQuantity)
         .orElseGet(() -> proportionalMargin(fullMargin, filledQuantity, orderQuantity));
@@ -278,10 +292,10 @@ public class OrderFillService {
     SymbolEntity symbol = symbolFor(order);
     InstrumentProfile profile = instrumentClassifier.profile(symbol);
     if (profile.kind() == InstrumentKind.SPOT) {
-      settleSpotFill(order, account, execution, symbol, filledQuantity, trade.getId());
+      settleSpotFill(order, effectiveHoldOwner, account, execution, symbol, filledQuantity, trade.getId());
       if (existingOrderHold.compareTo(BigDecimal.ZERO) > 0) {
-        order.setHoldAmount(BigDecimal.ZERO);
-        orderRepository.save(order);
+        effectiveHoldOwner.setHoldAmount(BigDecimal.ZERO);
+        orderRepository.save(effectiveHoldOwner);
       }
       return order;
     }
@@ -454,6 +468,7 @@ public class OrderFillService {
 
   private void settleSpotFill(
       OrderEntity order,
+      OrderEntity holdOwner,
       TradingAccountEntity account,
       ExecutionResult execution,
       SymbolEntity symbol,
@@ -463,9 +478,17 @@ public class OrderFillService {
     ExecutionResult fill = normalizeFill(execution, filledQuantity);
     if (spotSettlementService != null) {
       if (order.getSide() == com.fxplatform.trading.enums.OrderSide.BUY) {
-        spotSettlementService.settleBuyFill(order, fill, symbol, account, tradeId);
+        if (holdOwner == order) {
+          spotSettlementService.settleBuyFill(order, fill, symbol, account, tradeId);
+        } else {
+          spotSettlementService.settleBuyFill(order, holdOwner, fill, symbol, account, tradeId);
+        }
       } else {
-        spotSettlementService.settleSellFill(order, fill, symbol, account, tradeId);
+        if (holdOwner == order) {
+          spotSettlementService.settleSellFill(order, fill, symbol, account, tradeId);
+        } else {
+          spotSettlementService.settleSellFill(order, holdOwner, fill, symbol, account, tradeId);
+        }
       }
     }
   }

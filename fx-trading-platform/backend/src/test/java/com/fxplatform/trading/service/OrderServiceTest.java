@@ -1155,6 +1155,9 @@ class OrderServiceTest {
     account.setFreeMargin(new BigDecimal("9990.00000000"));
     OrderEntity order = pendingOrderEntity(userId, accountId, orderId);
     order.setHoldAmount(new BigDecimal("10.00000000"));
+    order.setOriginalQuantity(new BigDecimal("0.10"));
+    order.setBaseQuantity(new BigDecimal("0.10"));
+    order.setQuantityUnit(com.fxplatform.trading.enums.QuantityUnit.BASE);
     UpdateOrderRequest update = new UpdateOrderRequest(
         new BigDecimal("0.20"),
         new BigDecimal("1.07900"),
@@ -1174,6 +1177,8 @@ class OrderServiceTest {
 
     assertThat(response.status()).isEqualTo(OrderStatus.PENDING.name());
     assertThat(response.quantity()).isEqualByComparingTo("0.20");
+    assertThat(response.originalQuantity()).isEqualByComparingTo("0.20");
+    assertThat(response.baseQuantity()).isEqualByComparingTo("0.20");
     assertThat(response.price()).isEqualByComparingTo("1.07900");
     assertThat(order.getStopLoss()).isEqualByComparingTo("1.07000");
     assertThat(order.getTakeProfit()).isEqualByComparingTo("1.09000");

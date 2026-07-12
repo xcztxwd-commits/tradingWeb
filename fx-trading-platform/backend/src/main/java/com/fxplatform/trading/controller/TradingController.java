@@ -3,12 +3,15 @@ package com.fxplatform.trading.controller;
 import com.fxplatform.common.response.ApiResponse;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
+import com.fxplatform.trading.dto.request.CreateOcoOrderRequest;
 import com.fxplatform.trading.dto.request.UpdatePositionProtectionRequest;
 import com.fxplatform.trading.dto.request.UpdateOrderRequest;
 import com.fxplatform.trading.dto.response.OrderEventResponse;
 import com.fxplatform.trading.dto.response.OrderResponse;
+import com.fxplatform.trading.dto.response.OcoOrderGroupResponse;
 import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.service.OrderService;
+import com.fxplatform.trading.service.OcoOrderService;
 import com.fxplatform.trading.service.PositionService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -34,6 +37,7 @@ public class TradingController {
 
   private final OrderService orderService;
   private final PositionService positionService;
+  private final OcoOrderService ocoOrderService;
 
   /**
    * 处理 createOrder 提交接口请求。
@@ -44,6 +48,14 @@ public class TradingController {
       @Valid @RequestBody CreateOrderRequest request
   ) {
     return ApiResponse.success(orderService.createOrder(principal, request));
+  }
+
+  @PostMapping("/oco")
+  public ApiResponse<OcoOrderGroupResponse> createOco(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @Valid @RequestBody CreateOcoOrderRequest request
+  ) {
+    return ApiResponse.success(ocoOrderService.create(principal, request));
   }
 
   /**

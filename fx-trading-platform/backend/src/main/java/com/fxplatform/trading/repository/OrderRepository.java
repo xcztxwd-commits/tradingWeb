@@ -84,6 +84,22 @@ public interface OrderRepository extends FxBaseMapper<OrderEntity> {
       """)
   List<OrderEntity> findPendingByAccountIdForUpdate(@Param("accountId") UUID accountId);
 
+  default List<OrderEntity> findByContingencyGroupId(UUID contingencyGroupId) {
+    return selectList(new LambdaQueryWrapper<OrderEntity>()
+        .eq(OrderEntity::getContingencyGroupId, contingencyGroupId)
+        .orderByAsc(OrderEntity::getId));
+  }
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE contingency_group_id = #{contingencyGroupId}
+      ORDER BY id
+      FOR UPDATE
+      """)
+  List<OrderEntity> findByContingencyGroupIdForUpdate(
+      @Param("contingencyGroupId") UUID contingencyGroupId);
+
   /** 触价执行前先从 PENDING 抢占到 WORKING，避免多实例重复成交同一挂单。 */
   default int claimPending(UUID orderId) {
     return update(null, new LambdaUpdateWrapper<OrderEntity>()

@@ -3,6 +3,7 @@ package com.fxplatform.execution;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.common.exception.BusinessException;
@@ -108,6 +109,36 @@ class FullFillCoordinatorTest {
     assertThat(result.filledPrice()).isEqualByComparingTo("100.0100");
     assertThat(result.fee()).isEqualByComparingTo("0.10001000");
     assertThat(result.feeAsset()).isEqualTo("USDT");
+  }
+
+  @Test
+  void projectsCanonicalPricingAndSharedRatesWithoutCallingExecutionAdapter() {
+    FullFillPricingProjection projection = coordinator.project(
+        ProductType.CRYPTO_SPOT,
+        OrderSide.BUY,
+        FullFillExecutionPath.MARKET,
+        null,
+        spotSnapshot("BTCUSDT"));
+
+    assertThat(projection.filledPrice()).isEqualByComparingTo("100.0100");
+    assertThat(projection.slippage()).isEqualByComparingTo("0.0100");
+    assertThat(projection.slippageRate()).isEqualByComparingTo("0.0001");
+    assertThat(projection.feeRate()).isEqualByComparingTo("0.0005");
+    assertThat(projection.worstFeeRate()).isEqualByComparingTo("0.0005");
+    assertThat(projection.liquidityRole()).isEqualTo(LiquidityRole.TAKER);
+    verifyNoInteractions(executionAdapter);
+  }
+
+  @Test
+  void exposesFreshnessGuardForPendingSnapshotBeforeFirstWrite() {
+    MutableClock mutableClock = new MutableClock(NOW);
+    coordinator = new FullFillCoordinator(executionAdapter, mutableClock);
+    ExecutableMarketSnapshot snapshot = spotSnapshot("BTCUSDT");
+
+    coordinator.requireFresh(snapshot);
+    mutableClock.advance(Duration.ofSeconds(3));
+
+    assertCode("MARKET_DATA_STALE", () -> coordinator.requireFresh(snapshot));
   }
 
   @Test

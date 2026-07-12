@@ -63,6 +63,7 @@ public class PendingOrderExecutionService {
   private final TradingTransactionExecutor transactionExecutor;
   private final MarketBundleResolver marketBundleResolver;
   private final FullFillCoordinator fullFillCoordinator;
+  private PendingOrderExecutionProcessor pendingOrderExecutionProcessor;
 
   @Autowired
   public PendingOrderExecutionService(
@@ -156,11 +157,22 @@ public class PendingOrderExecutionService {
     return filled;
   }
 
+  @Autowired
+  void setPendingOrderExecutionProcessor(
+      PendingOrderExecutionProcessor pendingOrderExecutionProcessor
+  ) {
+    this.pendingOrderExecutionProcessor = pendingOrderExecutionProcessor;
+  }
+
   private boolean prepareAndExecuteP0(OrderEntity order) {
     TradingAccountEntity accountSnapshot = accountRepository.findById(order.getAccountId())
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
     ProductType productType = requestedProduct(order.getSymbol());
     demoExecutionGuard.requireDemo(accountSnapshot, productType, order.getSymbol());
+
+    if (productType == ProductType.CRYPTO_SPOT && pendingOrderExecutionProcessor != null) {
+      return prepareAndExecuteSpot(order);
+    }
 
     ExecutableMarketSnapshot snapshot = resolveExecutableSnapshot(order.getSymbol(), productType);
     if (!isTriggered(order, snapshot)) {
@@ -177,6 +189,25 @@ public class PendingOrderExecutionService {
         requiredMargin,
         snapshot);
     return transactionExecutor.execute(() -> tryExecuteP0(candidate));
+  }
+
+  private boolean prepareAndExecuteSpot(OrderEntity order) {
+    for (int attempt = 0; attempt < 2; attempt++) {
+      try {
+        ExecutableMarketSnapshot snapshot = resolveExecutableSnapshot(
+            order.getSymbol(), ProductType.CRYPTO_SPOT);
+        if (!isTriggered(order, snapshot)) {
+          return false;
+        }
+        return pendingOrderExecutionProcessor.process(order, snapshot);
+      } catch (BusinessException exception) {
+        if (attempt == 0 && "MARKET_DATA_STALE".equals(exception.getCode())) {
+          continue;
+        }
+        throw exception;
+      }
+    }
+    return false;
   }
 
   private boolean tryExecuteP0(PendingCandidate candidate) {

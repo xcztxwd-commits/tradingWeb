@@ -105,6 +105,14 @@ public class InstrumentRulesEngine {
   }
 
   public void validateOrderRules(CreateOrderRequest request, SymbolEntity symbol) {
+    validateOrderRules(request, symbol, request.quantity());
+  }
+
+  private void validateOrderRules(
+      CreateOrderRequest request,
+      SymbolEntity symbol,
+      BigDecimal canonicalBaseQuantity
+  ) {
     InstrumentRules rules = rules(symbol);
     if (!rules.enabled()) {
       throw new BusinessException("SYMBOL_NOT_ENABLED", "Symbol is disabled");
@@ -116,7 +124,7 @@ public class InstrumentRulesEngine {
       throw new BusinessException(ErrorCode.SYMBOL_NOT_TRADABLE, "Quote capability is unavailable");
     }
 
-    BigDecimal quantity = request.quantity();
+    BigDecimal quantity = canonicalBaseQuantity;
     if (quantity == null || quantity.compareTo(BigDecimal.ZERO) <= 0) {
       throw new BusinessException("BAD_QUANTITY", "Quantity must be greater than zero");
     }
@@ -131,8 +139,11 @@ public class InstrumentRulesEngine {
         && quantity.compareTo(rules.maxQty()) > 0) {
       throw new BusinessException("QUANTITY_TOO_LARGE", "Quantity is above maximum");
     }
-    if (requiresRequestedPrice(request.orderType()) && request.price() != null) {
-      if (rules.tickSize() != null && !isMultiple(request.price(), rules.tickSize())) {
+    BigDecimal priceForTick = request.orderType() == OrderType.STOP_MARKET
+        ? request.triggerPrice()
+        : requiresRequestedPrice(request.orderType()) ? request.price() : null;
+    if (priceForTick != null) {
+      if (rules.tickSize() != null && !isMultiple(priceForTick, rules.tickSize())) {
         throw new BusinessException("PRICE_TICK_MISMATCH", "Price does not match tick size");
       }
     }
@@ -142,12 +153,36 @@ public class InstrumentRulesEngine {
   }
 
   public void validateOrderNotional(CreateOrderRequest request, SymbolEntity symbol, BigDecimal referencePrice) {
+    validateOrderNotional(request, symbol, request.quantity(), referencePrice);
+  }
+
+  /** Validates aggregated instrument rules only after public quantity is canonical BASE. */
+  public void validateCanonicalOrder(
+      CreateOrderRequest request,
+      SymbolEntity symbol,
+      BigDecimal canonicalBaseQuantity,
+      BigDecimal referencePrice
+  ) {
+    validateOrderRules(request, symbol, canonicalBaseQuantity);
+    validateOrderNotional(request, symbol, canonicalBaseQuantity, referencePrice);
+  }
+
+  private void validateOrderNotional(
+      CreateOrderRequest request,
+      SymbolEntity symbol,
+      BigDecimal canonicalBaseQuantity,
+      BigDecimal referencePrice
+  ) {
     InstrumentRules rules = rules(symbol);
-    BigDecimal price = request.orderType() == OrderType.MARKET ? referencePrice : request.price();
-    if (request.quantity() == null || price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
+    BigDecimal price = request.orderType() == OrderType.MARKET
+        || request.orderType() == OrderType.STOP_MARKET
+        ? referencePrice
+        : request.price();
+    if (canonicalBaseQuantity == null || price == null || price.compareTo(BigDecimal.ZERO) <= 0) {
       return;
     }
-    BigDecimal notional = request.quantity().multiply(price).multiply(instrumentClassifier.profile(symbol).unitSize());
+    BigDecimal notional = canonicalBaseQuantity.multiply(price)
+        .multiply(instrumentClassifier.profile(symbol).unitSize());
     if (rules.minNotional() != null && notional.compareTo(rules.minNotional()) < 0) {
       throw new BusinessException("ORDER_NOTIONAL_TOO_SMALL", "Order notional is below minimum");
     }

@@ -207,6 +207,178 @@ class SpotSettlementServiceTest {
         .containsExactly("SPOT_SELL_DEBIT", "ORDER_RELEASE", "SPOT_SELL_CREDIT", "TRADE_FEE");
   }
 
+  @Test
+  void nonOwnerOcoLegConsumesAndReleasesTheOwnersSingleLockedHold() {
+    TradingAccountEntity account = account();
+    putBalance(account.getId(), "USDT", "6000.00000000", "1000.00000000", "5000.00000000");
+    OrderEntity owner = pendingOrder(
+        account.getId(), OrderSide.BUY, "0.10", "5000.00000000", "USDT");
+    OrderEntity nonOwner = order(account.getId(), OrderSide.BUY, "0.04");
+    nonOwner.setHoldAmount(BigDecimal.ZERO);
+    nonOwner.setHoldCurrency("USDT");
+    nonOwner.setHoldOwnerOrderId(owner.getId());
+
+    service().settleBuyFillUsingHoldOwner(
+        nonOwner,
+        owner,
+        execution("49000.00000000", "0.04", "0.00002000", "BTC"),
+        btcUsdt(),
+        account);
+
+    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getTotal())
+        .isEqualByComparingTo("4040.00000000");
+    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable())
+        .isEqualByComparingTo("4040.00000000");
+    assertThat(balance(account.getId(), WalletType.SPOT, "USDT").getLocked())
+        .isEqualByComparingTo("0.00000000");
+    assertThat(ledgerEntries)
+        .filteredOn(entry -> entry.getEntryType().equals("ORDER_RELEASE"))
+        .singleElement()
+        .extracting(AssetLedgerEntryEntity::getReferenceId)
+        .isEqualTo(owner.getId());
+  }
+
+  @Test
+  void buyJumpBeyondOwnersLockedHoldNeverFallsBackToAvailableBalance() {
+    TradingAccountEntity account = account();
+    putBalance(account.getId(), "USDT", "150.00000000", "50.00000000", "100.00000000");
+    OrderEntity owner = pendingOrder(
+        account.getId(), OrderSide.BUY, "0.10", "100.00000000", "USDT");
+    OrderEntity nonOwner = order(account.getId(), OrderSide.BUY, "0.10");
+    nonOwner.setHoldOwnerOrderId(owner.getId());
+
+    assertThatThrownBy(() -> service().settleBuyFillUsingHoldOwner(
+        nonOwner,
+        owner,
+        execution("1100.00000000", "0.10", "0.00005000", "BTC"),
+        btcUsdt(),
+        account))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("LOCKED_BALANCE_NOT_ENOUGH"));
+
+    WalletBalanceEntity quote = balance(account.getId(), WalletType.SPOT, "USDT");
+    assertThat(quote.getTotal()).isEqualByComparingTo("150.00000000");
+    assertThat(quote.getAvailable()).isEqualByComparingTo("50.00000000");
+    assertThat(quote.getLocked()).isEqualByComparingTo("100.00000000");
+    assertThat(quote.getTotal()).isEqualByComparingTo(
+        quote.getAvailable().add(quote.getLocked()));
+    assertThat(ledgerEntries).isEmpty();
+  }
+
+  @Test
+  void ownerHoldCannotConsumeAnotherOrdersAggregateLockedFunds() {
+    TradingAccountEntity account = account();
+    putBalance(account.getId(), "USDT", "250.00000000", "50.00000000", "200.00000000");
+    OrderEntity owner = pendingOrder(
+        account.getId(), OrderSide.BUY, "0.10", "100.00000000", "USDT");
+    OrderEntity nonOwner = order(account.getId(), OrderSide.BUY, "0.10");
+    nonOwner.setHoldOwnerOrderId(owner.getId());
+
+    assertThatThrownBy(() -> service().settleBuyFillUsingHoldOwner(
+        nonOwner,
+        owner,
+        execution("1100.00000000", "0.10", "0.00005000", "BTC"),
+        btcUsdt(),
+        account))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("LOCKED_BALANCE_NOT_ENOUGH"));
+
+    WalletBalanceEntity quote = balance(account.getId(), WalletType.SPOT, "USDT");
+    assertThat(quote.getTotal()).isEqualByComparingTo("250.00000000");
+    assertThat(quote.getAvailable()).isEqualByComparingTo("50.00000000");
+    assertThat(quote.getLocked()).isEqualByComparingTo("200.00000000");
+    assertThat(ledgerEntries).isEmpty();
+  }
+
+  @Test
+  void singlePendingHoldCannotConsumeAnotherOrdersAggregateLockedFunds() {
+    TradingAccountEntity account = account();
+    putBalance(account.getId(), "USDT", "250.00000000", "50.00000000", "200.00000000");
+    OrderEntity pending = pendingOrder(
+        account.getId(), OrderSide.BUY, "0.10", "100.00000000", "USDT");
+
+    assertThatThrownBy(() -> service().settleBuyFill(
+        pending,
+        execution("1100.00000000", "0.10", "0.00005000", "BTC"),
+        btcUsdt(),
+        account))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("LOCKED_BALANCE_NOT_ENOUGH"));
+
+    WalletBalanceEntity quote = balance(account.getId(), WalletType.SPOT, "USDT");
+    assertThat(quote.getTotal()).isEqualByComparingTo("250.00000000");
+    assertThat(quote.getAvailable()).isEqualByComparingTo("50.00000000");
+    assertThat(quote.getLocked()).isEqualByComparingTo("200.00000000");
+    assertThat(ledgerEntries).isEmpty();
+  }
+
+  @Test
+  void ownerHoldComparisonUsesTheSameEightDecimalWalletRounding() {
+    TradingAccountEntity account = account();
+    putBalance(account.getId(), "USDT", "100.00000000", "0.00000000", "100.00000000");
+    OrderEntity pending = pendingOrder(
+        account.getId(), OrderSide.BUY, "0.10", "100.000000004", "USDT");
+
+    service().settleBuyFill(
+        pending,
+        execution("1000.00000004", "0.10", "0.00005000", "BTC"),
+        btcUsdt(),
+        account);
+
+    WalletBalanceEntity quote = balance(account.getId(), WalletType.SPOT, "USDT");
+    assertThat(quote.getTotal()).isEqualByComparingTo("0.00000000");
+    assertThat(quote.getAvailable()).isEqualByComparingTo("0.00000000");
+    assertThat(quote.getLocked()).isEqualByComparingTo("0.00000000");
+  }
+
+  @Test
+  void ocoHoldCurrencyMismatchNeverFallsBackToAvailableBalance() {
+    TradingAccountEntity account = account();
+    putBalance(account.getId(), "USDT", "200.00000000", "100.00000000", "100.00000000");
+    OrderEntity owner = pendingOrder(
+        account.getId(), OrderSide.BUY, "0.10", "100.00000000", "BTC");
+    OrderEntity winner = order(account.getId(), OrderSide.BUY, "0.10");
+    UUID groupId = UUID.randomUUID();
+    owner.setContingencyGroupId(groupId);
+    winner.setContingencyGroupId(groupId);
+    winner.setHoldOwnerOrderId(owner.getId());
+
+    assertThatThrownBy(() -> service().settleBuyFillUsingHoldOwner(
+        winner,
+        owner,
+        execution("500.00000000", "0.10", "0.00005000", "BTC"),
+        btcUsdt(),
+        account))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("OCO_GROUP_INCOMPLETE"));
+
+    WalletBalanceEntity quote = balance(account.getId(), WalletType.SPOT, "USDT");
+    assertThat(quote.getAvailable()).isEqualByComparingTo("100.00000000");
+    assertThat(quote.getLocked()).isEqualByComparingTo("100.00000000");
+    assertThat(ledgerEntries).isEmpty();
+  }
+
+  @Test
+  void singlePendingHoldCurrencyMismatchNeverFallsBackToAvailableBalance() {
+    TradingAccountEntity account = account();
+    putBalance(account.getId(), "USDT", "200.00000000", "100.00000000", "100.00000000");
+    OrderEntity pending = pendingOrder(
+        account.getId(), OrderSide.BUY, "0.10", "100.00000000", "BTC");
+
+    assertThatThrownBy(() -> service().settleBuyFill(
+        pending,
+        execution("500.00000000", "0.10", "0.00005000", "BTC"),
+        btcUsdt(),
+        account))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("ORDER_HOLD_INVALID"));
+
+    WalletBalanceEntity quote = balance(account.getId(), WalletType.SPOT, "USDT");
+    assertThat(quote.getAvailable()).isEqualByComparingTo("100.00000000");
+    assertThat(quote.getLocked()).isEqualByComparingTo("100.00000000");
+    assertThat(ledgerEntries).isEmpty();
+  }
+
   private SpotSettlementService service() {
     return new SpotSettlementService(new WalletService(walletBalanceRepository, assetLedgerEntryRepository));
   }

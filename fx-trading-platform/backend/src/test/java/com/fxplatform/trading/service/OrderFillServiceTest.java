@@ -317,6 +317,42 @@ class OrderFillServiceTest {
   }
 
   @Test
+  void nonOwnerOcoFillPassesSharedHoldOwnerToSettlementAndClearsOnlyOwnerHold() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    OrderEntity order = order(accountId);
+    order.setProductType(ProductType.CRYPTO_SPOT);
+    order.setBaseQuantity(new BigDecimal("0.20"));
+    order.setHoldAmount(BigDecimal.ZERO);
+    OrderEntity holdOwner = order(accountId);
+    holdOwner.setHoldAmount(new BigDecimal("10010.00000000"));
+    holdOwner.setHoldCurrency("USDT");
+    order.setHoldOwnerOrderId(holdOwner.getId());
+    SpotSettlementService settlement = org.mockito.Mockito.mock(SpotSettlementService.class);
+    when(symbolRepository.findBySymbol("BTCUSDT"))
+        .thenReturn(Optional.of(symbol("BTCUSDT", "SPOT", "BTC", "USDT")));
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(tradeRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    Instant filledAt = Instant.parse("2026-07-12T02:00:00Z");
+    FullFillResult fill = new FullFillResult(
+        new BigDecimal("50005"), filledAt, new BigDecimal("0.20"), BigDecimal.ZERO,
+        new BigDecimal("0.0005"), new BigDecimal("0.0001"), "BTC",
+        LiquidityRole.TAKER, new BigDecimal("5"), MarketSourceMode.LOCAL_SIMULATED,
+        "local-spot", "BTCUSDT", filledAt.minusSeconds(1), filledAt.plusSeconds(2));
+    OrderFillService service = new OrderFillService(
+        orderRepository, tradeRepository, positionRepository, accountRepository,
+        ledgerService, symbolRepository, settlement);
+
+    service.fill(order, holdOwner, account, fill, holdOwner.getHoldAmount(), "OCO fill");
+
+    verify(settlement).settleBuyFill(
+        eq(order), eq(holdOwner), any(ExecutionResult.class), any(SymbolEntity.class),
+        eq(account), any(UUID.class));
+    assertThat(order.getHoldAmount()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(holdOwner.getHoldAmount()).isEqualByComparingTo(BigDecimal.ZERO);
+  }
+
+  @Test
   void finalFillBoundaryRejectsLowerGreaterNullAndNonZeroRemainingQuantities() {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId);
