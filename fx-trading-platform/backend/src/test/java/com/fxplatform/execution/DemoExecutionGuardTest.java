@@ -79,6 +79,43 @@ class DemoExecutionGuardTest {
   }
 
   @Test
+  void pendingRiskGatesBlockOrdinaryWritesButAllowSystemRiskReduction() {
+    for (AccountStatus status : java.util.List.of(
+        AccountStatus.RISK_REDUCTION_PENDING,
+        AccountStatus.ISOLATED_LIQUIDATION_PENDING,
+        AccountStatus.LIQUIDATION_PENDING)) {
+      TradingAccountEntity pending = account(AccountType.DEMO);
+      pending.setStatus(status);
+
+      assertCode("ACCOUNT_NOT_ACTIVE", () -> guard.requireDemo(
+          pending,
+          ProductType.LINEAR_PERP,
+          "BTCUSDT-PERP"));
+      assertCode("ACCOUNT_NOT_ACTIVE", () -> guard.requireDemoAccount(pending));
+      assertThatCode(() -> guard.requireDemoRiskReduction(
+          pending,
+          ProductType.LINEAR_PERP,
+          "BTCUSDT-PERP"))
+          .doesNotThrowAnyException();
+      assertThatCode(() -> guard.requireDemoRiskReductionAccount(pending))
+          .doesNotThrowAnyException();
+    }
+  }
+
+  @Test
+  void riskReductionStillRejectsLiveFrozenAndDisabledAccounts() {
+    TradingAccountEntity frozen = account(AccountType.DEMO);
+    frozen.setStatus(AccountStatus.FROZEN);
+    assertCode("ACCOUNT_NOT_ACTIVE", () -> guard.requireDemoRiskReductionAccount(frozen));
+    assertCode("DEMO_ACCOUNT_REQUIRED", () ->
+        guard.requireDemoRiskReductionAccount(account(AccountType.LIVE)));
+
+    properties.setMode(ExecutionMode.DISABLED);
+    assertCode("EXECUTION_DISABLED", () ->
+        guard.requireDemoRiskReductionAccount(account(AccountType.DEMO)));
+  }
+
+  @Test
   void disabledExecutionIsRejected() {
     properties.setMode(ExecutionMode.DISABLED);
 

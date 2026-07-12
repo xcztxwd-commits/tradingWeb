@@ -2,6 +2,7 @@ package com.fxplatform.trading.controller;
 
 import com.fxplatform.common.response.ApiResponse;
 import com.fxplatform.common.security.UserPrincipal;
+import com.fxplatform.trading.dto.request.BatchActionRequest;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.request.CreateOcoOrderRequest;
 import com.fxplatform.trading.dto.request.AdjustPositionMarginRequest;
@@ -15,6 +16,9 @@ import com.fxplatform.trading.dto.response.OrderResponse;
 import com.fxplatform.trading.dto.response.OcoOrderGroupResponse;
 import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.dto.response.AdjustPositionMarginResponse;
+import com.fxplatform.trading.dto.response.BatchActionResponse;
+import com.fxplatform.trading.service.CancelAllOrderService;
+import com.fxplatform.trading.service.CloseAllPositionService;
 import com.fxplatform.trading.service.OrderService;
 import com.fxplatform.trading.service.OcoOrderService;
 import com.fxplatform.trading.service.PositionService;
@@ -49,6 +53,8 @@ public class TradingController {
   private final OcoOrderService ocoOrderService;
   private final PositionMarginService positionMarginService;
   private ProtectionOrderService protectionOrderService;
+  private CancelAllOrderService cancelAllOrderService;
+  private CloseAllPositionService closeAllPositionService;
 
   /**
    * 处理 createOrder 提交接口请求。
@@ -91,6 +97,17 @@ public class TradingController {
       @PathVariable UUID orderId
   ) {
     return ApiResponse.success(orderService.cancelOrder(principal, orderId));
+  }
+
+  @PostMapping("/orders/cancel-all")
+  public ApiResponse<BatchActionResponse> cancelAllOrders(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @Valid @RequestBody BatchActionRequest request
+  ) {
+    return ApiResponse.success(cancelAllOrderService.cancelUser(
+        principal.id(),
+        request.accountId(),
+        request.requestId().toString()));
   }
 
   @PatchMapping("/orders/{orderId}")
@@ -157,6 +174,17 @@ public class TradingController {
         principal.id(), accountId, positionId, normalizedRequest));
   }
 
+  @PostMapping("/positions/close-all")
+  public ApiResponse<BatchActionResponse> closeAllPositions(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @Valid @RequestBody BatchActionRequest request
+  ) {
+    return ApiResponse.success(closeAllPositionService.closeUser(
+        principal.id(),
+        request.accountId(),
+        request.requestId().toString()));
+  }
+
   @PostMapping("/positions/{positionId}/protections")
   public ApiResponse<OrderResponse> createProtection(
       @AuthenticationPrincipal UserPrincipal principal,
@@ -186,5 +214,15 @@ public class TradingController {
   @Autowired
   void setProtectionOrderService(ProtectionOrderService protectionOrderService) {
     this.protectionOrderService = protectionOrderService;
+  }
+
+  @Autowired(required = false)
+  void setCancelAllOrderService(CancelAllOrderService cancelAllOrderService) {
+    this.cancelAllOrderService = cancelAllOrderService;
+  }
+
+  @Autowired(required = false)
+  void setCloseAllPositionService(CloseAllPositionService closeAllPositionService) {
+    this.closeAllPositionService = closeAllPositionService;
   }
 }

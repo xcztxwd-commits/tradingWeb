@@ -89,7 +89,7 @@ class Step09LiquidationServiceAuditTest {
   }
 
   @Test
-  void perpAccountBelowMaintenanceClosesLargestRiskFirst() {
+  void fxAccountBelowStopOutClosesLargestLossFirstWithoutRetryingStaleRows() {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity riskAccount = new TradingAccountEntity();
     riskAccount.setId(accountId);
@@ -100,30 +100,19 @@ class Step09LiquidationServiceAuditTest {
     riskAccount.setFreeMargin(new BigDecimal("-900.00000000"));
     riskAccount.setLeverage(10);
     when(accountRepository.findById(accountId)).thenReturn(Optional.of(riskAccount));
-    PositionEntity lowRisk = openPerp(accountId, "ETHUSDT", "60.00000000", "-5.00000000");
-    PositionEntity highRisk = openPerp(accountId, "BTCUSDT", "100.00000000", "-75.00000000");
-    lowRisk.setLots(BigDecimal.ONE);
-    lowRisk.setOpenPrice(new BigDecimal("2000.00000000"));
-    highRisk.setLots(BigDecimal.ONE);
-    highRisk.setOpenPrice(new BigDecimal("3000.00000000"));
+    PositionEntity lowRisk = openForex(accountId, "EURUSD", "-5.00000000");
+    PositionEntity highRisk = openForex(accountId, "GBPUSD", "-75.00000000");
 
     when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
     when(accountSnapshotService.snapshot(accountId)).thenReturn(snapshot(accountId, "100.00000000", "1000.00000000", "160.00000000"));
     when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
         .thenReturn(List.of(lowRisk, highRisk));
-    when(symbolRepository.findBySymbol("ETHUSDT")).thenReturn(Optional.of(linearPerpSymbol("ETHUSDT")));
-    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(linearPerpSymbol("BTCUSDT")));
-    when(quoteService.freshQuote("ETHUSDT"))
-        .thenReturn(quote("ETHUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-    when(quoteService.freshQuote("BTCUSDT"))
-        .thenReturn(quote("BTCUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-
     int closed = service().scanAccount(accountId);
 
     assertThat(closed).isEqualTo(2);
     InOrder order = inOrder(positionService);
-    order.verify(positionService).closeSystemPosition(accountId, highRisk.getId(), "PERP_MAINTENANCE_MARGIN");
-    order.verify(positionService).closeSystemPosition(accountId, lowRisk.getId(), "PERP_MAINTENANCE_MARGIN");
+    order.verify(positionService).closeSystemPosition(accountId, highRisk.getId(), "FX_MARGIN_STOP_OUT");
+    order.verify(positionService).closeSystemPosition(accountId, lowRisk.getId(), "FX_MARGIN_STOP_OUT");
   }
 
   @Test

@@ -47,7 +47,47 @@ public class DemoExecutionGuard {
     requireAllowedProduct(productType, canonicalSymbol);
   }
 
+  /** Allows only system-owned risk reduction while a Demo account awaits liquidation retry. */
+  public void requireDemoRiskReduction(
+      TradingAccountEntity account,
+      ProductType productType,
+      String canonicalSymbol
+  ) {
+    requireDemoModeAndType(account);
+    if (account.getStatus() != AccountStatus.ACTIVE
+        && account.getStatus() != AccountStatus.RISK_REDUCTION_PENDING
+        && account.getStatus() != AccountStatus.ISOLATED_LIQUIDATION_PENDING
+        && account.getStatus() != AccountStatus.LIQUIDATION_PENDING) {
+      throw new BusinessException(
+          ErrorCode.ACCOUNT_NOT_ACTIVE,
+          "Risk reduction requires an active or liquidation-pending account");
+    }
+    requireAllowedProduct(productType, canonicalSymbol);
+  }
+
+  /** Account-only form for a system cancel scope whose rows are validated after sorted locking. */
+  public void requireDemoRiskReductionAccount(TradingAccountEntity account) {
+    requireDemoModeAndType(account);
+    if (account.getStatus() != AccountStatus.ACTIVE
+        && account.getStatus() != AccountStatus.RISK_REDUCTION_PENDING
+        && account.getStatus() != AccountStatus.ISOLATED_LIQUIDATION_PENDING
+        && account.getStatus() != AccountStatus.LIQUIDATION_PENDING) {
+      throw new BusinessException(
+          ErrorCode.ACCOUNT_NOT_ACTIVE,
+          "Risk reduction requires an active or liquidation-pending account");
+    }
+  }
+
   public void requireDemoAccount(TradingAccountEntity account) {
+    requireDemoModeAndType(account);
+    if (account.getStatus() != AccountStatus.ACTIVE) {
+      throw new BusinessException(
+          ErrorCode.ACCOUNT_NOT_ACTIVE,
+          "Trading writes require an active account");
+    }
+  }
+
+  private void requireDemoModeAndType(TradingAccountEntity account) {
     if (executionProperties.mode() != ExecutionMode.DEMO) {
       throw new BusinessException(
           ErrorCode.EXECUTION_DISABLED,
@@ -57,11 +97,6 @@ public class DemoExecutionGuard {
       throw new BusinessException(
           ErrorCode.DEMO_ACCOUNT_REQUIRED,
           "Trading writes require a demo account");
-    }
-    if (account.getStatus() != AccountStatus.ACTIVE) {
-      throw new BusinessException(
-          ErrorCode.ACCOUNT_NOT_ACTIVE,
-          "Trading writes require an active account");
     }
   }
 

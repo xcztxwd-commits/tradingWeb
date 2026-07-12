@@ -59,6 +59,61 @@ public class PerpetualOrderRiskService {
       ExecutableMarketSnapshot snapshot,
       BigDecimal maintenanceMarginRate
   ) {
+    return evaluate(
+        lockedPositionMode,
+        lockedSetting,
+        lockedPositions,
+        side,
+        positionSide,
+        reduceOnly,
+        orderType,
+        canonicalBaseQuantity,
+        limitPrice,
+        snapshot,
+        maintenanceMarginRate,
+        false);
+  }
+
+  /** Prices and classifies a whole liquidation close without solvency-gating its execution. */
+  public OrderRisk evaluateLiquidationClose(
+      PositionMode lockedPositionMode,
+      AccountSymbolSettingEntity lockedSetting,
+      List<PositionEntity> lockedPositions,
+      OrderSide side,
+      PositionSide positionSide,
+      BigDecimal canonicalBaseQuantity,
+      ExecutableMarketSnapshot snapshot,
+      BigDecimal maintenanceMarginRate
+  ) {
+    return evaluate(
+        lockedPositionMode,
+        lockedSetting,
+        lockedPositions,
+        side,
+        positionSide,
+        true,
+        OrderType.MARKET,
+        canonicalBaseQuantity,
+        null,
+        snapshot,
+        maintenanceMarginRate,
+        true);
+  }
+
+  private OrderRisk evaluate(
+      PositionMode lockedPositionMode,
+      AccountSymbolSettingEntity lockedSetting,
+      List<PositionEntity> lockedPositions,
+      OrderSide side,
+      PositionSide positionSide,
+      boolean reduceOnly,
+      OrderType orderType,
+      BigDecimal canonicalBaseQuantity,
+      BigDecimal limitPrice,
+      ExecutableMarketSnapshot snapshot,
+      BigDecimal maintenanceMarginRate,
+      boolean liquidationClose
+  ) {
     LockedAuthority authority = requireAuthority(lockedPositionMode, lockedSetting);
     requirePositive(
         maintenanceMarginRate,
@@ -126,25 +181,31 @@ public class PerpetualOrderRiskService {
         exposure.closingBase(),
         snapshot.mark(),
         closeWorstPrice);
-    validateIsolatedCloseCapacity(
-        authority.marginMode(),
-        positionSide,
-        exposure,
-        openPositions,
-        closeWorstPrice,
-        snapshot.mark(),
-        pricing.worstFeeRate(),
-        maintenanceMarginRate,
-        marginAndFeePrice);
-    BigDecimal holdAmount = money(openingInitialMargin.add(feeBuffer).add(adverseCloseLoss));
-    BigDecimal isolatedHoldCapacity = isolatedHoldCapacity(
-        authority.marginMode(),
-        positionSide,
-        exposure,
-        openPositions,
-        snapshot.mark(),
-        maintenanceMarginRate,
-        pricing.worstFeeRate());
+    if (!liquidationClose) {
+      validateIsolatedCloseCapacity(
+          authority.marginMode(),
+          positionSide,
+          exposure,
+          openPositions,
+          closeWorstPrice,
+          snapshot.mark(),
+          pricing.worstFeeRate(),
+          maintenanceMarginRate,
+          marginAndFeePrice);
+    }
+    BigDecimal holdAmount = liquidationClose
+        ? money(BigDecimal.ZERO)
+        : money(openingInitialMargin.add(feeBuffer).add(adverseCloseLoss));
+    BigDecimal isolatedHoldCapacity = liquidationClose
+        ? money(BigDecimal.ZERO)
+        : isolatedHoldCapacity(
+            authority.marginMode(),
+            positionSide,
+            exposure,
+            openPositions,
+            snapshot.mark(),
+            maintenanceMarginRate,
+            pricing.worstFeeRate());
 
     return new OrderRisk(
         lockedPositionMode,

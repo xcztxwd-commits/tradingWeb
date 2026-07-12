@@ -4,6 +4,7 @@ import static com.fxplatform.common.money.MoneyAmount.orZero;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.execution.DemoExecutionGuard;
@@ -50,6 +51,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -80,6 +82,8 @@ public class SystemCloseOrderService {
   private final LedgerService ledgerService;
   private final DemoExecutionGuard demoExecutionGuard;
   private final TradingTransactionExecutor transactionExecutor;
+  private AuditLogService auditLogService;
+  private LiquidationSettlementService liquidationSettlementService;
 
   public SystemCloseOrderService(
       OrderRepository orderRepository,
@@ -121,6 +125,18 @@ public class SystemCloseOrderService {
     this.transactionExecutor = transactionExecutor;
   }
 
+  @Autowired(required = false)
+  public void setAuditLogService(AuditLogService auditLogService) {
+    this.auditLogService = auditLogService;
+  }
+
+  @Autowired(required = false)
+  public void setLiquidationSettlementService(
+      LiquidationSettlementService liquidationSettlementService
+  ) {
+    this.liquidationSettlementService = liquidationSettlementService;
+  }
+
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public CloseResult closeUser(
       UUID userId,
@@ -143,7 +159,8 @@ public class SystemCloseOrderService {
         null,
         key,
         false,
-        true));
+        true,
+        null));
   }
 
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -168,7 +185,8 @@ public class SystemCloseOrderService {
         null,
         key,
         true,
-        true));
+        true,
+        null));
   }
 
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -178,6 +196,20 @@ public class SystemCloseOrderService {
       OrderOrigin origin,
       String systemReason,
       String idempotencyKey
+  ) {
+    return closeWhole(
+        accountId, positionId, origin, systemReason, idempotencyKey, null);
+  }
+
+  /** System close with a guard executed after trading locks and before any item mutation. */
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
+  public CloseResult closeWhole(
+      UUID accountId,
+      UUID positionId,
+      OrderOrigin origin,
+      String systemReason,
+      String idempotencyKey,
+      Runnable lockedMutationGuard
   ) {
     requireId(accountId, "Account id is required");
     requireId(positionId, "Position id is required");
@@ -201,7 +233,8 @@ public class SystemCloseOrderService {
         systemReason.trim(),
         key,
         true,
-        false));
+        false,
+        lockedMutationGuard));
   }
 
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -406,8 +439,7 @@ public class SystemCloseOrderService {
           return replay.get();
         }
         requireOpenLinearPosition(context.position());
-        demoExecutionGuard.requireDemo(
-            context.account(), ProductType.LINEAR_PERP, context.position().getSymbol());
+        requireCloseGuard(intent, context.account(), context.position().getSymbol());
 
         SymbolEntity symbol = symbolRepository.findBySymbol(context.position().getSymbol())
             .orElseThrow(() -> new BusinessException("SYMBOL_NOT_FOUND", "Symbol not found"));
@@ -444,7 +476,8 @@ public class SystemCloseOrderService {
             effectiveRequest,
             conversion,
             snapshot,
-            symbol.getMaintenanceMarginRate());
+            symbol.getMaintenanceMarginRate(),
+            symbol.getLiquidationFeeRate());
         try {
           return transactionExecutor.execute(() -> persist(intent, prepared));
         } catch (DataIntegrityViolationException exception) {
@@ -473,7 +506,7 @@ public class SystemCloseOrderService {
             .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"))
         : accountRepository.findByIdForUpdate(intent.accountId())
             .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
-    demoExecutionGuard.requireDemo(account, ProductType.LINEAR_PERP, prepared.position().getSymbol());
+    requireCloseGuard(intent, account, prepared.position().getSymbol());
     AccountSymbolSettingEntity setting = settingRepository
         .findByAccountIdAndSymbolForUpdate(account.getId(), prepared.position().getSymbol())
         .orElseThrow(() -> new BusinessException(
@@ -494,6 +527,9 @@ public class SystemCloseOrderService {
     if (replay.isPresent()) {
       return replay.get();
     }
+    if (intent.lockedMutationGuard() != null) {
+      intent.lockedMutationGuard().run();
+    }
     PositionEntity target = lockedPositions.stream()
         .filter(position -> intent.positionId().equals(position.getId()))
         .findFirst()
@@ -508,20 +544,31 @@ public class SystemCloseOrderService {
     requireNotOverClose(prepared.conversion().baseQuantity(), target.getLots());
 
     OrderSide closeSide = opposite(target.getSide());
-    PerpetualOrderRiskService.OrderRisk risk = perpetualOrderRiskService.evaluate(
-        account.getPositionMode(),
-        setting,
-        lockedPositions,
-        closeSide,
-        target.getPositionSide(),
-        true,
-        OrderType.MARKET,
-        prepared.conversion().baseQuantity(),
-        null,
-        prepared.snapshot(),
-        prepared.maintenanceMarginRate());
+    boolean liquidation = intent.origin() == OrderOrigin.LIQUIDATION;
+    PerpetualOrderRiskService.OrderRisk risk = liquidation
+        ? perpetualOrderRiskService.evaluateLiquidationClose(
+            account.getPositionMode(),
+            setting,
+            lockedPositions,
+            closeSide,
+            target.getPositionSide(),
+            prepared.conversion().baseQuantity(),
+            prepared.snapshot(),
+            prepared.maintenanceMarginRate())
+        : perpetualOrderRiskService.evaluate(
+            account.getPositionMode(),
+            setting,
+            lockedPositions,
+            closeSide,
+            target.getPositionSide(),
+            true,
+            OrderType.MARKET,
+            prepared.conversion().baseQuantity(),
+            null,
+            prepared.snapshot(),
+            prepared.maintenanceMarginRate());
     requirePureClose(risk, prepared.conversion().baseQuantity());
-    if (risk.marginMode() == MarginMode.ISOLATED) {
+    if (!liquidation && risk.marginMode() == MarginMode.ISOLATED) {
       PerpetualIsolatedCloseHoldValidator.validate(target, risk, activeOrders);
     }
 
@@ -545,13 +592,19 @@ public class SystemCloseOrderService {
         prepared.snapshot());
     fullFillCoordinator.requireFresh(fullFill);
 
-    reserveHold(account, order, risk);
+    BigDecimal balanceBeforeFill = money(account.getBalance());
+    BigDecimal isolatedMarginBeforeFill = money(target.getMarginHeld()).max(BigDecimal.ZERO);
+    if (!liquidation) {
+      reserveHold(account, order, risk);
+    }
     orderRepository.save(order);
-    ledgerService.recordOrderHold(
-        account,
-        risk.holdAmount(),
-        order.getId(),
-        "Perpetual close order margin reserved");
+    if (!liquidation) {
+      ledgerService.recordOrderHold(
+          account,
+          risk.holdAmount(),
+          order.getId(),
+          "Perpetual close order margin reserved");
+    }
     orderFillService.fillPerpetual(
         order,
         account,
@@ -559,6 +612,26 @@ public class SystemCloseOrderService {
         prepared.snapshot().mark(),
         risk.leverage(),
         "System close position margin");
+    BigDecimal contractualLiquidationFee = contractualLiquidationFee(prepared, order);
+    if (liquidation
+        && risk.marginMode() == MarginMode.CROSS
+        && liquidationSettlementService != null) {
+      liquidationSettlementService.recordCrossChargeLocked(
+          account.getId(),
+          target.getId(),
+          order.getId(),
+          contractualLiquidationFee);
+    } else {
+      settleLiquidationDeficit(
+          intent,
+          account,
+          target,
+          order,
+          risk.marginMode(),
+          balanceBeforeFill,
+          isolatedMarginBeforeFill,
+          contractualLiquidationFee);
+    }
     orderEventService.record(
         order.getId(),
         "ORDER_FILLED",
@@ -1071,6 +1144,115 @@ public class SystemCloseOrderService {
     return value == null ? BigDecimal.ZERO : value.abs();
   }
 
+  private void requireCloseGuard(
+      CloseIntent intent,
+      TradingAccountEntity account,
+      String symbol
+  ) {
+    if (intent.origin() == OrderOrigin.LIQUIDATION
+        && account.getStatus() == com.fxplatform.account.enums.AccountStatus.RISK_REDUCTION_PENDING) {
+      throw new BusinessException(
+          "ACCOUNT_CLEANUP_PENDING",
+          "Liquidation close is suspended while Admin cleanup owns the account");
+    }
+    if (intent.origin() == OrderOrigin.USER || intent.origin() == OrderOrigin.BATCH_CLOSE) {
+      demoExecutionGuard.requireDemo(account, ProductType.LINEAR_PERP, symbol);
+      return;
+    }
+    demoExecutionGuard.requireDemoRiskReduction(account, ProductType.LINEAR_PERP, symbol);
+  }
+
+  private void settleLiquidationDeficit(
+      CloseIntent intent,
+      TradingAccountEntity account,
+      PositionEntity position,
+      OrderEntity order,
+      MarginMode marginMode,
+      BigDecimal balanceBeforeFill,
+      BigDecimal isolatedMarginBeforeFill,
+      BigDecimal liquidationFee
+  ) {
+    if (intent.origin() != OrderOrigin.LIQUIDATION) {
+      return;
+    }
+
+    BigDecimal balanceAfterFill = money(account.getBalance());
+    BigDecimal coreDebit = money(balanceBeforeFill.subtract(balanceAfterFill).max(BigDecimal.ZERO));
+    BigDecimal coreCapacity = isolatedMarginBeforeFill;
+    BigDecimal coreShortfall = marginMode == MarginMode.ISOLATED
+        ? money(coreDebit.subtract(coreCapacity).max(BigDecimal.ZERO))
+        : money(balanceAfterFill.negate().max(BigDecimal.ZERO));
+    if (coreShortfall.signum() > 0) {
+      creditCash(account, coreShortfall);
+    }
+    BigDecimal balanceFloorShortfall = money(orZero(account.getBalance()).negate().max(BigDecimal.ZERO));
+    if (balanceFloorShortfall.signum() > 0) {
+      creditCash(account, balanceFloorShortfall);
+      coreShortfall = money(coreShortfall.add(balanceFloorShortfall));
+    }
+
+    BigDecimal remainingCapacity = marginMode == MarginMode.ISOLATED
+        ? money(coreCapacity.subtract(coreDebit).max(BigDecimal.ZERO))
+        : money(account.getBalance().max(BigDecimal.ZERO));
+    BigDecimal chargedFee = money(liquidationFee
+        .min(remainingCapacity)
+        .min(orZero(account.getBalance()).max(BigDecimal.ZERO)));
+    if (chargedFee.signum() > 0) {
+      debitCash(account, chargedFee);
+      ledgerService.recordLiquidationFee(
+          account,
+          chargedFee,
+          position.getId(),
+          "Liquidation fee charged");
+    }
+
+    BigDecimal feeShortfall = money(liquidationFee.subtract(chargedFee).max(BigDecimal.ZERO));
+    BigDecimal totalShortfall = money(coreShortfall.add(feeShortfall));
+    accountRepository.save(account);
+    if (totalShortfall.signum() <= 0) {
+      return;
+    }
+    ledgerService.recordBankruptcyShortfall(
+        account,
+        totalShortfall,
+        order.getId(),
+        "Liquidation bankruptcy shortfall");
+    if (auditLogService != null) {
+      auditLogService.record(
+          null,
+          "BANKRUPTCY_SHORTFALL",
+          "ORDER",
+          order.getId().toString(),
+          "{\"amount\":" + totalShortfall.toPlainString()
+              + ",\"positionId\":\"" + position.getId() + "\"}");
+    }
+  }
+
+  private static void creditCash(TradingAccountEntity account, BigDecimal amount) {
+    account.setBalance(money(orZero(account.getBalance()).add(amount)));
+    account.setEquity(money(orZero(account.getEquity()).add(amount)));
+    account.setFreeMargin(money(orZero(account.getFreeMargin()).add(amount)));
+  }
+
+  private static void debitCash(TradingAccountEntity account, BigDecimal amount) {
+    account.setBalance(money(orZero(account.getBalance()).subtract(amount)));
+    account.setEquity(money(orZero(account.getEquity()).subtract(amount)));
+    account.setFreeMargin(money(orZero(account.getFreeMargin()).subtract(amount)));
+  }
+
+  private static BigDecimal nonNegative(BigDecimal value) {
+    return value == null ? BigDecimal.ZERO : value.max(BigDecimal.ZERO);
+  }
+
+  private static BigDecimal contractualLiquidationFee(
+      PreparedClose prepared,
+      OrderEntity order
+  ) {
+    return money(abs(order.getFilledQuantity())
+        .multiply(abs(order.getExecutionPrice()))
+        .multiply(nonNegative(prepared.liquidationFeeRate())));
+  }
+
   private static BigDecimal money(BigDecimal value) {
     return orZero(value).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
   }
@@ -1106,7 +1288,8 @@ public class SystemCloseOrderService {
       String systemReason,
       String idempotencyKey,
       boolean whole,
-      boolean userScoped
+      boolean userScoped,
+      Runnable lockedMutationGuard
   ) {
   }
 
@@ -1122,7 +1305,8 @@ public class SystemCloseOrderService {
       ClosePositionRequest request,
       QuantityConversionService.Conversion conversion,
       ExecutableMarketSnapshot snapshot,
-      BigDecimal maintenanceMarginRate
+      BigDecimal maintenanceMarginRate,
+      BigDecimal liquidationFeeRate
   ) {
   }
 

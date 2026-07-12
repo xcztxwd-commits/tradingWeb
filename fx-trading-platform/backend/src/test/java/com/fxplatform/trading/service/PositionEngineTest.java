@@ -22,6 +22,7 @@ import com.fxplatform.risk.service.PnLCalculator;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionSide;
@@ -405,6 +406,59 @@ class PositionEngineTest {
     assertThat(closed.getStatus()).isEqualTo(PositionStatus.CLOSED);
     assertThat(closed.getMarginHeld()).isZero();
     assertThat(closed.getRealizedPnl()).isEqualByComparingTo("1000.00000000");
+  }
+
+  @Test
+  void wholeIsolatedLiquidationAllowsUncoveredLossAndRealizesFundingSeparately() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(
+        accountId, new BigDecimal("100.00000000"), new BigDecimal("10.00000000"), 10);
+    account.setPositionMode(PositionMode.ONE_WAY);
+    PositionEntity existing = canonicalPosition(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "100", "10",
+        PositionMode.ONE_WAY, PositionSide.BOTH);
+    existing.setMarginMode(MarginMode.ISOLATED);
+    existing.setFundingPnl(new BigDecimal("-8.00000000"));
+    existing.setFloatingPnl(BigDecimal.ZERO);
+    when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.ONE_WAY, PositionSide.BOTH))
+        .thenReturn(Optional.of(existing));
+    when(positionRepository.save(existing)).thenReturn(existing);
+
+    OrderEntity liquidation = perpetualOrder(
+        accountId, "BTCUSDT-PERP", OrderSide.SELL, "1", PositionMode.ONE_WAY,
+        PositionSide.BOTH, MarginMode.ISOLATED, 10, true);
+    liquidation.setOrderOrigin(OrderOrigin.LIQUIDATION);
+    liquidation.setParentPositionId(existing.getId());
+    liquidation.setHoldAmount(BigDecimal.ZERO);
+
+    PositionEngine.PositionUpdateResult result = engine().applyPerpetualFill(
+        account,
+        liquidation,
+        fill(new BigDecimal("90.00000000"), BigDecimal.ONE),
+        linearWithMaintenance(),
+        new BigDecimal("90.00000000"),
+        10,
+        "Liquidation close");
+    engine().recordPerpetualFillLedger(account, result);
+
+    assertThat(existing.getStatus()).isEqualTo(PositionStatus.CLOSED);
+    assertThat(existing.getFundingPnl()).isEqualByComparingTo("0.00000000");
+    assertThat(existing.getRealizedPnl()).isEqualByComparingTo("-10.00000000");
+    assertThat(result.realizedPnlDelta()).isEqualByComparingTo("-10.00000000");
+    assertThat(account.getBalance()).isEqualByComparingTo("82.00000000");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("82.00000000");
+    verify(ledgerService).recordFundingFee(
+        account,
+        new BigDecimal("-8.00000000"),
+        existing.getId(),
+        "Isolated funding settled on position close");
+    verify(ledgerService).recordTradePnl(
+        account,
+        new BigDecimal("-10.00000000"),
+        existing.getId(),
+        "Position realized PnL");
   }
 
   @Test

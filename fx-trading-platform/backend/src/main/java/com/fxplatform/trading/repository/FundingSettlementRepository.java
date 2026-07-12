@@ -1,13 +1,23 @@
 package com.fxplatform.trading.repository;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.trading.entity.FundingSettlementEntity;
+import java.util.List;
+import java.util.UUID;
 import org.apache.ibatis.annotations.Insert;
 
 public interface FundingSettlementRepository extends FxBaseMapper<FundingSettlementEntity> {
 
   default boolean insertIfAbsent(FundingSettlementEntity settlement) {
     return insertOnConflictDoNothing(settlement) == 1;
+  }
+
+  default List<FundingSettlementEntity> findByAccountIdOrderByFundingTimeDesc(UUID accountId) {
+    return selectList(new LambdaQueryWrapper<FundingSettlementEntity>()
+        .eq(FundingSettlementEntity::getAccountId, accountId)
+        .orderByDesc(FundingSettlementEntity::getFundingTime)
+        .orderByDesc(FundingSettlementEntity::getId));
   }
 
   @Insert("""

@@ -7,6 +7,8 @@ public final class AdminActionConfirmation {
   public static final String CONFIRM_ADJUSTMENT = "CONFIRM_ADJUSTMENT";
   public static final String CONFIRM_APPROVE = "CONFIRM_APPROVE";
   public static final String CONFIRM_FORCE_CLOSE = "CONFIRM_FORCE_CLOSE";
+  public static final String CONFIRM_FORCE_CLEANUP = "CONFIRM_FORCE_CLEANUP";
+  public static final String CONFIRM_DEMO_RESET = "CONFIRM_DEMO_RESET";
   public static final String CONFIRM_DISABLE_SYMBOL = "CONFIRM_DISABLE_SYMBOL";
   public static final String CONFIRM_LEVERAGE_CHANGE = "CONFIRM_LEVERAGE_CHANGE";
   public static final String CONFIRM_PROVIDER_STATUS = "CONFIRM_PROVIDER_STATUS";

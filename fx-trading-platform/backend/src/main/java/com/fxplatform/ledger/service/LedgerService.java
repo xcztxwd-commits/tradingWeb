@@ -284,6 +284,38 @@ public class LedgerService {
     return save(account, LedgerEntryType.LIQUIDATION_FEE, amount.negate(), account.getBalance(), "POSITION", positionId, description);
   }
 
+  public LedgerEntryEntity recordBankruptcyShortfall(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID liquidationOrderId,
+      String description
+  ) {
+    return saveIdempotent(
+        account,
+        LedgerEntryType.BANKRUPTCY_SHORTFALL,
+        amount,
+        account.getBalance(),
+        "LIQUIDATION_ORDER",
+        liquidationOrderId,
+        description);
+  }
+
+  public LedgerEntryEntity recordCrossLiquidationShortfall(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID settlementId,
+      String description
+  ) {
+    return saveIdempotent(
+        account,
+        LedgerEntryType.BANKRUPTCY_SHORTFALL,
+        amount,
+        account.getBalance(),
+        "CROSS_LIQUIDATION_SETTLEMENT",
+        settlementId,
+        description);
+  }
+
   public LedgerEntryEntity recordFinancing(
       TradingAccountEntity account,
       BigDecimal amount,

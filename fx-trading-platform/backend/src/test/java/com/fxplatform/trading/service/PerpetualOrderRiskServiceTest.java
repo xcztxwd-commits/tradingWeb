@@ -385,6 +385,31 @@ class PerpetualOrderRiskServiceTest {
   }
 
   @Test
+  void liquidationCloseKeepsCanonicalPricingButDoesNotSolvencyGateOrReserveAHold() {
+    PositionEntity deepLoss = position(
+        PositionMode.ONE_WAY, PositionSide.BOTH, OrderSide.BUY, "1");
+    deepLoss.setOpenPrice(decimal("100"));
+    deepLoss.setMarginHeld(decimal("1"));
+    deepLoss.setFundingPnl(decimal("-2"));
+    ExecutableMarketSnapshot deepSnapshot = snapshot("49", "51", "50");
+
+    PerpetualOrderRiskService.OrderRisk risk = service.evaluateLiquidationClose(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.ISOLATED),
+        List.of(deepLoss),
+        OrderSide.SELL,
+        PositionSide.BOTH,
+        decimal("1"),
+        deepSnapshot,
+        decimal("0.005"));
+
+    assertThat(risk.closingBase()).isEqualByComparingTo("1");
+    assertThat(risk.openingBase()).isZero();
+    assertThat(risk.holdAmount()).isEqualByComparingTo("0.00000000");
+    assertThat(risk.isolatedHoldCapacity()).isEqualByComparingTo("0.00000000");
+  }
+
+  @Test
   void isolatedPartialCloseChecksPostFillSlotEquityAgainstRemainingThreshold() {
     PositionEntity safe = position(
         PositionMode.ONE_WAY, PositionSide.BOTH, OrderSide.BUY, "2");

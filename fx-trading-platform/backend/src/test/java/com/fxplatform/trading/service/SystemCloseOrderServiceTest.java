@@ -8,6 +8,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -19,6 +20,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.enums.AccountStatus;
 import com.fxplatform.account.enums.AccountType;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.execution.ExecutableMarketSnapshot;
@@ -99,6 +101,7 @@ class SystemCloseOrderServiceTest {
   @Mock private OrderFillService orderFillService;
   @Mock private OrderEventService orderEventService;
   @Mock private LedgerService ledgerService;
+  @Mock private AuditLogService auditLogService;
   @Mock private DemoExecutionGuard demoExecutionGuard;
   @Mock private TradingTransactionExecutor transactionExecutor;
 
@@ -162,6 +165,11 @@ class SystemCloseOrderServiceTest {
         .thenAnswer(invocation -> closeRisk(
             invocation.getArgument(3),
             invocation.getArgument(7)));
+    when(perpetualOrderRiskService.evaluateLiquidationClose(
+        any(), any(), any(), any(), any(), any(), any(), any()))
+        .thenAnswer(invocation -> closeRisk(
+            invocation.getArgument(3),
+            invocation.getArgument(5)));
     when(protectionOrderService.isTriggered(any(OrderEntity.class), any(BigDecimal.class)))
         .thenCallRealMethod();
     when(fullFillCoordinator.execute(any(FullFillRequest.class), any(ExecutableMarketSnapshot.class)))
@@ -644,6 +652,7 @@ class SystemCloseOrderServiceTest {
   @Test
   void wholeSystemClosePersistsOriginReasonAndDerivedIdempotency() {
     String requestId = "admin-force-42";
+    AtomicBoolean lockedGuardRan = new AtomicBoolean();
     String expectedKey = OrderIdempotencyKeyPolicy.systemClose(
         accountId, positionId, OrderOrigin.ADMIN_FORCE_CLOSE, requestId);
 
@@ -652,7 +661,15 @@ class SystemCloseOrderServiceTest {
         positionId,
         OrderOrigin.ADMIN_FORCE_CLOSE,
         "risk operator cleanup",
-        requestId);
+        requestId,
+        () -> {
+          assertThat(insideTransaction.get()).isTrue();
+          verify(accountRepository).findByIdForUpdate(accountId);
+          verify(positionRepository).findOpenLinearPerpBySymbolForUpdate(accountId, SYMBOL);
+          verify(orderRepository).findActiveLinearPerpBySymbolForUpdate(accountId, SYMBOL);
+          verify(orderRepository, never()).save(any());
+          lockedGuardRan.set(true);
+        });
 
     assertAll(
         () -> assertThat(result.order().getOrderOrigin()).isEqualTo(OrderOrigin.ADMIN_FORCE_CLOSE),
@@ -660,9 +677,131 @@ class SystemCloseOrderServiceTest {
         () -> assertThat(result.order().getClientOrderId()).isEqualTo(expectedKey),
         () -> assertThat(result.order().getIdempotencyKey()).isEqualTo(expectedKey),
         () -> assertThat(result.order().getOriginalQuantity()).isEqualByComparingTo("2.0000"),
-        () -> assertThat(result.order().getBaseQuantity()).isEqualByComparingTo("2.0000"));
-    verify(accountRepository).findByIdForUpdate(accountId);
+        () -> assertThat(result.order().getBaseQuantity()).isEqualByComparingTo("2.0000"),
+        () -> assertThat(lockedGuardRan).isTrue());
     verify(accountRepository, never()).findByIdAndUserIdForUpdate(any(), any());
+  }
+
+  @Test
+  void userBatchCloseRechecksActiveAccountInsideTheMutationTransaction() {
+    org.mockito.Mockito.doNothing()
+        .doThrow(new BusinessException(ErrorCode.ACCOUNT_NOT_ACTIVE, "cleanup gate acquired"))
+        .when(demoExecutionGuard)
+        .requireDemo(account, ProductType.LINEAR_PERP, SYMBOL);
+
+    assertThatThrownBy(() -> service().closeWhole(
+        accountId,
+        positionId,
+        OrderOrigin.BATCH_CLOSE,
+        "USER_CLOSE_ALL",
+        "batch-gate-race"))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo(ErrorCode.ACCOUNT_NOT_ACTIVE));
+
+    verify(accountRepository).findByIdForUpdate(accountId);
+    verify(orderRepository, never()).save(any());
+    verify(orderFillService, never()).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
+  }
+
+  @Test
+  void liquidationFeeChargesOnlyRemainingCrossBalanceAndRecordsExactShortfall() {
+    symbol.setLiquidationFeeRate(new BigDecimal("0.005"));
+    account.setBalance(new BigDecimal("5.00000000"));
+    account.setEquity(new BigDecimal("5.00000000"));
+    account.setFreeMargin(new BigDecimal("5.00000000"));
+    doAnswer(invocation -> {
+      OrderEntity order = invocation.getArgument(0);
+      order.setStatus(OrderStatus.FILLED);
+      order.setExecutionPrice(new BigDecimal("99.00000000"));
+      order.setFilledQuantity(new BigDecimal("2.0000"));
+      order.setRemainingQuantity(BigDecimal.ZERO);
+      order.setHoldAmount(BigDecimal.ZERO);
+      position.setStatus(PositionStatus.CLOSED);
+      position.setMarginHeld(BigDecimal.ZERO);
+      account.setBalance(new BigDecimal("0.50000000"));
+      account.setEquity(new BigDecimal("0.50000000"));
+      account.setUsedMargin(BigDecimal.ZERO);
+      account.setFreeMargin(new BigDecimal("0.50000000"));
+      return order;
+    }).when(orderFillService).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
+
+    SystemCloseOrderService.CloseResult result = service().closeWhole(
+        accountId,
+        positionId,
+        OrderOrigin.LIQUIDATION,
+        "CROSS_MAINTENANCE_MARGIN",
+        "liquidation-cross-shortfall");
+
+    assertAll(
+        () -> assertThat(result.order().getStatus()).isEqualTo(OrderStatus.FILLED),
+        () -> assertThat(account.getBalance()).isEqualByComparingTo("0.00000000"),
+        () -> assertThat(account.getEquity()).isEqualByComparingTo("0.00000000"),
+        () -> assertThat(account.getFreeMargin()).isEqualByComparingTo("0.00000000"));
+    verify(ledgerService).recordLiquidationFee(
+        account,
+        new BigDecimal("0.50000000"),
+        positionId,
+        "Liquidation fee charged");
+    verify(ledgerService).recordBankruptcyShortfall(
+        account,
+        new BigDecimal("0.49000000"),
+        result.order().getId(),
+        "Liquidation bankruptcy shortfall");
+    verify(auditLogService).record(
+        null,
+        "BANKRUPTCY_SHORTFALL",
+        "ORDER",
+        result.order().getId().toString(),
+        "{\"amount\":0.49000000,\"positionId\":\"" + positionId + "\"}");
+  }
+
+  @Test
+  void isolatedLiquidationConsumesOnlyItsSlotPoolAndCreditsTheGapAsShortfall() {
+    symbol.setLiquidationFeeRate(new BigDecimal("0.005"));
+    setting.setMarginMode(MarginMode.ISOLATED);
+    position.setMarginMode(MarginMode.ISOLATED);
+    position.setMarginHeld(new BigDecimal("3.00000000"));
+    account.setBalance(new BigDecimal("100.00000000"));
+    account.setEquity(new BigDecimal("100.00000000"));
+    account.setFreeMargin(new BigDecimal("97.00000000"));
+    doAnswer(invocation -> {
+      OrderEntity order = invocation.getArgument(0);
+      order.setStatus(OrderStatus.FILLED);
+      order.setExecutionPrice(new BigDecimal("99.00000000"));
+      order.setFilledQuantity(new BigDecimal("2.0000"));
+      order.setRemainingQuantity(BigDecimal.ZERO);
+      order.setHoldAmount(BigDecimal.ZERO);
+      position.setStatus(PositionStatus.CLOSED);
+      position.setMarginHeld(BigDecimal.ZERO);
+      account.setBalance(new BigDecimal("90.00000000"));
+      account.setEquity(new BigDecimal("90.00000000"));
+      account.setUsedMargin(BigDecimal.ZERO);
+      account.setFreeMargin(new BigDecimal("90.00000000"));
+      return order;
+    }).when(orderFillService).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
+
+    SystemCloseOrderService.CloseResult result = service().closeWhole(
+        accountId,
+        positionId,
+        OrderOrigin.LIQUIDATION,
+        "ISOLATED_MAINTENANCE_MARGIN",
+        "liquidation-isolated-shortfall");
+
+    assertAll(
+        () -> assertThat(account.getBalance()).isEqualByComparingTo("97.00000000"),
+        () -> assertThat(account.getEquity()).isEqualByComparingTo("97.00000000"),
+        () -> assertThat(account.getFreeMargin()).isEqualByComparingTo("97.00000000"));
+    verify(ledgerService, never()).recordLiquidationFee(
+        any(), any(), any(), anyString());
+    verify(ledgerService).recordBankruptcyShortfall(
+        account,
+        new BigDecimal("7.99000000"),
+        result.order().getId(),
+        "Liquidation bankruptcy shortfall");
   }
 
   @Test
@@ -960,7 +1099,7 @@ class SystemCloseOrderServiceTest {
   }
 
   private SystemCloseOrderService service() {
-    return new SystemCloseOrderService(
+    SystemCloseOrderService service = new SystemCloseOrderService(
         orderRepository,
         positionRepository,
         accountRepository,
@@ -979,6 +1118,8 @@ class SystemCloseOrderServiceTest {
         ledgerService,
         demoExecutionGuard,
         transactionExecutor);
+    service.setAuditLogService(auditLogService);
+    return service;
   }
 
   private ClosePositionRequest request(String quantity, String clientOrderId) {

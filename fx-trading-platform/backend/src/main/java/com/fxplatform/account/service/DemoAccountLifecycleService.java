@@ -5,6 +5,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.enums.AccountStatus;
 import com.fxplatform.account.enums.AccountType;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.audit.service.AuditDetailsBuilder;
 import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.exception.ErrorCode;
@@ -115,6 +116,37 @@ public class DemoAccountLifecycleService {
     }
     TradingAccountEntity account = accountRepository.findByIdAndUserIdForUpdate(accountId, userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
+    return resetLocked(userId, account, requestId, null);
+  }
+
+  @Transactional
+  public DemoResetResponse resetAsAdmin(
+      UUID actorUserId,
+      UUID accountId,
+      UUID requestId,
+      String reason
+  ) {
+    if (actorUserId == null || accountId == null) {
+      throw new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Admin actor and account are required");
+    }
+    if (requestId == null) {
+      throw new BusinessException(ErrorCode.DEMO_RESET_BLOCKED, "Reset requestId is required");
+    }
+    if (reason == null || reason.isBlank()) {
+      throw new BusinessException("ADMIN_RESET_REASON_REQUIRED", "Admin reset reason is required");
+    }
+    TradingAccountEntity account = accountRepository.findByIdForUpdate(accountId)
+        .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
+    return resetLocked(actorUserId, account, requestId, reason.trim());
+  }
+
+  private DemoResetResponse resetLocked(
+      UUID auditActorUserId,
+      TradingAccountEntity account,
+      UUID requestId,
+      String adminReason
+  ) {
+    UUID accountId = account.getId();
     demoExecutionGuard.requireDemoAccount(account);
 
     List<AccountSymbolSettingEntity> settings = settingRepository.findByAccountIdForUpdate(accountId);
@@ -156,14 +188,27 @@ public class DemoAccountLifecycleService {
         INITIAL_BALANCE.subtract(oldPerpBalance).setScale(MONEY_SCALE, RoundingMode.HALF_UP),
         requestId);
     auditLogService.recordWithRequestId(
-        userId,
-        "DEMO_RESET",
+        auditActorUserId,
+        adminReason == null ? "DEMO_RESET" : "ADMIN_DEMO_RESET",
         "TRADING_ACCOUNT",
         accountId.toString(),
         requestId,
-        "{\"generation\":" + account.getDemoGeneration() + "}");
+        resetAuditDetails(account, adminReason));
 
     return resetResponse(account, spotUsdt.getAvailable(), requestId, false, resetAt);
+  }
+
+  private static String resetAuditDetails(
+      TradingAccountEntity account,
+      String adminReason
+  ) {
+    if (adminReason == null) {
+      return "{\"generation\":" + account.getDemoGeneration() + "}";
+    }
+    return AuditDetailsBuilder.create()
+        .put("generation", account.getDemoGeneration())
+        .put("reason", adminReason)
+        .toJson();
   }
 
   private WalletBalanceEntity resetWallets(

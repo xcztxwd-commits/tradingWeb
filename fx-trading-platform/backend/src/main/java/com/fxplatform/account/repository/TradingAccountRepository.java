@@ -34,7 +34,24 @@ public interface TradingAccountRepository extends FxBaseMapper<TradingAccountEnt
     return Optional.ofNullable(selectOne(new LambdaQueryWrapper<TradingAccountEntity>()
         .eq(TradingAccountEntity::getUserId, userId)
         .eq(TradingAccountEntity::getAccountType, com.fxplatform.account.enums.AccountType.DEMO)
-        .eq(TradingAccountEntity::getStatus, com.fxplatform.account.enums.AccountStatus.ACTIVE)));
+        .in(
+            TradingAccountEntity::getStatus,
+            com.fxplatform.account.enums.AccountStatus.ACTIVE,
+            com.fxplatform.account.enums.AccountStatus.RISK_REDUCTION_PENDING,
+            com.fxplatform.account.enums.AccountStatus.ISOLATED_LIQUIDATION_PENDING,
+            com.fxplatform.account.enums.AccountStatus.LIQUIDATION_PENDING)));
+  }
+
+  default List<TradingAccountEntity> findDemoLiquidationScanCandidates() {
+    return selectList(new LambdaQueryWrapper<TradingAccountEntity>()
+        .eq(TradingAccountEntity::getAccountType,
+            com.fxplatform.account.enums.AccountType.DEMO)
+        .in(
+            TradingAccountEntity::getStatus,
+            com.fxplatform.account.enums.AccountStatus.ACTIVE,
+            com.fxplatform.account.enums.AccountStatus.ISOLATED_LIQUIDATION_PENDING,
+            com.fxplatform.account.enums.AccountStatus.LIQUIDATION_PENDING)
+        .orderByAsc(TradingAccountEntity::getId));
   }
 
   @Insert("""
@@ -46,7 +63,11 @@ public interface TradingAccountRepository extends FxBaseMapper<TradingAccountEnt
         50000, 10, 'ACTIVE', 'ONE_WAY', 1
       )
       ON CONFLICT (user_id)
-        WHERE account_type = 'DEMO' AND status = 'ACTIVE'
+        WHERE account_type = 'DEMO'
+          AND status IN (
+            'ACTIVE', 'RISK_REDUCTION_PENDING',
+            'ISOLATED_LIQUIDATION_PENDING', 'LIQUIDATION_PENDING'
+          )
       DO NOTHING
       """)
   int insertActiveDemoIfAbsent(@Param("id") UUID id, @Param("userId") UUID userId);

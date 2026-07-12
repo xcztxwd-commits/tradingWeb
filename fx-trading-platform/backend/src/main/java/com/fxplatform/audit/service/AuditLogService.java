@@ -34,12 +34,17 @@ public class AuditLogService {
       String details
   ) {
     AuditLogEntity log = new AuditLogEntity();
+    log.setId(UUID.randomUUID());
     log.setActorUserId(actorUserId);
     log.setAction(action);
     log.setTargetType(targetType);
     log.setTargetId(targetId);
     log.setRequestId(requestId == null ? null : requestId.toString());
     log.setDetails(details);
-    auditLogRepository.save(log);
+    if (requestId == null) {
+      auditLogRepository.save(log);
+    } else {
+      auditLogRepository.insertRequestLogIfAbsent(log);
+    }
   }
 }

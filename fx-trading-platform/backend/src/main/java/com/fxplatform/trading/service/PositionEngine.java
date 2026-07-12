@@ -17,6 +17,7 @@ import com.fxplatform.risk.service.PnLCalculator;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionSide;
@@ -372,14 +373,26 @@ public class PositionEngine {
     BigDecimal remainingQuantity = oldQuantity.subtract(closedQuantity);
     BigDecimal oldMargin = orZero(existing.getMarginHeld());
     BigDecimal oldUpl = orZero(existing.getFloatingPnl());
+    BigDecimal oldFunding = orZero(existing.getFundingPnl());
     BigDecimal realized = realizedPnl(existing, closedQuantity, fill.price(), fill.profile());
-    requireCoveredHold(
-        fill.orderHold(),
-        adverseCloseLoss(existing, closedQuantity, fill.price(), fill.authorityMark())
-            .add(fill.fee()));
+    BigDecimal fundingRealized = fill.marginMode() == MarginMode.ISOLATED
+        ? oldFunding.multiply(closedQuantity)
+            .divide(oldQuantity, PRICE_SCALE, RoundingMode.HALF_UP)
+        : BigDecimal.ZERO;
+    boolean liquidationWholeClose = isLiquidationWholeClose(
+        order, existing, closedQuantity, oldQuantity);
+    if (!liquidationWholeClose) {
+      requireCoveredHold(
+          fill.orderHold(),
+          adverseCloseLoss(existing, closedQuantity, fill.price(), fill.authorityMark())
+              .add(fill.fee()));
+    }
 
     if (remainingQuantity.compareTo(BigDecimal.ZERO) == 0) {
       closePosition(existing, fill.price(), fill.filledAt(), realized);
+      if (fill.marginMode() == MarginMode.ISOLATED) {
+        existing.setFundingPnl(BigDecimal.ZERO.setScale(PRICE_SCALE, RoundingMode.HALF_UP));
+      }
       existing.setMarkPrice(fill.authorityMark());
       existing.setCurrentPrice(fill.authorityMark());
       incrementVersion(existing);
@@ -391,8 +404,8 @@ public class PositionEngine {
           BigDecimal.ZERO,
           oldUpl,
           BigDecimal.ZERO,
-          realized);
-      return authorityResult(
+          realized.add(fundingRealized));
+      return withFundingRealization(authorityResult(
           existing,
           order,
           fill.orderHold(),
@@ -401,7 +414,7 @@ public class PositionEngine {
           existing,
           existing,
           realized,
-          existing)
+          existing), fundingRealized, existing)
           .withReduction(existing.getId(), oldQuantity, BigDecimal.ZERO);
     }
 
@@ -415,6 +428,10 @@ public class PositionEngine {
         fill.profile());
     existing.setLots(remainingQuantity);
     existing.setRealizedPnl(orZero(existing.getRealizedPnl()).add(realized));
+    if (fill.marginMode() == MarginMode.ISOLATED) {
+      existing.setFundingPnl(oldFunding.subtract(fundingRealized)
+          .setScale(PRICE_SCALE, RoundingMode.HALF_UP));
+    }
     applyAuthoritySnapshot(existing, snapshot, newMargin);
     incrementVersion(existing);
     PositionEntity saved = positionRepository.save(existing);
@@ -425,8 +442,8 @@ public class PositionEngine {
         newMargin,
         oldUpl,
         snapshot.upl(),
-        realized);
-    return authorityResult(
+        realized.add(fundingRealized));
+    return withFundingRealization(authorityResult(
         saved,
         order,
         fill.orderHold(),
@@ -435,7 +452,7 @@ public class PositionEngine {
         existing,
         saved,
         realized,
-        saved)
+        saved), fundingRealized, saved)
         .withReduction(existing.getId(), oldQuantity, remainingQuantity);
   }
 
@@ -877,6 +894,20 @@ public class PositionEngine {
     }
   }
 
+  private boolean isLiquidationWholeClose(
+      OrderEntity order,
+      PositionEntity position,
+      BigDecimal closedQuantity,
+      BigDecimal openQuantity
+  ) {
+    return order != null
+        && order.getOrderOrigin() == OrderOrigin.LIQUIDATION
+        && Boolean.TRUE.equals(order.getReduceOnly())
+        && position.getId() != null
+        && position.getId().equals(order.getParentPositionId())
+        && closedQuantity.compareTo(openQuantity) == 0;
+  }
+
   private BigDecimal adverseCloseLoss(
       PositionEntity position,
       BigDecimal closingQuantity,
@@ -964,6 +995,23 @@ public class PositionEngine {
         List.copyOf(effects));
   }
 
+  private PositionUpdateResult withFundingRealization(
+      PositionUpdateResult result,
+      BigDecimal amount,
+      PositionEntity position
+  ) {
+    if (orZero(amount).compareTo(BigDecimal.ZERO) == 0) {
+      return result;
+    }
+    List<PerpetualLedgerEffect> effects = new ArrayList<>(result.ledgerEffects());
+    effects.add(new PerpetualLedgerEffect(
+        PerpetualLedgerEffectType.FUNDING_REALIZATION,
+        amount,
+        position.getId(),
+        "Isolated funding settled on position close"));
+    return new PositionUpdateResult(result.position(), result.realizedPnlDelta(), List.copyOf(effects));
+  }
+
   private void addOrderReleaseEffect(
       List<PerpetualLedgerEffect> effects,
       BigDecimal orderHold,
@@ -1034,6 +1082,8 @@ public class PositionEngine {
         case MARGIN_RELEASE -> ledgerService.recordMarginRelease(
             account, effect.amount(), effect.referenceId(), effect.description());
         case TRADE_PNL -> ledgerService.recordTradePnl(
+            account, effect.amount(), effect.referenceId(), effect.description());
+        case FUNDING_REALIZATION -> ledgerService.recordFundingFee(
             account, effect.amount(), effect.referenceId(), effect.description());
       }
     }
@@ -1146,7 +1196,8 @@ public class PositionEngine {
     ORDER_RELEASE,
     MARGIN_HOLD,
     MARGIN_RELEASE,
-    TRADE_PNL
+    TRADE_PNL,
+    FUNDING_REALIZATION
   }
 
   private record PerpetualSnapshot(

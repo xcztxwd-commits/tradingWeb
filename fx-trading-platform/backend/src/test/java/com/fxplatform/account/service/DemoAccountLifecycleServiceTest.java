@@ -141,6 +141,20 @@ class DemoAccountLifecycleServiceTest {
   }
 
   @Test
+  void liquidationPendingDemoIsStillTheUsersSingleDemoAndIsNeverRecreated() {
+    UUID userId = UUID.randomUUID();
+    TradingAccountEntity pending = demoAccount(UUID.randomUUID(), userId, 4L);
+    pending.setStatus(AccountStatus.LIQUIDATION_PENDING);
+    when(accountRepository.findActiveDemoByUserId(userId)).thenReturn(Optional.of(pending));
+
+    assertThat(service.getOrCreateDemoAccount(userId)).isSameAs(pending);
+
+    verify(accountRepository, never()).insertActiveDemoIfAbsent(any(), any());
+    verify(walletService, never()).creditAvailableWithEntryType(
+        any(), any(WalletType.class), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
   void activeNormalOcoOrProtectionOrderBlocksResetWithZeroMutation() {
     for (OrderOrigin origin : List.of(OrderOrigin.USER, OrderOrigin.OCO, OrderOrigin.PROTECTIVE)) {
       ResetFixture fixture = resetFixture();
