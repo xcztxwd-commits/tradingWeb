@@ -54,6 +54,7 @@ class OrderResponseMapperTest {
     order.setTriggerExecutionType(TriggerExecutionType.MARKET);
     order.setContingencyGroupId(groupId);
     order.setHoldOwnerOrderId(holdOwnerId);
+    order.setVersion(7L);
 
     OrderResponse response = new OrderResponseMapper().toResponse(order);
 
@@ -75,5 +76,38 @@ class OrderResponseMapperTest {
     assertThat(response.triggerExecutionType()).isEqualTo(TriggerExecutionType.MARKET);
     assertThat(response.contingencyGroupId()).isEqualTo(groupId);
     assertThat(response.holdOwnerOrderId()).isEqualTo(holdOwnerId);
+    assertThat(response.version()).isEqualTo(7L);
+  }
+
+  @Test
+  void legacyCompatibilityConstructorDefaultsVersionToNull() {
+    OrderResponse response = new OrderResponse(
+        UUID.randomUUID(),
+        UUID.randomUUID(),
+        "BTCUSDT-PERP",
+        "BUY",
+        "MARKET",
+        10,
+        "FILLED",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        null,
+        null,
+        BigDecimal.ONE,
+        BigDecimal.ZERO,
+        null,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        "USDT",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null);
+
+    assertThat(response.version()).isNull();
+    assertThat(response.origin()).isEqualTo(OrderOrigin.USER);
   }
 }

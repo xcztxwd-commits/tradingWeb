@@ -71,6 +71,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class ProtectionOrderServiceTest {
 
+  private static final BigDecimal AUTHORITY_MARK = new BigDecimal("50000");
+
   @Mock TradingAccountRepository accountRepository;
   @Mock PositionRepository positionRepository;
   @Mock OrderRepository orderRepository;
@@ -858,7 +860,7 @@ class ProtectionOrderServiceTest {
             TriggerExecutionType.LIMIT,
             new BigDecimal("48900")));
 
-    serviceWithLedger().createAttachedLocked(parent, requests);
+    serviceWithLedger().createAttachedLocked(parent, requests, AUTHORITY_MARK);
 
     ArgumentCaptor<OrderEntity> carriers = ArgumentCaptor.forClass(OrderEntity.class);
     verify(orderRepository, times(2)).insert(carriers.capture());
@@ -891,7 +893,7 @@ class ProtectionOrderServiceTest {
         new BigDecimal("51000"),
         null,
         TriggerExecutionType.MARKET,
-        null)));
+        null)), AUTHORITY_MARK);
 
     ArgumentCaptor<OrderEntity> carrier = ArgumentCaptor.forClass(OrderEntity.class);
     verify(orderRepository).insert(carrier.capture());
@@ -913,7 +915,7 @@ class ProtectionOrderServiceTest {
             new BigDecimal("51000"),
             TriggerPriceType.LAST_PRICE,
             TriggerExecutionType.MARKET,
-            null))));
+            null)), AUTHORITY_MARK));
     assertCode("PROTECTION_PRICE_INVALID", () -> serviceWithLedger().createAttachedLocked(
         parent,
         List.of(new AttachedProtectionRequest(
@@ -921,7 +923,7 @@ class ProtectionOrderServiceTest {
             new BigDecimal("51000"),
             TriggerPriceType.MARK_PRICE,
             TriggerExecutionType.MARKET,
-            new BigDecimal("50900")))));
+            new BigDecimal("50900"))), AUTHORITY_MARK));
     assertCode(ErrorCode.ORDER_PRICE_REQUIRED, () -> serviceWithLedger().createAttachedLocked(
         parent,
         List.of(new AttachedProtectionRequest(
@@ -929,7 +931,7 @@ class ProtectionOrderServiceTest {
             new BigDecimal("51000"),
             null,
             TriggerExecutionType.LIMIT,
-            null))));
+            null)), AUTHORITY_MARK));
 
     verify(orderRepository, never()).insert(any(OrderEntity.class));
   }
@@ -953,7 +955,7 @@ class ProtectionOrderServiceTest {
                 new BigDecimal("49000"),
                 null,
                 TriggerExecutionType.LIMIT,
-                new BigDecimal("100")))));
+                new BigDecimal("100"))), AUTHORITY_MARK));
 
     OrderEntity tooLarge = parentOrder(fixture, "1000");
     assertCode("ORDER_NOTIONAL_TOO_LARGE", () -> serviceWithLedger().createAttachedLocked(
@@ -963,7 +965,7 @@ class ProtectionOrderServiceTest {
             new BigDecimal("51000"),
             null,
             TriggerExecutionType.LIMIT,
-            new BigDecimal("50000")))));
+            new BigDecimal("50000"))), AUTHORITY_MARK));
 
     verify(orderRepository, never()).insert(any(OrderEntity.class));
   }
@@ -978,7 +980,7 @@ class ProtectionOrderServiceTest {
         new BigDecimal("51000"),
         null,
         TriggerExecutionType.MARKET,
-        null)));
+        null)), AUTHORITY_MARK);
 
     verify(orderRepository, times(1)).insert(any(OrderEntity.class));
   }
@@ -996,7 +998,7 @@ class ProtectionOrderServiceTest {
             new BigDecimal("51000.05"),
             null,
             TriggerExecutionType.MARKET,
-            null))));
+            null)), AUTHORITY_MARK));
 
     verify(orderRepository, never()).insert(any(OrderEntity.class));
   }
@@ -1016,7 +1018,7 @@ class ProtectionOrderServiceTest {
     }
 
     assertCode(ErrorCode.PROTECTION_LIMIT_EXCEEDED,
-        () -> serviceWithLedger().createAttachedLocked(parent, eleven));
+        () -> serviceWithLedger().createAttachedLocked(parent, eleven, AUTHORITY_MARK));
     assertCode(ErrorCode.PROTECTION_QUANTITY_EXCEEDED,
         () -> serviceWithLedger().createAttachedLocked(parent, List.of(
             new AttachedProtectionRequest(
@@ -1030,7 +1032,122 @@ class ProtectionOrderServiceTest {
                 new BigDecimal("52000"),
                 null,
                 TriggerExecutionType.MARKET,
-                null))));
+                null)), AUTHORITY_MARK));
+
+    verify(orderRepository, never()).insert(any(OrderEntity.class));
+  }
+
+  @Test
+  void attachedCreateAllowsSameTypeLevelsThatExactlyFillParentBudget() {
+    Fixture fixture = fixture(OrderSide.BUY, "1");
+    OrderEntity parent = parentOrder(fixture, "1");
+    List<AttachedProtectionRequest> requests = List.of(
+        attached(ProtectionType.TAKE_PROFIT, "51000", "0.4", QuantityUnit.BASE),
+        attached(ProtectionType.TAKE_PROFIT, "52000", "0.6", null));
+
+    serviceWithLedger().createAttachedLocked(parent, requests, AUTHORITY_MARK);
+
+    ArgumentCaptor<OrderEntity> carriers = ArgumentCaptor.forClass(OrderEntity.class);
+    verify(orderRepository, times(2)).insert(carriers.capture());
+    assertThat(carriers.getAllValues())
+        .extracting(OrderEntity::getOriginalQuantity)
+        .containsExactly(new BigDecimal("0.4"), new BigDecimal("0.6"));
+    assertThat(carriers.getAllValues())
+        .extracting(OrderEntity::getQuantityUnit)
+        .containsExactly(QuantityUnit.BASE, QuantityUnit.BASE);
+    assertThat(carriers.getAllValues())
+        .extracting(OrderEntity::getBaseQuantity)
+        .containsExactly(new BigDecimal("0.4"), new BigDecimal("0.6"));
+    assertThat(carriers.getAllValues())
+        .allSatisfy(carrier -> {
+          assertThat(carrier.getLots()).isEqualByComparingTo(carrier.getBaseQuantity());
+          assertThat(carrier.getRemainingQuantity()).isEqualByComparingTo(carrier.getBaseQuantity());
+        });
+  }
+
+  @Test
+  void attachedCreateRejectsSameTypeOverBudgetBeforeAnyInsert() {
+    Fixture fixture = fixture(OrderSide.BUY, "1");
+    OrderEntity parent = parentOrder(fixture, "1");
+
+    assertCode(ErrorCode.PROTECTION_QUANTITY_EXCEEDED,
+        () -> serviceWithLedger().createAttachedLocked(
+            parent,
+            List.of(
+                attached(ProtectionType.TAKE_PROFIT, "51000", "0.6", QuantityUnit.BASE),
+                attached(ProtectionType.TAKE_PROFIT, "52000", "0.5", QuantityUnit.BASE)),
+            AUTHORITY_MARK));
+
+    verify(orderRepository, never()).insert(any(OrderEntity.class));
+  }
+
+  @Test
+  void attachedCreateBudgetsTakeProfitAndStopLossIndependently() {
+    Fixture fixture = fixture(OrderSide.BUY, "1");
+    OrderEntity parent = parentOrder(fixture, "1");
+
+    serviceWithLedger().createAttachedLocked(
+        parent,
+        List.of(
+            attached(ProtectionType.TAKE_PROFIT, "51000", "1", QuantityUnit.BASE),
+            attached(ProtectionType.STOP_LOSS, "49000", "1", QuantityUnit.BASE)),
+        AUTHORITY_MARK);
+
+    verify(orderRepository, times(2)).insert(any(OrderEntity.class));
+  }
+
+  @Test
+  void attachedCreateConvertsBaseQuoteAndContractsWithOneAuthorityMark() {
+    Fixture fixture = fixture(OrderSide.BUY, "2");
+    OrderEntity parent = parentOrder(fixture, "2");
+    List<AttachedProtectionRequest> requests = List.of(
+        attached(ProtectionType.TAKE_PROFIT, "51000", "0.1", QuantityUnit.BASE),
+        attached(ProtectionType.TAKE_PROFIT, "52000", "10000", QuantityUnit.QUOTE),
+        attached(ProtectionType.TAKE_PROFIT, "53000", "1", QuantityUnit.CONTRACTS));
+
+    serviceWithLedger().createAttachedLocked(parent, requests, AUTHORITY_MARK);
+
+    ArgumentCaptor<OrderEntity> carriers = ArgumentCaptor.forClass(OrderEntity.class);
+    verify(orderRepository, times(3)).insert(carriers.capture());
+    assertThat(carriers.getAllValues())
+        .extracting(OrderEntity::getOriginalQuantity)
+        .containsExactly(
+            new BigDecimal("0.1"),
+            new BigDecimal("10000"),
+            new BigDecimal("1"));
+    assertThat(carriers.getAllValues())
+        .extracting(OrderEntity::getQuantityUnit)
+        .containsExactly(QuantityUnit.BASE, QuantityUnit.QUOTE, QuantityUnit.CONTRACTS);
+    assertThat(carriers.getAllValues())
+        .extracting(OrderEntity::getBaseQuantity)
+        .satisfiesExactly(
+            quantity -> assertThat(quantity).isEqualByComparingTo("0.1"),
+            quantity -> assertThat(quantity).isEqualByComparingTo("0.2"),
+            quantity -> assertThat(quantity).isEqualByComparingTo("1"));
+    verify(marketBundleResolver, never()).resolvePerp(any(), any());
+  }
+
+  @Test
+  void attachedCreateAppliesPerLevelCanonicalRulesAndLimitNotionalBeforeWrites() {
+    Fixture fixture = fixture(OrderSide.BUY, "1");
+    OrderEntity parent = parentOrder(fixture, "1");
+    AttachedProtectionRequest tinyLimit = new AttachedProtectionRequest(
+        ProtectionType.STOP_LOSS,
+        new BigDecimal("49000"),
+        TriggerPriceType.MARK_PRICE,
+        TriggerExecutionType.LIMIT,
+        new BigDecimal("100"),
+        new BigDecimal("0.001"),
+        QuantityUnit.BASE);
+
+    assertCode("ORDER_NOTIONAL_TOO_SMALL", () -> serviceWithLedger().createAttachedLocked(
+        parent, List.of(tinyLimit), AUTHORITY_MARK));
+
+    OrderEntity oversizedParent = parentOrder(fixture, "200");
+    assertCode("QUANTITY_TOO_LARGE", () -> serviceWithLedger().createAttachedLocked(
+        oversizedParent,
+        List.of(attached(ProtectionType.TAKE_PROFIT, "51000", "101", QuantityUnit.BASE)),
+        AUTHORITY_MARK));
 
     verify(orderRepository, never()).insert(any(OrderEntity.class));
   }
@@ -1543,6 +1660,22 @@ class ProtectionOrderServiceTest {
     order.setLeverage(10);
     order.setReduceOnly(false);
     return order;
+  }
+
+  private AttachedProtectionRequest attached(
+      ProtectionType type,
+      String trigger,
+      String quantity,
+      QuantityUnit quantityUnit
+  ) {
+    return new AttachedProtectionRequest(
+        type,
+        new BigDecimal(trigger),
+        TriggerPriceType.MARK_PRICE,
+        TriggerExecutionType.MARKET,
+        null,
+        new BigDecimal(quantity),
+        quantityUnit);
   }
 
   private OrderEntity unboundAttached(

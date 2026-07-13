@@ -13,6 +13,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
@@ -564,6 +565,90 @@ class PositionServiceTest {
     assertThat(position.getStopLoss()).isEqualByComparingTo("1.09500");
     assertThat(position.getTakeProfit()).isEqualByComparingTo("1.12500");
     verify(positionRepository).save(position);
+  }
+
+  @Test
+  void updatePositionProtectionRejectsLinearPerpetualWithoutMutatingLegacyScalars() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSDT-PERP");
+    position.setProductType(ProductType.LINEAR_PERP);
+    BigDecimal originalStopLoss = position.getStopLoss();
+    BigDecimal originalTakeProfit = position.getTakeProfit();
+    SymbolEntity symbol = symbol(
+        "BTCUSDT-PERP",
+        ProductType.LINEAR_PERP,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        100);
+
+    when(accountRepository.findByIdAndUserId(accountId, userId))
+        .thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> service().updateProtection(
+            userId,
+            accountId,
+            positionId,
+            new UpdatePositionProtectionRequest(
+                new BigDecimal("49000"),
+                new BigDecimal("51000"))))
+        .isInstanceOf(BusinessException.class)
+        .satisfies(error -> assertThat(((BusinessException) error).getCode())
+            .isEqualTo(ErrorCode.PRODUCT_NOT_ALLOWED));
+
+    assertThat(position.getStopLoss()).isEqualByComparingTo(originalStopLoss);
+    assertThat(position.getTakeProfit()).isEqualByComparingTo(originalTakeProfit);
+    verify(quoteService, never()).freshQuote(any());
+    verify(positionRepository, never()).findByIdForUpdate(any());
+    verify(positionRepository, never()).save(any());
+  }
+
+  @Test
+  void updatePositionProtectionRejectsPerpetualPositionWhenSymbolMetadataIsMismatched() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID positionId = UUID.randomUUID();
+    PositionEntity position = openPosition(accountId, positionId);
+    position.setSymbol("BTCUSDT-PERP");
+    position.setProductType(ProductType.LINEAR_PERP);
+    BigDecimal originalStopLoss = position.getStopLoss();
+    BigDecimal originalTakeProfit = position.getTakeProfit();
+    SymbolEntity mismatchedSymbol = symbol(
+        "BTCUSDT-PERP",
+        ProductType.FX_MARGIN,
+        "BTC",
+        "USDT",
+        BigDecimal.ONE,
+        BigDecimal.ONE,
+        100);
+
+    when(accountRepository.findByIdAndUserId(accountId, userId))
+        .thenReturn(Optional.of(account(userId, accountId)));
+    when(positionRepository.findById(positionId)).thenReturn(Optional.of(position));
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(mismatchedSymbol));
+
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> service().updateProtection(
+            userId,
+            accountId,
+            positionId,
+            new UpdatePositionProtectionRequest(
+                new BigDecimal("49000"),
+                new BigDecimal("51000"))))
+        .isInstanceOf(BusinessException.class)
+        .satisfies(error -> assertThat(((BusinessException) error).getCode())
+            .isEqualTo(ErrorCode.PRODUCT_NOT_ALLOWED));
+
+    assertThat(position.getStopLoss()).isEqualByComparingTo(originalStopLoss);
+    assertThat(position.getTakeProfit()).isEqualByComparingTo(originalTakeProfit);
+    verify(quoteService, never()).freshQuote(any());
+    verify(positionRepository, never()).findByIdForUpdate(any());
+    verify(positionRepository, never()).save(any());
   }
 
   @Test

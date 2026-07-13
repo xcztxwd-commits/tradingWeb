@@ -8,6 +8,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
@@ -209,10 +210,16 @@ public class PositionService {
     requireOwnedAccount(userId, accountId);
     PositionEntity positionSnapshot = requireOwnedPosition(accountId, positionId);
     requireOpen(positionSnapshot, "Only open positions can be modified");
+    ProductType productType = symbolFor(positionSnapshot).getProductType();
+    if (positionSnapshot.getProductType() == ProductType.LINEAR_PERP
+        || productType == ProductType.LINEAR_PERP) {
+      throw new BusinessException(
+          ErrorCode.PRODUCT_NOT_ALLOWED,
+          "Linear Perpetual protection must use canonical protection orders");
+    }
     validateProtection(positionSnapshot, request);
 
     TradingAccountEntity account = requireOwnedAccountForUpdate(userId, accountId);
-    ProductType productType = symbolFor(positionSnapshot).getProductType();
     demoExecutionGuard.requireDemo(account, productType, positionSnapshot.getSymbol());
     PositionEntity position = requireOwnedPositionForUpdate(accountId, positionId);
     requireOpen(position, "Only open positions can be modified");

@@ -45,6 +45,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.EnumMap;
@@ -255,7 +256,8 @@ public class ProtectionOrderService {
   /** Creates unbound protection carriers while the parent-order lock scope is already held. */
   public void createAttachedLocked(
       OrderEntity parentOrder,
-      List<AttachedProtectionRequest> requests
+      List<AttachedProtectionRequest> requests,
+      BigDecimal authorityMark
   ) {
     List<AttachedProtectionRequest> attached = requests == null ? List.of() : List.copyOf(requests);
     if (attached.isEmpty()) {
@@ -269,22 +271,35 @@ public class ProtectionOrderService {
     }
     SymbolEntity symbol = requireSymbol(parentOrder.getSymbol());
     BigDecimal parentQuantity = canonicalQuantity(parentOrder);
+    if (!positive(authorityMark)) {
+      throw new BusinessException(
+          "MARKET_BUNDLE_INCOMPLETE",
+          "Authority mark price is required for attached protections");
+    }
     InstrumentRules rules = instrumentRulesEngine.rules(symbol);
     validateRules(rules);
     Map<ProtectionType, BigDecimal> totals = new EnumMap<>(ProtectionType.class);
+    List<PreparedAttachedProtection> prepared = new ArrayList<>(attached.size());
     for (AttachedProtectionRequest request : attached) {
       validateAttachedRequest(request, rules.tickSize());
+      QuantityConversionService.Conversion conversion = attachedConversion(
+          parentQuantity,
+          request,
+          rules,
+          symbol,
+          authorityMark);
       if (request.triggerExecutionType() == TriggerExecutionType.LIMIT) {
-        validateNotional(rules, parentQuantity, request.price());
+        validateNotional(rules, conversion.baseQuantity(), request.price());
       }
       BigDecimal total = totals.getOrDefault(request.protectionType(), BigDecimal.ZERO)
-          .add(parentQuantity);
+          .add(conversion.baseQuantity());
       if (total.compareTo(parentQuantity) > 0) {
         throw new BusinessException(
             ErrorCode.PROTECTION_QUANTITY_EXCEEDED,
             "Attached protection quantity exceeds the parent order quantity");
       }
       totals.put(request.protectionType(), total);
+      prepared.add(new PreparedAttachedProtection(request, conversion));
     }
     List<OrderEntity> existing = safeList(
         orderRepository.findProtectionsByParentOrderIdForUpdate(parentOrder.getId()));
@@ -293,8 +308,8 @@ public class ProtectionOrderService {
           ErrorCode.DUPLICATE_CLIENT_ORDER_ID,
           "Attached protections already exist for the parent order");
     }
-    for (int index = 0; index < attached.size(); index++) {
-      OrderEntity carrier = newAttachedCarrier(parentOrder, attached.get(index), index);
+    for (int index = 0; index < prepared.size(); index++) {
+      OrderEntity carrier = newAttachedCarrier(parentOrder, prepared.get(index), index);
       requireWrite(orderRepository.insert(carrier));
       orderEventService.record(
           carrier.getId(),
@@ -750,12 +765,44 @@ public class ProtectionOrderService {
     order.setRequestedPrice(prepared.price());
   }
 
+  private QuantityConversionService.Conversion attachedConversion(
+      BigDecimal parentQuantity,
+      AttachedProtectionRequest request,
+      InstrumentRules rules,
+      SymbolEntity symbol,
+      BigDecimal authorityMark
+  ) {
+    if (request.quantity() == null) {
+      return new QuantityConversionService.Conversion(
+          parentQuantity,
+          QuantityUnit.BASE,
+          parentQuantity,
+          null);
+    }
+    QuantityUnit quantityUnit = request.quantityUnit() == null
+        ? QuantityUnit.BASE
+        : request.quantityUnit();
+    QuantityConversionService.Conversion conversion = quantityConversionService.convertPerpetual(
+        quantityUnit,
+        request.quantity(),
+        rules.stepSize(),
+        rules.contractSize(),
+        symbol.getContractMultiplier(),
+        authorityMark,
+        rules.minNotional());
+    validateCanonicalQuantity(rules, conversion, authorityMark);
+    return conversion;
+  }
+
   private OrderEntity newAttachedCarrier(
       OrderEntity parent,
-      AttachedProtectionRequest request,
+      PreparedAttachedProtection prepared,
       int index
   ) {
-    BigDecimal quantity = canonicalQuantity(parent);
+    AttachedProtectionRequest request = prepared.request();
+    QuantityConversionService.Conversion conversion = prepared.conversion();
+    BigDecimal originalQuantity = conversion.originalQuantity();
+    BigDecimal baseQuantity = conversion.baseQuantity();
     OrderEntity carrier = new OrderEntity();
     carrier.setId(UUID.randomUUID());
     carrier.setUserId(parent.getUserId());
@@ -768,12 +815,12 @@ public class ProtectionOrderService {
     carrier.setSide(opposite(parent.getSide()));
     carrier.setOrderType(OrderType.STOP_MARKET);
     carrier.setStatus(OrderStatus.PENDING_ACTIVATION);
-    carrier.setLots(quantity);
-    carrier.setQuantity(quantity);
-    carrier.setOriginalQuantity(quantity);
-    carrier.setBaseQuantity(quantity);
-    carrier.setRemainingQuantity(quantity);
-    carrier.setQuantityUnit(QuantityUnit.BASE);
+    carrier.setLots(baseQuantity);
+    carrier.setQuantity(originalQuantity);
+    carrier.setOriginalQuantity(originalQuantity);
+    carrier.setBaseQuantity(baseQuantity);
+    carrier.setRemainingQuantity(baseQuantity);
+    carrier.setQuantityUnit(conversion.originalUnit());
     carrier.setPrice(request.triggerExecutionType() == TriggerExecutionType.LIMIT
         ? request.price()
         : null);
@@ -1161,7 +1208,8 @@ public class ProtectionOrderService {
     if (request == null
         || request.protectionType() == null
         || !positive(request.triggerPrice())
-        || request.triggerExecutionType() == null) {
+        || request.triggerExecutionType() == null
+        || (request.quantity() == null && request.quantityUnit() != null)) {
       throw new BusinessException(
           "PROTECTION_REQUEST_INVALID",
           "Attached protection request is invalid");
@@ -1534,6 +1582,12 @@ public class ProtectionOrderService {
       TradingAccountEntity account,
       PositionEntity position,
       SymbolEntity symbol
+  ) {
+  }
+
+  private record PreparedAttachedProtection(
+      AttachedProtectionRequest request,
+      QuantityConversionService.Conversion conversion
   ) {
   }
 

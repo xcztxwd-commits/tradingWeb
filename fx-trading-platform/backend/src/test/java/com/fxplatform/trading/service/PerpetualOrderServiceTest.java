@@ -696,7 +696,8 @@ class PerpetualOrderServiceTest {
     mutationOrder.verify(orderRepository).save(any(OrderEntity.class));
     mutationOrder.verify(protectionOrderService).createAttachedLocked(
         any(OrderEntity.class),
-        eq(protectedRequest.attachedProtections()));
+        eq(protectedRequest.attachedProtections()),
+        eq(new BigDecimal("100")));
     mutationOrder.verify(orderFillService).fillPerpetual(
         any(OrderEntity.class),
         eq(account),

@@ -105,7 +105,56 @@ class CreateOrderRequestTest {
         .containsEntry("triggerPrice", BigDecimal.class.getName())
         .containsEntry("triggerPriceType", "com.fxplatform.trading.enums.TriggerPriceType")
         .containsEntry("triggerExecutionType", "com.fxplatform.trading.enums.TriggerExecutionType")
-        .containsEntry("price", BigDecimal.class.getName());
+        .containsEntry("price", BigDecimal.class.getName())
+        .containsEntry("quantity", BigDecimal.class.getName())
+        .containsEntry("quantityUnit", "com.fxplatform.trading.enums.QuantityUnit");
+  }
+
+  @Test
+  void attachedProtectionKeepsFiveArgumentCompatibilityAndDefaultsQuantityMetadata() {
+    AttachedProtectionRequest legacy = new AttachedProtectionRequest(
+        ProtectionType.TAKE_PROFIT,
+        new BigDecimal("51000"),
+        TriggerPriceType.MARK_PRICE,
+        TriggerExecutionType.MARKET,
+        null);
+
+    assertThat(legacy.quantity()).isNull();
+    assertThat(legacy.quantityUnit()).isNull();
+  }
+
+  @Test
+  void validatesOptionalAttachedProtectionQuantityContract() {
+    AttachedProtectionRequest negative = new AttachedProtectionRequest(
+        ProtectionType.TAKE_PROFIT,
+        new BigDecimal("51000"),
+        TriggerPriceType.MARK_PRICE,
+        TriggerExecutionType.MARKET,
+        null,
+        new BigDecimal("-0.1"),
+        QuantityUnit.BASE);
+    AttachedProtectionRequest unitWithoutQuantity = new AttachedProtectionRequest(
+        ProtectionType.STOP_LOSS,
+        new BigDecimal("49000"),
+        TriggerPriceType.MARK_PRICE,
+        TriggerExecutionType.MARKET,
+        null,
+        null,
+        QuantityUnit.CONTRACTS);
+
+    try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
+      Set<ConstraintViolation<AttachedProtectionRequest>> negativeViolations =
+          factory.getValidator().validate(negative);
+      Set<ConstraintViolation<AttachedProtectionRequest>> combinationViolations =
+          factory.getValidator().validate(unitWithoutQuantity);
+
+      assertThat(negativeViolations)
+          .extracting(violation -> violation.getPropertyPath().toString())
+          .contains("quantity");
+      assertThat(combinationViolations)
+          .extracting(ConstraintViolation::getMessage)
+          .contains("quantity is required when quantityUnit is provided");
+    }
   }
 
   @Test

@@ -62,6 +62,7 @@ public class OrderResponseMapper {
         order.getParentOrderId(),
         order.getParentPositionId(),
         order.getContingencyGroupId(),
-        order.getHoldOwnerOrderId());
+        order.getHoldOwnerOrderId(),
+        order.getVersion());
   }
 }

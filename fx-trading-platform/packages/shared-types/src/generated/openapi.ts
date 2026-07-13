@@ -2932,6 +2932,8 @@ export interface components {
             contingencyGroupId?: string;
             /** Format: uuid */
             holdOwnerOrderId?: string;
+            /** Format: int64 */
+            version?: number | null;
         };
         ClosePositionRequest: {
             quantity: number;
@@ -3028,6 +3030,9 @@ export interface components {
             /** @enum {string} */
             triggerExecutionType: "MARKET" | "LIMIT";
             price?: number;
+            quantity?: number;
+            /** @enum {string} */
+            quantityUnit?: "BASE" | "QUOTE" | "CONTRACTS";
         };
         CreateOrderRequest: {
             /** Format: uuid */
@@ -3480,12 +3485,6 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             stale?: boolean;
-            fundingRate?: number;
-            /** Format: date-time */
-            fundingTime?: string;
-            /** Format: date-time */
-            nextFundingTime?: string;
-            fundingSource?: string;
         };
         AdminPriceAdjustmentRequest: {
             mode: string;
@@ -4278,6 +4277,12 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             stale?: boolean;
+            fundingRate?: number;
+            /** Format: date-time */
+            fundingTime?: string;
+            /** Format: date-time */
+            nextFundingTime?: string;
+            fundingSource?: string;
         };
         ApiResponseMarketDepthResponse: {
             success?: boolean;

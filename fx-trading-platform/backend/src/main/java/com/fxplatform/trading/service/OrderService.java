@@ -1163,7 +1163,8 @@ public class OrderService {
     if (!publicRequest.attachedProtections().isEmpty()) {
       protectionOrderService.createAttachedLocked(
           order,
-          publicRequest.attachedProtections());
+          publicRequest.attachedProtections(),
+          snapshot.mark());
     }
     ledgerService.recordOrderHold(
         account,

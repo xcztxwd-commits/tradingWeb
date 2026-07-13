@@ -28,6 +28,12 @@ function requireSchema(name) {
   )
 }
 
+function schemaBody(name) {
+  const body = generated.match(new RegExp(`^        ${name}: \\{([\\s\\S]*?)^        \\};`, 'm'))?.[1]
+  assert.ok(body, `OpenAPI schema is missing: ${name}`)
+  return body
+}
+
 describe('P0 trading OpenAPI contract', () => {
   it('contains every API operation from specification section 20', () => {
     const endpoints = [
@@ -188,5 +194,16 @@ describe('P0 trading OpenAPI contract', () => {
   it('preserves the canonical perpetual symbol and forbids its stripped spelling', () => {
     assert.ok(generated.includes('BTCUSDT-PERP'), 'generated contract must contain BTCUSDT-PERP')
     assert.ok(!generated.includes('BTCUSDTPERP'), 'generated contract must not contain BTCUSDTPERP')
+  })
+
+  it('publishes optional attached quantities and protection optimistic-lock versions', () => {
+    const attachedProtection = schemaBody('AttachedProtectionRequest')
+    assert.match(attachedProtection, /quantity\?: number;/)
+    assert.match(attachedProtection, /quantityUnit\?: "BASE" \| "QUOTE" \| "CONTRACTS";/)
+
+    const orderResponse = schemaBody('OrderResponse')
+    assert.match(orderResponse, /version\?: number \| null;/)
+    assert.match(orderResponse, /origin\?:/)
+    assert.doesNotMatch(orderResponse, /orderOrigin\?:/)
   })
 })

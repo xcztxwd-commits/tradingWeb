@@ -175,7 +175,30 @@ public record CreateOrderRequest(
       @NotNull BigDecimal triggerPrice,
       TriggerPriceType triggerPriceType,
       @NotNull TriggerExecutionType triggerExecutionType,
-      BigDecimal price
+      BigDecimal price,
+      @DecimalMin(value = "0", inclusive = false) BigDecimal quantity,
+      QuantityUnit quantityUnit
   ) {
+    public AttachedProtectionRequest(
+        ProtectionType protectionType,
+        BigDecimal triggerPrice,
+        TriggerPriceType triggerPriceType,
+        TriggerExecutionType triggerExecutionType,
+        BigDecimal price
+    ) {
+      this(
+          protectionType,
+          triggerPrice,
+          triggerPriceType,
+          triggerExecutionType,
+          price,
+          null,
+          null);
+    }
+
+    @AssertTrue(message = "quantity is required when quantityUnit is provided")
+    public boolean hasValidQuantityContract() {
+      return quantity != null || quantityUnit == null;
+    }
   }
 }

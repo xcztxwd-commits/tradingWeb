@@ -79,7 +79,8 @@ public record OrderResponse(
     UUID parentOrderId,
     UUID parentPositionId,
     UUID contingencyGroupId,
-    UUID holdOwnerOrderId
+    UUID holdOwnerOrderId,
+    @Schema(nullable = true) Long version
 ) {
   public OrderResponse(
       UUID id,
@@ -142,6 +143,7 @@ public record OrderResponse(
         TimeInForce.GTC,
         false,
         OrderOrigin.USER,
+        null,
         null,
         null,
         null,
