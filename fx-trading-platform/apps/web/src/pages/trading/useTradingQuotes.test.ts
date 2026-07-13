@@ -123,6 +123,32 @@ describe('trading quote map reconciliation', () => {
     assert.match(hookSource, /const expectedSources = expectedSourcesRef\.current/)
     assert.doesNotMatch(hookSource, /useEffect\([\s\S]*?const expectedSources = new Map/)
   })
+
+  it('clears a source transition when the subscribed symbol or token changes', () => {
+    const hookSource = readFileSync(new URL('./useTradingQuotes.ts', import.meta.url), 'utf8')
+
+    assert.match(hookSource, /const \[sourceNotice, setSourceNotice\] = useState/)
+    assert.match(hookSource, /useEffect\(\(\) => \{\s*setSourceNotice\(null\)\s*if \(markets\.length === 0\) return/)
+    assert.match(hookSource, /\}, \[onQuoteStatus, symbolKey, markets, token\]\)/)
+    assert.match(hookSource, /return \{ quotes, sourceNotice \}/)
+  })
+
+  it('restarts the eight-second notice timer for every source event and cancels it on cleanup', () => {
+    const hookSource = readFileSync(new URL('./useTradingQuotes.ts', import.meta.url), 'utf8')
+
+    assert.match(hookSource, /const MARKET_SOURCE_NOTICE_DURATION_MS = 8_000/)
+    assert.match(hookSource, /let sourceNoticeTimer: ReturnType<typeof globalThis\.setTimeout> \| undefined/)
+    assert.match(
+      hookSource,
+      /subscribeMarketSourceChanges[\s\S]*if \(sourceNoticeTimer\) globalThis\.clearTimeout\(sourceNoticeTimer\)[\s\S]*setSourceNotice\(event\)[\s\S]*sourceNoticeTimer = globalThis\.setTimeout/
+    )
+    assert.match(hookSource, /sourceNoticeTimer = undefined\s*setSourceNotice\(null\)/)
+    assert.match(
+      hookSource,
+      /return \(\) => \{[\s\S]*if \(sourceNoticeTimer\) globalThis\.clearTimeout\(sourceNoticeTimer\)[\s\S]*releases\.forEach/
+    )
+    assert.doesNotMatch(hookSource, /useEffect\(\(\) => \{\s*if \(!sourceNotice\) return/)
+  })
 })
 
 function market(symbol: string): TradingMarket {

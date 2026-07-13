@@ -125,6 +125,32 @@
   color: var(--trading-sell-strong);
 }
 
+.marketSourceNotice {
+  position: fixed;
+  z-index: var(--z-toast);
+  top: 64px;
+  right: 16px;
+  width: min(420px, calc(100vw - 32px));
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--trading-accent-border);
+  border-radius: 8px;
+  background: var(--trading-surface-raised);
+  box-shadow: var(--theme-shadow-elevated);
+  color: var(--trading-text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.marketSourceNotice strong {
+  color: var(--trading-text-strong);
+}
+
+.marketSourceNotice span {
+  overflow-wrap: anywhere;
+}
+
 .binanceGrid {
   min-width: 0;
   min-height: 0;
@@ -211,6 +237,12 @@
 }
 
 @media (max-width: 768px) {
+  .marketSourceNotice {
+    top: 56px;
+    right: 12px;
+    width: calc(100vw - 24px);
+  }
+
   .page {
     min-height: 100dvh;
     padding: var(--space-0);

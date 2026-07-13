@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { subscribeMarketSourceChanges, subscribeQuote } from '../../services/marketStream'
+import { subscribeMarketSourceChanges, subscribeQuote, type MarketSourceChangedEvent } from '../../services/marketStream'
 import {
   mapQuoteToTradingQuote
 } from '../../features/market/tradingMarketAdapters'
@@ -12,6 +12,8 @@ import { normalizePlatformMarketSymbol } from '../../utils/marketSymbol.ts'
 import { toTradingMarketDataError, type TradingMarketDataError } from './tradingPageMarketDataStatus'
 import { createUnavailableTradingQuote, expireTradingQuote, reconcileQuoteMap } from './tradingQuoteMap'
 
+const MARKET_SOURCE_NOTICE_DURATION_MS = 8_000
+
 export function useTradingQuoteMap(
   markets: TradingMarket[],
   token: string | null,
@@ -19,6 +21,7 @@ export function useTradingQuoteMap(
 ) {
   const symbolKey = useMemo(() => markets.map((market) => market.symbol).join('|'), [markets])
   const [quotes, setQuotes] = useState<Record<string, TradingQuote>>(() => reconcileQuoteMap(markets))
+  const [sourceNotice, setSourceNotice] = useState<MarketSourceChangedEvent | null>(null)
   const expectedSourcesRef = useRef(new Map<
     string,
     Pick<MarketSourceMetadata, 'providerCode' | 'sourceMode'>
@@ -36,9 +39,11 @@ export function useTradingQuoteMap(
   }, [symbolKey])
 
   useEffect(() => {
+    setSourceNotice(null)
     if (markets.length === 0) return
 
     let active = true
+    let sourceNoticeTimer: ReturnType<typeof globalThis.setTimeout> | undefined
     const releases: Array<() => void> = []
     const expiryTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>()
     const refreshTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>()
@@ -144,6 +149,12 @@ export function useTradingQuoteMap(
         }),
         subscribeMarketSourceChanges(market.symbol, token, (event) => {
           if (normalizePlatformMarketSymbol(event.symbol) !== symbolKey) return
+          if (sourceNoticeTimer) globalThis.clearTimeout(sourceNoticeTimer)
+          setSourceNotice(event)
+          sourceNoticeTimer = globalThis.setTimeout(() => {
+            sourceNoticeTimer = undefined
+            setSourceNotice(null)
+          }, MARKET_SOURCE_NOTICE_DURATION_MS)
           expectedSources.set(symbolKey, { providerCode: event.providerCode, sourceMode: event.sourceMode })
           sourceGenerations.set(symbolKey, (sourceGenerations.get(symbolKey) ?? 0) + 1)
           clearExpiry(market.symbol)
@@ -164,9 +175,10 @@ export function useTradingQuoteMap(
       active = false
       expiryTimers.forEach((timer) => globalThis.clearTimeout(timer))
       refreshTimers.forEach((timer) => globalThis.clearTimeout(timer))
+      if (sourceNoticeTimer) globalThis.clearTimeout(sourceNoticeTimer)
       releases.forEach((release) => release())
     }
   }, [onQuoteStatus, symbolKey, markets, token])
 
-  return quotes
+  return { quotes, sourceNotice }
 }

@@ -250,6 +250,25 @@ describe('TradingPage terminal viewport', () => {
     assert.match(source, /useEffect\(\(\) => startQuoteMarketDataAdapter\(selectedSymbol, token\), \[selectedSymbol, token\]\)/)
   })
 
+  it('shows a testable source transition notice on desktop and mobile until its timer expires', () => {
+    const noticePath = join(currentDir, 'components', 'MarketSourceChangeNotice.tsx')
+
+    assert.match(source, /const \{ quotes, sourceNotice \} = useTradingQuoteMap/)
+    assert.match(source, /<MarketSourceChangeNotice notice=\{sourceNotice\} \/>/)
+    assert.equal(existsSync(noticePath), true)
+
+    const noticeSource = readFileSync(noticePath, 'utf8')
+    assert.match(noticeSource, /data-testid="market-source-change-notice"/)
+    assert.match(noticeSource, /data-market-source-change="true"/)
+    assert.match(noticeSource, /data-previous-provider=\{previousProvider\}/)
+    assert.match(noticeSource, /data-current-provider=\{notice\.providerCode\}/)
+    assert.match(noticeSource, /data-previous-source=\{previousSource\}/)
+    assert.match(noticeSource, /data-current-source=\{notice\.sourceMode\}/)
+    assert.match(noticeSource, /role="status"/)
+    assert.match(noticeSource, /aria-live="polite"/)
+    assert.match(styles, /\.marketSourceNotice\s*\{[\s\S]*position:\s*fixed;[\s\S]*z-index:\s*var\(--z-toast\)/)
+  })
+
   it('keeps TradingPage below the orchestration size budget', () => {
     assert.ok(sourceLines.length <= 340, `TradingPage.tsx has ${sourceLines.length} lines`)
   })

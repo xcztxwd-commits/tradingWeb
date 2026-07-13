@@ -15,6 +15,7 @@ import { LoginPromptDialog } from './components/LoginPromptDialog'
 import { RightTradingPanel } from './components/RightTradingPanel'
 import { TradingDesktopView } from './components/TradingDesktopView'
 import { TradingMobileView } from './components/TradingMobileView'
+import { MarketSourceChangeNotice } from './components/MarketSourceChangeNotice'
 import { usePerpetualTradingControls } from './usePerpetualTradingControls'
 import { TradingOrderSheet } from './components/TradingOrderSheet'
 import { hydrateMarketFavorites } from '../../features/market/marketFavorites'
@@ -92,7 +93,7 @@ export function TradingPage({ product }: TradingPageProps) {
     () => getRealtimeQuoteMarkets(visibleMarkets, selectedSymbol),
     [selectedSymbol, visibleMarkets]
   )
-  const quotes = useTradingQuoteMap(quoteMarkets, token, handleQuoteStatus)
+  const { quotes, sourceNotice } = useTradingQuoteMap(quoteMarkets, token, handleQuoteStatus)
   const selectedQuote = quotes[selectedSymbol] ?? createTradingQuoteFromMarket(selectedMarketWithRules)
   const marketDataStatusView = getStatusView(selectedSymbol, selectedQuote.source)
   const { chartCallbacks, chartSettings, chartThemeMode, indicators } = useTradingChartSettings(
@@ -306,6 +307,7 @@ export function TradingPage({ product }: TradingPageProps) {
 
   return (
     <div className={styles.page}>
+      <MarketSourceChangeNotice notice={sourceNotice} />
       {!isMobileTerminal ? <TradingDesktopView {...viewProps} /> : null}
       {isMobileTerminal ? <TradingMobileView {...viewProps} /> : null}
       <MobileDrawer open={marketDrawerOpen} side="left" title="Markets" onClose={() => setMarketDrawerOpen(false)}>
