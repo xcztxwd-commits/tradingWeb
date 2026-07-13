@@ -69,7 +69,7 @@ register(
   `)}`,
   pathToFileURL(`${currentDir}/`)
 )
-const { applyRealtimeQuoteToChart } = await import('./KLineChartPanel.tsx')
+const { applyAuthoritativeRealtimeQuoteToChart, applyRealtimeQuoteToChart } = await import('./KLineChartPanel.tsx')
 const source = readFileSync(join(currentDir, 'KLineChartPanel.tsx'), 'utf8')
 const chartWorkspaceSource = readFileSync(join(currentDir, 'ChartWorkspace.tsx'), 'utf8')
 const tradingPageSource = readFileSync(join(currentDir, '..', 'TradingPage.tsx'), 'utf8')
@@ -245,6 +245,51 @@ describe('KLineChartPanel chart instance controls', () => {
 })
 
 describe('KLineChartPanel realtime candle updates', () => {
+  it('rejects realtime websocket quotes without complete fresh source metadata', () => {
+    const now = 1_700_000_001_000
+    const quote = {
+      type: 'quote' as const,
+      symbol: 'BTCUSDT',
+      bid: '59999',
+      ask: '60001',
+      mid: '60000',
+      spread: '2',
+      source: 'binance',
+      timestamp: 1_700_000_001_234
+    }
+
+    assert.equal(applyAuthoritativeRealtimeQuoteToChart(null, '1m', quote, now), null)
+    assert.equal(applyAuthoritativeRealtimeQuoteToChart(null, '1m', {
+      ...quote,
+      providerCode: 'binance',
+      providerSymbol: 'BTCUSDT',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      asOf: '2023-11-14T22:13:20.000Z',
+      expiresAt: '2023-11-14T22:13:21.000Z',
+      stale: true
+    }, now), null)
+    assert.deepEqual(applyAuthoritativeRealtimeQuoteToChart(null, '1m', {
+      ...quote,
+      providerCode: 'binance',
+      providerSymbol: 'BTCUSDT',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      asOf: '2023-11-14T22:13:20.000Z',
+      expiresAt: '2023-11-14T22:13:30.000Z',
+      stale: false
+    }, now), {
+      timestamp: 1_699_999_980_000,
+      open: 60_000,
+      high: 60_000,
+      low: 60_000,
+      close: 60_000,
+      volume: 0,
+      turnover: 0
+    })
+    assert.match(source, /const nextBar = applyAuthoritativeRealtimeQuoteToChart\(/)
+    assert.match(source, /subscribeQuote<BackendQuote>/)
+    assert.doesNotMatch(source, /quote as BackendQuote/)
+  })
+
   it('returns null for invalid or non-positive quote prices', () => {
     assert.equal(applyRealtimeQuoteToChart(null, '1m', 1_700_000_001_234, Number.NaN), null)
     assert.equal(applyRealtimeQuoteToChart(null, '1m', 1_700_000_001_234, 0), null)
@@ -304,7 +349,7 @@ describe('KLineChartPanel realtime candle updates', () => {
 
   it('uses the page session token for realtime quote subscriptions', () => {
     assert.match(source, /token:\s*string\s*\|\s*null/)
-    assert.match(source, /subscribeQuote\(symbol,\s*token,/)
+    assert.match(source, /subscribeQuote<BackendQuote>\(symbol,\s*token,/)
     assert.match(source, /\},\s*\[period,\s*symbol,\s*token\]\)/)
     assert.match(chartWorkspaceSource, /token:\s*string\s*\|\s*null/)
     assert.match(chartWorkspaceSource, /<KLineChartPanel[\s\S]*token=\{token\}/)

@@ -1,4 +1,5 @@
 import type { Amount } from '../../types/trading'
+import type { PositionResponse as GeneratedPositionResponse } from '@fx-platform/shared-types'
 
 export type OrderResponse = {
   id: string
@@ -27,7 +28,7 @@ export type OrderResponse = {
   canceledAt?: string | null
 }
 
-export type PositionResponse = {
+type PositionResponseOverrides = {
   id: string
   symbol: string
   side: string
@@ -57,3 +58,5 @@ export type PositionResponse = {
   closedAt?: string | null
   version?: number | null
 }
+
+export type PositionResponse = Omit<GeneratedPositionResponse, keyof PositionResponseOverrides> & PositionResponseOverrides

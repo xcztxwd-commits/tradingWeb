@@ -26,7 +26,6 @@ type Props = {
   orders: OrderResponse[]
   positions: PositionResponse[]
   themeMode: 'dark' | 'light'
-  allowMockFallback?: boolean
   settings: ChartSettings
   indicators: string[]
   onChartSettingsChange: (settings: ChartSettings) => void
@@ -49,7 +48,6 @@ export function ChartWorkspace({
   orders,
   positions,
   themeMode,
-  allowMockFallback = false,
   settings,
   indicators,
   onChartSettingsChange,
@@ -262,7 +260,6 @@ export function ChartWorkspace({
           tradeMarkers={tradeMarkers}
           indicatorsVisible={!indicatorsHidden}
           indicatorSettings={settings.indicatorSettings}
-          allowMockFallback={allowMockFallback}
           onCandlePriceSelect={onSelectPrice}
           onDrawingComplete={handleDrawingComplete}
           fullscreenActive={fullscreen || fallbackFullscreen}

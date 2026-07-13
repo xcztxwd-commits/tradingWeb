@@ -1,4 +1,5 @@
 import type { Quote } from '../types/trading'
+import { normalizePlatformMarketSymbol } from '../utils/marketSymbol.ts'
 import { Client } from '@stomp/stompjs'
 import type { IMessage, StompSubscription } from '@stomp/stompjs'
 
@@ -13,17 +14,34 @@ export type TradingSessionStreamEvent = {
 }
 
 type TopicHandler = (message: unknown) => void
+type ReconnectHandler = () => void
 type MarketStreamLocation = Pick<Location, 'protocol' | 'host'>
 
 interface TopicSubscription {
   handlers: Set<TopicHandler>
+  reconnectHandlers: Set<ReconnectHandler>
   stompSubscription?: StompSubscription
+}
+
+export type MarketSourceChangedEvent = {
+  type: 'MARKET_SOURCE_CHANGED'
+  symbol: string
+  previousProviderCode?: string | null
+  previousSourceMode?: 'PUBLIC_EXTERNAL' | 'LOCAL_SIMULATED' | null
+  providerCode: string
+  sourceMode: 'PUBLIC_EXTERNAL' | 'LOCAL_SIMULATED'
+  changedAt?: string
+  asOf?: string
+  expiresAt?: string
+  stale?: boolean
 }
 
 class MarketStreamSession {
   token: string | null
   client: Client
   connected = false
+  hasConnected = false
+  reconnectPending = false
   disposed = false
   subscriptions = new Map<string, TopicSubscription>()
 
@@ -35,14 +53,20 @@ class MarketStreamSession {
       connectHeaders: token ? { Authorization: `Bearer ${token}` } : {},
       reconnectDelay: 5000,
       onConnect: () => {
+        const reconnected = this.reconnectPending
         this.connected = true
+        this.hasConnected = true
+        this.reconnectPending = false
         this.resubscribeTopics()
+        if (reconnected) this.notifyReconnect()
       },
       onDisconnect: () => {
         this.connected = false
+        if (this.hasConnected) this.reconnectPending = true
       },
       onWebSocketClose: () => {
         this.connected = false
+        if (this.hasConnected) this.reconnectPending = true
         for (const subscription of this.subscriptions.values()) {
           subscription.stompSubscription = undefined
         }
@@ -53,24 +77,26 @@ class MarketStreamSession {
     this.client.activate()
   }
 
-  subscribe<T>(topic: string, handler: (message: T) => void) {
+  subscribe<T>(topic: string, handler: (message: T) => void, onReconnect?: ReconnectHandler) {
     let subscription = this.subscriptions.get(topic)
     if (!subscription) {
-      subscription = { handlers: new Set<TopicHandler>() }
+      subscription = { handlers: new Set<TopicHandler>(), reconnectHandlers: new Set<ReconnectHandler>() }
       this.subscriptions.set(topic, subscription)
     }
 
     subscription.handlers.add(handler as TopicHandler)
+    if (onReconnect) subscription.reconnectHandlers.add(onReconnect)
     if (this.connected && !subscription.stompSubscription) {
       this.subscribeStompTopic(topic, subscription)
     }
   }
 
-  unsubscribe<T>(topic: string, handler: (message: T) => void) {
+  unsubscribe<T>(topic: string, handler: (message: T) => void, onReconnect?: ReconnectHandler) {
     const subscription = this.subscriptions.get(topic)
     if (!subscription) return
 
     subscription.handlers.delete(handler as TopicHandler)
+    if (onReconnect) subscription.reconnectHandlers.delete(onReconnect)
     if (subscription.handlers.size > 0) return
 
     subscription.stompSubscription?.unsubscribe()
@@ -103,6 +129,13 @@ class MarketStreamSession {
       if (subscription.handlers.size > 0 && !subscription.stompSubscription) {
         this.subscribeStompTopic(topic, subscription)
       }
+    }
+  }
+
+  private notifyReconnect() {
+    if (this.disposed) return
+    for (const subscription of this.subscriptions.values()) {
+      for (const handler of subscription.reconnectHandlers) handler()
     }
   }
 
@@ -147,7 +180,7 @@ function getApiBaseUrl() {
 
 let activeMarketStreamSession: MarketStreamSession | undefined
 
-export function subscribeQuote(symbol: string, token: string | null, onQuote: (quote: Quote) => void) {
+export function subscribeQuote<T = Quote>(symbol: string, token: string | null, onQuote: (quote: T) => void) {
   return subscribeMarketTopic(`/topic/market/quotes/${normalizeMarketStreamSymbol(symbol)}`, token, onQuote)
 }
 
@@ -159,30 +192,47 @@ export function subscribeRecentTrades<T>(symbol: string, token: string | null, o
   return subscribeMarketTopic(`/topic/market/trades/${normalizeMarketStreamSymbol(symbol)}`, token, onTrades)
 }
 
-export function subscribeTradingSessionEvents(
-  accountId: string,
-  token: string,
-  onEvent: (event: TradingSessionStreamEvent) => void
+export function subscribeMarketSourceChanges(
+  symbol: string,
+  token: string | null,
+  onSourceChange: (event: MarketSourceChangedEvent) => void
 ) {
-  return subscribeMarketTopic(`/topic/trading/accounts/${accountId}/events`, token, onEvent)
+  return subscribeMarketTopic(
+    `/topic/market/source-changes/${normalizeMarketStreamSymbol(symbol)}`,
+    token,
+    onSourceChange
+  )
 }
 
-function subscribeMarketTopic<T>(topic: string, token: string | null, onMessage: (message: T) => void) {
+export function subscribeTradingSessionEvents(
+  token: string,
+  onEvent: (event: TradingSessionStreamEvent) => void,
+  onReconnect?: () => void
+) {
+  return subscribeMarketTopic('/user/queue/trading-events', token, onEvent, onReconnect)
+}
+
+function subscribeMarketTopic<T>(
+  topic: string,
+  token: string | null,
+  onMessage: (message: T) => void,
+  onReconnect?: () => void
+) {
   let disposed = false
   const session = ensureMarketStreamSession(token)
 
-  session.subscribe(topic, onMessage)
+  session.subscribe(topic, onMessage, onReconnect)
 
   return () => {
     if (disposed) return
 
     disposed = true
-    session.unsubscribe(topic, onMessage)
+    session.unsubscribe(topic, onMessage, onReconnect)
   }
 }
 
 function normalizeMarketStreamSymbol(symbol: string) {
-  return symbol.replace(/[-_/]/g, '').toUpperCase()
+  return normalizePlatformMarketSymbol(symbol)
 }
 
 function ensureMarketStreamSession(token: string | null) {

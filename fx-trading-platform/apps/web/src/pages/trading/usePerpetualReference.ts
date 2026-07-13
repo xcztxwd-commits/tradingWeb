@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { getPerpetualReference } from '../../services/marketApi.ts'
 import { toPerpetualReferenceView, type PerpetualReferenceView } from './perpetualReferenceModel.ts'
+import type { MarketSourceMetadata } from '../../features/market/tradingModels.ts'
 
-export function usePerpetualReference(symbol: string, enabled: boolean) {
+export function usePerpetualReference(symbol: string, enabled: boolean, expectedSource?: MarketSourceMetadata) {
   const [reference, setReference] = useState<PerpetualReferenceView | null>(null)
+  const expectedSourceRef = useRef(expectedSource)
+  expectedSourceRef.current = expectedSource
+  const expectedSourceKey = expectedSource ? `${expectedSource.providerCode}|${expectedSource.providerSymbol}|${expectedSource.sourceMode}` : ''
 
   useEffect(() => {
     if (!enabled) {
@@ -14,7 +18,7 @@ export function usePerpetualReference(symbol: string, enabled: boolean) {
     let active = true
     void getPerpetualReference(symbol)
       .then((response) => {
-        if (active) setReference(toPerpetualReferenceView(response))
+        if (active) setReference(toPerpetualReferenceView(response, expectedSourceRef.current))
       })
       .catch(() => {
         if (active) setReference(null)
@@ -22,7 +26,7 @@ export function usePerpetualReference(symbol: string, enabled: boolean) {
     return () => {
       active = false
     }
-  }, [enabled, symbol])
+  }, [enabled, expectedSourceKey, symbol])
 
   return reference
 }

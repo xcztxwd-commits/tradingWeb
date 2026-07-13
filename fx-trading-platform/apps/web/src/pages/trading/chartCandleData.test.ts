@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
 import { historicalCandleBatchSize, loadChartCandles, resolveHistoricalCandleEndTime } from './chartCandleData.ts'
@@ -55,22 +56,19 @@ describe('chart candle data loading', () => {
     assert.deepEqual(candles, [])
   })
 
-  it('uses local mock candles only when fallback is explicitly enabled', async () => {
+  it('never synthesizes a local chart series when the backend is unavailable', async () => {
     const candles = await loadChartCandles(
       'BTCUSDT',
       '1m',
       async () => {
         throw new Error('backend offline')
       },
-      1_780_000_060_000,
-      { allowMockFallback: true }
+      1_780_000_060_000
     )
 
-    assert.equal(candles.length, 180)
-    assert.equal(candles.at(-1)?.timestamp, 1_780_000_060_000)
-    assert.equal(candles.every((candle, index) => index === 0 || candle.timestamp > candles[index - 1].timestamp), true)
-    assert.equal(candles.every((candle) => candle.high >= candle.open && candle.high >= candle.close), true)
-    assert.equal(candles.every((candle) => candle.low <= candle.open && candle.low <= candle.close), true)
+    const source = readFileSync(new URL('./chartCandleData.ts', import.meta.url), 'utf8')
+    assert.deepEqual(candles, [])
+    assert.doesNotMatch(source, /makeMockCandles|allowMockFallback/)
   })
 
   it('returns an empty chart series when the backend returns an empty series by default', async () => {
@@ -79,10 +77,8 @@ describe('chart candle data loading', () => {
     assert.deepEqual(candles, [])
   })
 
-  it('returns an empty chart series instead of mock candles when fallback is disabled', async () => {
-    const candles = await loadChartCandles('EURUSD', '1m', async () => [], 1_780_000_060_000, {
-      allowMockFallback: false
-    })
+  it('returns an empty chart series instead of generated candles', async () => {
+    const candles = await loadChartCandles('EURUSD', '1m', async () => [], 1_780_000_060_000)
 
     assert.deepEqual(candles, [])
   })
@@ -112,9 +108,7 @@ describe('chart candle data loading', () => {
       }
     ]
 
-    const candles = await loadChartCandles('CHFIDR', '1h', async () => backendCandles, 1_780_000_060_000, {
-      allowMockFallback: false
-    })
+    const candles = await loadChartCandles('CHFIDR', '1h', async () => backendCandles, 1_780_000_060_000)
 
     assert.equal(candles, backendCandles)
   })

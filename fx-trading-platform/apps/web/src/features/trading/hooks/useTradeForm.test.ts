@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { createPanelMarket } from '../components/tradePanelMarket.ts'
-import { mockMarket } from './useMockBalances.ts'
+import { testMarket as mockMarket } from './tradeFormTestFixtures.ts'
 import {
   createInitialTradeForm,
   deriveTradeForm,
@@ -101,7 +101,7 @@ describe('trade form sizing algorithms', () => {
   it('treats forex market buy amount as lots instead of quote budget', () => {
     const market = createPanelMarket(
       'EURUSD',
-      { bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378 },
+      { symbol: 'EURUSD', bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378, tradable: true },
       { category: 'fx', leverage: 100 }
     )
     const form = deriveTradeForm(
@@ -121,7 +121,7 @@ describe('trade form sizing algorithms', () => {
   it('checks margin rather than base inventory for forex shorts', () => {
     const market = createPanelMarket(
       'EURUSD',
-      { bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378 },
+      { symbol: 'EURUSD', bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378, tradable: true },
       { category: 'fx', leverage: 100 }
     )
     const form = deriveTradeForm(

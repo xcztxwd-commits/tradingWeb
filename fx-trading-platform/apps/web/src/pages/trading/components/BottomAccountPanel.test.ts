@@ -2,19 +2,26 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { bottomAccountTabLabelKeys, bottomAccountTabs } from './bottomAccountTabs.ts'
-import { getBottomAccountTabView, mockBottomAccountPanelData } from './bottomAccountPanelData.ts'
-import { createPositionDisplayRow } from './positionDisplayModel.ts'
+import { bottomAccountPanelTestData, getBottomAccountTabView, resolveBottomAccountPanelData } from './bottomAccountPanelData.ts'
+import * as positionDisplayModel from './positionDisplayModel.ts'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
+const { createPositionDisplayRow } = positionDisplayModel
 const source = readFileSync(join(currentDir, 'BottomAccountPanel.tsx'), 'utf8')
+const contentSource = readFileSync(join(currentDir, 'BottomAccountContent.tsx'), 'utf8')
+const positionResponseTypesSource = readFileSync(join(currentDir, '../../../components/tables/types.ts'), 'utf8')
 const selectionSource = readFileSync(join(currentDir, 'bottomAccountPanelSelection.ts'), 'utf8')
 const styles = readFileSync(join(currentDir, 'BottomAccountPanel.module.css'), 'utf8')
 const expectedViewFiles = [
+  'BottomAccountContent.tsx',
   'BottomAccountOrdersGrid.tsx',
   'BottomAccountPositionsGrid.tsx',
+  'BottomAccountTradesGrid.tsx',
+  'BottomAccountFundingGrid.tsx',
+  'BottomAccountTransfersGrid.tsx',
   'BottomAccountAssetView.tsx',
   'BottomAccountStrategiesGrid.tsx',
   'bottomAccountFormatters.ts'
@@ -30,9 +37,41 @@ const testT = (key: string) =>
   })[key] ?? key
 
 describe('bottom account panel tabs', () => {
+  it('keeps missing and empty API arrays empty instead of injecting mock account data', () => {
+    const data = resolveBottomAccountPanelData({
+      orders: [],
+      positions: [],
+      trades: [],
+      fundingSettlements: [],
+      transfers: [],
+      ledgerEntries: [],
+      strategies: []
+    })
+    assert.equal(data.account, undefined)
+    assert.deepEqual(data.orders, [])
+    assert.deepEqual(data.positions, [])
+    assert.deepEqual(data.trades, [])
+    assert.deepEqual(data.fundingSettlements, [])
+    assert.deepEqual(data.transfers, [])
+    assert.deepEqual(data.ledgerEntries, [])
+    assert.deepEqual(data.strategies, [])
+  })
   it('keeps the requested bottom tab order', () => {
-    assert.deepEqual([...bottomAccountTabs], ['currentOrders', 'historicalOrders', 'currentPositions', 'historicalPositions', 'assets', 'strategies'])
+    assert.deepEqual([...bottomAccountTabs], [
+      'currentOrders',
+      'historicalOrders',
+      'currentPositions',
+      'historicalPositions',
+      'trades',
+      'funding',
+      'transfers',
+      'assets',
+      'strategies'
+    ])
     assert.equal(bottomAccountTabLabelKeys.currentOrders, 'orders.current')
+    assert.equal(bottomAccountTabLabelKeys.trades, 'orders.trades')
+    assert.equal(bottomAccountTabLabelKeys.funding, 'trading.fundingSettlements')
+    assert.equal(bottomAccountTabLabelKeys.transfers, 'trading.accountTransfers')
     assert.equal(bottomAccountTabLabelKeys.strategies, 'trading.strategies')
   })
 
@@ -73,7 +112,7 @@ describe('bottom account panel tabs', () => {
     assert.doesNotMatch(ordersGridSource, /全部撤单/)
   })
 
-  it('switches every requested tab to a populated local mock data view', () => {
+  it('keeps the legacy tab display fixtures isolated from missing API collections', () => {
     const expectedVisibleCells = new Map([
       ['currentOrders', 'BTCUSDT'],
       ['historicalOrders', 'EURUSD'],
@@ -83,8 +122,8 @@ describe('bottom account panel tabs', () => {
       ['strategies', 'London Breakout']
     ])
 
-    for (const tab of bottomAccountTabs) {
-      const view = getBottomAccountTabView(tab, mockBottomAccountPanelData)
+    for (const tab of expectedVisibleCells.keys()) {
+      const view = getBottomAccountTabView(tab, bottomAccountPanelTestData)
       const cells = view.rows.flat().map(String)
 
       assert.ok(view.rows.length > 0, `${tab} should render at least one mock row`)
@@ -97,14 +136,15 @@ describe('bottom account panel tabs', () => {
       assert.equal(existsSync(join(currentDir, fileName)), true, `${fileName} should exist`)
     }
 
-    assert.match(source, /import \{ OrdersGrid \} from '\.\/BottomAccountOrdersGrid'/)
-    assert.match(source, /import \{ PositionsGrid \} from '\.\/BottomAccountPositionsGrid'/)
-    assert.match(source, /import \{ AssetView \} from '\.\/BottomAccountAssetView'/)
-    assert.match(source, /import \{ StrategiesGrid \} from '\.\/BottomAccountStrategiesGrid'/)
-    assert.doesNotMatch(source, /function OrdersGrid/)
-    assert.doesNotMatch(source, /function PositionsGrid/)
-    assert.doesNotMatch(source, /function AssetView/)
-    assert.doesNotMatch(source, /function StrategiesGrid/)
+    assert.match(source, /import \{ BottomAccountContent \} from '\.\/BottomAccountContent'/)
+    assert.match(contentSource, /import \{ OrdersGrid \} from '\.\/BottomAccountOrdersGrid'/)
+    assert.match(contentSource, /import \{ PositionsGrid \} from '\.\/BottomAccountPositionsGrid'/)
+    assert.match(contentSource, /import \{ AssetView \} from '\.\/BottomAccountAssetView'/)
+    assert.match(contentSource, /import \{ StrategiesGrid \} from '\.\/BottomAccountStrategiesGrid'/)
+    assert.doesNotMatch(contentSource, /function OrdersGrid/)
+    assert.doesNotMatch(contentSource, /function PositionsGrid/)
+    assert.doesNotMatch(contentSource, /function AssetView/)
+    assert.doesNotMatch(contentSource, /function StrategiesGrid/)
     assert.ok(source.split(/\r?\n/).length <= 125, 'BottomAccountPanel.tsx should stay a small orchestration file')
   })
 
@@ -128,7 +168,7 @@ describe('bottom account panel tabs', () => {
     assert.match(positionsGridSource, /row\.maintenanceMargin/)
     assert.match(positionsGridSource, /positions\.takeProfitStopLoss/)
     assert.match(positionsGridSource, /positions\.closeAllMarket/)
-    assert.match(source, /mode=\{activeTab === 'historicalPositions' \? 'history' : 'current'\}/)
+    assert.match(contentSource, /mode=\{activeTab === 'historicalPositions' \? 'history' : 'current'\}/)
     assert.match(positionsGridSource, /PositionActionDialog/)
     assert.match(positionsGridSource, /onClosePosition\(selectedPosition, mutation\)/)
     assert.match(positionsGridSource, /selectedPosition\.version/)
@@ -139,8 +179,41 @@ describe('bottom account panel tabs', () => {
     assert.match(actionDialogSource, /Position version is unavailable from the current positions contract\./)
   })
 
+  it('renders account trades, funding settlements, and transfers from API data', () => {
+    const data = resolveBottomAccountPanelData({
+      trades: [{ id: 'trade-1', symbol: 'BTCUSDT', side: 'BUY', lots: 0.1, price: 64000, executedAt: '2026-07-12T01:00:00Z' }],
+      fundingSettlements: [
+        {
+          id: 'funding-1',
+          symbol: 'BTCUSDT',
+          fundingRate: 0.0001,
+          amount: -0.64,
+          asset: 'USDT',
+          fundingTime: '2026-07-12T00:00:00Z'
+        }
+      ],
+      transfers: [
+        {
+          transferId: 'transfer-1',
+          direction: 'SPOT_TO_PERP',
+          amount: 100,
+          spotAvailable: 900,
+          perpBalance: 100,
+          createdAt: '2026-07-12T00:30:00Z'
+        }
+      ]
+    })
+
+    assert.deepEqual(getBottomAccountTabView('trades', data).rows[0]?.slice(0, 2), ['BTCUSDT', 'BUY'])
+    assert.deepEqual(getBottomAccountTabView('funding', data).rows[0]?.slice(0, 2), ['BTCUSDT', 0.0001])
+    assert.deepEqual(getBottomAccountTabView('transfers', data).rows[0]?.slice(0, 2), ['SPOT_TO_PERP', 100])
+    assert.match(contentSource, /<TradesGrid/)
+    assert.match(contentSource, /<FundingGrid/)
+    assert.match(contentSource, /<TransfersGrid/)
+  })
+
   it('formats crypto swap positions with OKX-style labels', () => {
-    const btcPosition = mockBottomAccountPanelData.positions.find((position) => position.symbol === 'BTCUSDT')
+    const btcPosition = bottomAccountPanelTestData.positions.find((position) => position.symbol === 'BTCUSDT')
     assert.ok(btcPosition)
 
     const row = createPositionDisplayRow(btcPosition, testT)
@@ -150,6 +223,59 @@ describe('bottom account panel tabs', () => {
     assert.equal(row.quantity, '0.15 contracts')
     assert.equal(row.marginMode, 'Cross')
     assert.equal(row.liquidationPrice, '--')
+  })
+
+  it('preserves generated position identity fields and distinguishes HEDGE position sides', () => {
+    const row = createPositionDisplayRow({
+      id: 'hedge-short',
+      symbol: 'BTCUSDT-PERP',
+      side: 'SELL',
+      instrumentType: 'SWAP',
+      productType: 'LINEAR_PERP',
+      positionMode: 'HEDGE',
+      positionSide: 'SHORT',
+      marginMode: 'CROSS',
+      leverage: 10,
+      positionUnit: 'CONTRACT',
+      lots: '0.25',
+      openPrice: '60000',
+      currentPrice: '59000',
+      floatingPnl: '250',
+      realizedPnl: '0',
+      marginHeld: '1500',
+      status: 'OPEN'
+    }, testT)
+
+    assert.equal(row.positionSide, 'SHORT')
+    assert.match(positionResponseTypesSource, /PositionResponse as GeneratedPositionResponse/)
+    assert.match(positionResponseTypesSource, /Omit<GeneratedPositionResponse/)
+    const positionsGridSource = readFileSync(join(currentDir, 'BottomAccountPositionsGrid.tsx'), 'utf8')
+    assert.match(positionsGridSource, /positions\.positionSide/)
+    assert.match(positionsGridSource, /row\.positionSide/)
+  })
+
+  it('defaults position actions to the backend native unit without forbidding unit switches', () => {
+    const resolvePositionQuantityUnit = (positionDisplayModel as Record<string, unknown>).resolvePositionQuantityUnit
+    assert.equal(typeof resolvePositionQuantityUnit, 'function')
+    assert.equal((resolvePositionQuantityUnit as Function)({ positionUnit: 'CONTRACT' }), 'CONTRACTS')
+    assert.equal((resolvePositionQuantityUnit as Function)({ positionUnit: 'BTC' }), 'BASE')
+
+    const positionsGridSource = readFileSync(join(currentDir, 'BottomAccountPositionsGrid.tsx'), 'utf8')
+    const actionDialogSource = readFileSync(join(currentDir, '../../../features/trading/components/PositionActionDialog.tsx'), 'utf8')
+    const protectionSource = readFileSync(join(currentDir, '../../../features/trading/components/MultiLevelProtectionEditor.tsx'), 'utf8')
+
+    assert.match(positionsGridSource, /useState<QuantityUnit>/)
+    assert.match(positionsGridSource, /setQuantityUnit\(resolvePositionQuantityUnit\(position\)\)/)
+    assert.match(positionsGridSource, /quantityUnit,\s*$/m)
+    assert.doesNotMatch(positionsGridSource, /quantityUnit:\s*'CONTRACTS'/)
+    assert.match(actionDialogSource, /quantityUnit: QuantityUnit/)
+    assert.match(actionDialogSource, /onQuantityUnitChange:/)
+    assert.match(actionDialogSource, /value=\{quantityUnit\}/)
+    assert.match(actionDialogSource, /<option value="BASE">/)
+    assert.match(actionDialogSource, /<option value="QUOTE">/)
+    assert.match(actionDialogSource, /<option value="CONTRACTS">/)
+    assert.match(protectionSource, /quantityUnit\?: QuantityUnit/)
+    assert.match(protectionSource, /Quantity \(\{quantityUnit\}\)/)
   })
 
   it('formats forex, spot, linear perp, and inverse perp position rows with algorithm-aware units', () => {

@@ -15,7 +15,6 @@ import {
   type BinanceFuturesPeriod,
   type BinanceMarketOverview
 } from '../../features/market/binanceMarketData'
-import { mockTradingMarkets } from '../../features/market/mockTradingData'
 import { hydrateMarketFavorites } from '../../features/market/marketFavorites'
 import { mergeTradingQuoteIntoMarket } from '../../features/market/tradingMarketAdapters'
 import { fetchMarketQuotes, fetchMarketSymbols } from '../../features/market/tradingMarketApi'
@@ -119,7 +118,7 @@ const marketSortOptions: Array<SelectFieldOption<SortKey>> = [
 
 export function MarketsPage() {
   const navigate = useNavigate()
-  const [markets, setMarkets] = useState<TradingMarket[]>(mockTradingMarkets)
+  const [markets, setMarkets] = useState<TradingMarket[]>([])
   const [binanceOverview, setBinanceOverview] = useState<BinanceMarketOverview | null>(null)
   const { favorites, toggleFavorite } = useMarketFavorites()
   const [query, setQuery] = useState('')
@@ -164,7 +163,7 @@ export function MarketsPage() {
       const symbols = symbolsResult.status === 'fulfilled' ? symbolsResult.value : []
       const nextBinanceOverview = binanceOverviewResult.status === 'fulfilled' ? binanceOverviewResult.value : null
       const initialMarkets = mergeBinanceOverviewMarkets(symbols, nextBinanceOverview?.markets ?? [])
-      const nextMarkets = initialMarkets.length > 0 ? initialMarkets : mockTradingMarkets
+      const nextMarkets = initialMarkets
 
       if (active) {
         setBinanceOverview(nextBinanceOverview)
@@ -181,7 +180,7 @@ export function MarketsPage() {
     loadMarkets()
       .catch((error) => {
         if (active) {
-          setMarkets(mockTradingMarkets)
+          setMarkets([])
           setBinanceOverview(null)
           setApiError(formatApiError(error))
         }
@@ -1249,7 +1248,7 @@ function formatFuturesValue(value: number, series: FuturesChartSeries) {
 }
 
 function takeThree(markets: TradingMarket[]) {
-  return (markets.length >= 3 ? markets : mockTradingMarkets).slice(0, 3)
+  return markets.slice(0, 3)
 }
 
 function toAriaSort(direction: SortDirection) {

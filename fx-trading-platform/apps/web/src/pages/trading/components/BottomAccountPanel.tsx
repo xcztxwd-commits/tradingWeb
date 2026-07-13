@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { AccountTransferResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
 
 import type { OrderResponse, PositionResponse } from '../../../components/tables/types'
 import type { AccountSummary, LedgerEntry } from '../../../types/trading'
@@ -8,11 +9,8 @@ import type { BottomAccountTab } from './bottomAccountTabs'
 import { getBottomAccountTabView, resolveBottomAccountPanelData } from './bottomAccountPanelData'
 import type { StrategyRow } from './bottomAccountPanelData'
 import { mergePositions, resolveAccountPanelSelection } from './bottomAccountPanelSelection'
-import { AssetView } from './BottomAccountAssetView'
-import { OrdersGrid } from './BottomAccountOrdersGrid'
-import { PositionsGrid } from './BottomAccountPositionsGrid'
+import { BottomAccountContent } from './BottomAccountContent'
 import type { PositionMutationHandler } from './BottomAccountPositionsGrid'
-import { StrategiesGrid } from './BottomAccountStrategiesGrid'
 import styles from './BottomAccountPanel.module.css'
 import { TableSkeleton } from './TerminalSkeleton'
 
@@ -21,6 +19,9 @@ type Props = {
   orders?: OrderResponse[]
   positions?: PositionResponse[]
   positionHistory?: PositionResponse[]
+  trades?: Trade[]
+  fundingSettlements?: FundingSettlement[]
+  transfers?: AccountTransferResponse[]
   ledgerEntries?: LedgerEntry[]
   strategies?: StrategyRow[]
   loading?: boolean
@@ -34,6 +35,9 @@ export function BottomAccountPanel({
   orders,
   positions,
   positionHistory,
+  trades,
+  fundingSettlements,
+  transfers,
   ledgerEntries,
   strategies,
   loading = false,
@@ -49,6 +53,9 @@ export function BottomAccountPanel({
     account,
     orders,
     positions: mergePositions(positions, positionHistory),
+    trades,
+    fundingSettlements,
+    transfers,
     ledgerEntries,
     strategies
   })
@@ -90,23 +97,13 @@ export function BottomAccountPanel({
         {loading ? (
           <TableSkeleton />
         ) : (
-          <>
-            {activeView.kind === 'orders' ? <OrdersGrid emptyLabel={selection.orderEmptyLabel} orders={selection.orders} /> : null}
-            {activeView.kind === 'positions' ? (
-              <PositionsGrid
-                emptyLabel={selection.positionEmptyLabel}
-                mode={activeTab === 'historicalPositions' ? 'history' : 'current'}
-                positions={selection.positions}
-                onClosePosition={onClosePosition}
-              />
-            ) : null}
-            {activeView.kind === 'asset' ? (
-              <AssetView account={activeView.account} ledgerEntries={activeView.ledgerEntries} sessionReady={sessionReady} />
-            ) : null}
-            {activeView.kind === 'strategies' ? (
-              <StrategiesGrid emptyLabel={activeView.emptyLabel} strategies={activeView.strategies} />
-            ) : null}
-          </>
+          <BottomAccountContent
+            activeTab={activeTab}
+            activeView={activeView}
+            selection={selection}
+            sessionReady={sessionReady}
+            onClosePosition={onClosePosition}
+          />
         )}
       </div>
     </section>

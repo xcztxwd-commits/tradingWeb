@@ -10,7 +10,7 @@ import {
   syncLimitPriceFromMarket,
   validateOrder
 } from './useTradeForm.ts'
-import { mockBalances, mockMarket } from './useMockBalances.ts'
+import { testBalances as mockBalances, testMarket as mockMarket } from './tradeFormTestFixtures.ts'
 import { strategyOptions } from '../types/order.ts'
 import type { TradeFormState } from '../types/order.ts'
 

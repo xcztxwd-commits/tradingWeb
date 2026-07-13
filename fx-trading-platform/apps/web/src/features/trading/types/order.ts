@@ -43,6 +43,7 @@ export type TradeMarket = {
   leverage?: number
   productType?: TradeProductType
   quoteTimestamp?: number
+  tradable?: boolean
   rules?: TradeInstrumentRules
 }
 

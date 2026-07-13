@@ -1,5 +1,25 @@
-import type { ProductType, TradingCandle, TradingInstrumentRules, TradingMarket, TradingPeriod, TradingQuote } from './tradingModels'
-import type { MarketDataSnapshot, TradeItem } from './marketDataTypes'
+import { isFreshSource } from './authoritativeMarketSnapshot.ts'
+import type {
+  MarketSourceMetadata,
+  MarketSourceMode,
+  ProductType,
+  TradingCandle,
+  TradingInstrumentRules,
+  TradingMarket,
+  TradingPeriod,
+  TradingQuote
+} from './tradingModels'
+import type { MarketOrderBook, MarketTradeBatch, TradeItem } from './marketDataTypes'
+import { normalizePlatformMarketSymbol } from '../../utils/marketSymbol.ts'
+
+type BackendMarketSource = {
+  providerCode?: string | null
+  providerSymbol?: string | null
+  sourceMode?: MarketSourceMode | string | null
+  asOf?: string | null
+  expiresAt?: string | null
+  stale?: boolean | null
+}
 
 export type BackendSymbol = {
   symbol: string
@@ -63,7 +83,7 @@ export type BackendInstrumentRules = {
   userRiskLevelRestriction?: string | null
 }
 
-export type BackendQuote = {
+export type BackendQuote = BackendMarketSource & {
   type: 'quote'
   symbol: string
   bid: string
@@ -104,14 +124,14 @@ export type BackendOrderBookLevel = {
   amount: string
 }
 
-export type BackendOrderBook = {
+export type BackendOrderBook = BackendMarketSource & {
   symbol: string
   timestamp: number
   bids: BackendOrderBookLevel[]
   asks: BackendOrderBookLevel[]
 }
 
-export type BackendRecentTrade = {
+export type BackendRecentTrade = BackendMarketSource & {
   id: string
   symbol: string
   price: string
@@ -285,7 +305,7 @@ export function mapInstrumentRulesToTradingRules(rules: BackendInstrumentRules):
   }
 }
 
-export function mapQuoteToTradingQuote(quote: BackendQuote, previous?: TradingQuote): TradingQuote {
+export function mapQuoteToTradingQuote(quote: BackendQuote, previous?: TradingQuote, now = Date.now()): TradingQuote {
   const mid = toNumber(quote.mid)
   const previousMid = previous?.mid ?? 0
   const providerHigh24h = optionalNumber(quote.high24h)
@@ -295,6 +315,7 @@ export function mapQuoteToTradingQuote(quote: BackendQuote, previous?: TradingQu
   const high24h = providerHigh24h ?? (previous ? Math.max(previous.high24h, mid) : mid)
   const low24h = providerLow24h ?? (previous && previous.low24h > 0 ? Math.min(previous.low24h, mid) : mid)
 
+  const marketSource = mapMarketSourceMetadata(quote)
   return {
     symbol: quote.symbol,
     bid: toNumber(quote.bid),
@@ -306,7 +327,8 @@ export function mapQuoteToTradingQuote(quote: BackendQuote, previous?: TradingQu
     low24h,
     volume: providerVolume24h === undefined ? previous?.volume ?? 'Live' : formatCompactVolume(providerVolume24h),
     source: quote.source,
-    timestamp: quote.timestamp
+    timestamp: quote.timestamp,
+    ...(marketSource ? { marketSource, tradable: isFreshSource(marketSource, now) } : {})
   }
 }
 
@@ -326,7 +348,8 @@ export function mapCandleToTradingCandle(candle: BackendCandle): TradingCandle {
 
 export function mapOrderBookToMarketData(
   orderBook: BackendOrderBook
-): Pick<MarketDataSnapshot, 'bids' | 'asks' | 'lastPrice' | 'lastPriceDirection'> {
+): MarketOrderBook {
+  const source = mapMarketSourceMetadata(orderBook)
   const bids = orderBook.bids.map((level) => ({
     price: toNumber(level.price),
     amount: toNumber(level.amount)
@@ -340,10 +363,12 @@ export function mapOrderBookToMarketData(
   const lastPrice = roundNumber(bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : Math.max(bestBid, bestAsk))
 
   return {
+    symbol: orderBook.symbol,
     bids,
     asks,
     lastPrice,
-    lastPriceDirection: 'flat'
+    lastPriceDirection: 'flat',
+    ...(source ? { source } : {})
   }
 }
 
@@ -355,6 +380,46 @@ export function mapRecentTradesToMarketData(trades: BackendRecentTrade[]): Trade
     side: trade.side === 'buy' ? 'buy' : 'sell',
     time: trade.timestamp
   }))
+}
+
+export function mapRecentTradeBatchToMarketData(
+  trades: BackendRecentTrade[],
+  fallbackSymbol = ''
+): MarketTradeBatch {
+  const first = trades[0]
+  const firstSource = first ? mapMarketSourceMetadata(first) : undefined
+  const source = firstSource && trades.every((trade) => sameMarketSource(firstSource, mapMarketSourceMetadata(trade)))
+    ? firstSource
+    : undefined
+  return {
+    symbol: first?.symbol ?? fallbackSymbol,
+    recentTrades: mapRecentTradesToMarketData(trades),
+    source
+  }
+}
+
+export function mapMarketSourceMetadata(source: BackendMarketSource): MarketSourceMetadata | undefined {
+  const providerCode = optionalText(source.providerCode)
+  const providerSymbol = optionalText(source.providerSymbol)
+  const asOf = optionalText(source.asOf)
+  const expiresAt = optionalText(source.expiresAt)
+  const sourceMode = source.sourceMode === 'PUBLIC_EXTERNAL' || source.sourceMode === 'LOCAL_SIMULATED'
+    ? source.sourceMode
+    : undefined
+  if (!providerCode || !providerSymbol || !sourceMode || !asOf || !expiresAt || typeof source.stale !== 'boolean') {
+    return undefined
+  }
+  return { providerCode, providerSymbol, sourceMode, asOf, expiresAt, stale: source.stale }
+}
+
+function sameMarketSource(left: MarketSourceMetadata, right?: MarketSourceMetadata) {
+  return Boolean(right)
+    && left.providerCode === right?.providerCode
+    && left.providerSymbol === right?.providerSymbol
+    && left.sourceMode === right?.sourceMode
+    && left.asOf === right?.asOf
+    && left.expiresAt === right?.expiresAt
+    && left.stale === right?.stale
 }
 
 export function createTradingMarketPlaceholder(symbol: string): TradingMarket {
@@ -384,6 +449,22 @@ export function createTradingMarketPlaceholder(symbol: string): TradingMarket {
 }
 
 export function createTradingQuoteFromMarket(market: TradingMarket): TradingQuote {
+  if (p0TradingSymbols.has(market.symbol)) {
+    return {
+      symbol: market.symbol,
+      bid: 0,
+      ask: 0,
+      mid: 0,
+      spread: 0,
+      changePercent: 0,
+      high24h: 0,
+      low24h: 0,
+      volume: '0',
+      source: 'unavailable',
+      timestamp: 0,
+      tradable: false
+    }
+  }
   return {
     symbol: market.symbol,
     bid: market.last,
@@ -395,9 +476,15 @@ export function createTradingQuoteFromMarket(market: TradingMarket): TradingQuot
     low24h: market.low24h || market.last,
     volume: market.volume,
     source: market.source,
-    timestamp: Date.now()
+    timestamp: market.quoteTimestamp ?? 0,
+    tradable: market.tradable === true && market.last > 0 && Boolean(market.quoteTimestamp)
   }
 }
+
+const p0TradingSymbols = new Set([
+  'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+  'BTCUSDT-PERP', 'ETHUSDT-PERP', 'BNBUSDT-PERP', 'SOLUSDT-PERP', 'XRPUSDT-PERP'
+])
 
 export function mergeTradingQuoteIntoMarket(market: TradingMarket, quote: TradingQuote): TradingMarket {
   const nextMarketCap = quoteMarketCap(quote)
@@ -474,7 +561,7 @@ function optionalProductType(value: string | null | undefined): ProductType | un
 }
 
 function normalizeMarketSymbol(symbol: string) {
-  return symbol.trim().toUpperCase().replace(/[-_/]/g, '')
+  return normalizePlatformMarketSymbol(symbol)
 }
 
 function formatCompactVolume(value: number) {

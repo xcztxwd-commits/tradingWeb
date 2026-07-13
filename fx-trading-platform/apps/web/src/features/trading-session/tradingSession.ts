@@ -7,15 +7,21 @@ import {
   createOcoOrder,
   createOrder,
   createPositionProtection,
+  getAccountTransfers,
+  getFundingSettlements,
   getOrders,
   getPositionHistory,
   getPositions,
+  getTrades,
   updatePositionProtection
 } from '../../services/tradingApi'
 import type {
+  AccountTransferResponse,
   AdjustPositionMarginRequest,
   ClosePositionRequest,
-  CreateProtectionRequest
+  CreateProtectionRequest,
+  FundingSettlement,
+  Trade
 } from '@fx-platform/shared-types'
 import type { OrderResponse, PositionResponse } from '../../components/tables/types'
 import type { AccountSummary, AssetLedgerEntry, LedgerEntry, OcoOrderPayload, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
@@ -31,8 +37,11 @@ export type DemoTradingSession = {
 export type TradingAccountData = {
   account: AccountSummary
   orders: OrderResponse[]
+  trades: Trade[]
   positions: PositionResponse[]
   positionHistory: PositionResponse[]
+  fundingSettlements: FundingSettlement[]
+  transfers: AccountTransferResponse[]
   ledgerEntries: LedgerEntry[]
   assetLedgerEntries: AssetLedgerEntry[]
   walletBalances: WalletBalance[]
@@ -49,17 +58,42 @@ export function isAuthSessionFailure(error: unknown) {
 }
 
 export async function loadTradingAccountData(token: string, accountId: string): Promise<TradingAccountData> {
-  const [account, orders, positions, positionHistory, ledgerEntries, assetLedgerEntries, walletBalances] = await Promise.all([
+  const [
+    account,
+    orders,
+    trades,
+    positions,
+    positionHistory,
+    fundingSettlements,
+    transfers,
+    ledgerEntries,
+    assetLedgerEntries,
+    walletBalances
+  ] = await Promise.all([
     getAccountSummary(accountId, token),
     getOrders(accountId, token),
+    getTrades(accountId, token),
     getPositions(accountId, token),
     getPositionHistory(accountId, token),
+    getFundingSettlements(accountId, token),
+    getAccountTransfers(accountId, token),
     getLedgerEntries(accountId, token),
     getAssetLedger(accountId, token),
     getWalletBalances(accountId, token)
   ])
 
-  return { account, orders, positions, positionHistory, ledgerEntries, assetLedgerEntries, walletBalances }
+  return {
+    account,
+    orders,
+    trades,
+    positions,
+    positionHistory,
+    fundingSettlements,
+    transfers,
+    ledgerEntries,
+    assetLedgerEntries,
+    walletBalances
+  }
 }
 
 export async function submitTradingOrder(payload: OrderPayload, token?: string | null) {

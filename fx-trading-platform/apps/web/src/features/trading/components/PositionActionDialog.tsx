@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react'
+import type { QuantityUnit } from '@fx-platform/shared-types'
 
 import { MultiLevelProtectionEditor } from './MultiLevelProtectionEditor'
 import type { ProtectionLevel, ProtectionType } from './MultiLevelProtectionEditor'
@@ -16,7 +17,9 @@ type Props = {
   open: boolean
   action: PositionAction
   positionQuantity: string
+  positionQuantityUnit: QuantityUnit
   quantity: string
+  quantityUnit: QuantityUnit
   marginMode: 'CROSS' | 'ISOLATED'
   marginAdjustment: MarginAdjustmentValue
   protectionLevels: readonly ProtectionLevel[]
@@ -29,6 +32,7 @@ type Props = {
   error?: string | null
   onActionChange: (action: PositionAction) => void
   onQuantityChange: (quantity: string) => void
+  onQuantityUnitChange: (quantityUnit: QuantityUnit) => void
   onMarginAdjustmentChange: (value: MarginAdjustmentValue) => void
   onProtectionLevelChange: (id: string, patch: Partial<Omit<ProtectionLevel, 'id'>>) => void
   onProtectionAdd: (type: ProtectionType) => void
@@ -52,7 +56,9 @@ export function PositionActionDialog({
   open,
   action,
   positionQuantity,
+  positionQuantityUnit,
   quantity,
+  quantityUnit,
   marginMode,
   marginAdjustment,
   protectionLevels,
@@ -65,6 +71,7 @@ export function PositionActionDialog({
   error,
   onActionChange,
   onQuantityChange,
+  onQuantityUnitChange,
   onMarginAdjustmentChange,
   onProtectionLevelChange,
   onProtectionAdd,
@@ -76,10 +83,13 @@ export function PositionActionDialog({
 
   const isolated = marginMode === 'ISOLATED'
   const actionControlsDisabled = disabled || pending
+  const nativeUnitSelected = quantityUnit === positionQuantityUnit
   const hasRequiredInput =
     action === 'FULL_CLOSE'
     || (action === 'PARTIAL_CLOSE'
-      ? partialCloseSupported && isPositive(quantity) && Number(quantity) <= Number(positionQuantity)
+      ? partialCloseSupported
+        && isPositive(quantity)
+        && (!nativeUnitSelected || Number(quantity) <= Number(positionQuantity))
       : action === 'ADJUST_MARGIN'
         ? isolated && marginAdjustmentSupported && isPositive(marginAdjustment.amount)
         : protectionSupported && protectionLevels.length > 0 && protectionLevels.every(isProtectionLevelValid))
@@ -142,17 +152,32 @@ export function PositionActionDialog({
         </div>
 
         <form className={styles.dialogForm} onSubmit={handleSubmit}>
+          {action === 'PARTIAL_CLOSE' || action === 'CREATE_PROTECTIONS' ? (
+            <label>
+              <span>Quantity unit</span>
+              <select
+                value={quantityUnit}
+                disabled={actionControlsDisabled}
+                onChange={(event) => onQuantityUnitChange(event.target.value as QuantityUnit)}
+              >
+                <option value="BASE">Base asset</option>
+                <option value="QUOTE">USDT notional</option>
+                <option value="CONTRACTS">Contracts</option>
+              </select>
+            </label>
+          ) : null}
+
           {action === 'PARTIAL_CLOSE' ? (
             <label>
-              <span>Close quantity</span>
+              <span>Close quantity ({quantityUnit})</span>
               <input
                 inputMode="decimal"
                 value={quantity}
-                max={positionQuantity}
+                max={nativeUnitSelected ? positionQuantity : undefined}
                 disabled={actionControlsDisabled}
                 onChange={(event) => onQuantityChange(event.target.value)}
               />
-              <small>Open quantity: {positionQuantity}</small>
+              <small>Open quantity: {positionQuantity} {positionQuantityUnit}</small>
             </label>
           ) : null}
 
@@ -196,6 +221,7 @@ export function PositionActionDialog({
               error={null}
               levels={protectionLevels}
               pending={pending}
+              quantityUnit={quantityUnit}
               onAdd={onProtectionAdd}
               onLevelChange={onProtectionLevelChange}
               onRemove={onProtectionRemove}

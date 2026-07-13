@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
-import { reconcileQuoteMap } from './tradingQuoteMap.ts'
+import { createUnavailableTradingQuote, expireTradingQuote, reconcileQuoteMap } from './tradingQuoteMap.ts'
 import type { TradingMarket, TradingQuote } from '../../features/market/tradingModels.ts'
 
 describe('trading quote map reconciliation', () => {
@@ -29,6 +30,98 @@ describe('trading quote map reconciliation', () => {
     assert.equal(nextQuotes.EURUSD, existingQuote)
     assert.equal(nextQuotes.GBPUSD.symbol, 'GBPUSD')
     assert.equal(nextQuotes.GBPUSD.mid, 0)
+  })
+
+  it('does not turn P0 symbol-list prices into a tradable quote before the provider quote arrives', () => {
+    const quotes = reconcileQuoteMap([{
+      ...market('BTCUSDT'),
+      category: 'crypto',
+      base: 'BTC',
+      quote: 'USDT',
+      last: 60_000,
+      high24h: 61_000,
+      low24h: 59_000,
+      tradable: true,
+      quoteTimestamp: Date.now()
+    }])
+
+    assert.equal(quotes.BTCUSDT.mid, 0)
+    assert.equal(quotes.BTCUSDT.timestamp, 0)
+    assert.equal(quotes.BTCUSDT.tradable, false)
+  })
+
+  it('clears provider prices on failure or expiry while preserving source metadata for diagnosis', () => {
+    const unavailable = createUnavailableTradingQuote('BTCUSDT')
+    const expired = expireTradingQuote({
+      ...unavailable,
+      bid: 59_999,
+      ask: 60_001,
+      mid: 60_000,
+      marketSource: {
+        providerCode: 'binance',
+        providerSymbol: 'BTCUSDT',
+        sourceMode: 'PUBLIC_EXTERNAL',
+        asOf: '2026-07-13T00:00:00.000Z',
+        expiresAt: '2026-07-13T00:00:05.000Z',
+        stale: false
+      },
+      tradable: true
+    })
+
+    assert.equal(unavailable.mid, 0)
+    assert.equal(unavailable.tradable, false)
+    assert.equal(expired.mid, 0)
+    assert.equal(expired.tradable, false)
+    assert.equal(expired.marketSource?.providerCode, 'binance')
+  })
+
+  it('invalidates the selected quote on provider failure and authoritative expiry', () => {
+    const hookSource = readFileSync(new URL('./useTradingQuotes.ts', import.meta.url), 'utf8')
+
+    assert.match(hookSource, /createUnavailableTradingQuote\(market\.symbol\)/)
+    assert.match(hookSource, /expireTradingQuote\(current\[quote\.symbol\]\)/)
+    assert.match(hookSource, /Date\.parse\(quote\.marketSource\.expiresAt\) - Date\.now\(\)/)
+    assert.doesNotMatch(hookSource, /catch\(\(error:[\s\S]*current\[market\.symbol\]/)
+  })
+
+  it('does not apply a websocket quote without complete freshness metadata', () => {
+    const hookSource = readFileSync(new URL('./useTradingQuotes.ts', import.meta.url), 'utf8')
+
+    assert.match(hookSource, /const mappedQuote = mapQuoteToTradingQuote\(quote,[\s\S]*?latestQuotes\.get\(symbolKey\)\s*\)/)
+    assert.match(hookSource, /subscribeQuote<BackendQuote>/)
+    assert.match(hookSource, /if \(!mappedQuote\.marketSource\) \{[\s\S]*scheduleQuoteRefresh\(market\)[\s\S]*return/)
+    assert.match(hookSource, /applyQuote\(mappedQuote, market\.symbol\)/)
+    assert.match(hookSource, /isFreshSource\(normalizedQuote\.marketSource/)
+  })
+
+  it('reports trust status from the freshness-normalized quote', () => {
+    const hookSource = readFileSync(new URL('./useTradingQuotes.ts', import.meta.url), 'utf8')
+
+    assert.match(hookSource, /nextQuote\.tradable === false \? \{ code: 'MARKET_DATA_STALE'/)
+    assert.doesNotMatch(hookSource, /quote\.tradable === false \? \{ code: 'MARKET_DATA_STALE'/)
+  })
+
+  it('invalidates quotes and refreshes authoritative REST data when the provider source changes', () => {
+    const hookSource = readFileSync(new URL('./useTradingQuotes.ts', import.meta.url), 'utf8')
+
+    assert.match(hookSource, /subscribeMarketSourceChanges/)
+    assert.match(hookSource, /normalizePlatformMarketSymbol\(event\.symbol\)/)
+    assert.match(hookSource, /expectedSources\.set\(symbolKey, \{ providerCode: event\.providerCode, sourceMode: event\.sourceMode \}\)/)
+    assert.match(hookSource, /clearExpiry\(market\.symbol\)/)
+    assert.match(hookSource, /latestQuotes\.set\(symbolKey, unavailableQuote\)/)
+    assert.match(hookSource, /\[market\.symbol\]: unavailableQuote/)
+    assert.match(hookSource, /refreshMarketQuote\(market\)/)
+    assert.match(hookSource, /matchesExpectedMarketSource\(quote\.marketSource, expectedSource\)/)
+    assert.match(hookSource, /refreshRunning\.has\(symbolKey\)/)
+    assert.match(hookSource, /refreshTrailing\.set\(symbolKey, market\)/)
+  })
+
+  it('keeps a source-change pin across market metadata effect restarts', () => {
+    const hookSource = readFileSync(new URL('./useTradingQuotes.ts', import.meta.url), 'utf8')
+
+    assert.match(hookSource, /const expectedSourcesRef = useRef\(new Map/)
+    assert.match(hookSource, /const expectedSources = expectedSourcesRef\.current/)
+    assert.doesNotMatch(hookSource, /useEffect\([\s\S]*?const expectedSources = new Map/)
   })
 })
 

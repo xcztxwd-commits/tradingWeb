@@ -1,4 +1,5 @@
 import styles from './TradingControls.module.css'
+import type { QuantityUnit } from '@fx-platform/shared-types'
 
 export const MAX_PROTECTION_LEVELS = 10
 
@@ -19,6 +20,7 @@ type Props = {
   maxLevels?: number
   disabled?: boolean
   pending?: boolean
+  quantityUnit?: QuantityUnit
   error?: string | null
   showQuantity?: boolean
   onLevelChange: (id: string, patch: Partial<Omit<ProtectionLevel, 'id'>>) => void
@@ -31,6 +33,7 @@ export function MultiLevelProtectionEditor({
   maxLevels = MAX_PROTECTION_LEVELS,
   disabled = false,
   pending = false,
+  quantityUnit = 'BASE',
   error,
   showQuantity = true,
   onLevelChange,
@@ -86,7 +89,7 @@ export function MultiLevelProtectionEditor({
             </label>
             {showQuantity ? (
               <label>
-                <span>Quantity</span>
+                <span>Quantity ({quantityUnit})</span>
                 <input
                   inputMode="decimal"
                   value={level.protectedQuantity}

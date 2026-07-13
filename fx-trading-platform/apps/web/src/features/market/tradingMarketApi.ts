@@ -16,6 +16,7 @@ import {
   mapInstrumentRulesToTradingRules,
   mapOrderBookToMarketData,
   mapQuoteToTradingQuote,
+  mapRecentTradeBatchToMarketData,
   mapRecentTradesToMarketData,
   mapSymbolToTradingMarket,
   tradingMarketEndpoints
@@ -99,4 +100,10 @@ export function fetchMarketOrderBook(symbol: string) {
 
 export function fetchMarketRecentTrades(symbol: string, limit = 40) {
   return apiGet<BackendRecentTrade[]>(buildMarketRecentTradesPath(symbol, limit)).then(mapRecentTradesToMarketData)
+}
+
+export function fetchMarketRecentTradeBatch(symbol: string, limit = 40) {
+  return apiGet<BackendRecentTrade[]>(buildMarketRecentTradesPath(symbol, limit)).then((trades) =>
+    mapRecentTradeBatchToMarketData(trades, symbol)
+  )
 }

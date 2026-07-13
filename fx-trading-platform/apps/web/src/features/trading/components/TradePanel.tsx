@@ -89,9 +89,10 @@ export function TradePanel({
   } | null>(null)
   const backendReady = !loginRequired && Boolean(accountId && sessionReady && onSubmitOrder)
   const sessionState = getTradePanelSessionState({ backendReady, loginRequired, sessionError, sessionMode, t })
-  const rulesTradable = rules ? rules.enabled && rules.tradable && rules.orderEnabled : true
+  const rulesTradable = Boolean(rules?.enabled && rules.tradable && rules.orderEnabled)
+  const marketDataReady = market.tradable === true
   const perpetual = market.productType === 'LINEAR_PERP'
-  const canTrade = backendReady && rulesTradable && (!perpetual || settingsReady)
+  const canTrade = marketDataReady && backendReady && rulesTradable && (!perpetual || settingsReady)
   const { attempted, handleSubmit, notice, setNotice, submittingSide } = useTradePanelSubmit({
     accountId,
     backendReady,

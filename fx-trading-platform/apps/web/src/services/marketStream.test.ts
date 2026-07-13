@@ -191,15 +191,55 @@ describe('market stream shared client', () => {
     const { subscribeTradingSessionEvents } = await importMarketStream()
     const received = []
 
-    subscribeTradingSessionEvents('acct_1', 'token-a', (event) => received.push(event))
+    subscribeTradingSessionEvents('token-a', (event) => received.push(event))
 
     const [client] = globalThis.__marketStreamFakeClients
     client.config.onConnect()
 
     assert.equal(client.config.connectHeaders.Authorization, 'Bearer token-a')
-    assert.equal(client.subscriptions[0].topic, '/topic/trading/accounts/acct_1/events')
+    assert.equal(client.subscriptions[0].topic, '/user/queue/trading-events')
 
     client.subscriptions[0].callback({ body: '{"type":"ORDER_EVENT","status":"FILLED"}' })
     assert.deepEqual(received, [{ type: 'ORDER_EVENT', status: 'FILLED' }])
+  })
+
+  it('preserves the canonical Perpetual suffix and exposes source-change events', async () => {
+    const { subscribeQuote, subscribeMarketSourceChanges } = await importMarketStream()
+    const sourceChanges = []
+
+    subscribeQuote('btc_usdt-perp', null, () => {})
+    subscribeMarketSourceChanges('btc/usdt_perp', null, (event) => sourceChanges.push(event))
+
+    const [client] = globalThis.__marketStreamFakeClients
+    client.config.onConnect()
+
+    assert.deepEqual(client.subscriptions.map((subscription) => subscription.topic), [
+      '/topic/market/quotes/BTCUSDT-PERP',
+      '/topic/market/source-changes/BTCUSDT-PERP'
+    ])
+    client.subscriptions[1].callback({
+      body: '{"type":"MARKET_SOURCE_CHANGED","symbol":"BTCUSDT-PERP","providerCode":"local-perp","sourceMode":"LOCAL_SIMULATED"}'
+    })
+    assert.equal(sourceChanges[0].providerCode, 'local-perp')
+  })
+
+  it('notifies account subscribers only when the STOMP client reconnects', async () => {
+    const { subscribeTradingSessionEvents } = await importMarketStream()
+    let reconnects = 0
+
+    subscribeTradingSessionEvents('token-a', () => {}, () => {
+      reconnects += 1
+    })
+
+    const [client] = globalThis.__marketStreamFakeClients
+    client.config.onConnect()
+    assert.equal(reconnects, 0)
+    client.config.onConnect()
+    assert.equal(reconnects, 0)
+
+    client.config.onWebSocketClose()
+    client.config.onConnect()
+
+    assert.equal(reconnects, 1)
   })
 })

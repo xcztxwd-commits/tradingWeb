@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 
 import { useTradingSettings } from '../../features/trading-settings/useTradingSettings'
 import type { OrderAdapterSettings } from '../../features/trading/services/orderAdapter'
-import type { TradingInstrumentRules, TradingMarket } from '../../features/market/tradingModels'
+import type { MarketSourceMetadata, TradingInstrumentRules, TradingMarket } from '../../features/market/tradingModels'
 import { usePerpetualReference } from './usePerpetualReference'
 
 export type PerpetualTradingControlsModel = {
@@ -29,11 +29,12 @@ type Options = {
   token?: string | null
   market: TradingMarket
   enabled: boolean
+  expectedSource?: MarketSourceMetadata
 }
 
-export function usePerpetualTradingControls({ accountId, token, market, enabled }: Options): PerpetualTradingControlsModel {
+export function usePerpetualTradingControls({ accountId, token, market, enabled, expectedSource }: Options): PerpetualTradingControlsModel {
   const settingsState = useTradingSettings({ accountId, token, symbol: market.symbol, enabled })
-  const reference = usePerpetualReference(market.symbol, enabled)
+  const reference = usePerpetualReference(market.symbol, enabled, expectedSource)
   const symbolSettings = settingsState.symbolSettings
   const positionMode = settingsState.settings?.positionMode ?? 'ONE_WAY'
   const marginMode = symbolSettings?.marginMode === 'ISOLATED' ? 'ISOLATED' : 'CROSS'

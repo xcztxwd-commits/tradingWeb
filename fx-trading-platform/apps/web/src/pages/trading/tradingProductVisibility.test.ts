@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
 import type { TradingMarket } from '../../features/market/tradingModels.ts'
 import {
   getTradingMarketsForProduct,
-  mergeWithMockMarkets,
+  mergeWithLocalTradingMarkets,
   normalizeTradingSymbol
 } from './tradingPageMarketSelection.ts'
 
@@ -13,7 +14,7 @@ const perpetualSymbols = spotSymbols.map((symbol) => `${symbol}-PERP`)
 
 describe('P0 trading product visibility', () => {
   it('shows exactly five Spot and five linear Perpetual markets', () => {
-    const merged = mergeWithMockMarkets([
+    const merged = mergeWithLocalTradingMarkets([
       market('EURUSD', 'FX_MARGIN'),
       market('BTCUSD-PERP', 'INVERSE_PERP'),
       market('BTC-USD-OPTION'),
@@ -29,7 +30,7 @@ describe('P0 trading product visibility', () => {
   })
 
   it('keeps the local fallback within the exact ten-product allowlist', () => {
-    const merged = mergeWithMockMarkets([])
+    const merged = mergeWithLocalTradingMarkets([])
 
     assert.equal(merged.length, 10)
     assert.deepEqual(merged.map(({ symbol }) => symbol), [...spotSymbols, ...perpetualSymbols])
@@ -39,6 +40,15 @@ describe('P0 trading product visibility', () => {
     assert.equal(normalizeTradingSymbol(' btcusdt-perp '), 'BTCUSDT-PERP')
     assert.equal(normalizeTradingSymbol('BTC-USDT-SWAP'), 'BTC-USDT-SWAP')
     assert.notEqual(normalizeTradingSymbol('BTCUSDT-PERP'), 'BTCUSDTPERP')
+  })
+
+  it('uses local entries only as zero-price metadata and never imports ready-path mock markets', () => {
+    const source = readFileSync(new URL('./tradingPageMarketSelection.ts', import.meta.url), 'utf8')
+    const merged = mergeWithLocalTradingMarkets([])
+
+    assert.doesNotMatch(source, /mockTradingData/)
+    assert.ok(merged.every((market) => market.last === 0 && market.high24h === 0 && market.low24h === 0))
+    assert.ok(merged.every((market) => market.tradable === false && market.source === 'metadata-only'))
   })
 })
 

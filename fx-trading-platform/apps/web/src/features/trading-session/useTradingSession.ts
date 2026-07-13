@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -12,10 +12,15 @@ import {
   updateTradingPositionProtection
 } from './tradingSession'
 import type { PositionMutation } from './tradingSession'
+import {
+  createAccountRefreshCoordinator,
+  createLatestSingleFlightRefreshGate
+} from './accountRefreshCoordinator'
 import { getSessionStatus } from '../../services/authApi'
 import type { SessionAuthStatus } from '../../services/authApi'
 import { subscribeTradingSessionEvents } from '../../services/marketStream'
 import type { PositionResponse, OrderResponse } from '../../components/tables/types'
+import type { AccountTransferResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
 import type { AccountSummary, AssetLedgerEntry, LedgerEntry, OcoOrderPayload, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
 import { clearStoredAuthToken, readStoredAuthToken } from './tradingSessionStorage'
 
@@ -24,7 +29,6 @@ type Options = {
 }
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
-type TradingSessionVisibility = 'visible' | 'hidden' | string
 
 const defaultTranslate: Translate = (key) => {
   if (key === 'trading.backendSessionFailed') return 'Backend session connection failed. Try again later.'
@@ -59,25 +63,16 @@ export function formatTradingSessionError(error: unknown, t: Translate = default
   return t('trading.backendSessionFailed')
 }
 
-export function getTradingSessionRefreshMs(
-  refreshMs: number,
-  visibilityState: TradingSessionVisibility = getDocumentVisibilityState()
-) {
-  return visibilityState === 'hidden' ? Math.max(refreshMs * 6, 15000) : refreshMs
-}
-
-function getDocumentVisibilityState(): TradingSessionVisibility {
-  if (typeof document === 'undefined') return 'visible'
-  return document.visibilityState
-}
-
-export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
+export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
   const { t } = useTranslation()
   const [token, setToken] = useState<string | null>(null)
   const [account, setAccount] = useState<AccountSummary>()
   const [orders, setOrders] = useState<OrderResponse[]>([])
+  const [trades, setTrades] = useState<Trade[]>([])
   const [positions, setPositions] = useState<PositionResponse[]>([])
   const [positionHistory, setPositionHistory] = useState<PositionResponse[]>([])
+  const [fundingSettlements, setFundingSettlements] = useState<FundingSettlement[]>([])
+  const [transfers, setTransfers] = useState<AccountTransferResponse[]>([])
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([])
   const [assetLedgerEntries, setAssetLedgerEntries] = useState<AssetLedgerEntry[]>([])
   const [walletBalances, setWalletBalances] = useState<WalletBalance[]>([])
@@ -86,9 +81,10 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
   const [sessionAuthStatus, setSessionAuthStatus] = useState<SessionAuthStatus>('guest')
   const [lastOrderError, setLastOrderError] = useState<unknown>(null)
   const [loginRequired, setLoginRequired] = useState(false)
-  const [visibilityState, setVisibilityState] = useState<TradingSessionVisibility>(() => getDocumentVisibilityState())
-  const accountId = useMemo(() => account?.id, [account])
-  const effectiveRefreshMs = getTradingSessionRefreshMs(refreshMs, visibilityState)
+  const [refreshGate] = useState(() =>
+    createLatestSingleFlightRefreshGate<Awaited<ReturnType<typeof loadTradingAccountData>>>()
+  )
+  const accountId = account?.id
 
   const markSessionError = useCallback((error: unknown) => {
     setSessionError(formatTradingSessionError(error, t))
@@ -98,8 +94,11 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
   const applyAccountData = useCallback((data: Awaited<ReturnType<typeof loadTradingAccountData>>) => {
     setAccount(data.account)
     setOrders(data.orders)
+    setTrades(data.trades)
     setPositions(data.positions)
     setPositionHistory(data.positionHistory)
+    setFundingSettlements(data.fundingSettlements)
+    setTransfers(data.transfers)
     setLedgerEntries(data.ledgerEntries)
     setAssetLedgerEntries(data.assetLedgerEntries)
     setWalletBalances(data.walletBalances)
@@ -109,23 +108,31 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
   const refreshAccountData = useCallback(
     async (accessToken = token, currentAccountId = accountId, isActive: () => boolean = () => true) => {
       if (!accessToken || !currentAccountId) return
-      const data = await loadTradingAccountData(accessToken, currentAccountId)
-      if (isActive()) applyAccountData(data)
+      await refreshGate.request(
+        () => loadTradingAccountData(accessToken, currentAccountId),
+        (data) => {
+          if (isActive()) applyAccountData(data)
+        }
+      )
     },
-    [accountId, applyAccountData, token]
+    [accountId, applyAccountData, refreshGate, token]
   )
 
   const clearSessionSnapshot = useCallback(() => {
+    refreshGate.invalidate()
     setToken(null)
     setAccount(undefined)
     setOrders([])
+    setTrades([])
     setPositions([])
     setPositionHistory([])
+    setFundingSettlements([])
+    setTransfers([])
     setLedgerEntries([])
     setAssetLedgerEntries([])
     setWalletBalances([])
     setSessionReady(false)
-  }, [])
+  }, [refreshGate])
 
   const requireLogin = useCallback((authStatus: SessionAuthStatus = 'guest') => {
     clearStoredAuthToken()
@@ -137,6 +144,7 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
 
   const loadSessionSnapshot = useCallback(
     async (isActive: () => boolean = () => true) => {
+      refreshGate.invalidate()
       setSessionError(null)
       setSessionReady(false)
       setLoginRequired(false)
@@ -161,7 +169,7 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
       await refreshAccountData(savedToken, account.id, isActive)
       if (isActive()) setSessionReady(true)
     },
-    [refreshAccountData, requireLogin]
+    [refreshAccountData, refreshGate, requireLogin]
   )
 
   const retrySession = useCallback(async () => {
@@ -175,6 +183,10 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
       markSessionError(error)
     }
   }, [loadSessionSnapshot, markSessionError, requireLogin])
+
+  useEffect(() => {
+    return () => refreshGate.invalidate()
+  }, [refreshGate])
 
   useEffect(() => {
     let active = true
@@ -199,74 +211,34 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
   }, [loadSessionSnapshot, markSessionError, requireLogin])
 
   useEffect(() => {
-    if (typeof document === 'undefined') return
-
-    const syncVisibility = () => setVisibilityState(getDocumentVisibilityState())
-    syncVisibility()
-    document.addEventListener('visibilitychange', syncVisibility)
-
-    return () => {
-      document.removeEventListener('visibilitychange', syncVisibility)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (visibilityState !== 'visible' || !token || !accountId || !sessionReady) return
+    if (!token || !accountId || !sessionReady) return
     let active = true
 
-    void refreshAccountData(token, accountId, () => active).catch((error) => {
-      if (!active) return
-      if (isAuthSessionFailure(error)) {
-        requireLogin()
-        return
+    const coordinator = createAccountRefreshCoordinator({
+      refresh: () => refreshAccountData(token, accountId, () => active),
+      pollMs: refreshMs,
+      onError: (error) => {
+        if (!active) return
+        if (isAuthSessionFailure(error)) {
+          requireLogin()
+          return
+        }
+        markSessionError(error)
       }
-      markSessionError(error)
     })
-
-    return () => {
-      active = false
-    }
-  }, [accountId, markSessionError, refreshAccountData, requireLogin, sessionReady, token, visibilityState])
-
-  useEffect(() => {
-    if (!token || !accountId || !sessionReady) return
-    let active = true
-    const interval = window.setInterval(() => {
-      void refreshAccountData(token, accountId, () => active).catch((error) => {
-        if (!active) return
-        if (isAuthSessionFailure(error)) {
-          requireLogin()
-          return
-        }
-        markSessionError(error)
-      })
-    }, effectiveRefreshMs)
-
-    return () => {
-      active = false
-      window.clearInterval(interval)
-    }
-  }, [accountId, effectiveRefreshMs, markSessionError, refreshAccountData, requireLogin, sessionReady, token])
-
-  useEffect(() => {
-    if (!token || !accountId || !sessionReady) return
-    let active = true
-    const unsubscribe = subscribeTradingSessionEvents(accountId, token, () => {
-      void refreshAccountData(token, accountId, () => active).catch((error) => {
-        if (!active) return
-        if (isAuthSessionFailure(error)) {
-          requireLogin()
-          return
-        }
-        markSessionError(error)
-      })
-    })
+    coordinator.start()
+    const unsubscribe = subscribeTradingSessionEvents(
+      token,
+      () => coordinator.notifyEvent(),
+      () => coordinator.notifyReconnect()
+    )
 
     return () => {
       active = false
       unsubscribe()
+      coordinator.dispose()
     }
-  }, [accountId, markSessionError, refreshAccountData, requireLogin, sessionReady, token])
+  }, [accountId, markSessionError, refreshAccountData, refreshMs, requireLogin, sessionReady, token])
 
   const submitOrder = useCallback(
     async (payload: OrderPayload) => {
@@ -338,8 +310,11 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
     account,
     accountId,
     orders,
+    trades,
     positions,
     positionHistory,
+    fundingSettlements,
+    transfers,
     ledgerEntries,
     assetLedgerEntries,
     walletBalances,

@@ -23,7 +23,7 @@ describe('P0 Spot and perpetual trading controls', () => {
   })
 
   it('submits canonical settings and real OCO payloads without mock balances', () => {
-    assert.doesNotMatch(tradePanel, /useMockBalances/)
+    assert.doesNotMatch(tradePanel, /tradeFormTestFixtures/)
     assert.match(tradePanel, /adapterSettings/)
     assert.match(tradePanel, /onSubmitOco/)
     assert.match(orderFormSide, /PerpetualOrderOptions/)

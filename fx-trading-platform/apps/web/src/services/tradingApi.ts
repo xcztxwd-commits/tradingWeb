@@ -2,13 +2,19 @@ import { apiGet, apiPatch, apiPost } from './apiClient.ts'
 import type {
   AdjustPositionMarginRequest,
   AdjustPositionMarginResponse,
+  AccountTransferPageResponse,
+  AccountTransferResponse,
   ClosePositionRequest,
   CreateProtectionRequest,
+  FundingSettlement,
+  FundingSettlementPageResponse,
   OcoOrderGroupResponse,
   OrderPageResponse,
   PositionMode,
   PositionPageResponse,
   TradingSettingsResponse,
+  Trade,
+  TradePageResponse,
   UpdateSymbolSettingsRequest
 } from '@fx-platform/shared-types'
 import type { OcoOrderPayload, OrderEventResponse, OrderPayload, UpdateOrderPayload, UpdatePositionProtectionPayload } from '../types/trading'
@@ -16,6 +22,9 @@ import type { OrderResponse, PositionResponse } from '../components/tables/types
 
 type OrderPage = Omit<OrderPageResponse, 'items'> & { items?: OrderResponse[] }
 type PositionPage = Omit<PositionPageResponse, 'items'> & { items?: PositionResponse[] }
+type TradePage = Omit<TradePageResponse, 'items'> & { items?: Trade[] }
+type FundingPage = Omit<FundingSettlementPageResponse, 'items'> & { items?: FundingSettlement[] }
+type TransferPage = Omit<AccountTransferPageResponse, 'items'> & { items?: AccountTransferResponse[] }
 
 export function createOrder(payload: OrderPayload, token?: string) {
   return apiPost<OrderResponse>('/api/trading/orders', payload, token)
@@ -49,6 +58,23 @@ export function getPositions(accountId: string, token: string) {
 
 export function getPositionHistory(accountId: string, token: string) {
   return apiGet<PositionPage>(`/api/trading/positions/history?accountId=${encodeURIComponent(accountId)}`, token)
+    .then((page) => page.items ?? [])
+}
+
+export function getTrades(accountId: string, token: string) {
+  return apiGet<TradePage>(`/api/trading/trades?accountId=${encodeURIComponent(accountId)}`, token)
+    .then((page) => page.items ?? [])
+}
+
+export function getFundingSettlements(accountId: string, token: string) {
+  return apiGet<FundingPage>(
+    `/api/trading/funding/settlements?accountId=${encodeURIComponent(accountId)}`,
+    token
+  ).then((page) => page.items ?? [])
+}
+
+export function getAccountTransfers(accountId: string, token: string) {
+  return apiGet<TransferPage>(`/api/accounts/${encodeURIComponent(accountId)}/transfers`, token)
     .then((page) => page.items ?? [])
 }
 

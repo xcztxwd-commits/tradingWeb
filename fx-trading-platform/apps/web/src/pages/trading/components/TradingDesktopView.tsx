@@ -10,7 +10,7 @@ import { RightTradingPanel } from './RightTradingPanel'
 import { SymbolHeader } from './SymbolHeader'
 import { PerpetualTradingControls } from './PerpetualTradingControls'
 import styles from '../TradingPage.module.css'
-import { shouldAllowChartMockFallback, type TradingTerminalViewProps } from '../tradingPageViewModels'
+import type { TradingTerminalViewProps } from '../tradingPageViewModels'
 
 export function TradingDesktopView({
   accountId,
@@ -84,7 +84,6 @@ export function TradingDesktopView({
               token={token}
               orders={accountPanel.orders}
               positions={accountPanel.positions}
-              allowMockFallback={shouldAllowChartMockFallback(market)}
               onChartSettingsChange={chartCallbacks.onChartSettingsChange}
               onResetChartSettings={chartCallbacks.onResetChartSettings}
               onChartTypeChange={chartCallbacks.onChartTypeChange}
@@ -135,8 +134,11 @@ export function TradingDesktopView({
               ledgerEntries={accountPanel.ledgerEntries}
               loading={accountPanel.loading}
               orders={accountPanel.orders}
+              trades={accountPanel.trades}
               positions={accountPanel.positions}
               positionHistory={accountPanel.positionHistory}
+              fundingSettlements={accountPanel.fundingSettlements}
+              transfers={accountPanel.transfers}
               sessionReady={accountPanel.sessionReady}
               currentSymbol={symbol}
               onClosePosition={accountPanel.onClosePosition}

@@ -471,6 +471,19 @@
   pointer-events: none;
 }
 
+.sourceBadge {
+  margin-left: auto;
+}
+
+.emptyState {
+  display: grid;
+  min-height: 120px;
+  place-items: center;
+  padding: 16px;
+  color: var(--trading-muted);
+  text-align: center;
+}
+
 @media (max-width: 760px) {
   .panel {
     min-height: 0;

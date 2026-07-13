@@ -2,10 +2,12 @@ import type { TradeMarket } from '../types/order'
 import { parseSymbolAssets } from '../utils/symbols.ts'
 
 type Snapshot = {
+  symbol?: string
   bids: Array<{ price: number }>
   asks: Array<{ price: number }>
   lastPrice: number
   updatedAt?: number
+  tradable?: boolean
 }
 
 type MarketProfile = {
@@ -19,9 +21,10 @@ export function createPanelMarket(symbol: string, snapshot: Snapshot, profile: M
   const { baseAsset, quoteAsset } = parseSymbolAssets(symbol)
   const normalizedSymbol = normalizePlatformSymbol(symbol)
 
-  const bestBid = snapshot.bids[0]?.price ?? 0
-  const bestAsk = snapshot.asks[0]?.price ?? 0
-  const lastPrice = snapshot.lastPrice || (bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : 0)
+  const marketDataReady = snapshot.tradable === true && normalizePlatformSymbol(snapshot.symbol ?? '') === normalizedSymbol
+  const bestBid = marketDataReady ? snapshot.bids[0]?.price ?? 0 : 0
+  const bestAsk = marketDataReady ? snapshot.asks[0]?.price ?? 0 : 0
+  const lastPrice = marketDataReady ? snapshot.lastPrice || (bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : 0) : 0
   const leverage = resolveMarketLeverage(profile.leverage)
   const productType = profile.productType
 
@@ -37,6 +40,7 @@ export function createPanelMarket(symbol: string, snapshot: Snapshot, profile: M
     leverage,
     productType,
     quoteTimestamp: snapshot.updatedAt,
+    tradable: marketDataReady,
     rules: profile.rules
   }
 }

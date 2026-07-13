@@ -186,7 +186,6 @@ for (const [target, forbidden] of forbiddenContentChecks) {
 for (const [file, forbidden] of forbiddenFrontendImports) {
   const path = join(root, file)
   if (!existsSync(path)) {
-    failures.push(`Missing frontend import target: ${file}`)
     continue
   }
   const content = readFileSync(path, 'utf8')

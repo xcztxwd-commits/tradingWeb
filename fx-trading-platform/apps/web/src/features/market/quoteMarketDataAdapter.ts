@@ -1,10 +1,10 @@
-import { subscribeOrderBook, subscribeQuote, subscribeRecentTrades } from '../../services/marketStream'
-import { fetchMarketOrderBook, fetchMarketQuote, fetchMarketRecentTrades } from './tradingMarketApi'
-import { mapOrderBookToMarketData, mapQuoteToTradingQuote, mapRecentTradesToMarketData } from './tradingMarketAdapters'
-import type { BackendOrderBook, BackendQuote, BackendRecentTrade } from './tradingMarketAdapters'
-import type { TradingQuote } from './tradingModels'
+import { subscribeMarketSourceChanges, subscribeOrderBook, subscribeQuote, subscribeRecentTrades } from '../../services/marketStream'
+import type { MarketSourceChangedEvent } from '../../services/marketStream'
+import { createAuthoritativeMarketSnapshot, matchesExpectedMarketSource, unavailableSnapshot } from './authoritativeMarketSnapshot.ts'
+import { fetchMarketOrderBook, fetchMarketQuote, fetchMarketRecentTradeBatch } from './tradingMarketApi'
+import type { MarketOrderBook, MarketTradeBatch } from './marketDataTypes.ts'
+import type { MarketSourceMode, TradingQuote } from './tradingModels'
 import { marketDataStore } from './marketDataStore'
-import { createQuoteMarketDataSnapshot } from './quoteMarketDataSnapshot'
 
 type AdapterStore = typeof marketDataStore
 
@@ -43,48 +43,100 @@ export function startQuoteMarketDataAdapter(symbol: string, token: string | null
 
 function startQuoteSession(symbol: string, token: string | null, store: AdapterStore) {
   let latestQuote: TradingQuote | undefined
+  let latestOrderBook: MarketOrderBook | undefined
+  let latestTrades: MarketTradeBatch | undefined
+  let expectedSource: { providerCode: string; sourceMode: MarketSourceMode } | undefined
   let disposed = false
-  let backendDepthReady = false
+  let expiryTimer: ReturnType<typeof globalThis.setTimeout> | undefined
+  let refreshTimer: ReturnType<typeof globalThis.setTimeout> | undefined
+  let refreshRunning = false
+  let refreshTrailing = false
 
-  const applyQuote = (quote: TradingQuote) => {
-    latestQuote = quote
-    if (backendDepthReady) {
-      store.setLastPrice(quote.mid, quote.timestamp)
-    } else {
-      store.reset(createQuoteMarketDataSnapshot(quote))
+  store.reset(unavailableSnapshot('loading'))
+
+  const publish = () => {
+    if (disposed) return
+    if (expiryTimer) globalThis.clearTimeout(expiryTimer)
+    expiryTimer = undefined
+
+    const snapshot = createAuthoritativeMarketSnapshot(latestQuote, latestOrderBook, latestTrades)
+    if (expectedSource) {
+      if (snapshot.status !== 'ready' || !snapshot.source || !matchesExpectedMarketSource(snapshot.source, expectedSource)) {
+        store.reset(unavailableSnapshot('source-changing'))
+        return
+      }
+    }
+    store.reset(snapshot)
+    if (snapshot.status !== 'ready' || !snapshot.source) return
+
+    const expiresIn = Date.parse(snapshot.source.expiresAt) - Date.now()
+    expiryTimer = globalThis.setTimeout(() => {
+      if (!disposed) store.reset(unavailableSnapshot('stale', snapshot.source))
+    }, Math.max(0, expiresIn))
+  }
+
+  const refreshBundle = async () => {
+    if (disposed) return
+    if (refreshRunning) {
+      refreshTrailing = true
+      return
+    }
+    refreshRunning = true
+    try {
+      const [quote, orderBook, trades] = await Promise.all([
+        fetchMarketQuote(symbol),
+        fetchMarketOrderBook(symbol),
+        fetchMarketRecentTradeBatch(symbol)
+      ])
+      if (disposed) return
+      latestQuote = quote
+      latestOrderBook = orderBook
+      latestTrades = trades
+      publish()
+    } catch {
+      if (!disposed) store.reset(unavailableSnapshot(expectedSource ? 'source-changing' : 'unavailable'))
+    } finally {
+      refreshRunning = false
+      if (!disposed && refreshTrailing) {
+        refreshTrailing = false
+        void refreshBundle()
+      }
     }
   }
 
-  const applyOrderBook = (orderBook: ReturnType<typeof mapOrderBookToMarketData>) => {
-    backendDepthReady = true
-    store.setOrderBook([
-      ...orderBook.bids.map((level) => ({ ...level, side: 'bid' as const })),
-      ...orderBook.asks.map((level) => ({ ...level, side: 'ask' as const }))
-    ])
-    store.setLastPrice(latestQuote?.mid ?? orderBook.lastPrice, latestQuote?.timestamp)
+  const scheduleBundleRefresh = () => {
+    if (disposed || refreshTimer) return
+    refreshTimer = globalThis.setTimeout(() => {
+      refreshTimer = undefined
+      void refreshBundle()
+    }, 200)
   }
 
-  void fetchMarketQuote(symbol).then(applyQuote).catch(() => {
-    if (!disposed) store.reset()
-  })
-  void fetchMarketOrderBook(symbol).then(applyOrderBook).catch(() => undefined)
-  void fetchMarketRecentTrades(symbol).then((trades) => store.setRecentTrades(trades)).catch(() => undefined)
+  void refreshBundle()
 
-  const unsubscribeQuote = subscribeQuote(symbol, token, (quote) => {
-    applyQuote(mapQuoteToTradingQuote(quote as BackendQuote, latestQuote))
-  })
-  const unsubscribeOrderBook = subscribeOrderBook<BackendOrderBook>(symbol, token, (orderBook) => {
-    applyOrderBook(mapOrderBookToMarketData(orderBook))
-  })
-  const unsubscribeRecentTrades = subscribeRecentTrades<BackendRecentTrade[]>(symbol, token, (trades) => {
-    store.setRecentTrades(mapRecentTradesToMarketData(trades))
+  const unsubscribeQuote = subscribeQuote(symbol, token, scheduleBundleRefresh)
+  const unsubscribeOrderBook = subscribeOrderBook(symbol, token, scheduleBundleRefresh)
+  const unsubscribeRecentTrades = subscribeRecentTrades(symbol, token, scheduleBundleRefresh)
+  const unsubscribeSourceChanges = subscribeMarketSourceChanges(symbol, token, (event: MarketSourceChangedEvent) => {
+    expectedSource = { providerCode: event.providerCode, sourceMode: event.sourceMode }
+    latestQuote = undefined
+    latestOrderBook = undefined
+    latestTrades = undefined
+    if (expiryTimer) globalThis.clearTimeout(expiryTimer)
+    expiryTimer = undefined
+    store.reset(unavailableSnapshot('source-changing'))
+    void refreshBundle()
   })
 
   return () => {
     disposed = true
+    if (expiryTimer) globalThis.clearTimeout(expiryTimer)
+    if (refreshTimer) globalThis.clearTimeout(refreshTimer)
+    refreshTrailing = false
     unsubscribeQuote()
     unsubscribeOrderBook()
     unsubscribeRecentTrades()
+    unsubscribeSourceChanges()
   }
 }
 

@@ -23,6 +23,27 @@ export type TradeItem = {
 export type OrderBookSide = 'bid' | 'ask'
 
 export type MarketDataSnapshot = OrderBookState & {
+  symbol?: string
   recentTrades: TradeItem[]
   updatedAt?: number
+  source?: MarketSourceMetadata
+  componentSources?: {
+    quote: MarketSourceMetadata
+    orderBook: MarketSourceMetadata
+    trades: MarketSourceMetadata
+  }
+  status?: 'loading' | 'ready' | 'stale' | 'source-changing' | 'unavailable'
+  tradable?: boolean
 }
+
+export type MarketOrderBook = OrderBookState & {
+  symbol: string
+  source?: MarketSourceMetadata
+}
+
+export type MarketTradeBatch = {
+  symbol: string
+  recentTrades: TradeItem[]
+  source?: MarketSourceMetadata
+}
+import type { MarketSourceMetadata } from './tradingModels.ts'

@@ -24,9 +24,11 @@ describe('trade panel market model', () => {
 
   it('uses the current quote snapshot instead of the BTC mock market for BTCUSDT', () => {
     const market = createPanelMarket('BTCUSDT', {
+      symbol: 'BTCUSDT',
       bids: [{ price: 67123.4 }],
       asks: [{ price: 67124.8 }],
-      lastPrice: 67124.1
+      lastPrice: 67124.1,
+      tradable: true
     })
 
     assert.equal(market.symbol, 'BTCUSDT')
@@ -41,6 +43,46 @@ describe('trade panel market model', () => {
     assert.equal(market.symbol, 'ETHUSDT')
     assert.equal(market.bestBid, 0)
     assert.equal(market.bestAsk, 0)
+    assert.equal(market.lastPrice, 0)
+  })
+
+  it('clears all executable prices when the authoritative bundle is incomplete or stale', () => {
+    const market = createPanelMarket('BTCUSDT', {
+      bids: [{ price: 59_999 }],
+      asks: [{ price: 60_001 }],
+      lastPrice: 60_000,
+      updatedAt: Date.now(),
+      tradable: false
+    })
+
+    assert.equal(market.tradable, false)
+    assert.equal(market.lastPrice, 0)
+    assert.equal(market.bestBid, 0)
+    assert.equal(market.bestAsk, 0)
+  })
+
+  it('fails closed when the market snapshot does not explicitly declare itself tradable', () => {
+    const market = createPanelMarket('BTCUSDT', {
+      bids: [{ price: 59_999 }],
+      asks: [{ price: 60_001 }],
+      lastPrice: 60_000,
+      updatedAt: Date.now()
+    })
+
+    assert.equal(market.tradable, false)
+    assert.equal(market.lastPrice, 0)
+  })
+
+  it('fails closed during a symbol switch when the snapshot still belongs to the previous symbol', () => {
+    const market = createPanelMarket('ETHUSDT', {
+      symbol: 'BTCUSDT',
+      bids: [{ price: 59_999 }],
+      asks: [{ price: 60_001 }],
+      lastPrice: 60_000,
+      tradable: true
+    })
+
+    assert.equal(market.tradable, false)
     assert.equal(market.lastPrice, 0)
   })
 

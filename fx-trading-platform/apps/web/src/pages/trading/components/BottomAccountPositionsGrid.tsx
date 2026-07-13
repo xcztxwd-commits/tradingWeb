@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { QuantityUnit } from '@fx-platform/shared-types'
 
 import type { PositionResponse } from '../../../components/tables/types'
 import type { PositionMutation } from '../../../features/trading-session/tradingSession'
@@ -7,7 +8,7 @@ import { PositionActionDialog } from '../../../features/trading/components/Posit
 import type { MarginAdjustmentValue, PositionAction } from '../../../features/trading/components/PositionActionDialog'
 import type { ProtectionLevel, ProtectionType } from '../../../features/trading/components/MultiLevelProtectionEditor'
 import { EmptyState } from './BottomAccountEmptyState'
-import { createPositionDisplayRow } from './positionDisplayModel'
+import { createPositionDisplayRow, resolvePositionQuantityUnit } from './positionDisplayModel'
 import styles from './BottomAccountPanel.module.css'
 
 export type PositionMutationHandler = (
@@ -34,6 +35,7 @@ export function PositionsGrid({
   const [selectedPosition, setSelectedPosition] = useState<PositionResponse | null>(null)
   const [action, setAction] = useState<PositionAction>('FULL_CLOSE')
   const [quantity, setQuantity] = useState('')
+  const [quantityUnit, setQuantityUnit] = useState<QuantityUnit>('CONTRACTS')
   const [partialCloseClientOrderId, setPartialCloseClientOrderId] = useState('')
   const [marginAdjustment, setMarginAdjustment] = useState(initialMarginAdjustment)
   const [protectionLevels, setProtectionLevels] = useState<ProtectionLevel[]>([])
@@ -46,6 +48,7 @@ export function PositionsGrid({
     setSelectedPosition(position)
     setAction('FULL_CLOSE')
     setQuantity('')
+    setQuantityUnit(resolvePositionQuantityUnit(position))
     setPartialCloseClientOrderId(createClientOrderId('partial-close'))
     setMarginAdjustment(initialMarginAdjustment)
     setProtectionLevels([])
@@ -78,13 +81,27 @@ export function PositionsGrid({
     setProtectionLevels((current) => current.filter((level) => level.id !== id))
   }
 
+  const changeQuantityUnit = (nextUnit: QuantityUnit) => {
+    setQuantityUnit(nextUnit)
+    setQuantity('')
+    setProtectionLevels((current) => current.map((level) => ({ ...level, protectedQuantity: '' })))
+  }
+
   const confirmPositionAction = async () => {
     if (!selectedPosition || !onClosePosition) return
     const version = selectedPosition.version ?? undefined
     try {
       setPending(true)
       setError(null)
-      const mutation = buildPositionMutation(action, quantity, partialCloseClientOrderId, marginAdjustment, protectionLevels, version)
+      const mutation = buildPositionMutation(
+        action,
+        quantity,
+        quantityUnit,
+        partialCloseClientOrderId,
+        marginAdjustment,
+        protectionLevels,
+        version
+      )
       await onClosePosition(selectedPosition, mutation)
       setSelectedPosition(null)
     } catch (caught) {
@@ -108,6 +125,7 @@ export function PositionsGrid({
         <thead>
           <tr>
             <th>{t('positions.instrument')}</th>
+            <th>{t('positions.positionSide')}</th>
             <th>{t('positions.positionSize')}</th>
             <th>{t('positions.markPrice')}</th>
             <th>{t('positions.openAveragePrice')}</th>
@@ -138,6 +156,7 @@ export function PositionsGrid({
                   <span className={styles.positionSymbol}>{row.instrument}</span>
                   <span className={styles.positionMeta}>{row.leverage}</span>
                 </td>
+                <td>{row.positionSide}</td>
                 <td>{row.quantity}</td>
                 <td>{row.markPrice}</td>
                 <td>{row.openPrice}</td>
@@ -186,9 +205,11 @@ export function PositionsGrid({
         partialCloseSupported={selectedIsLinearPerpetual}
         pending={pending}
         positionQuantity={String(selectedPosition?.lots ?? '')}
+        positionQuantityUnit={selectedPosition ? resolvePositionQuantityUnit(selectedPosition) : 'CONTRACTS'}
         protectionLevels={protectionLevels}
         protectionSupported={selectedIsLinearPerpetual}
         quantity={quantity}
+        quantityUnit={quantityUnit}
         onActionChange={setAction}
         onClose={closePositionActions}
         onConfirm={() => void confirmPositionAction()}
@@ -197,6 +218,7 @@ export function PositionsGrid({
         onProtectionLevelChange={updateProtection}
         onProtectionRemove={removeProtection}
         onQuantityChange={setQuantity}
+        onQuantityUnitChange={changeQuantityUnit}
       />
     </>
   )
@@ -210,6 +232,7 @@ function isLinearPerpetualPosition(position: PositionResponse) {
 function buildPositionMutation(
   action: PositionAction,
   quantity: string,
+  quantityUnit: QuantityUnit,
   partialCloseClientOrderId: string,
   marginAdjustment: MarginAdjustmentValue,
   protectionLevels: readonly ProtectionLevel[],
@@ -223,7 +246,7 @@ function buildPositionMutation(
         type: 'PARTIAL_CLOSE',
         payload: {
           quantity: Number(quantity),
-          quantityUnit: 'CONTRACTS',
+          quantityUnit,
           clientOrderId: partialCloseClientOrderId
         }
       }
@@ -245,7 +268,7 @@ function buildPositionMutation(
         payloads: protectionLevels.map((level) => ({
           protectionType: level.protectionType,
           quantity: Number(level.protectedQuantity),
-          quantityUnit: 'CONTRACTS',
+          quantityUnit,
           triggerPrice: Number(level.triggerPrice),
           triggerExecutionType: level.executionType,
           ...(level.executionType === 'LIMIT' ? { price: Number(level.limitPrice) } : {}),

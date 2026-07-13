@@ -21,6 +21,8 @@ import type { PersistedChartDrawing } from '../chartDrawingPersistence'
 import { buildTradeMarkerOverlays, tradeMarkerOverlayGroupId } from '../chartTradeMarkers'
 import type { ChartTradeMarker } from '../chartTradeMarkers'
 import { formatMarketPrice, getPricePrecision, toKLinePeriod } from '../../../features/market/tradingModels'
+import { mapQuoteToTradingQuote } from '../../../features/market/tradingMarketAdapters'
+import type { BackendQuote } from '../../../features/market/tradingMarketAdapters'
 import { registerTradingGeneratedIndicators } from '../generatedTradingIndicators'
 import { registerTradingDrawingOverlays } from '../tradingDrawingOverlays'
 import type { TradingCandle, TradingPeriod } from '../../../features/market/tradingModels'
@@ -46,7 +48,6 @@ type Props = {
   drawingClearRequest: number
   drawingsVisible: boolean
   tradeMarkers: ChartTradeMarker[]
-  allowMockFallback?: boolean
   onDrawingComplete: () => void
   onCandlePriceSelect?: (price: number) => void
   fullscreenActive: boolean
@@ -119,7 +120,6 @@ export const KLineChartPanel = memo(function KLineChartPanel({
   drawingClearRequest,
   drawingsVisible,
   tradeMarkers,
-  allowMockFallback = false,
   onDrawingComplete,
   onCandlePriceSelect,
   fullscreenActive
@@ -342,7 +342,6 @@ export const KLineChartPanel = memo(function KLineChartPanel({
         }
 
         void loadChartCandles(symbol, period, undefined, resolveHistoricalCandleEndTime(type, timestamp), {
-          allowMockFallback,
           count: historicalCandleBatchSize
         })
           .then((candles) => {
@@ -388,7 +387,7 @@ export const KLineChartPanel = memo(function KLineChartPanel({
     return () => {
       disposed = true
     }
-  }, [allowMockFallback, period, symbol])
+  }, [period, symbol])
 
   useEffect(() => {
     const chart = chartRef.current
@@ -444,10 +443,13 @@ export const KLineChartPanel = memo(function KLineChartPanel({
   }, [period, tradeMarkers])
 
   useEffect(() => {
-    return subscribeQuote(symbol, token, (quote) => {
+    return subscribeQuote<BackendQuote>(symbol, token, (quote) => {
       const callback = realtimeBarCallbackRef.current
-      const price = Number(quote.mid)
-      const nextBar = applyRealtimeQuoteToChart(latestRealtimeBarRef.current, period, quote.timestamp, price)
+      const nextBar = applyAuthoritativeRealtimeQuoteToChart(
+        latestRealtimeBarRef.current,
+        period,
+        quote
+      )
       if (!callback || !nextBar) return
       latestRealtimeBarRef.current = nextBar
       callback(nextBar)
@@ -1054,6 +1056,17 @@ export function applyRealtimeQuoteToChart(
     volume: 0,
     turnover: 0
   }
+}
+
+export function applyAuthoritativeRealtimeQuoteToChart(
+  previous: TradingCandle | null,
+  period: TradingPeriod,
+  quote: BackendQuote,
+  now = Date.now()
+): TradingCandle | null {
+  const tradingQuote = mapQuoteToTradingQuote(quote, undefined, now)
+  if (!tradingQuote.marketSource || tradingQuote.tradable !== true) return null
+  return applyRealtimeQuoteToChart(previous, period, tradingQuote.timestamp, tradingQuote.mid)
 }
 
 const terminalChartStyles = {

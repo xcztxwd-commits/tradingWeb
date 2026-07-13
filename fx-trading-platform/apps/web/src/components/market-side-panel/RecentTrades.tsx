@@ -25,9 +25,13 @@ export function RecentTrades({ aggregationStep, snapshot, symbol, onSelectPrice 
         <span>{t('common.time')}</span>
       </div>
       <div className={styles.tradeRows}>
-        {snapshot.recentTrades.slice(0, 40).map((trade) => (
-          <TradeRow key={trade.id} aggregationStep={aggregationStep} trade={trade} onSelectPrice={onSelectPrice} />
-        ))}
+        {snapshot.recentTrades.length === 0 ? (
+          <div className={styles.emptyState} role="status">{t('trading.noRecentTrades')}</div>
+        ) : (
+          snapshot.recentTrades.slice(0, 40).map((trade) => (
+            <TradeRow key={trade.id} aggregationStep={aggregationStep} trade={trade} onSelectPrice={onSelectPrice} />
+          ))
+        )}
       </div>
     </div>
   )

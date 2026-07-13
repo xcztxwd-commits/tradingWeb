@@ -356,29 +356,21 @@ describe('trading session submit mode', () => {
     assert.doesNotMatch(bootBlock, /setAccount\(undefined\)/)
   })
 
-  it('turns timed auth refresh failures into login-required instead of offline preview', async () => {
+  it('turns coordinated refresh auth failures into login-required instead of offline preview', async () => {
     const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
-    const pollingBlock = sourceBetween(source, 'const interval = window.setInterval', 'return () => {')
     const { getTradingSessionMode } = await import('./useTradingSession.ts')
 
     assert.equal(getTradingSessionMode({ sessionReady: false, token: null, sessionError: null, loginRequired: true }), 'login-required')
     assert.equal(getTradingSessionMode({ sessionReady: false, token: 'token-1', sessionError: 'poll failed' }), 'error')
-    assert.match(pollingBlock, /isAuthSessionFailure\(error\)/)
-    assert.match(pollingBlock, /requireLogin\(\)/)
-    assert.doesNotMatch(pollingBlock, /setOrders\(\[\]\)/)
+    assert.match(source, /createAccountRefreshCoordinator\(\{[\s\S]*onError:[\s\S]*isAuthSessionFailure\(error\)[\s\S]*requireLogin\(\)/)
   })
 
-  it('reduces REST polling frequency while the page is hidden', async () => {
+  it('uses the coordinator 15s visible fallback without a duplicate hook interval', () => {
     const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
-    const { getTradingSessionRefreshMs } = await import('./useTradingSession.ts')
 
-    assert.equal(getTradingSessionRefreshMs(2000, 'visible'), 2000)
-    assert.equal(getTradingSessionRefreshMs(2000, 'hidden'), 15000)
-    assert.equal(getTradingSessionRefreshMs(5000, 'hidden'), 30000)
-    assert.match(source, /document\.addEventListener\('visibilitychange',\s*syncVisibility\)/)
-    assert.match(source, /document\.removeEventListener\('visibilitychange',\s*syncVisibility\)/)
-    assert.match(source, /const effectiveRefreshMs = getTradingSessionRefreshMs\(refreshMs,\s*visibilityState\)/)
-    assert.match(source, /}, effectiveRefreshMs\)/)
+    assert.match(source, /useTradingSession\(\{ refreshMs = 15_000 \}/)
+    assert.match(source, /createAccountRefreshCoordinator\(\{[\s\S]*pollMs: refreshMs/)
+    assert.doesNotMatch(source, /window\.setInterval/)
   })
 
   it('refreshes the authoritative account snapshot after trading-session stream events', () => {
@@ -386,17 +378,18 @@ describe('trading session submit mode', () => {
     const streamSource = readFileSync(new URL('../../services/marketStream.ts', import.meta.url), 'utf8')
 
     assert.match(source, /subscribeTradingSessionEvents/)
-    assert.match(source, /subscribeTradingSessionEvents\(accountId,\s*token,\s*\(\) => \{/)
-    assert.match(source, /refreshAccountData\(token,\s*accountId,\s*\(\) => active\)/)
+    assert.match(source, /subscribeTradingSessionEvents\([\s\S]*coordinator\.notifyEvent\(\)[\s\S]*coordinator\.notifyReconnect\(\)/)
+    assert.match(source, /coordinator\.dispose\(\)/)
     assert.match(streamSource, /subscribeTradingSessionEvents/)
-    assert.match(streamSource, /`\/topic\/trading\/accounts\/\$\{accountId\}\/events`/)
+    assert.match(streamSource, /'\/user\/queue\/trading-events'/)
+    assert.doesNotMatch(streamSource, /\/topic\/trading\/accounts/)
   })
 
   it('uses backend position refresh as the authoritative open-position PnL source', () => {
     const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
 
-    assert.match(source, /setInterval/)
-    assert.match(source, /refreshAccountData\(token,\s*accountId/)
+    assert.match(source, /createAccountRefreshCoordinator/)
+    assert.match(source, /refresh: \(\) => refreshAccountData\(token, accountId/)
     assert.doesNotMatch(source, /subscribeQuote/)
     assert.doesNotMatch(source, /repriceOpenPositionsForQuote/)
     assert.doesNotMatch(source, /positionQuoteSymbolsKey/)
@@ -408,8 +401,57 @@ describe('trading session submit mode', () => {
     assert.match(source, /getLedgerEntries/)
     assert.match(source, /getAssetLedger/)
     assert.match(source, /assetLedgerEntries:\s*AssetLedgerEntry\[\]/)
-    assert.match(source, /return \{ account, orders, positions, positionHistory, ledgerEntries, assetLedgerEntries, walletBalances \}/)
+    assert.match(source, /return \{[\s\S]*ledgerEntries,[\s\S]*assetLedgerEntries,[\s\S]*walletBalances[\s\S]*\}/)
     assert.doesNotMatch(source, /mapAssetLedgerEntry/)
+  })
+
+  it('loads the initial account, order, trade, position, funding and transfer snapshot in parallel', () => {
+    const source = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
+    const loadBlock = sourceBetween(
+      source,
+      'export async function loadTradingAccountData',
+      'export async function submitTradingOrder'
+    )
+
+    assert.match(loadBlock, /Promise\.all\(\[/)
+    for (const request of [
+      'getAccountSummary',
+      'getOrders',
+      'getTrades',
+      'getPositions',
+      'getPositionHistory',
+      'getFundingSettlements',
+      'getAccountTransfers',
+      'getLedgerEntries',
+      'getAssetLedger',
+      'getWalletBalances'
+    ]) {
+      assert.match(loadBlock, new RegExp(`${request}\\(accountId, token\\)`))
+    }
+    assert.match(
+      loadBlock,
+      /return \{[\s\S]*account,[\s\S]*orders,[\s\S]*trades,[\s\S]*positions,[\s\S]*positionHistory,[\s\S]*fundingSettlements,[\s\S]*transfers,/
+    )
+  })
+
+  it('routes boot, public, event, order, OCO and position refreshes through one latest single-flight gate', () => {
+    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+    const refreshBlock = sourceBetween(
+      source,
+      'const refreshAccountData = useCallback',
+      'const clearSessionSnapshot = useCallback'
+    )
+
+    assert.match(source, /createLatestSingleFlightRefreshGate/)
+    assert.match(refreshBlock, /refreshGate\.request\(/)
+    assert.match(refreshBlock, /loadTradingAccountData\(accessToken, currentAccountId\)/)
+    assert.match(refreshBlock, /applyAccountData\(data\)/)
+    assert.equal((source.match(/loadTradingAccountData\(/g) ?? []).length, 1)
+    assert.match(source, /refresh: \(\) => refreshAccountData\(token, accountId/)
+    assert.match(source, /await refreshAccountData\(savedToken, account\.id, isActive\)/)
+    assert.match(source, /submitTradingOrder[\s\S]*await refreshAccountData\(token, accountId\)/)
+    assert.match(source, /submitTradingOco[\s\S]*await refreshAccountData\(token, accountId\)/)
+    assert.match(source, /mutateTradingPosition[\s\S]*await refreshAccountData\(token, accountId\)/)
   })
 })
 

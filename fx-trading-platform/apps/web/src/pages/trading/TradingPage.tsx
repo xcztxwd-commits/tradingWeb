@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router-dom'
-import { formatTradingChartTitle, getTradingMarketsForProduct, mergeWithMockMarkets } from './tradingPageMarketSelection'
+import { formatTradingChartTitle, getTradingMarketsForProduct, mergeWithLocalTradingMarkets } from './tradingPageMarketSelection'
 import { getTradingSessionStatusLabel, getTradingSessionStatusText } from './tradingPageSessionStatus'
 import { getTradeMinOrderAmount, getTradePricePrecision, getTradeQuantityPrecision, mergeMarketRules } from './tradingPageTradeRules'
 import type { TradingTerminalViewProps } from './tradingPageViewModels'
@@ -20,6 +20,7 @@ import { TradingOrderSheet } from './components/TradingOrderSheet'
 import { hydrateMarketFavorites } from '../../features/market/marketFavorites'
 import { createTradingMarketPlaceholder, createTradingQuoteFromMarket } from '../../features/market/tradingMarketAdapters'
 import { fetchMarketSymbolRules, fetchMarketSymbols } from '../../features/market/tradingMarketApi'
+import { startQuoteMarketDataAdapter } from '../../features/market/quoteMarketDataAdapter'
 import { getRealtimeQuoteMarkets } from '../../features/market/tradingModels'
 import type { TradingInstrumentRules, TradingMarket } from '../../features/market/tradingModels'
 import { useMarketFavorites } from '../../features/market/useMarketFavorites'
@@ -54,8 +55,11 @@ export function TradingPage({ product }: TradingPageProps) {
     account,
     accountId,
     orders,
+    trades,
     positions,
     positionHistory,
+    fundingSettlements,
+    transfers,
     ledgerEntries,
     walletBalances,
     sessionReady,
@@ -108,11 +112,13 @@ export function TradingPage({ product }: TradingPageProps) {
     accountId,
     token,
     market: selectedMarketWithRules,
-    enabled: product === 'perpetual'
+    enabled: product === 'perpetual',
+    expectedSource: selectedQuote.marketSource
   })
   const tradeMinOrderAmount = getTradeMinOrderAmount(selectedMarketWithRules)
   const tradePricePrecision = getTradePricePrecision(selectedMarketWithRules)
   const tradeQuantityPrecision = getTradeQuantityPrecision(selectedMarketWithRules, tradeMinOrderAmount)
+  useEffect(() => startQuoteMarketDataAdapter(selectedSymbol, token), [selectedSymbol, token])
   useEffect(() => {
     setTradePricePrefill(null)
   }, [selectedSymbol])
@@ -132,7 +138,7 @@ export function TradingPage({ product }: TradingPageProps) {
     void fetchMarketSymbols()
       .then((nextMarkets) => {
         if (!active) return
-        const mergedMarkets = mergeWithMockMarkets(nextMarkets)
+        const mergedMarkets = mergeWithLocalTradingMarkets(nextMarkets)
         const productMarkets = getTradingMarketsForProduct(mergedMarkets, product)
         setMarkets(productMarkets)
         setSelectedSymbol((current) =>
@@ -140,7 +146,7 @@ export function TradingPage({ product }: TradingPageProps) {
         )
       })
       .catch(() => {
-        if (active) setMarkets(getTradingMarketsForProduct(mergeWithMockMarkets([]), product))
+        if (active) setMarkets(getTradingMarketsForProduct(mergeWithLocalTradingMarkets([]), product))
       })
 
     return () => {
@@ -248,8 +254,11 @@ export function TradingPage({ product }: TradingPageProps) {
     ledgerEntries,
     loading: terminalLoading,
     orders,
+    trades,
     positions,
     positionHistory,
+    fundingSettlements,
+    transfers,
     sessionReady,
     onClosePosition: closePosition
   }

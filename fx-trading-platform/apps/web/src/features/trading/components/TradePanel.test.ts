@@ -163,7 +163,8 @@ describe('OKX-style trade panel density', () => {
     assert.match(tradePanelSource, /sessionMode/)
     assert.doesNotMatch(tradePanelSource, /offline-preview/)
     assert.doesNotMatch(tradePanelSource, /previewReady/)
-    assert.match(tradePanelSource, /const canTrade = backendReady && rulesTradable/)
+    assert.match(tradePanelSource, /const canTrade = marketDataReady && backendReady && rulesTradable/)
+    assert.match(tradePanelSource, /const rulesTradable = Boolean\(rules\?\.enabled && rules\.tradable && rules\.orderEnabled\)/)
     assert.doesNotMatch(tradePanelSource, /buildOrderPayload/)
     assert.doesNotMatch(tradePanelSource, /submitOrder\(mockPayload\)/)
     assert.doesNotMatch(tradePanelSource, /mockResponse/)
@@ -198,6 +199,8 @@ describe('OKX-style trade panel density', () => {
   })
 
   it('blocks stale market orders and surfaces balance or margin shortfalls', () => {
+    assert.match(tradePanelSource, /const marketDataReady = market\.tradable === true/)
+    assert.match(tradePanelSource, /marketDataReady && backendReady/)
     assert.match(orderSideSource, /validation\.errors\.includes\('marketStale'\)/)
     assert.match(orderSideSource, /disabledReason=\{marketStaleError\}/)
     assert.match(orderSideSource, /getRequiredMargin/)
@@ -217,7 +220,7 @@ describe('OKX-style trade panel density', () => {
 
   it('uses only account-derived balances on the ready trading path', () => {
     assert.match(tradePanelSource, /const balances = externalBalances/)
-    assert.doesNotMatch(tradePanelSource, /useMockBalances|mockBalances/)
+    assert.doesNotMatch(tradePanelSource, /tradeFormTestFixtures/)
   })
 
   it('keeps order controls polished with focus rings, press feedback, and dropdown entrance motion', () => {

@@ -137,7 +137,7 @@ describe('TradingPage terminal viewport', () => {
 
   it('waits for backend market capabilities before seeding the full mock watchlist', () => {
     assert.match(source, /useState<TradingMarket\[\]>\(\[\]\)/)
-    assert.match(source, /catch\(\(\) => \{[\s\S]*setMarkets\(getTradingMarketsForProduct\(mergeWithMockMarkets\(\[\]\), product\)\)/)
+    assert.match(source, /catch\(\(\) => \{[\s\S]*setMarkets\(getTradingMarketsForProduct\(mergeWithLocalTradingMarkets\(\[\]\), product\)\)/)
   })
 
   it('shares market favorites between the trading watchlist and market self-selection', () => {
@@ -223,13 +223,10 @@ describe('TradingPage terminal viewport', () => {
     assert.match(styles, /--trading-chart-grid-horizontal:/)
   })
 
-  it('does not use local mock chart history for forex markets', () => {
-    assert.match(viewModelsSource, /function shouldAllowChartMockFallback\(market: TradingMarket\)/)
-    assert.match(viewModelsSource, /return !market\.provider && market\.category !== 'fx'/)
-    assert.match(desktopSource, /allowMockFallback=\{shouldAllowChartMockFallback\(market\)\}/)
-    assert.match(mobileSource, /allowMockFallback=\{shouldAllowChartMockFallback\(market\)\}/)
-    assert.doesNotMatch(desktopSource, /allowMockFallback=\{!market\.provider\}/)
-    assert.doesNotMatch(mobileSource, /allowMockFallback=\{!market\.provider\}/)
+  it('does not use generated chart history on any trading route', () => {
+    assert.doesNotMatch(viewModelsSource, /shouldAllowChartMockFallback/)
+    assert.doesNotMatch(desktopSource, /allowMockFallback/)
+    assert.doesNotMatch(mobileSource, /allowMockFallback/)
   })
 
   it('shows explicit market data source and failure status on the trading page', () => {
@@ -246,6 +243,11 @@ describe('TradingPage terminal viewport', () => {
     assert.match(marketStatusSource, /Massive/)
     assert.match(marketStatusSource, /Demo quote/)
     assert.match(marketStatusSource, /QUOTE_PROVIDER_UNAVAILABLE/)
+  })
+
+  it('starts the authoritative quote-depth-trades bundle before the mobile quote drawer opens', () => {
+    assert.match(source, /startQuoteMarketDataAdapter/)
+    assert.match(source, /useEffect\(\(\) => startQuoteMarketDataAdapter\(selectedSymbol, token\), \[selectedSymbol, token\]\)/)
   })
 
   it('keeps TradingPage below the orchestration size budget', () => {

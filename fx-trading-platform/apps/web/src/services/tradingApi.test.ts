@@ -2,7 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
-import { getOrders, getPositionHistory, getPositions } from './tradingApi.ts'
+import {
+  getAccountTransfers,
+  getFundingSettlements,
+  getOrders,
+  getPositionHistory,
+  getPositions,
+  getTrades
+} from './tradingApi.ts'
 
 const source = readFileSync(new URL('./tradingApi.ts', import.meta.url), 'utf8')
 
@@ -60,6 +67,33 @@ describe('trading api endpoint contracts', () => {
         '/api/trading/orders?accountId=acct_1',
         '/api/trading/positions?accountId=acct_1',
         '/api/trading/positions/history?accountId=acct_1'
+      ])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('loads trade, funding settlement and account transfer history from backend paging routes', async () => {
+    const originalFetch = globalThis.fetch
+    const requestedPaths: string[] = []
+    globalThis.fetch = async (input) => {
+      requestedPaths.push(String(input))
+      return new Response(JSON.stringify({
+        success: true,
+        code: 'OK',
+        message: 'ok',
+        data: { items: [{ id: `history_${requestedPaths.length}` }], page: 0, size: 20, total: 1, totalPages: 1 }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+
+    try {
+      assert.deepEqual(await getTrades('acct_1', 'token_1'), [{ id: 'history_1' }])
+      assert.deepEqual(await getFundingSettlements('acct_1', 'token_1'), [{ id: 'history_2' }])
+      assert.deepEqual(await getAccountTransfers('acct_1', 'token_1'), [{ id: 'history_3' }])
+      assert.deepEqual(requestedPaths, [
+        '/api/trading/trades?accountId=acct_1',
+        '/api/trading/funding/settlements?accountId=acct_1',
+        '/api/accounts/acct_1/transfers'
       ])
     } finally {
       globalThis.fetch = originalFetch

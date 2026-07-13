@@ -12,7 +12,7 @@ import type {
 } from '../../stores/layoutStore'
 import type { AccountSummary, LedgerEntry, OrderPayload } from '../../types/trading'
 import type { OcoOrderPayload } from '../../types/trading'
-import type { OcoOrderGroupResponse } from '@fx-platform/shared-types'
+import type { AccountTransferResponse, FundingSettlement, OcoOrderGroupResponse, Trade } from '@fx-platform/shared-types'
 import type { TradingMarketDataStatusView } from './tradingPageMarketDataStatus'
 import type { PerpetualTradingControlsModel } from './usePerpetualTradingControls'
 
@@ -37,8 +37,11 @@ export type TradingAccountPanelData = {
   ledgerEntries: LedgerEntry[]
   loading: boolean
   orders: OrderResponse[]
+  trades: Trade[]
   positions: PositionResponse[]
   positionHistory: PositionResponse[]
+  fundingSettlements: FundingSettlement[]
+  transfers: AccountTransferResponse[]
   sessionReady: boolean
   onClosePosition: (position: PositionResponse) => Promise<unknown> | void
 }
@@ -95,8 +98,4 @@ export type TradingTerminalViewProps = {
   token: string | null
   tradePanelSessionMode: TradingSessionMode
   workspaceLayoutControls: TradingWorkspaceLayoutControls
-}
-
-export function shouldAllowChartMockFallback(market: TradingMarket) {
-  return !market.provider && market.category !== 'fx'
 }
