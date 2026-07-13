@@ -94,6 +94,21 @@ export const adminMenuGroups: AdminMenuGroup[] = [
       { to: '/config/settings/email', label: '邮箱配置', icon: 'mail', pageKey: 'settings-email' },
       { to: '/config/settings/footer', label: '底部导航', icon: 'layout', pageKey: 'settings-footer' }
     ]
+  },
+  {
+    label: 'Demo 交易运营',
+    icon: 'activity',
+    items: [
+      { to: '/accounts', label: '交易账户', icon: 'user' },
+      { to: '/trading/orders', label: '订单', icon: 'clipboard' },
+      { to: '/trading/positions', label: '持仓', icon: 'chart' },
+      { to: '/trading/trades', label: '成交', icon: 'receipt' },
+      { to: '/trading/funding-settlements', label: '资金费结算', icon: 'wallet' },
+      { to: '/market/funding-config', label: '资金费配置', icon: 'settings' },
+      { to: '/market/status', label: '行情状态', icon: 'activity' },
+      { to: '/risk', label: '风控', icon: 'shield' },
+      { to: '/audit-logs', label: '审计', icon: 'clock' }
+    ]
   }
 ]
 
@@ -101,7 +116,9 @@ export const adminFeatureRoutes = adminMenuGroups.flatMap((group) => group.items
 
 export function findAdminMenuItem(pathname: string) {
   for (const group of adminMenuGroups) {
-    const item = group.items.find((entry) => entry.to === pathname)
+    const item = group.items.find(
+      (entry) => entry.to === pathname || pathname.startsWith(`${entry.to}/`)
+    )
     if (item) {
       return { group, item }
     }

@@ -1,0 +1,203 @@
+.high-risk-action-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6, 12, 24, 0.72);
+}
+
+.high-risk-action-dialog {
+  display: flex;
+  width: min(560px, 100%);
+  max-height: calc(100dvh - 48px);
+  flex-direction: column;
+  overflow: hidden;
+  color: #e8edf7;
+  background: #111a2c;
+  border: 1px solid rgba(248, 113, 113, 0.42);
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.46);
+}
+
+.high-risk-action-header,
+.high-risk-action-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  background: #111a2c;
+}
+
+.high-risk-action-header {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.high-risk-action-header h2,
+.high-risk-action-body p {
+  margin: 0;
+}
+
+.high-risk-action-eyebrow {
+  color: #fca5a5;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.high-risk-action-close {
+  min-width: 40px;
+  min-height: 40px;
+  color: inherit;
+  font-size: 24px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+}
+
+.high-risk-action-body {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.high-risk-action-context,
+.high-risk-action-review,
+.high-risk-action-completed,
+.high-risk-action-blockers {
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+}
+
+.high-risk-action-blockers,
+.high-risk-action-error {
+  color: #fecaca;
+}
+
+.high-risk-action-blockers ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+.high-risk-action-identifiers,
+.high-risk-action-review dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.high-risk-action-identifiers div,
+.high-risk-action-review dl div {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.35fr) 1fr;
+  gap: 12px;
+}
+
+.high-risk-action-identifiers dt,
+.high-risk-action-review dt {
+  color: #94a3b8;
+}
+
+.high-risk-action-identifiers dd,
+.high-risk-action-review dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.high-risk-action-reason {
+  display: grid;
+  gap: 8px;
+}
+
+.high-risk-action-reason textarea {
+  width: 100%;
+  min-height: 112px;
+  padding: 12px;
+  resize: vertical;
+  color: inherit;
+  background: #0b1220;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+
+.high-risk-action-reason small {
+  color: #94a3b8;
+}
+
+.high-risk-action-completed {
+  display: grid;
+  gap: 8px;
+  color: #bbf7d0;
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.high-risk-action-completed code {
+  overflow-wrap: anywhere;
+}
+
+.high-risk-action-footer {
+  position: sticky;
+  bottom: 0;
+  justify-content: flex-end;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.high-risk-action-footer button {
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-weight: 700;
+}
+
+.high-risk-action-secondary {
+  color: #e2e8f0;
+  background: transparent;
+  border: 1px solid #475569;
+}
+
+.high-risk-action-danger {
+  color: white;
+  background: #dc2626;
+  border: 1px solid #ef4444;
+}
+
+.high-risk-action-footer button:disabled,
+.high-risk-action-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+@media (max-width: 390px) {
+  .high-risk-action-mask {
+    align-items: stretch;
+    padding: 0;
+  }
+
+  .high-risk-action-dialog {
+    width: 100%;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+
+  .high-risk-action-body {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .high-risk-action-footer {
+    position: sticky;
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .high-risk-action-footer button {
+    width: 100%;
+  }
+}

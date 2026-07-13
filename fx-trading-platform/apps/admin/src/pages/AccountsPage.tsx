@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 import { getAccountsPage } from '../services/adminApi'
 import { AdminPageTable, display, useAdminData } from './adminPageUtils'
 
@@ -13,7 +15,14 @@ export function AccountsPage() {
       error={error}
       emptyText="暂无账户数据"
       columns={[
-        { title: '账户 ID', render: (row) => row.id },
+        {
+          title: '账户 ID',
+          render: (row) => (
+            <Link className="table-action" to={`/accounts/${encodeURIComponent(row.id)}`}>
+              {row.id}
+            </Link>
+          )
+        },
         { title: '用户 ID', render: (row) => row.userId },
         { title: '类型', render: (row) => display(row.accountType) },
         { title: '余额', render: (row) => display(row.balance) },
