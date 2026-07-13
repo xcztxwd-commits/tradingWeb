@@ -11,6 +11,7 @@ import { mergePositions, resolveAccountPanelSelection } from './bottomAccountPan
 import { AssetView } from './BottomAccountAssetView'
 import { OrdersGrid } from './BottomAccountOrdersGrid'
 import { PositionsGrid } from './BottomAccountPositionsGrid'
+import type { PositionMutationHandler } from './BottomAccountPositionsGrid'
 import { StrategiesGrid } from './BottomAccountStrategiesGrid'
 import styles from './BottomAccountPanel.module.css'
 import { TableSkeleton } from './TerminalSkeleton'
@@ -25,7 +26,7 @@ type Props = {
   loading?: boolean
   sessionReady?: boolean
   currentSymbol?: string
-  onClosePosition?: (position: PositionResponse) => Promise<unknown> | void
+  onClosePosition?: PositionMutationHandler
 }
 
 export function BottomAccountPanel({

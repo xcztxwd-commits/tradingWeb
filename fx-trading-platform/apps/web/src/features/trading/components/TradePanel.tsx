@@ -8,13 +8,16 @@ import { getTradePanelSessionState } from './TradePanelSessionStatus'
 import type { TradePanelSessionMode } from './TradePanelSessionStatus'
 import { TradeTabs } from './TradeTabs'
 import { createPanelMarket } from './tradePanelMarket'
-import { useMockBalances } from '../hooks/useMockBalances'
 import { useTradePanelSubmit } from '../hooks/useTradePanelSubmit'
+import type { CanonicalSubmitPayload } from '../hooks/useTradePanelSubmit'
+import type { OrderAdapterSettings } from '../services/orderAdapter'
 import { useTradeForm } from '../hooks/useTradeForm'
 import type { OrderValidationResult, TradeBalances, TradeFormState, TradeMarket, TradeSide } from '../types/order'
 import { useMarketDataSnapshot } from '../../market/marketDataStore'
 import type { OrderResponse } from '../../../components/tables/types'
 import type { OrderPayload } from '../../../types/trading'
+import type { OcoOrderGroupResponse } from '@fx-platform/shared-types'
+import type { OcoOrderPayload } from '../../../types/trading'
 import '../styles/trade-panel.css'
 const skipConfirmStorageKey = 'fx-trade-confirm-skip'
 
@@ -25,6 +28,8 @@ type Props = {
   accountId?: string
   balances?: TradeBalances
   leverage?: number
+  adapterSettings?: OrderAdapterSettings
+  settingsReady?: boolean
   productType?: TradeMarket['productType']
   rules?: TradeMarket['rules']
   minOrderAmount?: number
@@ -36,6 +41,7 @@ type Props = {
   sessionError?: string | null
   loginRequired?: boolean
   onSubmitOrder?: (payload: OrderPayload) => Promise<OrderResponse | void>
+  onSubmitOco?: (payload: OcoOrderPayload) => Promise<OcoOrderGroupResponse | void>
   onLoginRequired?: () => void
   onRetrySession?: () => Promise<void> | void
 }
@@ -48,7 +54,7 @@ export function TradePanel({
   compact = false,
   accountId,
   balances: externalBalances = emptyBalances,
-  leverage: symbolLeverage, productType, rules,
+  leverage: symbolLeverage, adapterSettings = {}, settingsReady = true, productType, rules,
   minOrderAmount = 0.0001,
   pricePrecision = 2,
   quantityPrecision = 6,
@@ -58,15 +64,15 @@ export function TradePanel({
   sessionError = null,
   loginRequired = false,
   onSubmitOrder,
+  onSubmitOco,
   onLoginRequired,
   onRetrySession
 }: Props) {
   const { t } = useTranslation()
   const snapshot = useMarketDataSnapshot()
-  const leverage = resolveTradePanelLeverage(resolveRuleLeverage(symbolLeverage, rules))
+  const leverage = resolveTradePanelLeverage(resolveRuleLeverage(adapterSettings.leverage ?? symbolLeverage, rules))
   const market = useMemo(() => createPanelMarket(symbol, snapshot, { category, leverage, productType, rules }), [category, leverage, productType, rules, snapshot, symbol])
-  const mockBalances = useMockBalances()
-  const balances = useMemo(() => ({ ...mockBalances, ...externalBalances }), [externalBalances, mockBalances])
+  const balances = externalBalances
   const effectiveMinOrderAmount = resolveRuleNumber(rules?.minQty ?? rules?.minLot, minOrderAmount)
   const minNotional = resolveRuleNumber(rules?.minNotional, 5)
   const effectivePricePrecision = resolvePrecision(rules?.tickSize, pricePrecision)
@@ -77,22 +83,25 @@ export function TradePanel({
   const [skipConfirm, setSkipConfirm] = useState(readSkipConfirmPreference)
   const [confirmation, setConfirmation] = useState<{
     form: TradeFormState
+    payload: CanonicalSubmitPayload
     validation: OrderValidationResult
     reset: () => void
   } | null>(null)
   const backendReady = !loginRequired && Boolean(accountId && sessionReady && onSubmitOrder)
   const sessionState = getTradePanelSessionState({ backendReady, loginRequired, sessionError, sessionMode, t })
   const rulesTradable = rules ? rules.enabled && rules.tradable && rules.orderEnabled : true
-  const canTrade = backendReady && rulesTradable
+  const perpetual = market.productType === 'LINEAR_PERP'
+  const canTrade = backendReady && rulesTradable && (!perpetual || settingsReady)
   const { attempted, handleSubmit, notice, setNotice, submittingSide } = useTradePanelSubmit({
     accountId,
     backendReady,
     canTrade,
-    leverage,
+    adapterSettings: { ...adapterSettings, leverage },
     loginRequired,
     market,
     onLoginRequired,
     onSubmitOrder,
+    onSubmitOco,
     sessionHasError: sessionState.sessionHasError
   })
 
@@ -113,6 +122,18 @@ export function TradePanel({
     }
   }, [pricePrefill?.id])
 
+  useEffect(() => {
+    setConfirmation(null)
+  }, [market.symbol])
+
+  useEffect(() => {
+    if (!perpetual) return
+    buyForm.updateField('quantityUnit', adapterSettings.quantityUnit ?? 'BASE')
+    sellForm.updateField('quantityUnit', adapterSettings.quantityUnit ?? 'BASE')
+    buyForm.updateField('marginMode', adapterSettings.marginMode ?? 'CROSS')
+    sellForm.updateField('marginMode', adapterSettings.marginMode ?? 'CROSS')
+  }, [adapterSettings.marginMode, adapterSettings.quantityUnit, perpetual])
+
   const updateBothOrderTypes = (orderType: TradeFormState['orderType']) => {
     buyForm.setOrderType(orderType)
     sellForm.setOrderType(orderType)
@@ -120,11 +141,11 @@ export function TradePanel({
     sellForm.setStrategyType('none')
   }
 
-  const updateBothStrategyOrderTypes = (orderType: TradeFormState['orderType']) => {
-    buyForm.setOrderType(orderType)
-    sellForm.setOrderType(orderType)
-    buyForm.setStrategyType('tp_sl')
-    sellForm.setStrategyType('tp_sl')
+  const updateBothStrategyTypes = (strategyType: 'trigger' | 'oco') => {
+    buyForm.setOrderType(strategyType === 'oco' ? 'limit' : 'market')
+    sellForm.setOrderType(strategyType === 'oco' ? 'limit' : 'market')
+    buyForm.setStrategyType(strategyType)
+    sellForm.setStrategyType(strategyType)
   }
 
   const updateSkipConfirm = (value: boolean) => {
@@ -135,7 +156,7 @@ export function TradePanel({
   const requestSubmit = (form: TradeFormState, validation: OrderValidationResult, reset: () => void) => {
     void handleSubmit(form, validation, reset, {
       confirmed: skipConfirm,
-      onConfirmRequired: () => setConfirmation({ form, validation, reset })
+      onConfirmRequired: (payload) => setConfirmation({ form, payload, validation, reset })
     })
   }
 
@@ -143,7 +164,7 @@ export function TradePanel({
     if (!confirmation) return
     const pending = confirmation
     setConfirmation(null)
-    void handleSubmit(pending.form, pending.validation, pending.reset, { confirmed: true })
+    void handleSubmit(pending.form, pending.validation, pending.reset, { confirmed: true, payload: pending.payload })
   }
 
   return (
@@ -152,14 +173,15 @@ export function TradePanel({
       aria-label={t('trading.panelForSymbol', { symbol: market.symbol })}
     >
       <header className="trade-panel__header">
-        <TradeTabs onToolsUnavailable={() => setNotice(t('trading.toolUnavailable'))} />
+        <TradeTabs productType={market.productType} />
       </header>
 
       <OrderTypeTabs
         orderType={activeOrderType}
         strategyType={activeStrategyType}
+        allowOco={market.productType === 'CRYPTO_SPOT'}
         onOrderTypeChange={updateBothOrderTypes}
-        onStrategyOrderTypeChange={updateBothStrategyOrderTypes}
+        onStrategyTypeChange={updateBothStrategyTypes}
       />
 
       <div className="trade-panel__mobile-sides" role="tablist" aria-label={t('trading.sideTabs')}>
@@ -196,6 +218,8 @@ export function TradePanel({
           onPriceFocusChange={buyForm.setPriceFocused}
           onPercentChange={buyForm.setPercent}
           onBestPrice={buyForm.fillBestPrice}
+          positionMode={adapterSettings.positionMode}
+          onProtectionsChange={buyForm.setAttachedProtections}
           onSubmit={() => requestSubmit(buyForm.form, buyForm.validation, buyForm.reset)}
         />
         <OrderFormSide
@@ -214,6 +238,8 @@ export function TradePanel({
           onPriceFocusChange={sellForm.setPriceFocused}
           onPercentChange={sellForm.setPercent}
           onBestPrice={sellForm.fillBestPrice}
+          positionMode={adapterSettings.positionMode}
+          onProtectionsChange={sellForm.setAttachedProtections}
           onSubmit={() => requestSubmit(sellForm.form, sellForm.validation, sellForm.reset)}
         />
       </div>
@@ -226,9 +252,7 @@ export function TradePanel({
 
       {confirmation ? (
         <OrderConfirmationDialog
-          form={confirmation.form}
-          market={market}
-          leverage={leverage}
+          payload={confirmation.payload}
           skipConfirm={skipConfirm}
           submitting={submittingSide === confirmation.form.side}
           onCancel={() => setConfirmation(null)}

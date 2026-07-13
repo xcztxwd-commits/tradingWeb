@@ -10,11 +10,13 @@ describe('trade panel market model', () => {
     const market = createPanelMarket('ETHUSDT', { bids: [], asks: [], lastPrice: 0 })
     const form = {
       ...createInitialTradeForm('buy', market),
+      orderType: 'market' as const,
       amount: '0.5',
+      total: '50',
       clientOrderId: 'client_eth_empty_book'
     }
 
-    assert.equal(market.symbol, 'ETH-USDT')
+    assert.equal(market.symbol, 'ETHUSDT')
     assert.equal(market.baseAsset, 'ETH')
     assert.equal(market.quoteAsset, 'USDT')
     assert.equal(toOrderPayload('acct_1', form, market).symbol, 'ETHUSDT')
@@ -27,7 +29,7 @@ describe('trade panel market model', () => {
       lastPrice: 67124.1
     })
 
-    assert.equal(market.symbol, 'BTC-USDT')
+    assert.equal(market.symbol, 'BTCUSDT')
     assert.equal(market.bestBid, 67123.4)
     assert.equal(market.bestAsk, 67124.8)
     assert.equal(market.lastPrice, 67124.1)
@@ -36,7 +38,7 @@ describe('trade panel market model', () => {
   it('does not borrow BTC mock prices for another symbol when the snapshot is empty', () => {
     const market = createPanelMarket('ETHUSDT', { bids: [], asks: [], lastPrice: 0 })
 
-    assert.equal(market.symbol, 'ETH-USDT')
+    assert.equal(market.symbol, 'ETHUSDT')
     assert.equal(market.bestBid, 0)
     assert.equal(market.bestAsk, 0)
     assert.equal(market.lastPrice, 0)
@@ -49,7 +51,7 @@ describe('trade panel market model', () => {
       { category: 'fx', leverage: 100 }
     )
 
-    assert.equal(market.symbol, 'EUR-USD')
+    assert.equal(market.symbol, 'EURUSD')
     assert.equal(market.unitSize, 100_000)
     assert.equal(market.quantityMode, 'quantity')
     assert.equal(market.leverage, 100)
@@ -57,7 +59,7 @@ describe('trade panel market model', () => {
 
   it('uses productType to keep leveraged crypto spot in quote-budget market-buy mode', () => {
     const market = createPanelMarket(
-      'BTCUSDT',
+      'BTCUSDT-PERP',
       { bids: [{ price: 67123.4 }], asks: [{ price: 67124.8 }], lastPrice: 67124.1 },
       { category: 'crypto', leverage: 20, productType: 'CRYPTO_SPOT' }
     )
@@ -69,7 +71,7 @@ describe('trade panel market model', () => {
 
   it('preserves backend instrument rules in the panel market model', () => {
     const market = createPanelMarket(
-      'BTCUSDT',
+      'BTCUSDT-PERP',
       { bids: [{ price: 67123.4 }], asks: [{ price: 67124.8 }], lastPrice: 67124.1 },
       {
         category: 'crypto',
@@ -97,7 +99,7 @@ describe('trade panel market model', () => {
 
   it('uses explicit productType modes for perpetual contracts', () => {
     const linear = createPanelMarket(
-      'BTCUSDT',
+      'BTCUSDT-PERP',
       { bids: [{ price: 67123.4 }], asks: [{ price: 67124.8 }], lastPrice: 67124.1 },
       { category: 'crypto', leverage: 20, productType: 'LINEAR_PERP' }
     )
@@ -108,6 +110,9 @@ describe('trade panel market model', () => {
     )
 
     assert.equal(linear.quantityMode, 'quantity')
+    assert.equal(linear.symbol, 'BTCUSDT-PERP')
+    assert.equal(linear.baseAsset, 'BTC')
+    assert.equal(linear.quoteAsset, 'USDT')
     assert.equal(inverse.quantityMode, 'contracts')
   })
 })

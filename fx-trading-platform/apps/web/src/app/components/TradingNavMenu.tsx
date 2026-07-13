@@ -2,17 +2,17 @@ import { ChevronDown, CircleDollarSign, Gem, LineChart } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { resolveTradingPath, type TradingCategory } from '../hooks/useLastTradingSymbol'
+import { resolveTradingPath } from '../hooks/useLastTradingSymbol'
+import type { TradingProduct } from '../tradingRoutes'
 
 const tradingMenuItems: Array<{
-  category: TradingCategory
+  product: TradingProduct
   label: string
   description: string
   icon: typeof LineChart
 }> = [
-  { category: 'crypto', label: '现货交易', description: 'BTC、ETH 等主流币种', icon: Gem },
-  { category: 'forex', label: '外汇交易', description: 'EURUSD、GBPUSD 等外汇品种', icon: LineChart },
-  { category: 'contract', label: '合约', description: '按最近合约品种快速进入', icon: CircleDollarSign }
+  { product: 'spot', label: '现货交易', description: '五个 USDT 现货交易对', icon: Gem },
+  { product: 'perpetual', label: 'USDT 永续', description: '五个 USDT 本位永续合约', icon: CircleDollarSign }
 ]
 
 export function TradingNavMenu() {
@@ -39,9 +39,9 @@ export function TradingNavMenu() {
     }
   }, [open])
 
-  const openCategory = (category: TradingCategory) => {
+  const openProduct = (product: TradingProduct) => {
     setOpen(false)
-    navigate(resolveTradingPath(category))
+    navigate(resolveTradingPath(product))
   }
 
   return (
@@ -74,7 +74,7 @@ export function TradingNavMenu() {
           }
           if (event.key === 'Enter' && open) {
             event.preventDefault()
-            openCategory(tradingMenuItems[activeIndex].category)
+            openProduct(tradingMenuItems[activeIndex].product)
           }
         }}
       >
@@ -89,12 +89,12 @@ export function TradingNavMenu() {
             const Icon = item.icon
             return (
               <button
-                key={item.category}
+                key={item.product}
                 type="button"
                 role="menuitem"
                 className={index === activeIndex ? 'active' : ''}
                 onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => openCategory(item.category)}
+                onClick={() => openProduct(item.product)}
               >
                 <span className="trading-nav-menu__icon">
                   <Icon size={18} aria-hidden="true" />

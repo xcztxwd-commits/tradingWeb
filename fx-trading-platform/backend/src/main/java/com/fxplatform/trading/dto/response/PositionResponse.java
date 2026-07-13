@@ -40,7 +40,8 @@ public record PositionResponse(
     Instant closedAt,
     ProductType productType,
     PositionMode positionMode,
-    PositionSide positionSide
+    PositionSide positionSide,
+    Long version
 ) {
   public PositionResponse(
       UUID id,
@@ -101,6 +102,7 @@ public record PositionResponse(
         closedAt,
         null,
         PositionMode.ONE_WAY,
-        PositionSide.BOTH);
+        PositionSide.BOTH,
+        null);
   }
 }

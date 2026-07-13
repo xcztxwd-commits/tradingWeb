@@ -1,39 +1,43 @@
+import {
+  buildTradingPath,
+  defaultTradingSymbols,
+  normalizeTradingProductSymbol,
+  type TradingProduct
+} from '../tradingRoutes.ts'
+
 export type TradingCategory = 'crypto' | 'forex' | 'contract'
+type TradingDestination = TradingProduct | TradingCategory
 
-export const lastTradingSymbolsStorageKey = 'fx-platform-last-trading-symbols'
-
-const defaultSymbols: Record<TradingCategory, string> = {
-  crypto: 'BTCUSDT',
-  forex: 'EURUSD',
-  contract: 'ETHUSDT'
-}
+export const lastTradingSymbolsStorageKey = 'fx-platform-last-trading-symbols:v2'
 
 export function readLastTradingSymbols(storage = getStorage()) {
   try {
     const parsed = JSON.parse(storage?.getItem(lastTradingSymbolsStorageKey) ?? '{}')
-    if (!isRecord(parsed)) return { ...defaultSymbols }
+    if (!isRecord(parsed) || parsed.version !== 2) return { ...defaultTradingSymbols }
     return {
-      crypto: normalizeSymbol(parsed.crypto, defaultSymbols.crypto),
-      forex: normalizeSymbol(parsed.forex, defaultSymbols.forex),
-      contract: normalizeSymbol(parsed.contract, defaultSymbols.contract)
+      spot: normalizeTradingProductSymbol('spot', parsed.spot) ?? defaultTradingSymbols.spot,
+      perpetual: normalizeTradingProductSymbol('perpetual', parsed.perpetual) ?? defaultTradingSymbols.perpetual
     }
   } catch {
-    return { ...defaultSymbols }
+    return { ...defaultTradingSymbols }
   }
 }
 
-export function getLastTradingSymbol(category: TradingCategory, storage = getStorage()) {
-  return readLastTradingSymbols(storage)[category]
+export function getLastTradingSymbol(destination: TradingDestination, storage = getStorage()) {
+  const product = toTradingProduct(destination)
+  return readLastTradingSymbols(storage)[product]
 }
 
-export function writeLastTradingSymbol(category: TradingCategory, symbol: string, storage = getStorage()) {
-  const normalized = normalizeSymbol(symbol, defaultSymbols[category])
+export function writeLastTradingSymbol(destination: TradingDestination, symbol: string, storage = getStorage()) {
+  const product = toTradingProduct(destination)
+  const normalized = normalizeTradingProductSymbol(product, symbol) ?? defaultTradingSymbols[product]
   try {
     storage?.setItem(
       lastTradingSymbolsStorageKey,
       JSON.stringify({
+        version: 2,
         ...readLastTradingSymbols(storage),
-        [category]: normalized
+        [product]: normalized
       })
     )
   } catch {
@@ -42,8 +46,15 @@ export function writeLastTradingSymbol(category: TradingCategory, symbol: string
   return normalized
 }
 
-export function resolveTradingPath(category: TradingCategory, symbol = getLastTradingSymbol(category)) {
-  return `/trading?category=${category}&symbol=${encodeURIComponent(symbol)}`
+export function resolveTradingPath(
+  destination: TradingDestination,
+  symbol?: string,
+  storage = getStorage()
+) {
+  const product = toTradingProduct(destination)
+  const selectedSymbol = symbol === undefined ? getLastTradingSymbol(product, storage) : symbol
+  const normalized = normalizeTradingProductSymbol(product, selectedSymbol) ?? defaultTradingSymbols[product]
+  return buildTradingPath(product, normalized)
 }
 
 export function inferTradingCategory(symbol: string): TradingCategory {
@@ -57,8 +68,8 @@ export function normalizeTradingCategory(value: string | null): TradingCategory 
   return value === 'forex' || value === 'contract' || value === 'crypto' ? value : 'crypto'
 }
 
-function normalizeSymbol(value: unknown, fallback: string) {
-  return typeof value === 'string' && value.trim() ? value.trim().toUpperCase() : fallback
+function toTradingProduct(destination: TradingDestination): TradingProduct {
+  return destination === 'contract' || destination === 'perpetual' ? 'perpetual' : 'spot'
 }
 
 function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | undefined {

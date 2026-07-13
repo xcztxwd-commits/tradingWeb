@@ -2,15 +2,23 @@ import { createDemoAccount, getAccounts, getAccountSummary, getAssetLedger, getW
 import { ApiClientError } from '../../services/apiClient'
 import { getLedgerEntries } from '../../services/ledgerApi'
 import {
+  adjustPositionMargin,
   closePosition,
+  createOcoOrder,
   createOrder,
+  createPositionProtection,
   getOrders,
   getPositionHistory,
   getPositions,
   updatePositionProtection
 } from '../../services/tradingApi'
+import type {
+  AdjustPositionMarginRequest,
+  ClosePositionRequest,
+  CreateProtectionRequest
+} from '@fx-platform/shared-types'
 import type { OrderResponse, PositionResponse } from '../../components/tables/types'
-import type { AccountSummary, AssetLedgerEntry, LedgerEntry, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
+import type { AccountSummary, AssetLedgerEntry, LedgerEntry, OcoOrderPayload, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
 
 export { deriveTradingBalances } from './tradingSessionModels'
 export type { TradingBalances } from './tradingSessionModels'
@@ -30,6 +38,12 @@ export type TradingAccountData = {
   walletBalances: WalletBalance[]
 }
 
+export type PositionMutation =
+  | { type: 'FULL_CLOSE' }
+  | { type: 'PARTIAL_CLOSE'; payload: ClosePositionRequest }
+  | { type: 'ADJUST_MARGIN'; payload: AdjustPositionMarginRequest }
+  | { type: 'CREATE_PROTECTIONS'; payloads: CreateProtectionRequest[] }
+
 export function isAuthSessionFailure(error: unknown) {
   return error instanceof ApiClientError && (error.status === 401 || error.status === 403)
 }
@@ -37,7 +51,7 @@ export function isAuthSessionFailure(error: unknown) {
 export async function loadTradingAccountData(token: string, accountId: string): Promise<TradingAccountData> {
   const [account, orders, positions, positionHistory, ledgerEntries, assetLedgerEntries, walletBalances] = await Promise.all([
     getAccountSummary(accountId, token),
-    getOrders(token),
+    getOrders(accountId, token),
     getPositions(accountId, token),
     getPositionHistory(accountId, token),
     getLedgerEntries(accountId, token),
@@ -55,8 +69,42 @@ export async function submitTradingOrder(payload: OrderPayload, token?: string |
   return createOrder(payload, token)
 }
 
-export function closeTradingPosition(accountId: string, positionId: string, token: string) {
-  return closePosition(accountId, positionId, token)
+export function closeTradingPosition(
+  accountId: string,
+  positionId: string,
+  token: string,
+  payload?: ClosePositionRequest
+) {
+  return closePosition(accountId, positionId, token, payload)
+}
+
+export async function submitTradingOco(payload: OcoOrderPayload, token?: string | null) {
+  if (!token) throw new Error('Trading session token is required')
+  return createOcoOrder(payload, token)
+}
+
+export async function mutateTradingPosition(
+  accountId: string,
+  positionId: string,
+  mutation: PositionMutation,
+  token: string
+) {
+  switch (mutation.type) {
+    case 'FULL_CLOSE':
+      return closeTradingPosition(accountId, positionId, token)
+    case 'PARTIAL_CLOSE':
+      return closeTradingPosition(accountId, positionId, token, mutation.payload)
+    case 'ADJUST_MARGIN':
+      return adjustPositionMargin(positionId, mutation.payload, token)
+    case 'CREATE_PROTECTIONS': {
+      const { payloads } = mutation
+      const responses = []
+      for (const payload of payloads) {
+        responses.push(await createPositionProtection(positionId, payload, token))
+      }
+      return responses
+    }
+  }
 }
 
 export function updateTradingPositionProtection(

@@ -55,4 +55,5 @@ export type PositionResponse = {
   status: string
   openedAt?: string | null
   closedAt?: string | null
+  version?: number | null
 }

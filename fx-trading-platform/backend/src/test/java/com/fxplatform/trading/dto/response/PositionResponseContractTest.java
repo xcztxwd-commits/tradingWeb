@@ -36,6 +36,7 @@ class PositionResponseContractTest {
         .containsEntry("productType", "com.fxplatform.market.model.ProductType")
         .containsEntry("positionMode", "com.fxplatform.trading.enums.PositionMode")
         .containsEntry("positionSide", "com.fxplatform.trading.enums.PositionSide")
+        .containsEntry("version", Long.class.getName())
         .containsEntry("marginMode", String.class.getName());
   }
 

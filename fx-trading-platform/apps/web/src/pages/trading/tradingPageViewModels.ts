@@ -11,7 +11,10 @@ import type {
   TradingSplitDirection
 } from '../../stores/layoutStore'
 import type { AccountSummary, LedgerEntry, OrderPayload } from '../../types/trading'
+import type { OcoOrderPayload } from '../../types/trading'
+import type { OcoOrderGroupResponse } from '@fx-platform/shared-types'
 import type { TradingMarketDataStatusView } from './tradingPageMarketDataStatus'
+import type { PerpetualTradingControlsModel } from './usePerpetualTradingControls'
 
 export type ChartThemeMode = 'dark' | 'light'
 
@@ -81,6 +84,8 @@ export type TradingTerminalViewProps = {
   sessionStatusLabel: string
   sessionStatusText: string
   submitOrder: (payload: OrderPayload) => Promise<OrderResponse | void>
+  submitOco: (payload: OcoOrderPayload) => Promise<OcoOrderGroupResponse | void>
+  perpetualControls: PerpetualTradingControlsModel
   symbol: string
   tradeMinOrderAmount: number
   tradePricePrecision: number

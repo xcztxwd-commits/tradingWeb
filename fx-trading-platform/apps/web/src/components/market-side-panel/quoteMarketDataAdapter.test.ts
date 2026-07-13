@@ -4,12 +4,13 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
-import { createFallbackMarketDataSnapshot, createQuoteMarketDataSnapshot } from './quoteMarketDataSnapshot.ts'
+import { createQuoteMarketDataSnapshot } from './quoteMarketDataSnapshot.ts'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const adapterSource = readFileSync(join(currentDir, 'quoteMarketDataAdapter.ts'), 'utf8')
 const snapshotSource = readFileSync(join(currentDir, 'quoteMarketDataSnapshot.ts'), 'utf8')
 const marketFeatureDir = join(currentDir, '..', '..', 'features', 'market')
+const marketFeatureAdapterSource = readFileSync(join(marketFeatureDir, 'quoteMarketDataAdapter.ts'), 'utf8')
 
 describe('quote market data adapter', () => {
   it('keeps market data store and quote adapter implementation in the market feature', () => {
@@ -62,20 +63,7 @@ describe('quote market data adapter', () => {
     })
   })
 
-  it('builds a local fallback snapshot for BTCUSDT when backend market data is unavailable', () => {
-    const snapshot = createFallbackMarketDataSnapshot('BTCUSDT', 1_780_000_000_000)
-
-    assert.equal(snapshot.lastPrice, 67240)
-    assert.equal(snapshot.asks.length, 42)
-    assert.equal(snapshot.bids.length, 42)
-    assert.equal(snapshot.asks[0].price > snapshot.lastPrice, true)
-    assert.equal(snapshot.bids[0].price < snapshot.lastPrice, true)
-    assert.deepEqual(snapshot.recentTrades[0], {
-      id: 'BTCUSDT-1780000000000',
-      price: 67240,
-      amount: 1,
-      side: 'buy',
-      time: 1_780_000_000_000
-    })
+  it('does not synthesize a tradable fallback price when backend market data is unavailable', () => {
+    assert.doesNotMatch(marketFeatureAdapterSource, /createFallbackMarketDataSnapshot|mockTradingMarkets/)
   })
 })

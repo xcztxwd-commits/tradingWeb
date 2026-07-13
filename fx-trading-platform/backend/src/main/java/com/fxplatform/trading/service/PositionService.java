@@ -469,7 +469,8 @@ public class PositionService {
         position.getClosedAt(),
         position.getProductType(),
         position.getPositionMode(),
-        position.getPositionSide());
+        position.getPositionSide(),
+        position.getVersion());
   }
 
   private List<RealtimePositionContext> realtimePositionContexts(
@@ -613,7 +614,8 @@ public class PositionService {
         position.getClosedAt(),
         position.getProductType(),
         position.getPositionMode(),
-        position.getPositionSide());
+        position.getPositionSide(),
+        position.getVersion());
   }
 
   private PositionResponse toRealtimeLinearPerpetualResponse(
@@ -658,7 +660,8 @@ public class PositionService {
         position.getClosedAt(),
         position.getProductType(),
         position.getPositionMode(),
-        position.getPositionSide());
+        position.getPositionSide(),
+        position.getVersion());
   }
 
   private PositionResponse toRealtimeSpotResponse(SpotPositionEntity position) {

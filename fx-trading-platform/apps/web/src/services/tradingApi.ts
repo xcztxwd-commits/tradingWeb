@@ -1,13 +1,33 @@
-import { apiGet, apiPatch, apiPost } from './apiClient'
-import type { OrderEventResponse, OrderPayload, UpdateOrderPayload, UpdatePositionProtectionPayload } from '../types/trading'
+import { apiGet, apiPatch, apiPost } from './apiClient.ts'
+import type {
+  AdjustPositionMarginRequest,
+  AdjustPositionMarginResponse,
+  ClosePositionRequest,
+  CreateProtectionRequest,
+  OcoOrderGroupResponse,
+  OrderPageResponse,
+  PositionMode,
+  PositionPageResponse,
+  TradingSettingsResponse,
+  UpdateSymbolSettingsRequest
+} from '@fx-platform/shared-types'
+import type { OcoOrderPayload, OrderEventResponse, OrderPayload, UpdateOrderPayload, UpdatePositionProtectionPayload } from '../types/trading'
 import type { OrderResponse, PositionResponse } from '../components/tables/types'
+
+type OrderPage = Omit<OrderPageResponse, 'items'> & { items?: OrderResponse[] }
+type PositionPage = Omit<PositionPageResponse, 'items'> & { items?: PositionResponse[] }
 
 export function createOrder(payload: OrderPayload, token?: string) {
   return apiPost<OrderResponse>('/api/trading/orders', payload, token)
 }
 
-export function getOrders(token: string) {
-  return apiGet<OrderResponse[]>('/api/trading/orders', token)
+export function createOcoOrder(payload: OcoOrderPayload, token?: string) {
+  return apiPost<OcoOrderGroupResponse>('/api/trading/oco', payload, token)
+}
+
+export function getOrders(accountId: string, token: string) {
+  return apiGet<OrderPage>(`/api/trading/orders?accountId=${encodeURIComponent(accountId)}`, token)
+    .then((page) => page.items ?? [])
 }
 
 export function getOrderEvents(orderId: string, token: string) {
@@ -23,19 +43,42 @@ export function modifyOrder(orderId: string, payload: UpdateOrderPayload, token:
 }
 
 export function getPositions(accountId: string, token: string) {
-  return apiGet<PositionResponse[]>(`/api/trading/positions?accountId=${accountId}`, token)
+  return apiGet<PositionPage>(`/api/trading/positions?accountId=${encodeURIComponent(accountId)}`, token)
+    .then((page) => page.items ?? [])
 }
 
 export function getPositionHistory(accountId: string, token: string) {
-  return apiGet<PositionResponse[]>(`/api/trading/positions/history?accountId=${accountId}`, token)
+  return apiGet<PositionPage>(`/api/trading/positions/history?accountId=${encodeURIComponent(accountId)}`, token)
+    .then((page) => page.items ?? [])
 }
 
-export function closePosition(accountId: string, positionId: string, token: string) {
+export function closePosition(
+  accountId: string,
+  positionId: string,
+  token: string,
+  payload: ClosePositionRequest | undefined = undefined
+) {
   return apiPost<PositionResponse>(
-    `/api/trading/positions/${positionId}/close?accountId=${accountId}`,
-    undefined,
+    `/api/trading/positions/${positionId}/close?accountId=${encodeURIComponent(accountId)}`,
+    payload,
     token
   )
+}
+
+export function adjustPositionMargin(
+  positionId: string,
+  payload: AdjustPositionMarginRequest,
+  token: string
+) {
+  return apiPost<AdjustPositionMarginResponse>(`/api/trading/positions/${positionId}/margin`, payload, token)
+}
+
+export function createPositionProtection(
+  positionId: string,
+  payload: CreateProtectionRequest,
+  token: string
+) {
+  return apiPost<OrderResponse>(`/api/trading/positions/${positionId}/protections`, payload, token)
 }
 
 export function updatePositionProtection(
@@ -44,5 +87,30 @@ export function updatePositionProtection(
   payload: UpdatePositionProtectionPayload,
   token: string
 ) {
-  return apiPatch<PositionResponse>(`/api/trading/positions/${positionId}/protection?accountId=${accountId}`, payload, token)
+  return apiPatch<PositionResponse>(
+    `/api/trading/positions/${positionId}/protection?accountId=${encodeURIComponent(accountId)}`,
+    payload,
+    token
+  )
+}
+
+export function getTradingSettings(accountId: string, token?: string) {
+  return apiGet<TradingSettingsResponse>(`/api/accounts/${accountId}/trading-settings`, token)
+}
+
+export function updateTradingPositionMode(accountId: string, positionMode: PositionMode, token?: string) {
+  return apiPatch<TradingSettingsResponse>(`/api/accounts/${accountId}/position-mode`, { positionMode }, token)
+}
+
+export function updateTradingSymbolSettings(
+  accountId: string,
+  symbol: string,
+  payload: UpdateSymbolSettingsRequest,
+  token?: string
+) {
+  return apiPatch<TradingSettingsResponse>(
+    `/api/accounts/${accountId}/symbols/${encodeURIComponent(symbol)}/settings`,
+    payload,
+    token
+  )
 }

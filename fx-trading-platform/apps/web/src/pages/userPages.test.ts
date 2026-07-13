@@ -144,12 +144,11 @@ describe('prototype markets page', () => {
     assert.match(markets, /zone === 'payments'[\s\S]*market\.symbol === 'XRPUSDT'/)
   })
 
-  it('connects market rows to category-aware trading routes and last-symbol memory', () => {
-    assert.match(markets, /writeLastTradingSymbol/)
-    assert.match(markets, /resolveTradingPath/)
+  it('connects only canonical P0 market rows to product-aware trading routes', () => {
+    assert.match(markets, /resolveMarketTradingTarget/)
+    assert.match(markets, /isMarketTradingEnabled/)
     assert.match(markets, /onOpenMarket/)
-    assert.match(markets, /category=\$\{category\}/)
-    assert.match(markets, /symbol=\$\{encodeURIComponent\(market\.symbol\)\}/)
+    assert.match(markets, /navigate\(target\)/)
   })
 
   it('recreates the Binance futures trading-data chart surface without copying page assets', () => {

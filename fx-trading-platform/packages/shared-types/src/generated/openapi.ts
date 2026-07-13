@@ -2986,6 +2986,8 @@ export interface components {
             positionMode?: "ONE_WAY" | "HEDGE";
             /** @enum {string} */
             positionSide?: "BOTH" | "LONG" | "SHORT";
+            /** Format: int64 */
+            version?: number;
         };
         BatchActionRequest: {
             /** Format: uuid */

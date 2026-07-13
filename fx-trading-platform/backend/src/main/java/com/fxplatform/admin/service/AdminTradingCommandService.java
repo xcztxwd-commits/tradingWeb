@@ -201,7 +201,8 @@ public class AdminTradingCommandService {
         position.getClosedAt(),
         productType,
         position.getPositionMode(),
-        position.getPositionSide());
+        position.getPositionSide(),
+        position.getVersion());
   }
 
   /**

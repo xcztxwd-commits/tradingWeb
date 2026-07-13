@@ -6,12 +6,12 @@ export type TradingBalances = Record<string, number>
 
 export function createLocalPreviewOrder(payload: OrderPayload, createdAt = new Date().toISOString()): OrderResponse {
   return {
-    id: payload.clientOrderId ?? payload.idempotencyKey,
+    id: payload.clientOrderId,
     symbol: payload.symbol,
     side: payload.side,
     orderType: payload.orderType,
     status: 'LOCAL_PREVIEW',
-    lots: payload.quantity ?? payload.lots,
+    lots: payload.quantity,
     executionPrice: null,
     createdAt
   }

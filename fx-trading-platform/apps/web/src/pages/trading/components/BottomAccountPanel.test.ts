@@ -110,6 +110,9 @@ describe('bottom account panel tabs', () => {
 
   it('renders OKX-style current position columns through a focused display model', () => {
     const positionsGridSource = readFileSync(join(currentDir, 'BottomAccountPositionsGrid.tsx'), 'utf8')
+    assert.match(positionsGridSource, /partialCloseClientOrderId/)
+    assert.match(positionsGridSource, /setPartialCloseClientOrderId\(createClientOrderId\('partial-close'\)\)/)
+    const actionDialogSource = readFileSync(join(currentDir, '../../../features/trading/components/PositionActionDialog.tsx'), 'utf8')
     const displayModelPath = join(currentDir, 'positionDisplayModel.ts')
 
     assert.equal(existsSync(displayModelPath), true, 'positionDisplayModel.ts should own position row formatting')
@@ -126,6 +129,14 @@ describe('bottom account panel tabs', () => {
     assert.match(positionsGridSource, /positions\.takeProfitStopLoss/)
     assert.match(positionsGridSource, /positions\.closeAllMarket/)
     assert.match(source, /mode=\{activeTab === 'historicalPositions' \? 'history' : 'current'\}/)
+    assert.match(positionsGridSource, /PositionActionDialog/)
+    assert.match(positionsGridSource, /onClosePosition\(selectedPosition, mutation\)/)
+    assert.match(positionsGridSource, /selectedPosition\.version/)
+    assert.doesNotMatch(positionsGridSource, /positionVersions/)
+    assert.doesNotMatch(source, /positionVersions/)
+    assert.match(actionDialogSource, /MultiLevelProtectionEditor/)
+    assert.match(actionDialogSource, /marginAdjustmentSupported/)
+    assert.match(actionDialogSource, /Position version is unavailable from the current positions contract\./)
   })
 
   it('formats crypto swap positions with OKX-style labels', () => {

@@ -8,6 +8,7 @@ import { ChartWorkspace } from './ChartWorkspace'
 import { MarketSidebar } from './MarketSidebar'
 import { RightTradingPanel } from './RightTradingPanel'
 import { SymbolHeader } from './SymbolHeader'
+import { PerpetualTradingControls } from './PerpetualTradingControls'
 import styles from '../TradingPage.module.css'
 import { shouldAllowChartMockFallback, type TradingTerminalViewProps } from '../tradingPageViewModels'
 
@@ -37,6 +38,8 @@ export function TradingDesktopView({
   sessionError,
   sessionReady,
   submitOrder,
+  submitOco,
+  perpetualControls,
   symbol,
   terminalLoading,
   token,
@@ -99,26 +102,32 @@ export function TradingDesktopView({
           chartTitle={chartTitle}
           market={<RightTradingPanel symbol={symbol} token={token} loading={terminalLoading} onSelectPrice={onSelectPrice} />}
           trade={
-            <TradePanel
-              accountId={accountId}
-              balances={balances}
-              category={market.category}
-              productType={market.productType}
-              minOrderAmount={tradeMinOrderAmount}
-              pricePrecision={tradePricePrecision}
-              quantityPrecision={tradeQuantityPrecision}
-              pricePrefill={tradePricePrefill}
-              sessionReady={sessionReady}
-              sessionMode={tradePanelSessionMode}
-              sessionError={sessionError}
-              loginRequired={loginRequired}
-              leverage={market.leverage}
-              rules={market.rules}
-              symbol={symbol}
-              onLoginRequired={onLoginRequired}
-              onSubmitOrder={submitOrder}
-              onRetrySession={onRetrySession}
-            />
+            <div className={styles.tradeControlsStack}>
+              <PerpetualTradingControls controls={perpetualControls} />
+              <TradePanel
+                accountId={accountId}
+                adapterSettings={perpetualControls.adapterSettings}
+                settingsReady={perpetualControls.ready}
+                balances={balances}
+                category={market.category}
+                productType={market.productType}
+                minOrderAmount={tradeMinOrderAmount}
+                pricePrecision={tradePricePrecision}
+                quantityPrecision={tradeQuantityPrecision}
+                pricePrefill={tradePricePrefill}
+                sessionReady={sessionReady}
+                sessionMode={tradePanelSessionMode}
+                sessionError={sessionError}
+                loginRequired={loginRequired}
+                leverage={market.leverage}
+                rules={market.rules}
+                symbol={symbol}
+                onLoginRequired={onLoginRequired}
+                onSubmitOrder={submitOrder}
+                onSubmitOco={submitOco}
+                onRetrySession={onRetrySession}
+              />
+            </div>
           }
           bottom={
             <BottomAccountPanel

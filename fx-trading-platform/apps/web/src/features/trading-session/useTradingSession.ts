@@ -3,18 +3,20 @@ import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
-  closeTradingPosition,
   firstOrCreatedAccount,
   isAuthSessionFailure,
   loadTradingAccountData,
+  mutateTradingPosition,
+  submitTradingOco,
   submitTradingOrder,
   updateTradingPositionProtection
 } from './tradingSession'
+import type { PositionMutation } from './tradingSession'
 import { getSessionStatus } from '../../services/authApi'
 import type { SessionAuthStatus } from '../../services/authApi'
 import { subscribeTradingSessionEvents } from '../../services/marketStream'
 import type { PositionResponse, OrderResponse } from '../../components/tables/types'
-import type { AccountSummary, AssetLedgerEntry, LedgerEntry, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
+import type { AccountSummary, AssetLedgerEntry, LedgerEntry, OcoOrderPayload, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
 import { clearStoredAuthToken, readStoredAuthToken } from './tradingSessionStorage'
 
 type Options = {
@@ -293,11 +295,31 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
     [accountId, loginRequired, refreshAccountData, t, token]
   )
 
+  const submitOco = useCallback(
+    async (payload: OcoOrderPayload) => {
+      setLastOrderError(null)
+      try {
+        if (loginRequired) throw new Error(t('trading.loginBeforeOrder'))
+        if (!token || !accountId) throw new Error('Trading account is not ready')
+        const response = await submitTradingOco({ ...payload, accountId }, token)
+        await refreshAccountData(token, accountId).catch(() => undefined)
+        return response
+      } catch (error) {
+        setLastOrderError(error)
+        throw error
+      }
+    },
+    [accountId, loginRequired, refreshAccountData, t, token]
+  )
+
   const submitClosePosition = useCallback(
-    async (position: PositionResponse) => {
+    async (position: PositionResponse, mutation: PositionMutation = { type: 'FULL_CLOSE' }) => {
       if (!token || !accountId) return
-      await closeTradingPosition(accountId, position.id, token)
-      await refreshAccountData(token, accountId)
+      try {
+        await mutateTradingPosition(accountId, position.id, mutation, token)
+      } finally {
+        await refreshAccountData(token, accountId).catch(() => undefined)
+      }
     },
     [accountId, refreshAccountData, token]
   )
@@ -330,6 +352,7 @@ export function useTradingSession({ refreshMs = 2000 }: Options = {}) {
     refreshAccountData,
     retrySession,
     submitOrder,
+    submitOco,
     closePosition: submitClosePosition,
     updatePositionProtection: submitProtectionUpdate
   }

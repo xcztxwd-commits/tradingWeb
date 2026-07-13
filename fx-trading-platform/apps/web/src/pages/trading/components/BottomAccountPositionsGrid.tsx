@@ -1,98 +1,261 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { PositionResponse } from '../../../components/tables/types'
+import type { PositionMutation } from '../../../features/trading-session/tradingSession'
+import { PositionActionDialog } from '../../../features/trading/components/PositionActionDialog'
+import type { MarginAdjustmentValue, PositionAction } from '../../../features/trading/components/PositionActionDialog'
+import type { ProtectionLevel, ProtectionType } from '../../../features/trading/components/MultiLevelProtectionEditor'
 import { EmptyState } from './BottomAccountEmptyState'
 import { createPositionDisplayRow } from './positionDisplayModel'
 import styles from './BottomAccountPanel.module.css'
+
+export type PositionMutationHandler = (
+  position: PositionResponse,
+  mutation?: PositionMutation
+) => Promise<unknown> | void
 
 type Props = {
   positions: PositionResponse[]
   emptyLabel: string
   mode?: 'current' | 'history'
-  onClosePosition?: (position: PositionResponse) => Promise<unknown> | void
+  onClosePosition?: PositionMutationHandler
 }
 
-export function PositionsGrid({ positions, emptyLabel, mode = 'current', onClosePosition }: Props) {
+const initialMarginAdjustment: MarginAdjustmentValue = { direction: 'ADD', amount: '' }
+
+export function PositionsGrid({
+  positions,
+  emptyLabel,
+  mode = 'current',
+  onClosePosition
+}: Props) {
   const { t } = useTranslation()
+  const [selectedPosition, setSelectedPosition] = useState<PositionResponse | null>(null)
+  const [action, setAction] = useState<PositionAction>('FULL_CLOSE')
+  const [quantity, setQuantity] = useState('')
+  const [partialCloseClientOrderId, setPartialCloseClientOrderId] = useState('')
+  const [marginAdjustment, setMarginAdjustment] = useState(initialMarginAdjustment)
+  const [protectionLevels, setProtectionLevels] = useState<ProtectionLevel[]>([])
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   if (positions.length === 0) return <EmptyState label={emptyLabel} />
 
+  const openPositionActions = (position: PositionResponse) => {
+    setSelectedPosition(position)
+    setAction('FULL_CLOSE')
+    setQuantity('')
+    setPartialCloseClientOrderId(createClientOrderId('partial-close'))
+    setMarginAdjustment(initialMarginAdjustment)
+    setProtectionLevels([])
+    setError(null)
+  }
+
+  const closePositionActions = () => {
+    if (!pending) setSelectedPosition(null)
+  }
+
+  const addProtection = (protectionType: ProtectionType) => {
+    setProtectionLevels((current) => current.length >= 10 ? current : [
+      ...current,
+      {
+        id: createClientOrderId('protection-level'),
+        protectionType,
+        triggerPrice: '',
+        protectedQuantity: '',
+        executionType: 'MARKET',
+        limitPrice: ''
+      }
+    ])
+  }
+
+  const updateProtection = (id: string, patch: Partial<Omit<ProtectionLevel, 'id'>>) => {
+    setProtectionLevels((current) => current.map((level) => level.id === id ? { ...level, ...patch } : level))
+  }
+
+  const removeProtection = (id: string) => {
+    setProtectionLevels((current) => current.filter((level) => level.id !== id))
+  }
+
+  const confirmPositionAction = async () => {
+    if (!selectedPosition || !onClosePosition) return
+    const version = selectedPosition.version ?? undefined
+    try {
+      setPending(true)
+      setError(null)
+      const mutation = buildPositionMutation(action, quantity, partialCloseClientOrderId, marginAdjustment, protectionLevels, version)
+      await onClosePosition(selectedPosition, mutation)
+      setSelectedPosition(null)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Position action failed')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  const selectedIsLinearPerpetual = selectedPosition ? isLinearPerpetualPosition(selectedPosition) : false
+  const selectedMarginMode = selectedPosition?.marginMode?.toUpperCase() === 'ISOLATED' ? 'ISOLATED' : 'CROSS'
+  const selectedVersion = selectedPosition?.version ?? undefined
+  const marginAdjustmentSupported = selectedIsLinearPerpetual
+    && selectedMarginMode === 'ISOLATED'
+    && Number.isInteger(selectedVersion)
+    && Number(selectedVersion) >= 0
+
   return (
-    <table className={styles.table}>
-      <thead>
-        <tr>
-          <th>{t('positions.instrument')}</th>
-          <th>{t('positions.positionSize')}</th>
-          <th>{t('positions.markPrice')}</th>
-          <th>{t('positions.openAveragePrice')}</th>
-          <th>{t('positions.notional')}</th>
-          <th>{t('positions.estimatedLiquidationPrice')}</th>
-          <th>{t('positions.breakEvenPrice')}</th>
-          <th>{mode === 'history' ? t('positions.realizedPnl') : t('positions.floatingPnl')}</th>
-          <th>{t('positions.maintenanceMargin')}</th>
-          <th>{t('positions.margin')}</th>
-          <th>{t('positions.takeProfitStopLoss')}</th>
-          <th>{t('common.action')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {positions.map((position) => {
-          const row = createPositionDisplayRow(position, t)
-          const pnlValue = mode === 'history' ? row.realizedPnl : row.floatingPnl
-          const pnlTone = mode === 'history' ? row.realizedPnlTone : row.floatingPnlTone
-          const pnlClass =
-            pnlTone === 'positive'
+    <>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>{t('positions.instrument')}</th>
+            <th>{t('positions.positionSize')}</th>
+            <th>{t('positions.markPrice')}</th>
+            <th>{t('positions.openAveragePrice')}</th>
+            <th>{t('positions.notional')}</th>
+            <th>{t('positions.estimatedLiquidationPrice')}</th>
+            <th>{t('positions.breakEvenPrice')}</th>
+            <th>{mode === 'history' ? t('positions.realizedPnl') : t('positions.floatingPnl')}</th>
+            <th>{t('positions.maintenanceMargin')}</th>
+            <th>{t('positions.margin')}</th>
+            <th>{t('positions.takeProfitStopLoss')}</th>
+            <th>{t('common.action')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {positions.map((position) => {
+            const row = createPositionDisplayRow(position, t)
+            const pnlValue = mode === 'history' ? row.realizedPnl : row.floatingPnl
+            const pnlTone = mode === 'history' ? row.realizedPnlTone : row.floatingPnlTone
+            const pnlClass = pnlTone === 'positive'
               ? styles.positiveValue
               : pnlTone === 'negative'
                 ? styles.negativeValue
                 : undefined
 
-          return (
-            <tr key={position.id}>
-              <td>
-                <span className={styles.positionSymbol}>{row.instrument}</span>
-                <span className={styles.positionMeta}>{row.leverage}</span>
-              </td>
-              <td>{row.quantity}</td>
-              <td>{row.markPrice}</td>
-              <td>{row.openPrice}</td>
-              <td>{row.notional}</td>
-              <td>{row.liquidationPrice}</td>
-              <td>{row.breakEvenPrice}</td>
-              <td className={pnlClass}>{pnlValue}</td>
-              <td>{row.showMaintenanceMargin ? row.maintenanceMargin : null}</td>
-              <td>
-                <span>{row.margin}</span>
-                <span className={styles.positionMeta}>{row.marginMode}</span>
-              </td>
-              <td>
-                {row.takeProfit !== '--' || row.stopLoss !== '--' ? (
-                  <span className={styles.protectionValues}>
-                    <span className={styles.positiveValue}>{row.takeProfit}</span>
-                    <span className={styles.negativeValue}>{row.stopLoss}</span>
-                  </span>
-                ) : (
-                  '--'
-                )}
-              </td>
-              <td>
-                {onClosePosition && row.canClose ? (
-                  <span className={styles.actionGroup}>
-                    <button type="button" className={styles.closeButton} onClick={() => void onClosePosition(position)}>
+            return (
+              <tr key={position.id}>
+                <td>
+                  <span className={styles.positionSymbol}>{row.instrument}</span>
+                  <span className={styles.positionMeta}>{row.leverage}</span>
+                </td>
+                <td>{row.quantity}</td>
+                <td>{row.markPrice}</td>
+                <td>{row.openPrice}</td>
+                <td>{row.notional}</td>
+                <td>{row.liquidationPrice}</td>
+                <td>{row.breakEvenPrice}</td>
+                <td className={pnlClass}>{pnlValue}</td>
+                <td>{row.showMaintenanceMargin ? row.maintenanceMargin : null}</td>
+                <td>
+                  <span>{row.margin}</span>
+                  <span className={styles.positionMeta}>{row.marginMode}</span>
+                </td>
+                <td>
+                  {row.takeProfit !== '--' || row.stopLoss !== '--' ? (
+                    <span className={styles.protectionValues}>
+                      <span className={styles.positiveValue}>{row.takeProfit}</span>
+                      <span className={styles.negativeValue}>{row.stopLoss}</span>
+                    </span>
+                  ) : '--'}
+                </td>
+                <td>
+                  {onClosePosition && row.canClose ? (
+                    <button
+                      type="button"
+                      className={styles.closeButton}
+                      title={t('positions.closeAllMarket')}
+                      onClick={() => openPositionActions(position)}
+                    >
                       {t('positions.closePosition')}
                     </button>
-                    <button type="button" className={styles.closeButton} onClick={() => void onClosePosition(position)}>
-                      {t('positions.closeAllMarket')}
-                    </button>
-                  </span>
-                ) : (
-                  '-'
-                )}
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
+                  ) : '-'}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
+      <PositionActionDialog
+        action={action}
+        error={error}
+        marginAdjustment={marginAdjustment}
+        marginAdjustmentSupported={marginAdjustmentSupported}
+        marginMode={selectedMarginMode}
+        open={selectedPosition !== null}
+        partialCloseSupported={selectedIsLinearPerpetual}
+        pending={pending}
+        positionQuantity={String(selectedPosition?.lots ?? '')}
+        protectionLevels={protectionLevels}
+        protectionSupported={selectedIsLinearPerpetual}
+        quantity={quantity}
+        onActionChange={setAction}
+        onClose={closePositionActions}
+        onConfirm={() => void confirmPositionAction()}
+        onMarginAdjustmentChange={setMarginAdjustment}
+        onProtectionAdd={addProtection}
+        onProtectionLevelChange={updateProtection}
+        onProtectionRemove={removeProtection}
+        onQuantityChange={setQuantity}
+      />
+    </>
   )
+}
+
+function isLinearPerpetualPosition(position: PositionResponse) {
+  return position.instrumentType?.toUpperCase() === 'LINEAR_PERP'
+    || position.symbol.toUpperCase().endsWith('USDT-PERP')
+}
+
+function buildPositionMutation(
+  action: PositionAction,
+  quantity: string,
+  partialCloseClientOrderId: string,
+  marginAdjustment: MarginAdjustmentValue,
+  protectionLevels: readonly ProtectionLevel[],
+  version?: number
+): PositionMutation {
+  switch (action) {
+    case 'FULL_CLOSE':
+      return { type: 'FULL_CLOSE' }
+    case 'PARTIAL_CLOSE':
+      return {
+        type: 'PARTIAL_CLOSE',
+        payload: {
+          quantity: Number(quantity),
+          quantityUnit: 'CONTRACTS',
+          clientOrderId: partialCloseClientOrderId
+        }
+      }
+    case 'ADJUST_MARGIN':
+      if (!Number.isInteger(version) || Number(version) < 0) {
+        throw new Error('Position version is unavailable from the current positions contract.')
+      }
+      return {
+        type: 'ADJUST_MARGIN',
+        payload: {
+          action: marginAdjustment.direction,
+          amount: Number(marginAdjustment.amount),
+          expectedVersion: Number(version)
+        }
+      }
+    case 'CREATE_PROTECTIONS':
+      return {
+        type: 'CREATE_PROTECTIONS',
+        payloads: protectionLevels.map((level) => ({
+          protectionType: level.protectionType,
+          quantity: Number(level.protectedQuantity),
+          quantityUnit: 'CONTRACTS',
+          triggerPrice: Number(level.triggerPrice),
+          triggerExecutionType: level.executionType,
+          ...(level.executionType === 'LIMIT' ? { price: Number(level.limitPrice) } : {}),
+          clientOrderId: level.id
+        }))
+      }
+  }
+}
+
+function createClientOrderId(prefix: string) {
+  const randomId = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return `${prefix}-${randomId}`
 }

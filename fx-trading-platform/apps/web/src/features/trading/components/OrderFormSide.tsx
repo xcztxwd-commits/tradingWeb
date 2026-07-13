@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { AmountInput } from './AmountInput'
 import { OrderSubmitButton } from './OrderSubmitButton'
 import { PercentSlider } from './PercentSlider'
+import { PerpetualOrderOptions } from './PerpetualOrderOptions'
 import { PriceInput } from './PriceInput'
-import { TpSlPanel } from './TpSlPanel'
 import { getRequiredMargin, isMarginQuantityMarket, usesQuoteBudgetMarketBuy } from '../hooks/useTradeForm'
 import { formatDecimal } from '../utils/format'
 import { parseSymbolAssets } from '../utils/symbols'
@@ -26,6 +26,8 @@ type Props = {
   onPriceFocusChange: (focused: boolean) => void
   onPercentChange: (percent: number) => void
   onBestPrice: () => void
+  positionMode?: 'ONE_WAY' | 'HEDGE'
+  onProtectionsChange: (protections: TradeFormState['attachedProtections']) => void
   onSubmit: () => void
 }
 
@@ -47,6 +49,8 @@ export function OrderFormSide({
   onPriceFocusChange,
   onPercentChange,
   onBestPrice,
+  positionMode = 'ONE_WAY',
+  onProtectionsChange,
   onSubmit
 }: Props) {
   const { t } = useTranslation()
@@ -62,11 +66,13 @@ export function OrderFormSide({
   const maxSellAmount = marginQuantityMarket && price > 0 ? quoteBalance * leverage / (price * unitSize) : baseBalance
   const maxSellValue = price > 0 ? baseBalance * price : 0
   const marketBuyAmount = usesQuoteBudgetMarketBuy(form, market)
-  const amountField: TradeField = marketBuyAmount ? 'total' : 'amount'
-  const amountValue = marketBuyAmount ? form.total : form.amount
+  const quoteQuantity = marginQuantityMarket && form.quantityUnit === 'QUOTE'
+  const amountField: TradeField = marketBuyAmount || quoteQuantity ? 'total' : 'amount'
+  const amountValue = marketBuyAmount || quoteQuantity ? form.total : form.amount
   const amountUnit = marketBuyAmount
     ? t('trading.minWithAsset', { amount: minMarketQuoteAmount, asset: quoteAsset })
-    : marginQuantityMarket ? t('trading.contractsUnit') : baseAsset
+    : quoteQuantity ? quoteAsset
+      : marginQuantityMarket && form.quantityUnit === 'CONTRACTS' ? t('trading.contractsUnit') : baseAsset
   const requiredQuoteAmount = getRequiredMargin(form, market)
   const quoteShortfall = Math.max(0, requiredQuoteAmount - quoteBalance)
   const baseShortfall = Math.max(0, Number(form.amount) - baseBalance)
@@ -87,7 +93,7 @@ export function OrderFormSide({
       data-quantity-precision={quantityPrecision}
       data-min-amount={minOrderAmount}
     >
-      {form.strategyType === 'tp_sl' ? (
+      {form.strategyType === 'trigger' || form.strategyType === 'oco' ? (
         <TriggerPriceField
           value={form.triggerPrice}
           unit={quoteAsset}
@@ -96,7 +102,7 @@ export function OrderFormSide({
         />
       ) : null}
 
-      {form.orderType === 'limit' ? (
+      {form.orderType === 'limit' && form.strategyType !== 'trigger' ? (
         <PriceInput
           ariaLabel={t('trading.sidePrice', { side: sideLabel })}
           value={form.price}
@@ -116,7 +122,7 @@ export function OrderFormSide({
 
       <AmountInput
         ariaLabel={t('trading.sideQuantity', { side: sideLabel })}
-        label={marketBuyAmount ? t('trading.orderAmount') : t('common.quantity')}
+        label={marketBuyAmount || quoteQuantity ? t('trading.orderAmount') : t('common.quantity')}
         value={amountValue}
         unit={amountUnit}
         unitDropdown={form.orderType === 'market'}
@@ -127,11 +133,18 @@ export function OrderFormSide({
 
       <PercentSlider value={form.percent} onChange={onPercentChange} />
 
-      {form.orderType === 'limit' && form.strategyType === 'none' ? (
-        <TpSlPanel form={form} showErrors={showErrors} fieldErrors={validation.fieldErrors} onFieldChange={onFieldChange} />
+      {marginQuantityMarket ? (
+        <PerpetualOrderOptions
+          form={form}
+          positionMode={positionMode}
+          disabled={!canTrade || submitting}
+          error={getError('attachedProtections')}
+          onFieldChange={onFieldChange}
+          onProtectionsChange={onProtectionsChange}
+        />
       ) : null}
 
-      {form.orderType === 'market' ? <SlippageTolerance expanded={form.strategyType === 'tp_sl'} /> : null}
+      {form.orderType === 'market' ? <SlippageTolerance expanded={false} /> : null}
 
       <BalanceSummary
         canTrade={canTrade}

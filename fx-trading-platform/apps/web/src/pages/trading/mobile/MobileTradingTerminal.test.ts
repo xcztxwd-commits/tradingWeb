@@ -55,21 +55,21 @@ describe('mobile trading terminal redesign', () => {
     assert.match(terminalSource, /aria-label=\{t\('trading\.mobileTerminal'\)\}/)
   })
 
-  it('matches the tokenized mobile contract surface with market tabs, long short actions and bid ask ratio', () => {
+  it('renders the product label from the selected market without inventing a contract state', () => {
     const terminalSource = readFileSync(terminalSourcePath, 'utf8')
     const terminalStyles = readFileSync(terminalStylesPath, 'utf8')
 
-    assert.match(terminalSource, /styles\.marketTabs/)
+    assert.match(terminalSource, /market\.productType === 'LINEAR_PERP'/)
+    assert.match(terminalSource, /t\('trading\.perpetual'\)/)
+    assert.match(terminalSource, /t\('trading\.spot'\)/)
+    assert.match(terminalSource, /<small>\{productLabel\}<\/small>/)
     assert.match(terminalSource, /styles\.contractHeader/)
-    assert.match(terminalSource, /styles\.orderSurface/)
-    assert.match(terminalSource, /styles\.longButton/)
-    assert.match(terminalSource, /styles\.shortButton/)
-    assert.match(terminalSource, /styles\.bidAskRatio/)
     assert.match(terminalSource, /onClick=\{onOpenTrade\}/)
-    assert.match(terminalStyles, /\.marketTabs\s*{[\s\S]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\)/)
-    assert.match(terminalStyles, /\.longButton\s*{[\s\S]*background:\s*var\(--trading-buy\)/)
-    assert.match(terminalStyles, /\.shortButton\s*{[\s\S]*background:\s*var\(--trading-sell\)/)
-    assert.match(terminalStyles, /\.bidAskRatio\s*{[\s\S]*var\(--trading-buy\)/)
+    assert.doesNotMatch(terminalSource, /7\.34|100x|styles\.marketTabs|styles\.orderSurface|styles\.orderControls/)
+    assert.doesNotMatch(terminalSource, /styles\.longButton|styles\.shortButton|styles\.positionHints|styles\.triggerGrid/)
+    assert.doesNotMatch(terminalSource, /bidShare|askShare|styles\.bidAskRatio/)
+    assert.doesNotMatch(terminalSource, />\s*(?:开仓|平仓|全仓|止盈\/止损|开多|开空)\s*</)
+    assert.doesNotMatch(terminalStyles, /\.marketTabs\s*\{|\.orderSurface\s*\{|\.longButton\s*\{|\.shortButton\s*\{|\.bidAskRatio\s*\{/)
   })
 
   it('uses design tokens for mobile density, radius, typography and motion', () => {

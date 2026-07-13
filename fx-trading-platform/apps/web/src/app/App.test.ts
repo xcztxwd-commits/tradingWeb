@@ -19,10 +19,13 @@ const zhLocale = readFileSync(join(currentDir, '..', 'i18n', 'locales', 'zh-CN.t
 const jaLocale = readFileSync(join(currentDir, '..', 'i18n', 'locales', 'ja-JP.ts'), 'utf8')
 
 describe('prototype-driven app shell and routes', () => {
-  it('keeps the homepage at root and preserves the legacy trade redirect', () => {
+  it('keeps the homepage at root and exposes only canonical Spot and Perpetual terminals', () => {
     assert.match(source, /const HomePage = lazy\(/)
     assert.match(source, /<Route path="\/" element=\{<HomePage \/>\} \/>/)
-    assert.match(source, /<Route path="\/trade" element=\{<Navigate to="\/trading" replace \/>\} \/>/)
+    assert.match(source, /<Route path="\/trade\/spot\/:symbol\?" element=\{<TradingPage product="spot" \/>\} \/>/)
+    assert.match(source, /<Route path="\/trade\/perpetual\/:symbol\?" element=\{<TradingPage product="perpetual" \/>\} \/>/)
+    assert.match(source, /<Route path="\/trading" element=\{<LegacyTradingRedirect \/>\} \/>/)
+    assert.match(source, /<Route path="\/trade\/:product\/:symbol\?" element=\{<Navigate to=\{resolveSafeTradingPath\(null\)\} replace \/>\} \/>/)
     assert.doesNotMatch(source, /path="\/admin"/)
   })
 
@@ -87,16 +90,16 @@ describe('prototype-driven app shell and routes', () => {
     assert.match(mobileNavSource, /to:\s*'\/'/)
   })
 
-  it('keeps the home trading dropdown wired to category routes', () => {
+  it('keeps the home trading dropdown wired only to Spot and Perpetual routes', () => {
     const tradingNavSource = readFileSync(join(currentDir, 'components', 'TradingNavMenu.tsx'), 'utf8')
     const topbarNavRule = getCssRule(styles, '.app-topbar__nav')
 
     assert.match(tradingNavSource, /resolveTradingPath/)
-    assert.match(tradingNavSource, /onClick=\{\(\) => openCategory\(item\.category\)\}/)
+    assert.match(tradingNavSource, /onClick=\{\(\) => openProduct\(item\.product\)\}/)
     assert.match(tradingNavSource, /role="menuitem"/)
-    assert.match(tradingNavSource, /category:\s*'crypto'/)
-    assert.match(tradingNavSource, /category:\s*'forex'/)
-    assert.match(tradingNavSource, /category:\s*'contract'/)
+    assert.match(tradingNavSource, /product:\s*'spot'/)
+    assert.match(tradingNavSource, /product:\s*'perpetual'/)
+    assert.doesNotMatch(tradingNavSource, /category:\s*'forex'|INVERSE_PERP|options/i)
     assert.match(tradingNavSource, /onClick=\{\(\) => setOpen\(true\)\}/)
     assert.match(tradingNavSource, /onPointerEnter=\{\(event\) => \{[\s\S]*event\.pointerType !== 'touch'[\s\S]*setOpen\(true\)/)
     assert.match(tradingNavSource, /onPointerLeave=\{\(event\) => \{[\s\S]*event\.pointerType !== 'touch'[\s\S]*setOpen\(false\)/)
@@ -168,7 +171,7 @@ describe('prototype-driven app shell and routes', () => {
 
   it('keeps mobile navigation capped to five implemented entries', () => {
     const mobileNavSource = getArraySource(navigationSource, 'mobileNavItems')
-    const expectedRoutes = ['/', '/markets', '/trading', '/account/orders/trades', '/account/overview']
+    const expectedRoutes = ['/', '/markets', '/trade/spot/BTCUSDT', '/account/orders/trades', '/account/overview']
 
     for (const route of expectedRoutes) {
       assert.match(mobileNavSource, new RegExp(`to:\\s*'${escapeRegExp(route)}'`))
@@ -176,6 +179,8 @@ describe('prototype-driven app shell and routes', () => {
 
     assert.equal([...mobileNavSource.matchAll(/to:\s*'/g)].length, expectedRoutes.length)
     assert.doesNotMatch(mobileNavSource, /to:\s*'\/admin'|to:\s*'\/wallet'|to:\s*'\/orders'|to:\s*'\/positions'|to:\s*'\/security'|to:\s*'\/settings'/)
+    assert.match(appShellSource, /isConfiguredNavPathActive\(item, pathname\)/)
+    assert.match(appShellSource, /pathname === path \|\| pathname\.startsWith\(`\$\{path\}\/`\)/)
   })
 
   it('uses Binance-like shell tokens with safe-area mobile tabs', () => {
@@ -212,6 +217,8 @@ describe('prototype-driven app shell and routes', () => {
     assert.match(styles, /\.app-shell--auth\s*{[\s\S]*grid-template-rows:\s*minmax\(0,\s*1fr\)/)
     assert.match(styles, /\.app-shell--auth\s+\.app-topbar\s*{[\s\S]*display:\s*none/)
     assert.match(styles, /\.app-shell--terminal\s+\.main-region\s*{[\s\S]*padding:\s*0/)
+    assert.match(appShellSource, /\^\\\/trade\\\/\(spot\|perpetual\)/)
+    assert.match(appShellSource, /item\.to\.startsWith\('\/trade\/'\)/)
     assert.match(
       mobileTerminalStyles,
       /\.actionBar\s*{[\s\S]*bottom:\s*calc\(env\(safe-area-inset-bottom\) \+ var\(--mobile-tabs-height\) \+ var\(--space-2\)\)/

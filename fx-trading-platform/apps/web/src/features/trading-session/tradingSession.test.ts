@@ -100,12 +100,14 @@ describe('trading session models', () => {
       symbol: 'BTCUSDT',
       side: 'BUY',
       orderType: 'LIMIT',
-      quantity: '0.02',
-      price: '60736.3',
+      quantity: 0.02,
+      price: 60736.3,
       clientOrderId: 'client_123',
-      lots: '0.02',
-      requestedPrice: '60736.3',
-      idempotencyKey: 'client_123'
+      idempotencyKey: 'client_123',
+      positionSide: 'BOTH',
+      quantityUnit: 'BASE',
+      marginMode: 'CASH',
+      reduceOnly: false
     }
 
     assert.deepEqual(createLocalPreviewOrder(payload, '2026-06-06T00:00:00.000Z'), {
@@ -114,7 +116,7 @@ describe('trading session models', () => {
       side: 'BUY',
       orderType: 'LIMIT',
       status: 'LOCAL_PREVIEW',
-      lots: '0.02',
+      lots: 0.02,
       executionPrice: null,
       createdAt: '2026-06-06T00:00:00.000Z'
     })
@@ -247,6 +249,21 @@ describe('trading session models', () => {
 })
 
 describe('trading session submit mode', () => {
+  it('routes only canonical position mutations and refreshes through the authenticated account session', () => {
+    const sessionSource = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
+    const hookSource = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+
+    assert.match(sessionSource, /export type PositionMutation =/)
+    assert.match(sessionSource, /type: 'PARTIAL_CLOSE'/)
+    assert.match(sessionSource, /type: 'FULL_CLOSE'/)
+    assert.match(sessionSource, /type: 'ADJUST_MARGIN'/)
+    assert.match(sessionSource, /type: 'CREATE_PROTECTIONS'/)
+    assert.match(sessionSource, /for \(const payload of payloads\)/)
+    assert.match(hookSource, /mutation: PositionMutation = \{ type: 'FULL_CLOSE' \}/)
+    assert.match(hookSource, /mutateTradingPosition\(accountId, position\.id, mutation, token\)/)
+    assert.match(hookSource, /finally \{[\s\S]*await refreshAccountData\(token, accountId\)\.catch\(\(\) => undefined\)/)
+  })
+
   it('rejects order submission without a backend token', async () => {
     const { submitTradingOrder } = await import('./tradingSession.ts')
 

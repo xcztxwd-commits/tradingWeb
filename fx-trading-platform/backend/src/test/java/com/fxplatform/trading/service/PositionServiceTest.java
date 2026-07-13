@@ -1257,6 +1257,7 @@ class PositionServiceTest {
     position.setSide(OrderSide.SELL);
     position.setLots(new BigDecimal("0.2"));
     position.setLeverage(20);
+    position.setVersion(7L);
     position.setMarkPrice(new BigDecimal("50000"));
     when(accountRepository.findByIdAndUserId(accountId, userId))
         .thenReturn(Optional.of(account(userId, accountId)));
@@ -1279,6 +1280,7 @@ class PositionServiceTest {
     assertThat(response.positionSide()).isEqualTo(PositionSide.SHORT);
     assertThat(response.marginMode()).isEqualTo(MarginMode.ISOLATED.name());
     assertThat(response.leverage()).isEqualTo(20);
+    assertThat(response.version()).isEqualTo(7L);
   }
 
   @Test

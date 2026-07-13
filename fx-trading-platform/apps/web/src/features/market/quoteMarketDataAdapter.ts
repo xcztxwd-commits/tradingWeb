@@ -4,7 +4,7 @@ import { mapOrderBookToMarketData, mapQuoteToTradingQuote, mapRecentTradesToMark
 import type { BackendOrderBook, BackendQuote, BackendRecentTrade } from './tradingMarketAdapters'
 import type { TradingQuote } from './tradingModels'
 import { marketDataStore } from './marketDataStore'
-import { createFallbackMarketDataSnapshot, createQuoteMarketDataSnapshot } from './quoteMarketDataSnapshot'
+import { createQuoteMarketDataSnapshot } from './quoteMarketDataSnapshot'
 
 type AdapterStore = typeof marketDataStore
 
@@ -65,7 +65,7 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
   }
 
   void fetchMarketQuote(symbol).then(applyQuote).catch(() => {
-    if (!disposed) store.reset(createFallbackMarketDataSnapshot(symbol))
+    if (!disposed) store.reset()
   })
   void fetchMarketOrderBook(symbol).then(applyOrderBook).catch(() => undefined)
   void fetchMarketRecentTrades(symbol).then((trades) => store.setRecentTrades(trades)).catch(() => undefined)

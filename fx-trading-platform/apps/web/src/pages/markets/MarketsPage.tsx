@@ -2,7 +2,6 @@ import { ChevronDown, LayoutGrid, List, Search, Star } from 'lucide-react'
 import { useEffect, useMemo, useState, type PointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { resolveTradingPath, writeLastTradingSymbol, type TradingCategory } from '../../app/hooks/useLastTradingSymbol'
 import { AssetMark } from '../../components/asset/AssetMark'
 import { SelectField, type SelectFieldOption } from '../../components/SelectField'
 import { ApiErrorState, LoadingState } from '../../components/user-page/PageState'
@@ -23,6 +22,7 @@ import { fetchMarketQuotes, fetchMarketSymbols } from '../../features/market/tra
 import { formatMarketPrice } from '../../features/market/tradingModels'
 import type { TradingMarket, TradingQuote } from '../../features/market/tradingModels'
 import { useMarketFavorites } from '../../features/market/useMarketFavorites'
+import { isMarketTradingEnabled, resolveMarketTradingTarget } from './marketTradingTarget'
 import { subscribeQuote } from '../../services/marketStream'
 import type { Quote } from '../../types/trading'
 
@@ -343,11 +343,8 @@ export function MarketsPage() {
   }
 
   function onOpenMarket(market: TradingMarket) {
-    const category = toTradingCategory(market)
-    writeLastTradingSymbol(category, market.symbol)
-    const target = resolveTradingPath(category, market.symbol)
-    const expectedPath = `/trading?category=${category}&symbol=${encodeURIComponent(market.symbol)}`
-    navigate(target === expectedPath ? target : expectedPath)
+    const target = resolveMarketTradingTarget(market)
+    if (target) navigate(target)
   }
 }
 
@@ -396,7 +393,7 @@ function SummaryCard({ group, onOpen }: { group: SummaryGroup; onOpen: (market: 
           <h2 id={`summary-${group.key}`}>{group.title}</h2>
           <p>{group.description}</p>
         </div>
-        <button type="button" onClick={() => onOpen(group.markets[0])}>
+        <button type="button" disabled={!isMarketTradingEnabled(group.markets[0])} onClick={() => onOpen(group.markets[0])}>
           更多
         </button>
       </div>
@@ -413,7 +410,7 @@ function SummaryCard({ group, onOpen }: { group: SummaryGroup; onOpen: (market: 
 
 function RankingPreviewCard({ market, onOpen }: { market: TradingMarket; onOpen: (market: TradingMarket) => void }) {
   return (
-    <button type="button" className="market-preview-row" onClick={() => onOpen(market)}>
+    <button type="button" className="market-preview-row" disabled={!isMarketTradingEnabled(market)} onClick={() => onOpen(market)}>
       <AssetMark symbol={market.symbol} category={market.category} iconUrl={market.iconUrl} size="sm" />
       <span>
         <strong>{market.base}</strong>
@@ -524,7 +521,7 @@ function MarketTable({
         </thead>
         <tbody>
           {markets.map((market) => (
-            <tr key={market.symbol} onClick={() => onOpen(market)}>
+            <tr key={market.symbol} onClick={() => isMarketTradingEnabled(market) && onOpen(market)}>
               <td>
                 <FavoriteButton active={favorites.has(market.symbol) || market.favorite} symbol={market.symbol} onFavorite={onFavorite} />
                 <AssetMark symbol={market.symbol} category={market.category} iconUrl={market.iconUrl} size="sm" />
@@ -543,6 +540,7 @@ function MarketTable({
                 <button
                   type="button"
                   className="table-action table-action--secondary market-trade-action"
+                  disabled={!isMarketTradingEnabled(market)}
                   onClick={(event) => {
                     event.stopPropagation()
                     onOpen(market)
@@ -574,7 +572,7 @@ function MarketMobileList({
     <div className="market-mobile-list" aria-label="移动端行情列表">
       {markets.map((market) => (
         <article key={market.symbol} className="market-mobile-row">
-          <button type="button" className="market-mobile-row__body" onClick={() => onOpen(market)}>
+          <button type="button" className="market-mobile-row__body" disabled={!isMarketTradingEnabled(market)} onClick={() => onOpen(market)}>
             <AssetMark symbol={market.symbol} category={market.category} iconUrl={market.iconUrl} size="md" />
             <span>
               <strong>{market.symbol}</strong>
@@ -749,7 +747,7 @@ function RankingCard({ group, onOpen }: { group: RankingGroup; onOpen: (market: 
       <ol className="market-rank-list">
         {group.markets.map((market, index) => (
           <li key={`${group.title}-${market.symbol}-${index}`}>
-            <button type="button" onClick={() => onOpen(market)}>
+            <button type="button" disabled={!isMarketTradingEnabled(market)} onClick={() => onOpen(market)}>
               <span className="market-rank-index">{index + 1}</span>
               <span className="market-rank-symbol">
                 <AssetMark symbol={market.symbol} category={market.category} size="sm" />
@@ -1079,12 +1077,6 @@ function matchesZone(market: TradingMarket, zone: MarketZoneTab) {
   if (zone === 'metals') return market.category === 'metals'
   if (zone === 'indices') return market.category === 'indices'
   return true
-}
-
-function toTradingCategory(market: TradingMarket): TradingCategory {
-  if (market.category === 'fx') return 'forex'
-  if (market.category === 'crypto') return market.symbol === 'ETHUSDT' ? 'contract' : 'crypto'
-  return 'contract'
 }
 
 async function loadQuotedMarkets(markets: TradingMarket[]) {
