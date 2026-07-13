@@ -24,7 +24,9 @@ import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.trading.entity.FundingRateEntity;
 import com.fxplatform.trading.repository.FundingRateRepository;
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -57,20 +59,23 @@ class AdminFundingConfigServiceTest {
 
   @Test
   void getReturnsConfigurationAndMapsLatestPhysicalProviderToActualSource() {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
     SymbolEntity symbol = perpetualSymbol(UUID.randomUUID());
     FundingRateEntity latest = new FundingRateEntity();
     latest.setSymbol(symbol.getSymbol());
     latest.setProviderCode("okx-swap");
     latest.setSourceMode("PUBLIC_EXTERNAL");
-    latest.setAsOf(Instant.parse("2026-07-12T07:59:59Z"));
-    latest.setNextFundingTime(Instant.parse("2026-07-12T08:00:00Z"));
+    latest.setAsOf(Instant.parse("2026-07-12T00:00:00Z"));
+    latest.setFundingTime(Instant.parse("2026-07-12T08:00:00Z"));
+    latest.setNextFundingTime(Instant.parse("2026-07-12T16:00:00Z"));
     when(symbolRepository.findById(symbol.getId())).thenReturn(Optional.of(symbol));
     when(fundingRateRepository.findLatestBySymbol(symbol.getSymbol())).thenReturn(Optional.of(latest));
     AdminMarketQueryService service = new AdminMarketQueryService(
         symbolRepository,
         symbolCategoryRepository,
         priceAdjustmentRepository,
-        fundingRateRepository);
+        fundingRateRepository,
+        Clock.fixed(now, ZoneOffset.UTC));
 
     var response = service.fundingConfig(symbol.getId());
 
@@ -82,8 +87,38 @@ class AdminFundingConfigServiceTest {
     assertThat(response.fundingStaleSeconds()).isEqualTo(900);
     assertThat(response.actualSource()).isEqualTo("OKX");
     assertThat(response.sourceMode()).isEqualTo("PUBLIC_EXTERNAL");
-    assertThat(response.asOf()).isEqualTo(Instant.parse("2026-07-12T07:59:59Z"));
-    assertThat(response.nextFundingTime()).isEqualTo(Instant.parse("2026-07-12T08:00:00Z"));
+    assertThat(response.asOf()).isEqualTo(Instant.parse("2026-07-12T00:00:00Z"));
+    assertThat(response.nextFundingTime()).isEqualTo(Instant.parse("2026-07-12T16:00:00Z"));
+  }
+
+  @Test
+  void getTreatsStaleLatestFundingAsUnavailable() {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    SymbolEntity symbol = perpetualSymbol(UUID.randomUUID());
+    FundingRateEntity latest = new FundingRateEntity();
+    latest.setSymbol(symbol.getSymbol());
+    latest.setProviderCode("okx-swap");
+    latest.setSourceMode("PUBLIC_EXTERNAL");
+    latest.setAsOf(now.minusSeconds(901));
+    latest.setFundingTime(now.plusSeconds(28_800));
+    latest.setNextFundingTime(now.plusSeconds(57_600));
+    when(symbolRepository.findById(symbol.getId())).thenReturn(Optional.of(symbol));
+    when(fundingRateRepository.findLatestBySymbol(symbol.getSymbol())).thenReturn(Optional.of(latest));
+    AdminMarketQueryService service = new AdminMarketQueryService(
+        symbolRepository,
+        symbolCategoryRepository,
+        priceAdjustmentRepository,
+        fundingRateRepository,
+        Clock.fixed(now, ZoneOffset.UTC));
+
+    var response = service.fundingConfig(symbol.getId());
+
+    assertThat(response.fundingStaleSeconds()).isEqualTo(900);
+    assertThat(response.actualSource()).isNull();
+    assertThat(response.fallbackReason()).isNull();
+    assertThat(response.sourceMode()).isNull();
+    assertThat(response.asOf()).isNull();
+    assertThat(response.nextFundingTime()).isNull();
   }
 
   @Test

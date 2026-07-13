@@ -9,6 +9,7 @@ import com.fxplatform.market.dto.MarketDepthResponse;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
 import com.fxplatform.market.dto.PerpetualReferenceResponse;
+import com.fxplatform.market.funding.FundingRateFreshnessPolicy;
 import com.fxplatform.market.model.CandleRequest;
 import com.fxplatform.market.model.MarketBundleProducts;
 import com.fxplatform.market.model.PerpetualMarketBundle;
@@ -248,9 +249,14 @@ public class MarketDataRouter {
       throw new BusinessException("SYMBOL_QUOTE_DISABLED", "Symbol quote is disabled");
     }
     PerpetualMarketBundle bundle = marketBundleResolver.resolvePerp(normalized, defaultCandleRequest());
-    FundingRateEntity funding = fundingRateRepository == null
+    FundingRateEntity latestFunding = fundingRateRepository == null
         ? null
         : fundingRateRepository.findLatestBySymbol(normalized).orElse(null);
+    Instant now = clock.instant();
+    FundingRateEntity funding = FundingRateFreshnessPolicy.activeOrNull(
+        latestFunding,
+        platformSymbol.getFundingStaleSeconds(),
+        now);
     return new PerpetualReferenceResponse(
         bundle.platformSymbol(),
         bundle.providerSymbol(),
@@ -263,7 +269,7 @@ public class MarketDataRouter {
         bundle.index(),
         bundle.asOf(),
         bundle.expiresAt(),
-        !clock.instant().isBefore(bundle.expiresAt()),
+        !now.isBefore(bundle.expiresAt()),
         funding == null ? null : funding.getFundingRate(),
         funding == null ? null : funding.getFundingTime(),
         funding == null ? null : funding.getNextFundingTime(),

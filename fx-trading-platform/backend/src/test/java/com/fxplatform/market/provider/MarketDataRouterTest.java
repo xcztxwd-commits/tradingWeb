@@ -98,8 +98,8 @@ class MarketDataRouterTest {
   @Test
   void p0PerpetualReferenceProjectsLatestFundingCycleWithoutReplacingMarketSource() {
     Instant now = Instant.parse("2026-07-12T00:00:10Z");
-    Instant fundingTime = Instant.parse("2026-07-12T00:00:00Z");
-    Instant nextFundingTime = Instant.parse("2026-07-12T08:00:00Z");
+    Instant fundingTime = Instant.parse("2026-07-12T08:00:00Z");
+    Instant nextFundingTime = Instant.parse("2026-07-12T16:00:00Z");
     PerpetualMarketBundle bundle = perpBundle(now);
     FundingRateEntity funding = new FundingRateEntity();
     funding.setSymbol("BTCUSDT-PERP");
@@ -107,6 +107,7 @@ class MarketDataRouterTest {
     funding.setFundingTime(fundingTime);
     funding.setNextFundingTime(nextFundingTime);
     funding.setProviderCode("fixed");
+    funding.setAsOf(Instant.parse("2026-07-12T00:00:00Z"));
     when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP"))
         .thenReturn(enabledSymbol("BTCUSDT-PERP"));
     when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
@@ -127,6 +128,75 @@ class MarketDataRouterTest {
     assertThat(reference.nextFundingTime()).isEqualTo(nextFundingTime);
     assertThat(reference.fundingSource()).isEqualTo("fixed");
     verify(fundingRateRepository).findLatestBySymbol("BTCUSDT-PERP");
+  }
+
+  @Test
+  void p0PerpetualReferenceHidesFundingCycleThatIsNoLongerActive() {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    PerpetualMarketBundle bundle = perpBundle(now);
+    FundingRateEntity funding = new FundingRateEntity();
+    funding.setSymbol("BTCUSDT-PERP");
+    funding.setFundingRate(new BigDecimal("0.0001"));
+    funding.setFundingTime(now);
+    funding.setNextFundingTime(now.plusSeconds(28_800));
+    funding.setProviderCode("okx-swap");
+    funding.setAsOf(now);
+    when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP"))
+        .thenReturn(enabledSymbol("BTCUSDT-PERP"));
+    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    when(fundingRateRepository.findLatestBySymbol("BTCUSDT-PERP"))
+        .thenReturn(Optional.of(funding));
+    MarketDataRouter router = new MarketDataRouter(
+        providerResolver,
+        marketBundleResolver,
+        fundingRateRepository,
+        Clock.fixed(now, ZoneOffset.UTC));
+
+    var reference = router.perpetualReference("BTCUSDT-PERP");
+
+    assertThat(reference.providerCode()).isEqualTo("okx-swap");
+    assertThat(reference.fundingRate()).isNull();
+    assertThat(reference.fundingTime()).isNull();
+    assertThat(reference.nextFundingTime()).isNull();
+    assertThat(reference.fundingSource()).isNull();
+  }
+
+  @Test
+  void p0PerpetualReferenceEvaluatesFreshnessAfterFundingLookup() {
+    Instant beforeLookup = Instant.parse("2026-07-12T00:00:09Z");
+    Instant afterLookup = Instant.parse("2026-07-12T00:00:15Z");
+    AtomicReference<Instant> currentTime = new AtomicReference<>(beforeLookup);
+    Clock advancingClock = org.mockito.Mockito.mock(Clock.class);
+    when(advancingClock.instant()).thenAnswer(ignored -> currentTime.get());
+    PerpetualMarketBundle bundle = perpBundle(beforeLookup);
+    FundingRateEntity funding = new FundingRateEntity();
+    funding.setSymbol("BTCUSDT-PERP");
+    funding.setFundingRate(new BigDecimal("0.0001"));
+    funding.setFundingTime(Instant.parse("2026-07-12T00:00:12Z"));
+    funding.setNextFundingTime(Instant.parse("2026-07-12T08:00:12Z"));
+    funding.setProviderCode("okx-swap");
+    funding.setAsOf(beforeLookup);
+    when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP"))
+        .thenReturn(enabledSymbol("BTCUSDT-PERP"));
+    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    when(fundingRateRepository.findLatestBySymbol("BTCUSDT-PERP"))
+        .thenAnswer(ignored -> {
+          currentTime.set(afterLookup);
+          return Optional.of(funding);
+        });
+    MarketDataRouter router = new MarketDataRouter(
+        providerResolver,
+        marketBundleResolver,
+        fundingRateRepository,
+        advancingClock);
+
+    var reference = router.perpetualReference("BTCUSDT-PERP");
+
+    assertThat(reference.stale()).isTrue();
+    assertThat(reference.fundingRate()).isNull();
+    assertThat(reference.fundingTime()).isNull();
+    assertThat(reference.nextFundingTime()).isNull();
+    assertThat(reference.fundingSource()).isNull();
   }
 
   @Test

@@ -9,11 +9,13 @@ import com.fxplatform.admin.dto.response.AdminSymbolResponse;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.market.entity.SymbolCategoryEntity;
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.funding.FundingRateFreshnessPolicy;
 import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.PriceAdjustmentRepository;
 import com.fxplatform.market.repository.SymbolCategoryRepository;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.trading.repository.FundingRateRepository;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,6 +33,7 @@ public class AdminMarketQueryService {
   private final SymbolCategoryRepository symbolCategoryRepository;
   private final PriceAdjustmentRepository priceAdjustmentRepository;
   private final FundingRateRepository fundingRateRepository;
+  private final Clock clock;
 
   @Autowired
   public AdminMarketQueryService(
@@ -39,10 +42,26 @@ public class AdminMarketQueryService {
       PriceAdjustmentRepository priceAdjustmentRepository,
       FundingRateRepository fundingRateRepository
   ) {
+    this(
+        symbolRepository,
+        symbolCategoryRepository,
+        priceAdjustmentRepository,
+        fundingRateRepository,
+        Clock.systemUTC());
+  }
+
+  AdminMarketQueryService(
+      SymbolRepository symbolRepository,
+      SymbolCategoryRepository symbolCategoryRepository,
+      PriceAdjustmentRepository priceAdjustmentRepository,
+      FundingRateRepository fundingRateRepository,
+      Clock clock
+  ) {
     this.symbolRepository = symbolRepository;
     this.symbolCategoryRepository = symbolCategoryRepository;
     this.priceAdjustmentRepository = priceAdjustmentRepository;
     this.fundingRateRepository = fundingRateRepository;
+    this.clock = clock;
   }
 
   public AdminFundingConfigResponse fundingConfig(UUID symbolId) {
@@ -51,7 +70,10 @@ public class AdminMarketQueryService {
     requireLinearPerpetual(symbol);
     return AdminFundingConfigResponse.from(
         symbol,
-        fundingRateRepository.findLatestBySymbol(symbol.getSymbol()).orElse(null));
+        FundingRateFreshnessPolicy.activeOrNull(
+            fundingRateRepository.findLatestBySymbol(symbol.getSymbol()).orElse(null),
+            symbol.getFundingStaleSeconds(),
+            clock.instant()));
   }
 
   /** 分页查询全部产品品种，按 symbol 升序返回。 */
