@@ -18,7 +18,9 @@ const demo = accounts.find((account) => account.accountType === 'DEMO' && accoun
 assert(demo, 'Register must create one active Demo account')
 const accountId = demo.id
 
+const summaryBeforeMarket = await accountSummary()
 const walletsBeforeMarket = await walletBalances()
+assertWalletConservation(walletsBeforeMarket, 'before market order')
 const usdtBeforeMarket = wallet(walletsBeforeMarket, 'USDT')
 const btcBeforeMarket = wallet(walletsBeforeMarket, 'BTC')
 const marketOrder = await createOrder({
@@ -30,10 +32,20 @@ const marketOrder = await createOrder({
 assert(marketOrder.status === 'FILLED', 'Spot market order must fill')
 
 const walletsAfterMarket = await walletBalances()
+assertWalletConservation(walletsAfterMarket, 'after market order')
 const usdtAfterMarket = wallet(walletsAfterMarket, 'USDT')
 const btcAfterMarket = wallet(walletsAfterMarket, 'BTC')
 assert(usdtAfterMarket.total < usdtBeforeMarket.total, 'market order must debit Spot USDT')
 assert(btcAfterMarket.total > btcBeforeMarket.total, 'market order must credit Spot BTC')
+const summaryAfterMarket = await accountSummary()
+assertAccountSummaryUnchanged(summaryBeforeMarket, summaryAfterMarket, 'Spot market order')
+const ledgerAfterMarket = await assetLedger()
+assert(ledgerAfterMarket.some((entry) =>
+  entry.walletType === 'SPOT' && entry.asset === 'USDT' && entry.entryType === 'SPOT_BUY_DEBIT'),
+'market buy must create a Spot USDT asset-ledger debit')
+assert(ledgerAfterMarket.some((entry) =>
+  entry.walletType === 'SPOT' && entry.asset === 'BTC' && entry.entryType === 'SPOT_BUY_CREDIT'),
+'market buy must create a Spot BTC asset-ledger credit')
 
 const quote = await request(`/api/market/quotes/${symbol}`)
 const referencePrice = Number(quote.bid ?? quote.mid ?? quote.ask)
@@ -50,18 +62,16 @@ assert(!['FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(pend
   `non-marketable Spot limit must remain active, got ${pendingLimit.status}`)
 
 const walletsWithLimit = await walletBalances()
+assertWalletConservation(walletsWithLimit, 'with pending limit')
 assert(wallet(walletsWithLimit, 'USDT').locked > usdtAfterMarket.locked,
   'non-marketable limit must lock Spot USDT')
 
-const query = new URLSearchParams({ accountId, page: '0', size: '50' })
-const ordersPage = await request(`/api/trading/orders?${query}`, { token })
-assert(Array.isArray(ordersPage.items), 'Order query must return paginated items')
-assert(ordersPage.items.some((order) => order.id === marketOrder.id), 'Market order must appear in order history')
-assert(ordersPage.items.some((order) => order.id === pendingLimit.id), 'Limit order must appear in order history')
+const orders = await loadAllPages('/api/trading/orders', accountId, token, 1)
+assert(orders.some((order) => order.id === marketOrder.id), 'Market order must appear in order history')
+assert(orders.some((order) => order.id === pendingLimit.id), 'Limit order must appear in order history')
 
-const positionsPage = await request(`/api/trading/positions?${query}`, { token })
-assert(Array.isArray(positionsPage.items), 'Position query must return paginated items')
-assert(!positionsPage.items.some((position) => position.symbol === symbol),
+const positions = await loadAllPages('/api/trading/positions', accountId, token, 1)
+assert(!positions.some((position) => position.symbol === symbol),
   'Spot fills must not create leveraged positions')
 
 const canceledLimit = await request(`/api/trading/orders/${pendingLimit.id}/cancel`, {
@@ -71,8 +81,11 @@ const canceledLimit = await request(`/api/trading/orders/${pendingLimit.id}/canc
 assert(['CANCELED', 'CANCELLED'].includes(canceledLimit.status), 'Limit cancel must reach a canceled state')
 
 const walletsAfterCancel = await walletBalances()
-assert(wallet(walletsAfterCancel, 'USDT').locked <= usdtAfterMarket.locked,
-  'cancel must release the limit hold')
+assertWalletConservation(walletsAfterCancel, 'after limit cancel')
+assert(approximatelyEqual(wallet(walletsAfterCancel, 'USDT').locked, usdtAfterMarket.locked),
+  'cancel must release the exact limit hold')
+const summaryAfterCancel = await accountSummary()
+assertAccountSummaryUnchanged(summaryBeforeMarket, summaryAfterCancel, 'Spot order and cancel lifecycle')
 
 console.log(JSON.stringify({
   health: health.status,
@@ -111,6 +124,33 @@ function walletBalances() {
   return request(`/api/accounts/${accountId}/wallet-balances`, { token })
 }
 
+function accountSummary() {
+  return request(`/api/accounts/${accountId}/summary`, { token })
+}
+
+function assetLedger() {
+  return request(`/api/accounts/${accountId}/asset-ledger`, { token })
+}
+
+async function loadAllPages(path, accountId, token, pageSize = 50) {
+  const items = []
+  let page = 0
+  let totalPages = 1
+  while (page < totalPages) {
+    const query = new URLSearchParams({ accountId, page: String(page), size: String(pageSize) })
+    const result = await request(`${path}?${query}`, { token })
+    assert(Array.isArray(result.items), `${path} must return paginated items`)
+    const reportedTotalPages = Number(result.totalPages)
+    assert(Number.isSafeInteger(reportedTotalPages) && reportedTotalPages >= 0,
+      `${path} must return valid totalPages`)
+    if (page === 0) totalPages = Math.max(1, reportedTotalPages)
+    else assert(Math.max(1, reportedTotalPages) === totalPages, `${path} pagination metadata changed mid-read`)
+    items.push(...result.items)
+    page += 1
+  }
+  return items
+}
+
 function wallet(wallets, asset) {
   const balance = wallets.find((candidate) => candidate.walletType === 'SPOT' && candidate.asset === asset)
   return {
@@ -118,6 +158,30 @@ function wallet(wallets, asset) {
     available: Number(balance?.available ?? 0),
     locked: Number(balance?.locked ?? 0)
   }
+}
+
+function assertWalletConservation(wallets, label) {
+  for (const balance of wallets.filter((candidate) => candidate.walletType === 'SPOT')) {
+    const total = Number(balance.total)
+    const available = Number(balance.available)
+    const locked = Number(balance.locked)
+    assert([total, available, locked].every(Number.isFinite), `${label}: wallet amounts must be finite`)
+    assert(total >= 0 && available >= 0 && locked >= 0, `${label}: wallet amounts must be non-negative`)
+    assert(approximatelyEqual(total, available + locked),
+      `${label}: ${balance.asset} total must equal available plus locked`)
+  }
+}
+
+function assertAccountSummaryUnchanged(before, after, label) {
+  assert(after.id === before.id, `${label}: account summary identity changed`)
+  for (const field of ['balance', 'equity', 'usedMargin', 'freeMargin']) {
+    assert(approximatelyEqual(Number(after[field]), Number(before[field])),
+      `${label}: Spot trading must not mutate Perpetual account ${field}`)
+  }
+}
+
+function approximatelyEqual(left, right) {
+  return Number.isFinite(left) && Number.isFinite(right) && Math.abs(left - right) <= 1e-8
 }
 
 async function request(path, options = {}) {
