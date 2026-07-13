@@ -32,6 +32,7 @@ public class TradeEntity {
   private UUID accountId;
   private String symbol;
   private ProductType productType = ProductType.FX_MARGIN;
+  private Boolean canonicalFullFill = false;
   private PositionSide positionSide = PositionSide.BOTH;
   private MarginMode marginMode = MarginMode.CROSS;
   private OrderSide side;

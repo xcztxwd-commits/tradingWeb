@@ -144,6 +144,7 @@ class DomainEnumContractTest {
 
     assertFields(TradeEntity.class, Map.ofEntries(
         entry("productType", "com.fxplatform.market.model.ProductType"),
+        entry("canonicalFullFill", Boolean.class.getName()),
         entry("positionSide", ENUM_PACKAGE + "PositionSide"),
         entry("marginMode", ENUM_PACKAGE + "MarginMode"),
         entry("fee", BigDecimal.class.getName()),

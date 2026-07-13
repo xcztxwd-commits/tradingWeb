@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
+import com.fxplatform.account.enums.AccountType;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.ExecutionResult;
@@ -362,7 +363,7 @@ class OrderFillServiceTest {
   }
 
   @Test
-  void canonicalFullFillCopiesFeeRoleAndSourceMetadataToOneTrade() {
+  void canonicalFullFillMarksOnlyDemoP0TradeAndCopiesExecutionMetadata() {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId);
     OrderEntity order = order(accountId);
@@ -399,6 +400,12 @@ class OrderFillServiceTest {
         spotSettlementService);
 
     service.fill(order, account, fill, BigDecimal.ZERO, "canonical fill");
+    TradingAccountEntity liveAccount = account(UUID.randomUUID());
+    liveAccount.setAccountType(AccountType.LIVE);
+    OrderEntity liveOrder = order(liveAccount.getId());
+    liveOrder.setProductType(ProductType.CRYPTO_SPOT);
+    liveOrder.setBaseQuantity(new BigDecimal("0.20"));
+    service.fill(liveOrder, liveAccount, fill, BigDecimal.ZERO, "legacy live fill");
 
     assertThat(order.getStatus()).isEqualTo(OrderStatus.FILLED);
     assertThat(order.getFee()).isEqualByComparingTo(fill.fee());
@@ -406,13 +413,17 @@ class OrderFillServiceTest {
     assertThat(order.getLiquidityRole()).isEqualTo(LiquidityRole.TAKER);
     ArgumentCaptor<com.fxplatform.trading.entity.TradeEntity> tradeCaptor =
         ArgumentCaptor.forClass(com.fxplatform.trading.entity.TradeEntity.class);
-    verify(tradeRepository, times(1)).save(tradeCaptor.capture());
-    assertThat(tradeCaptor.getValue().getFee()).isEqualByComparingTo(fill.fee());
-    assertThat(tradeCaptor.getValue().getFeeAsset()).isEqualTo("BTC");
-    assertThat(tradeCaptor.getValue().getLiquidityRole()).isEqualTo(LiquidityRole.TAKER);
-    assertThat(tradeCaptor.getValue().getProductType()).isEqualTo(ProductType.CRYPTO_SPOT);
-    assertThat(tradeCaptor.getValue().getSourceMode()).isEqualTo("LOCAL_SIMULATED");
-    assertThat(tradeCaptor.getValue().getProviderCode()).isEqualTo("local-spot");
+    verify(tradeRepository, times(2)).save(tradeCaptor.capture());
+    var demoTrade = tradeCaptor.getAllValues().get(0);
+    var legacyLiveTrade = tradeCaptor.getAllValues().get(1);
+    assertThat(demoTrade.getFee()).isEqualByComparingTo(fill.fee());
+    assertThat(demoTrade.getFeeAsset()).isEqualTo("BTC");
+    assertThat(demoTrade.getLiquidityRole()).isEqualTo(LiquidityRole.TAKER);
+    assertThat(demoTrade.getProductType()).isEqualTo(ProductType.CRYPTO_SPOT);
+    assertThat(demoTrade.getCanonicalFullFill()).isTrue();
+    assertThat(demoTrade.getSourceMode()).isEqualTo("LOCAL_SIMULATED");
+    assertThat(demoTrade.getProviderCode()).isEqualTo("local-spot");
+    assertThat(legacyLiveTrade.getCanonicalFullFill()).isFalse();
   }
 
   @Test

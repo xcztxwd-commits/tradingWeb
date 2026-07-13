@@ -4,6 +4,7 @@ import static com.fxplatform.common.money.MoneyAmount.accountEquity;
 import static com.fxplatform.common.money.MoneyAmount.orZero;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
+import com.fxplatform.account.enums.AccountType;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.exception.ErrorCode;
@@ -11,6 +12,7 @@ import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.risk.model.InstrumentProfile;
 import com.fxplatform.risk.model.InstrumentKind;
@@ -341,6 +343,7 @@ public class OrderFillService {
     trade.setAccountId(account.getId());
     trade.setSymbol(order.getSymbol());
     trade.setProductType(order.getProductType());
+    trade.setCanonicalFullFill(isCanonicalDemoFullFill(account, order));
     trade.setPositionSide(order.getPositionSide());
     trade.setMarginMode(order.getMarginMode());
     trade.setSide(order.getSide());
@@ -453,6 +456,15 @@ public class OrderFillService {
         new PositionEngine.PositionUpdateResult(savedPosition));
 
     return order;
+  }
+
+  private static boolean isCanonicalDemoFullFill(
+      TradingAccountEntity account,
+      OrderEntity order
+  ) {
+    ProductType productType = order.getProductType();
+    return account.getAccountType() == AccountType.DEMO
+        && (productType == ProductType.CRYPTO_SPOT || productType == ProductType.LINEAR_PERP);
   }
 
   @Autowired

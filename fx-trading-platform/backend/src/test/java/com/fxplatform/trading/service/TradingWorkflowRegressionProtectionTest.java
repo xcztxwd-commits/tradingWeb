@@ -40,7 +40,10 @@ import com.fxplatform.trading.repository.TradeRepository;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -234,6 +237,95 @@ class TradingWorkflowRegressionProtectionTest {
     verify(positionRepository, never()).save(any(PositionEntity.class));
   }
 
+  @Test
+  void crossFlowMutationsPreserveGlobalLockOrder() throws IOException {
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/account/service/AccountTransferService.java",
+        "private AccountTransferResponse transferLocked",
+        "accountRepository.findByIdAndUserIdForUpdate",
+        "walletService.lockBalancesInOrder",
+        "positionRepository.findOpenLinearPerpByAccountIdForUpdate",
+        "orderRepository.findActiveLinearPerpByAccountIdForUpdate",
+        "ledgerService.recordTransfer");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/PendingOrderExecutionProcessor.java",
+        "private boolean processLocked",
+        "accountRepository.findByIdForUpdate",
+        "walletBalanceRepository.findByAccountIdForUpdate",
+        "spotPositionService.lockExisting",
+        "orderRepository.findByIdForUpdate");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/CancelAllOrderService.java",
+        "private BatchActionResponse cancelLocked",
+        "accountRepository.findByIdForUpdate",
+        "walletBalanceRepository.findByAccountIdForUpdate",
+        "positionRepository.findOpenByAccountIdForUpdate",
+        "orderRepository.findActive");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/FundingService.java",
+        "public FundingSettlementOutcome settleFundingForPositionOutcome",
+        "accountRepository.findByIdForUpdate",
+        "positionRepository.findByIdForUpdate",
+        "settleLockedPosition");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/LiquidationService.java",
+        "private LockedRisk projectFresh",
+        "accountRepository.findByIdForUpdate",
+        "positionRepository.findOpenLinearPerpByAccountIdForUpdate",
+        "orderRepository.findActiveLinearPerpByAccountIdForUpdate");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/SystemCloseOrderService.java",
+        "private CloseResult persist(CloseIntent intent, PreparedClose prepared)",
+        "accountRepository.findByIdForUpdate",
+        "settingRepository",
+        "findByAccountIdAndSymbolForUpdate",
+        "positionRepository.findOpenLinearPerpBySymbolForUpdate",
+        "orderRepository.findActiveLinearPerpBySymbolForUpdate");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/OcoOrderService.java",
+        "private OcoOrderGroupResponse cancelLocked",
+        "requireOwnedAccount(userId, accountId, true)",
+        "lockExistingState(accountId)",
+        "orderRepository.findByContingencyGroupIdForUpdate",
+        "walletService.releaseLockedWithEntryType",
+        "orderRepository.save",
+        "orderEventService.record");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/OcoOrderService.java",
+        "private void lockExistingState",
+        "walletBalanceRepository.findByAccountIdForUpdate",
+        "spotPositionService.lockExisting");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/ProtectionOrderService.java",
+        "private OrderResponse updateLocked",
+        "lockAccount",
+        "lockSetting",
+        "lockPosition",
+        "orderRepository.findActiveLinearPerpBySymbolForUpdate",
+        "orderRepository.updateById",
+        "orderEventService.record");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/OrderService.java",
+        "private OrderResponse persistP0Perpetual",
+        "accountRepository.findByIdAndUserIdForUpdate",
+        "accountSymbolSettingRepository",
+        "findByAccountIdAndSymbolForUpdate",
+        "positionRepository",
+        "findOpenLinearPerpByAccountIdForUpdate",
+        "orderRepository",
+        "findActiveLinearPerpByAccountIdForUpdate",
+        "ledgerService.recordOrderHold",
+        "orderFillService.fillPerpetual",
+        "orderEventService.record");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/TradingSettingsService.java",
+        "private TradingSettingsResponse updateSymbolSettingsLocked",
+        "requireOwnedAccountForUpdate",
+        "settingRepository.findByAccountIdAndSymbolForUpdate",
+        "positionRepository.findOpenLinearPerpByAccountIdForUpdate",
+        "orderRepository.findActiveLinearPerpByAccountIdForUpdate");
+  }
+
   private OrderService orderService() {
     RiskCheckService riskCheckService = new RiskCheckService(
         quoteService,
@@ -397,5 +489,38 @@ class TradingWorkflowRegressionProtectionTest {
       position.setId(UUID.randomUUID());
     }
     return position;
+  }
+
+  private static void assertTokensInOrder(String sourcePath, String... tokens) throws IOException {
+    String source = Files.readString(Path.of(sourcePath));
+    int methodStart = source.indexOf(tokens[0]);
+    assertThat(methodStart)
+        .as("%s should contain target method %s", sourcePath, tokens[0])
+        .isGreaterThanOrEqualTo(0);
+    int bodyStart = source.indexOf('{', methodStart);
+    assertThat(bodyStart).as("%s target method should have a body", sourcePath).isPositive();
+    int bodyEnd = matchingBrace(source, bodyStart);
+    String methodBody = source.substring(methodStart, bodyEnd + 1);
+    int cursor = 0;
+    for (String token : tokens) {
+      int next = methodBody.indexOf(token, cursor);
+      assertThat(next)
+          .as("%s should contain %s after the preceding lock-order token", sourcePath, token)
+          .isGreaterThanOrEqualTo(cursor);
+      cursor = next + token.length();
+    }
+  }
+
+  private static int matchingBrace(String source, int openingBrace) {
+    int depth = 0;
+    for (int index = openingBrace; index < source.length(); index++) {
+      char character = source.charAt(index);
+      if (character == '{') {
+        depth++;
+      } else if (character == '}' && --depth == 0) {
+        return index;
+      }
+    }
+    throw new AssertionError("Target method body has unbalanced braces");
   }
 }
