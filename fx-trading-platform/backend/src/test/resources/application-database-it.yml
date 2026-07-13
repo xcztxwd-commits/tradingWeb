@@ -20,7 +20,7 @@ market:
     enabled: false
 
 execution:
-  mode: broker
+  mode: demo
 
 trading:
   pending-order-execution-enabled: false

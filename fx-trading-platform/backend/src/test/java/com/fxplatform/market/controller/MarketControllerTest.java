@@ -114,7 +114,13 @@ class MarketControllerTest {
         java.time.Instant.parse("2026-07-12T00:00:05Z"), false);
     when(marketDataRouter.perpetualReference("BTCUSDT-PERP")).thenReturn(response);
 
-    assertThat(controller().perpetualReference("BTCUSDT-PERP").data()).isSameAs(response);
+    var result = controller().perpetualReference("BTCUSDT-PERP").data();
+
+    assertThat(result).isSameAs(response);
+    assertThat(result.fundingRate()).isNull();
+    assertThat(result.fundingTime()).isNull();
+    assertThat(result.nextFundingTime()).isNull();
+    assertThat(result.fundingSource()).isNull();
   }
 
   @Test

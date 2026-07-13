@@ -14,6 +14,8 @@ import com.fxplatform.market.model.MarketBundleProducts;
 import com.fxplatform.market.model.PerpetualMarketBundle;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.service.ProviderHealthRecorder;
+import com.fxplatform.trading.entity.FundingRateEntity;
+import com.fxplatform.trading.repository.FundingRateRepository;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -34,6 +36,7 @@ public class MarketDataRouter {
   private final ObjectMapper objectMapper;
   private final ProviderHealthRecorder healthRecorder;
   private final MarketBundleResolver marketBundleResolver;
+  private final FundingRateRepository fundingRateRepository;
   private final Clock clock;
 
   @Autowired
@@ -42,13 +45,21 @@ public class MarketDataRouter {
       StringRedisTemplate redisTemplate,
       ObjectMapper objectMapper,
       ProviderHealthRecorder healthRecorder,
-      MarketBundleResolver marketBundleResolver
+      MarketBundleResolver marketBundleResolver,
+      FundingRateRepository fundingRateRepository
   ) {
-    this(providerResolver, redisTemplate, objectMapper, healthRecorder, marketBundleResolver, Clock.systemUTC());
+    this(
+        providerResolver,
+        redisTemplate,
+        objectMapper,
+        healthRecorder,
+        marketBundleResolver,
+        fundingRateRepository,
+        Clock.systemUTC());
   }
 
   public MarketDataRouter(ProviderResolver providerResolver) {
-    this(providerResolver, null, null, ProviderHealthRecorder.noop(), null, Clock.systemUTC());
+    this(providerResolver, null, null, ProviderHealthRecorder.noop(), null, null, Clock.systemUTC());
   }
 
   public MarketDataRouter(
@@ -57,7 +68,7 @@ public class MarketDataRouter {
       ObjectMapper objectMapper,
       ProviderHealthRecorder healthRecorder
   ) {
-    this(providerResolver, redisTemplate, objectMapper, healthRecorder, null, Clock.systemUTC());
+    this(providerResolver, redisTemplate, objectMapper, healthRecorder, null, null, Clock.systemUTC());
   }
 
   public MarketDataRouter(
@@ -65,7 +76,23 @@ public class MarketDataRouter {
       MarketBundleResolver marketBundleResolver,
       Clock clock
   ) {
-    this(providerResolver, null, null, ProviderHealthRecorder.noop(), marketBundleResolver, clock);
+    this(providerResolver, null, null, ProviderHealthRecorder.noop(), marketBundleResolver, null, clock);
+  }
+
+  public MarketDataRouter(
+      ProviderResolver providerResolver,
+      MarketBundleResolver marketBundleResolver,
+      FundingRateRepository fundingRateRepository,
+      Clock clock
+  ) {
+    this(
+        providerResolver,
+        null,
+        null,
+        ProviderHealthRecorder.noop(),
+        marketBundleResolver,
+        fundingRateRepository,
+        clock);
   }
 
   private MarketDataRouter(
@@ -74,6 +101,7 @@ public class MarketDataRouter {
       ObjectMapper objectMapper,
       ProviderHealthRecorder healthRecorder,
       MarketBundleResolver marketBundleResolver,
+      FundingRateRepository fundingRateRepository,
       Clock clock
   ) {
     this.providerResolver = providerResolver;
@@ -81,6 +109,7 @@ public class MarketDataRouter {
     this.objectMapper = objectMapper;
     this.healthRecorder = healthRecorder;
     this.marketBundleResolver = marketBundleResolver;
+    this.fundingRateRepository = fundingRateRepository;
     this.clock = clock;
   }
 
@@ -219,6 +248,9 @@ public class MarketDataRouter {
       throw new BusinessException("SYMBOL_QUOTE_DISABLED", "Symbol quote is disabled");
     }
     PerpetualMarketBundle bundle = marketBundleResolver.resolvePerp(normalized, defaultCandleRequest());
+    FundingRateEntity funding = fundingRateRepository == null
+        ? null
+        : fundingRateRepository.findLatestBySymbol(normalized).orElse(null);
     return new PerpetualReferenceResponse(
         bundle.platformSymbol(),
         bundle.providerSymbol(),
@@ -231,7 +263,11 @@ public class MarketDataRouter {
         bundle.index(),
         bundle.asOf(),
         bundle.expiresAt(),
-        !clock.instant().isBefore(bundle.expiresAt()));
+        !clock.instant().isBefore(bundle.expiresAt()),
+        funding == null ? null : funding.getFundingRate(),
+        funding == null ? null : funding.getFundingTime(),
+        funding == null ? null : funding.getNextFundingTime(),
+        funding == null ? null : funding.getProviderCode());
   }
 
   public Map<String, QuoteResponse> snapshots(String providerCode, String assetClass, int limit) {

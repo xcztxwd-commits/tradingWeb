@@ -2559,6 +2559,7 @@ export interface components {
             /** Format: int32 */
             fundingStaleSeconds?: number;
             actualSource?: string;
+            fallbackReason?: string;
             sourceMode?: string;
             /** Format: date-time */
             asOf?: string;
@@ -3479,6 +3480,12 @@ export interface components {
             /** Format: date-time */
             expiresAt?: string;
             stale?: boolean;
+            fundingRate?: number;
+            /** Format: date-time */
+            fundingTime?: string;
+            /** Format: date-time */
+            nextFundingTime?: string;
+            fundingSource?: string;
         };
         AdminPriceAdjustmentRequest: {
             mode: string;

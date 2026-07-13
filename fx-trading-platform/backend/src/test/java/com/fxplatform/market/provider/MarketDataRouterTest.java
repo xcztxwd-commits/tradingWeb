@@ -2,6 +2,7 @@ package com.fxplatform.market.provider;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -22,6 +23,8 @@ import com.fxplatform.market.repository.DataProviderCapabilityRepository;
 import com.fxplatform.market.repository.DataProviderRepository;
 import com.fxplatform.market.repository.SymbolProviderBindingRepository;
 import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.trading.entity.FundingRateEntity;
+import com.fxplatform.trading.repository.FundingRateRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.Clock;
@@ -46,6 +49,9 @@ class MarketDataRouterTest {
 
   @Mock
   private MarketBundleResolver marketBundleResolver;
+
+  @Mock
+  private FundingRateRepository fundingRateRepository;
 
   @Test
   void p0SpotComponentsAlwaysComeFromAuthoritativeWholeBundle() {
@@ -87,6 +93,40 @@ class MarketDataRouterTest {
     assertThat(reference.mark()).isEqualByComparingTo("100.2");
     assertThat(reference.index()).isEqualByComparingTo("100.1");
     assertThat(reference.stale()).isFalse();
+  }
+
+  @Test
+  void p0PerpetualReferenceProjectsLatestFundingCycleWithoutReplacingMarketSource() {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    Instant fundingTime = Instant.parse("2026-07-12T00:00:00Z");
+    Instant nextFundingTime = Instant.parse("2026-07-12T08:00:00Z");
+    PerpetualMarketBundle bundle = perpBundle(now);
+    FundingRateEntity funding = new FundingRateEntity();
+    funding.setSymbol("BTCUSDT-PERP");
+    funding.setFundingRate(new BigDecimal("-0.00025"));
+    funding.setFundingTime(fundingTime);
+    funding.setNextFundingTime(nextFundingTime);
+    funding.setProviderCode("fixed");
+    when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP"))
+        .thenReturn(enabledSymbol("BTCUSDT-PERP"));
+    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    when(fundingRateRepository.findLatestBySymbol("BTCUSDT-PERP"))
+        .thenReturn(Optional.of(funding));
+    MarketDataRouter router = new MarketDataRouter(
+        providerResolver,
+        marketBundleResolver,
+        fundingRateRepository,
+        Clock.fixed(now, ZoneOffset.UTC));
+
+    var reference = router.perpetualReference("BTCUSDT-PERP");
+
+    assertThat(reference.providerCode()).isEqualTo("okx-swap");
+    assertThat(reference.sourceMode()).isEqualTo(MarketSourceMode.PUBLIC_EXTERNAL);
+    assertThat(reference.fundingRate()).isEqualByComparingTo("-0.00025");
+    assertThat(reference.fundingTime()).isEqualTo(fundingTime);
+    assertThat(reference.nextFundingTime()).isEqualTo(nextFundingTime);
+    assertThat(reference.fundingSource()).isEqualTo("fixed");
+    verify(fundingRateRepository).findLatestBySymbol("BTCUSDT-PERP");
   }
 
   @Test

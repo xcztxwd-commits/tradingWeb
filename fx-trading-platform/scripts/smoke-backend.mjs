@@ -1,5 +1,5 @@
 const baseUrl = process.env.API_BASE_URL ?? 'http://localhost:8080'
-
+const symbol = 'BTCUSDT'
 const email = `smoke+${Date.now()}@example.com`
 const password = 'Password123!'
 
@@ -14,85 +14,111 @@ const token = auth.accessToken
 assert(token, 'Register must return access token')
 
 const accounts = await request('/api/accounts', { token })
-assert(Array.isArray(accounts) && accounts.length > 0, 'Register must create a demo account')
+const demo = accounts.find((account) => account.accountType === 'DEMO' && account.status === 'ACTIVE')
+assert(demo, 'Register must create one active Demo account')
+const accountId = demo.id
 
-const accountId = accounts[0].id
-const order = await request('/api/trading/orders', {
-  method: 'POST',
-  token,
-  body: {
-    accountId,
-    symbol: 'EURUSD',
-    side: 'BUY',
-    orderType: 'MARKET',
-    lots: '0.01',
-    idempotencyKey: `smoke-${Date.now()}`
-  }
+const walletsBeforeMarket = await walletBalances()
+const usdtBeforeMarket = wallet(walletsBeforeMarket, 'USDT')
+const btcBeforeMarket = wallet(walletsBeforeMarket, 'BTC')
+const marketOrder = await createOrder({
+  orderType: 'MARKET',
+  quantity: '10',
+  quantityUnit: 'QUOTE',
+  label: 'market'
 })
-assert(order.status === 'FILLED', 'Market order must be filled in simulated execution')
+assert(marketOrder.status === 'FILLED', 'Spot market order must fill')
 
-const ledger = await request(`/api/ledger?accountId=${accountId}`, { token })
-assert(ledger.some((entry) => entry.entryType === 'MARGIN_HOLD'), 'Filled market order must record MARGIN_HOLD ledger entry')
+const walletsAfterMarket = await walletBalances()
+const usdtAfterMarket = wallet(walletsAfterMarket, 'USDT')
+const btcAfterMarket = wallet(walletsAfterMarket, 'BTC')
+assert(usdtAfterMarket.total < usdtBeforeMarket.total, 'market order must debit Spot USDT')
+assert(btcAfterMarket.total > btcBeforeMarket.total, 'market order must credit Spot BTC')
 
-const openPositions = await request(`/api/trading/positions?accountId=${accountId}`, { token })
-assert(openPositions.length > 0, 'Filled market order must create an open position')
-assert(Number(openPositions[0].marginHeld) > 0, 'Open position must expose marginHeld')
-
-const closedPosition = await request(`/api/trading/positions/${openPositions[0].id}/close?accountId=${accountId}`, {
-  method: 'POST',
-  token,
-  body: {}
+const quote = await request(`/api/market/quotes/${symbol}`)
+const referencePrice = Number(quote.bid ?? quote.mid ?? quote.ask)
+assert(Number.isFinite(referencePrice) && referencePrice > 0, 'BTCUSDT quote must expose a positive price')
+const nonMarketablePrice = (Math.floor(referencePrice * 5) / 10).toFixed(1)
+const pendingLimit = await createOrder({
+  orderType: 'LIMIT',
+  quantity: '0.001',
+  quantityUnit: 'BASE',
+  price: nonMarketablePrice,
+  label: 'limit'
 })
-assert(closedPosition.status === 'CLOSED', 'Close position endpoint must close an open position')
-assert(Number(closedPosition.marginHeld) === 0, 'Closed position must release held margin')
+assert(!['FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(pendingLimit.status),
+  `non-marketable Spot limit must remain active, got ${pendingLimit.status}`)
 
-const ledgerAfterClose = await request(`/api/ledger?accountId=${accountId}`, { token })
-assert(
-  ledgerAfterClose.some((entry) => entry.entryType === 'MARGIN_RELEASE' && entry.referenceId === closedPosition.id && Number(entry.amount) > 0),
-  'Closed position must record positive MARGIN_RELEASE ledger entry'
-)
-assert(ledgerAfterClose.some((entry) => entry.entryType === 'TRADE_PNL'), 'Closed position must record TRADE_PNL ledger entry')
+const walletsWithLimit = await walletBalances()
+assert(wallet(walletsWithLimit, 'USDT').locked > usdtAfterMarket.locked,
+  'non-marketable limit must lock Spot USDT')
 
-const marginHoldCountAfterMarket = ledgerAfterClose.filter((entry) => entry.entryType === 'MARGIN_HOLD').length
-const pendingLimitOrder = await request('/api/trading/orders', {
+const query = new URLSearchParams({ accountId, page: '0', size: '50' })
+const ordersPage = await request(`/api/trading/orders?${query}`, { token })
+assert(Array.isArray(ordersPage.items), 'Order query must return paginated items')
+assert(ordersPage.items.some((order) => order.id === marketOrder.id), 'Market order must appear in order history')
+assert(ordersPage.items.some((order) => order.id === pendingLimit.id), 'Limit order must appear in order history')
+
+const positionsPage = await request(`/api/trading/positions?${query}`, { token })
+assert(Array.isArray(positionsPage.items), 'Position query must return paginated items')
+assert(!positionsPage.items.some((position) => position.symbol === symbol),
+  'Spot fills must not create leveraged positions')
+
+const canceledLimit = await request(`/api/trading/orders/${pendingLimit.id}/cancel`, {
   method: 'POST',
-  token,
-  body: {
-    accountId,
-    symbol: 'EURUSD',
-    side: 'BUY',
-    orderType: 'LIMIT',
-    requestedPrice: '0.00001',
-    lots: '0.01',
-    idempotencyKey: `smoke-limit-${Date.now()}`
-  }
+  token
 })
-assert(pendingLimitOrder.status === 'PENDING', 'Limit order must stay PENDING in the first foundation release')
-assert(!pendingLimitOrder.executionPrice, 'Pending limit order must not have an execution price')
-assert(Number(pendingLimitOrder.filledQuantity) === 0, 'Pending limit order must not have filled quantity')
-assert(Number(pendingLimitOrder.remainingQuantity) === Number(pendingLimitOrder.quantity), 'Pending limit order must keep remaining quantity')
+assert(['CANCELED', 'CANCELLED'].includes(canceledLimit.status), 'Limit cancel must reach a canceled state')
 
-await delay(2500)
-const ordersAfterLimitWait = await request('/api/trading/orders', { token })
-const limitOrderAfterWait = ordersAfterLimitWait.find((entry) => entry.id === pendingLimitOrder.id)
-assert(limitOrderAfterWait?.status === 'PENDING', 'Limit order must not be auto-filled by demo scheduler')
-
-const ledgerAfterLimit = await request(`/api/ledger?accountId=${accountId}`, { token })
-const marginHoldCountAfterLimit = ledgerAfterLimit.filter((entry) => entry.entryType === 'MARGIN_HOLD').length
-assert(
-  marginHoldCountAfterLimit === marginHoldCountAfterMarket,
-  'Foundation limit order must not create an execution margin hold ledger entry'
-)
+const walletsAfterCancel = await walletBalances()
+assert(wallet(walletsAfterCancel, 'USDT').locked <= usdtAfterMarket.locked,
+  'cancel must release the limit hold')
 
 console.log(JSON.stringify({
   health: health.status,
   email,
   accountId,
-  orderStatus: order.status,
-  closedPositionStatus: closedPosition.status,
-  limitOrderStatus: limitOrderAfterWait.status,
-  ledgerTypes: ledgerAfterLimit.map((entry) => entry.entryType)
+  symbol,
+  marketOrderStatus: marketOrder.status,
+  limitOrderStatus: canceledLimit.status,
+  spotUsdt: wallet(walletsAfterCancel, 'USDT'),
+  spotBtc: wallet(walletsAfterCancel, 'BTC')
 }, null, 2))
+
+function createOrder({ orderType, quantity, quantityUnit, price, label }) {
+  const clientOrderId = `smoke-${label}-${Date.now()}`
+  return request('/api/trading/orders', {
+    method: 'POST',
+    token,
+    body: {
+      accountId,
+      symbol,
+      side: 'BUY',
+      orderType,
+      quantity,
+      quantityUnit,
+      ...(price === undefined ? {} : { price }),
+      positionSide: 'BOTH',
+      marginMode: 'CASH',
+      reduceOnly: false,
+      clientOrderId,
+      idempotencyKey: clientOrderId
+    }
+  })
+}
+
+function walletBalances() {
+  return request(`/api/accounts/${accountId}/wallet-balances`, { token })
+}
+
+function wallet(wallets, asset) {
+  const balance = wallets.find((candidate) => candidate.walletType === 'SPOT' && candidate.asset === asset)
+  return {
+    total: Number(balance?.total ?? 0),
+    available: Number(balance?.available ?? 0),
+    locked: Number(balance?.locked ?? 0)
+  }
+}
 
 async function request(path, options = {}) {
   const response = await fetch(`${baseUrl}${path}`, {
@@ -105,9 +131,7 @@ async function request(path, options = {}) {
   })
 
   const payload = await response.json()
-  if (options.raw) {
-    return payload
-  }
+  if (options.raw) return payload
   if (!response.ok || !payload.success) {
     throw new Error(payload.message ?? `Request failed: ${response.status}`)
   }
@@ -115,11 +139,5 @@ async function request(path, options = {}) {
 }
 
 function assert(condition, message) {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
-
-async function delay(timeoutMs) {
-  await new Promise((resolve) => setTimeout(resolve, timeoutMs))
+  if (!condition) throw new Error(message)
 }
