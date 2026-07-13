@@ -8,6 +8,7 @@ import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionSide;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -18,6 +19,101 @@ import org.apache.ibatis.annotations.Select;
  * PositionRepository 通过 MyBatis-Plus 访问持仓。
  */
 public interface PositionRepository extends FxBaseMapper<PositionEntity> {
+
+  @Select("""
+      SELECT id, source, sort_time AS "sortTime"
+      FROM (
+        SELECT id, 'PERP' AS source, closed_at AS sort_time
+        FROM trading.positions
+        WHERE account_id = #{accountId}
+          AND status = 'CLOSED'
+          AND (COALESCE(#{symbol}, '') = '' OR symbol = #{symbol})
+        UNION ALL
+        SELECT id, 'SPOT' AS source, updated_at AS sort_time
+        FROM trading.spot_positions
+        WHERE account_id = #{accountId}
+          AND wallet_type = 'SPOT'
+          AND quantity <= 0
+          AND realized_pnl <> 0
+          AND (COALESCE(#{symbol}, '') = '' OR UPPER(CONCAT(asset, cost_asset)) = #{symbol})
+      ) closed_items
+      ORDER BY sort_time DESC NULLS LAST, id DESC
+      LIMIT #{size} OFFSET #{offset}
+      """)
+  List<ClosedPositionPageKey> findClosedPageKeys(
+      @Param("accountId") UUID accountId,
+      @Param("symbol") String symbol,
+      @Param("offset") long offset,
+      @Param("size") int size);
+
+  @Select("""
+      SELECT COUNT(*)
+      FROM (
+        SELECT id
+        FROM trading.positions
+        WHERE account_id = #{accountId}
+          AND status = 'CLOSED'
+          AND (COALESCE(#{symbol}, '') = '' OR symbol = #{symbol})
+        UNION ALL
+        SELECT id
+        FROM trading.spot_positions
+        WHERE account_id = #{accountId}
+          AND wallet_type = 'SPOT'
+          AND quantity <= 0
+          AND realized_pnl <> 0
+          AND (COALESCE(#{symbol}, '') = '' OR UPPER(CONCAT(asset, cost_asset)) = #{symbol})
+      ) closed_items
+      """)
+  long countClosedPageItems(
+      @Param("accountId") UUID accountId,
+      @Param("symbol") String symbol);
+
+  default List<PositionEntity> findAllByIds(Collection<UUID> ids) {
+    if (ids == null || ids.isEmpty()) {
+      return List.of();
+    }
+    return selectList(new LambdaQueryWrapper<PositionEntity>()
+        .in(PositionEntity::getId, ids));
+  }
+
+  class ClosedPositionPageKey {
+    private UUID id;
+    private String source;
+    private Instant sortTime;
+
+    public ClosedPositionPageKey() {
+    }
+
+    public ClosedPositionPageKey(UUID id, String source, Instant sortTime) {
+      this.id = id;
+      this.source = source;
+      this.sortTime = sortTime;
+    }
+
+    public UUID getId() {
+      return id;
+    }
+
+    public void setId(UUID id) {
+      this.id = id;
+    }
+
+    public String getSource() {
+      return source;
+    }
+
+    public void setSource(String source) {
+      this.source = source;
+    }
+
+    public Instant getSortTime() {
+      return sortTime;
+    }
+
+    public void setSortTime(Instant sortTime) {
+      this.sortTime = sortTime;
+    }
+  }
 
   @Select("""
       SELECT MIN(p.opened_at)

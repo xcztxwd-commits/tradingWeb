@@ -397,10 +397,47 @@ public class PositionService {
   /**
    * 已落库的持仓字段直接映射给历史和写操作响应，不重新拉取报价。
    */
+  List<PositionResponse> toStoredResponses(
+      List<PositionEntity> positions,
+      TradingAccountEntity account
+  ) {
+    if (positions.isEmpty()) {
+      return List.of();
+    }
+    List<String> symbols = positions.stream()
+        .map(PositionEntity::getSymbol)
+        .map(this::normalize)
+        .distinct()
+        .toList();
+    Map<String, SymbolEntity> metadata = new HashMap<>();
+    symbolRepository.findBySymbols(symbols).forEach(symbol ->
+        metadata.put(normalize(symbol.getSymbol()), requireProductType(symbol)));
+    return positions.stream()
+        .map(position -> {
+          SymbolEntity symbol = metadata.get(normalize(position.getSymbol()));
+          if (symbol == null) {
+            throw new BusinessException("SYMBOL_METADATA_NOT_FOUND", "Symbol metadata not found");
+          }
+          return toResponse(position, account, instrumentClassifier.profile(symbol));
+        })
+        .toList();
+  }
+
+  List<PositionResponse> toClosedSpotResponses(List<SpotPositionEntity> positions) {
+    return positions.stream().map(this::toClosedSpotResponse).toList();
+  }
+
   private PositionResponse toResponse(PositionEntity position, TradingAccountEntity account) {
+    return toResponse(position, account, instrumentProfile(position));
+  }
+
+  private PositionResponse toResponse(
+      PositionEntity position,
+      TradingAccountEntity account,
+      InstrumentProfile profile
+  ) {
     BigDecimal currentPrice = position.getCurrentPrice();
     BigDecimal floatingPnl = position.getFloatingPnl();
-    InstrumentProfile profile = instrumentProfile(position);
     BigDecimal markPrice = position.getMarkPrice() != null ? position.getMarkPrice() : currentPrice;
     return new PositionResponse(
         position.getId(),

@@ -90,7 +90,7 @@ class MarketSourceSelectionTrackerTest {
   }
 
   @Test
-  void concurrentFallbackAndRecoveryArePublishedInSelectionOrder() throws Exception {
+  void blockedPublisherKeepsCallbacksOrderedWithoutBlockingTheNextSelection() throws Exception {
     List<MarketSourceSelectionTracker.MarketSourceChangedEvent> events = new CopyOnWriteArrayList<>();
     CountDownLatch firstPublishEntered = new CountDownLatch(1);
     CountDownLatch releaseFirstPublish = new CountDownLatch(1);
@@ -100,13 +100,13 @@ class MarketSourceSelectionTrackerTest {
     MarketSourceSelectionTracker tracker = new MarketSourceSelectionTracker(event -> {
       try {
         int call = publishCalls.incrementAndGet();
+        events.add((MarketSourceSelectionTracker.MarketSourceChangedEvent) event);
         if (call == 1) {
           firstPublishEntered.countDown();
           releaseFirstPublish.await(5, TimeUnit.SECONDS);
         } else {
           secondPublishEntered.countDown();
         }
-        events.add((MarketSourceSelectionTracker.MarketSourceChangedEvent) event);
       } catch (Throwable failure) {
         listenerFailure.set(failure);
       }
@@ -120,15 +120,65 @@ class MarketSourceSelectionTrackerTest {
       var recovery = executor.submit(() ->
           tracker.recordSelection("BTCUSDT", "binance", MarketSourceMode.PUBLIC_EXTERNAL));
 
-      secondPublishEntered.await(1, TimeUnit.SECONDS);
-      releaseFirstPublish.countDown();
+      try {
+        recovery.get(1, TimeUnit.SECONDS);
+        assertThat(secondPublishEntered.await(200, TimeUnit.MILLISECONDS)).isFalse();
+      } finally {
+        releaseFirstPublish.countDown();
+      }
       fallback.get(5, TimeUnit.SECONDS);
-      recovery.get(5, TimeUnit.SECONDS);
+      assertThat(secondPublishEntered.await(1, TimeUnit.SECONDS)).isTrue();
     }
 
     assertThat(listenerFailure.get()).isNull();
+    assertThat(publishCalls).hasValue(2);
     assertThat(events).extracting(MarketSourceSelectionTracker.MarketSourceChangedEvent::providerCode)
         .containsExactly("okx", "binance");
-    assertThat(events.get(1).previousProviderCode()).isEqualTo("okx");
+  }
+
+  @Test
+  void observerFailureConsumesTheEventAndContinuesDrainingItsSymbolQueue() throws Exception {
+    List<String> publishedProviders = new CopyOnWriteArrayList<>();
+    CountDownLatch firstPublishEntered = new CountDownLatch(1);
+    CountDownLatch releaseFirstPublish = new CountDownLatch(1);
+    CountDownLatch secondPublishCompleted = new CountDownLatch(1);
+    AtomicInteger publishCalls = new AtomicInteger();
+    MarketSourceSelectionTracker tracker = new MarketSourceSelectionTracker(event -> {
+      var changed = (MarketSourceSelectionTracker.MarketSourceChangedEvent) event;
+      publishedProviders.add(changed.providerCode());
+      int call = publishCalls.incrementAndGet();
+      if (call == 1) {
+        firstPublishEntered.countDown();
+        try {
+          releaseFirstPublish.await(5, TimeUnit.SECONDS);
+        } catch (InterruptedException failure) {
+          Thread.currentThread().interrupt();
+          throw new IllegalStateException(failure);
+        }
+        throw new IllegalStateException("observer failed");
+      }
+      secondPublishCompleted.countDown();
+    }, CLOCK);
+    tracker.recordSelection("BTCUSDT", "binance", MarketSourceMode.PUBLIC_EXTERNAL);
+
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var fallback = executor.submit(() ->
+          tracker.recordSelection("BTCUSDT", "okx", MarketSourceMode.PUBLIC_EXTERNAL));
+      assertThat(firstPublishEntered.await(5, TimeUnit.SECONDS)).isTrue();
+      var recovery = executor.submit(() ->
+          tracker.recordSelection("BTCUSDT", "binance", MarketSourceMode.PUBLIC_EXTERNAL));
+
+      try {
+        recovery.get(1, TimeUnit.SECONDS);
+      } finally {
+        releaseFirstPublish.countDown();
+      }
+      fallback.get(5, TimeUnit.SECONDS);
+      assertThat(secondPublishCompleted.await(1, TimeUnit.SECONDS)).isTrue();
+    } finally {
+      releaseFirstPublish.countDown();
+    }
+
+    assertThat(publishedProviders).containsExactly("okx", "binance");
   }
 }

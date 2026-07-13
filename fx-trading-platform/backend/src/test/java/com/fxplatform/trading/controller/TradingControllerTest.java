@@ -18,10 +18,12 @@ import com.fxplatform.trading.dto.request.CreateProtectionRequest;
 import com.fxplatform.trading.dto.response.AdjustPositionMarginResponse;
 import com.fxplatform.trading.dto.response.OcoOrderGroupResponse;
 import com.fxplatform.trading.enums.OrderSide;
+import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.ProtectionType;
 import com.fxplatform.trading.enums.QuantityUnit;
 import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.PositionSide;
+import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.enums.TriggerPriceType;
 import com.fxplatform.trading.enums.TriggerExecutionType;
 import com.fxplatform.trading.service.OcoOrderService;
@@ -29,6 +31,7 @@ import com.fxplatform.trading.service.OrderService;
 import com.fxplatform.trading.service.PositionService;
 import com.fxplatform.trading.service.PositionMarginService;
 import com.fxplatform.trading.service.ProtectionOrderService;
+import com.fxplatform.trading.service.TradingHistoryQueryService;
 import java.math.BigDecimal;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -37,6 +40,40 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class TradingControllerTest {
+
+  @Test
+  void tradingReadEndpointsDelegateFiltersOwnershipAndPaging() {
+    OrderService orderService = org.mockito.Mockito.mock(OrderService.class);
+    PositionService positionService = org.mockito.Mockito.mock(PositionService.class);
+    OcoOrderService ocoOrderService = org.mockito.Mockito.mock(OcoOrderService.class);
+    PositionMarginService marginService = org.mockito.Mockito.mock(PositionMarginService.class);
+    TradingHistoryQueryService historyQueryService =
+        org.mockito.Mockito.mock(TradingHistoryQueryService.class);
+    TradingController controller = new TradingController(
+        orderService, positionService, ocoOrderService, marginService);
+    controller.setTradingHistoryQueryService(historyQueryService);
+    UserPrincipal principal = new UserPrincipal(UUID.randomUUID(), "trader@example.com", "TRADER");
+    UUID accountId = UUID.randomUUID();
+
+    controller.orders(
+        principal, accountId, OrderStatus.FILLED, "BTCUSDT-PERP", 1, 30);
+    controller.trades(principal, accountId, "BTCUSDT-PERP", 2, 25);
+    controller.positions(principal, accountId, "BTCUSDT-PERP", 0, 20);
+    controller.positionHistory(principal, accountId, "BTCUSDT-PERP", 4, 50);
+    controller.fundingSettlements(
+        principal, accountId, "BTCUSDT-PERP", 3, 10);
+
+    verify(historyQueryService).orders(
+        principal.id(), accountId, OrderStatus.FILLED, "BTCUSDT-PERP", 1, 30);
+    verify(historyQueryService).trades(
+        principal.id(), accountId, "BTCUSDT-PERP", 2, 25);
+    verify(historyQueryService).positions(
+        principal.id(), accountId, PositionStatus.OPEN, "BTCUSDT-PERP", 0, 20);
+    verify(historyQueryService).positions(
+        principal.id(), accountId, PositionStatus.CLOSED, "BTCUSDT-PERP", 4, 50);
+    verify(historyQueryService).fundingSettlements(
+        principal.id(), accountId, "BTCUSDT-PERP", 3, 10);
+  }
 
   @Test
   void postPositionCloseForwardsOptionalExplicitQuantity() {

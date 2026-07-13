@@ -11,6 +11,7 @@ import com.fxplatform.trading.enums.QuantityUnit;
 import com.fxplatform.trading.enums.TimeInForce;
 import com.fxplatform.trading.enums.TriggerExecutionType;
 import com.fxplatform.trading.enums.TriggerPriceType;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -25,7 +26,22 @@ public record OrderResponse(
     String side,
     String orderType,
     Integer leverage,
-    String status,
+    @Schema(allowableValues = {
+        "RECEIVED",
+        "VALIDATING",
+        "ACCEPTED",
+        "WORKING",
+        "PARTIALLY_FILLED",
+        "PENDING_ACTIVATION",
+        "PENDING",
+        "FILLED",
+        "CANCEL_PENDING",
+        "CANCELED",
+        "CANCELLED",
+        "REJECTED",
+        "EXPIRED",
+        "FAILED"
+    }) String status,
     BigDecimal lots,
     BigDecimal quantity,
     BigDecimal price,

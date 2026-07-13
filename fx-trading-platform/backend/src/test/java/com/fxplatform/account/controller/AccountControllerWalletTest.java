@@ -14,7 +14,9 @@ import com.fxplatform.account.dto.AssetConversionResponse;
 import com.fxplatform.account.dto.AssetLedgerEntryResponse;
 import com.fxplatform.account.dto.WalletBalanceResponse;
 import com.fxplatform.account.service.AccountService;
+import com.fxplatform.account.service.AccountTransferQueryService;
 import com.fxplatform.common.security.UserPrincipal;
+import com.fxplatform.trading.dto.response.TradingPageResponse;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -161,12 +163,22 @@ class AccountControllerWalletTest {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
     AccountService accountService = org.mockito.Mockito.mock(AccountService.class);
-    when(accountService.transferHistory(userId, accountId)).thenReturn(List.of());
+    AccountTransferQueryService transferQueryService =
+        org.mockito.Mockito.mock(AccountTransferQueryService.class);
+    TradingPageResponse<AccountTransferResponse> page =
+        new TradingPageResponse<>(List.of(), 2, 25, 0, 0);
+    when(transferQueryService.history(
+        userId, accountId, Direction.PERP_TO_SPOT, 2, 25)).thenReturn(page);
     AccountController controller = new AccountController(accountService);
+    controller.setAccountTransferQueryService(transferQueryService);
 
     var response = controller.transferHistory(
-        new UserPrincipal(userId, "trader@example.com", "TRADER"), accountId);
+        new UserPrincipal(userId, "trader@example.com", "TRADER"),
+        accountId,
+        Direction.PERP_TO_SPOT,
+        2,
+        25);
 
-    assertThat(response.data()).isEmpty();
+    assertThat(response.data()).isSameAs(page);
   }
 }

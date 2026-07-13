@@ -35,9 +35,9 @@ class AdminFundingConfigControllerTest {
         .getAnnotation(PutMapping.class);
 
     assertThat(getMapping).isNotNull();
-    assertThat(getMapping.value()).containsExactly("/symbols/{symbolId}/funding-config");
+    assertThat(getMapping.value()).containsExactly("/symbols/{id}/funding-config");
     assertThat(putMapping).isNotNull();
-    assertThat(putMapping.value()).containsExactly("/symbols/{symbolId}/funding-config");
+    assertThat(putMapping.value()).containsExactly("/symbols/{id}/funding-config");
   }
 
   @Test

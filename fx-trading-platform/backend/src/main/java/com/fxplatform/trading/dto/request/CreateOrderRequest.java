@@ -9,6 +9,7 @@ import com.fxplatform.trading.enums.ProtectionType;
 import com.fxplatform.trading.enums.QuantityUnit;
 import com.fxplatform.trading.enums.TriggerExecutionType;
 import com.fxplatform.trading.enums.TriggerPriceType;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMin;
@@ -24,9 +25,9 @@ import java.util.UUID;
  */
 public record CreateOrderRequest(
     @NotNull UUID accountId,
-    @NotBlank String symbol,
+    @Schema(example = "BTCUSDT-PERP") @NotBlank String symbol,
     @NotNull OrderSide side,
-    @NotNull OrderType orderType,
+    @Schema(allowableValues = {"MARKET", "LIMIT", "STOP_MARKET"}) @NotNull OrderType orderType,
     @DecimalMin(value = "0", inclusive = false) BigDecimal lots,
     BigDecimal requestedPrice,
     BigDecimal stopLoss,

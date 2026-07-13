@@ -16,6 +16,7 @@ import com.fxplatform.trading.entity.SpotPositionEntity;
 import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.QuantityUnit;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.AccountSymbolSettingRepository;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
@@ -30,6 +31,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +40,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class DemoAccountLifecycleService {
 
   private static final int MONEY_SCALE = 8;
+  private static final ApplicationEventPublisher NO_OP_EVENT_PUBLISHER = event -> {
+  };
   private static final BigDecimal INITIAL_BALANCE =
       new BigDecimal("50000.00000000");
   private static final List<String> CANONICAL_SYMBOLS = List.of(
@@ -52,6 +57,7 @@ public class DemoAccountLifecycleService {
   private final OrderRepository orderRepository;
   private final DemoExecutionGuard demoExecutionGuard;
   private final AuditLogService auditLogService;
+  private final ApplicationEventPublisher eventPublisher;
 
   public DemoAccountLifecycleService(
       TradingAccountRepository accountRepository,
@@ -64,6 +70,32 @@ public class DemoAccountLifecycleService {
       DemoExecutionGuard demoExecutionGuard,
       AuditLogService auditLogService
   ) {
+    this(
+        accountRepository,
+        walletService,
+        ledgerService,
+        settingRepository,
+        spotPositionRepository,
+        positionRepository,
+        orderRepository,
+        demoExecutionGuard,
+        auditLogService,
+        NO_OP_EVENT_PUBLISHER);
+  }
+
+  @Autowired
+  public DemoAccountLifecycleService(
+      TradingAccountRepository accountRepository,
+      WalletService walletService,
+      LedgerService ledgerService,
+      AccountSymbolSettingRepository settingRepository,
+      SpotPositionRepository spotPositionRepository,
+      PositionRepository positionRepository,
+      OrderRepository orderRepository,
+      DemoExecutionGuard demoExecutionGuard,
+      AuditLogService auditLogService,
+      ApplicationEventPublisher eventPublisher
+  ) {
     this.accountRepository = accountRepository;
     this.walletService = walletService;
     this.ledgerService = ledgerService;
@@ -73,6 +105,7 @@ public class DemoAccountLifecycleService {
     this.orderRepository = orderRepository;
     this.demoExecutionGuard = demoExecutionGuard;
     this.auditLogService = auditLogService;
+    this.eventPublisher = eventPublisher;
   }
 
   @Transactional
@@ -195,7 +228,35 @@ public class DemoAccountLifecycleService {
         requestId,
         resetAuditDetails(account, adminReason));
 
-    return resetResponse(account, spotUsdt.getAvailable(), requestId, false, resetAt);
+    DemoResetResponse completed =
+        resetResponse(account, spotUsdt.getAvailable(), requestId, false, resetAt);
+    publishCompletedReset(account, requestId, completed);
+    return completed;
+  }
+
+  private void publishCompletedReset(
+      TradingAccountEntity account,
+      UUID requestId,
+      DemoResetResponse completed
+  ) {
+    eventPublisher.publishEvent(new TradingAccountMutationEvent(
+        account.getUserId(),
+        account.getId(),
+        "DEMO_RESET",
+        "ACCOUNT",
+        account.getId(),
+        requestId,
+        completed.demoGeneration(),
+        completed.resetAt()));
+    eventPublisher.publishEvent(new TradingAccountMutationEvent(
+        account.getUserId(),
+        account.getId(),
+        "BALANCE_UPDATED",
+        "ACCOUNT",
+        account.getId(),
+        requestId,
+        completed.demoGeneration(),
+        completed.resetAt()));
   }
 
   private static String resetAuditDetails(

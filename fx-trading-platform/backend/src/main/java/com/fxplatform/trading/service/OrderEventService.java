@@ -1,16 +1,17 @@
 package com.fxplatform.trading.service;
 
 import com.fxplatform.trading.dto.response.OrderEventResponse;
-import com.fxplatform.trading.dto.response.TradingSessionEventResponse;
 import com.fxplatform.trading.entity.OrderEventEntity;
 import com.fxplatform.trading.entity.OrderEntity;
+import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderStatus;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.OrderEventRepository;
 import com.fxplatform.trading.repository.OrderRepository;
-import com.fxplatform.trading.websocket.TradingWsPublisher;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 /**
@@ -22,7 +23,7 @@ public class OrderEventService {
 
   private final OrderEventRepository orderEventRepository;
   private final OrderRepository orderRepository;
-  private final TradingWsPublisher tradingWsPublisher;
+  private final ApplicationEventPublisher eventPublisher;
 
   public OrderEventEntity record(
       UUID orderId,
@@ -68,13 +69,48 @@ public class OrderEventService {
     if (order == null) {
       return;
     }
-    tradingWsPublisher.publishAccountEvent(order.getAccountId(), new TradingSessionEventResponse(
-        "ORDER_EVENT",
+    if (event.getFromStatus() == OrderStatus.ACCEPTED
+        && event.getToStatus() != OrderStatus.ACCEPTED
+        && !"ORDER_ACCEPTED".equals(event.getEventType())) {
+      publishOrderEvent(order, event, "ORDER_ACCEPTED");
+    }
+    publishOrderEvent(order, event, event.getEventType());
+    if (event.getToStatus() == OrderStatus.EXPIRED
+        && !"ORDER_EXPIRED".equals(event.getEventType())) {
+      publishOrderEvent(order, event, "ORDER_EXPIRED");
+    }
+    if ("ORDER_FILLED".equals(event.getEventType())
+        && order.getOrderOrigin() == OrderOrigin.LIQUIDATION
+        && order.getParentPositionId() != null) {
+      publishLiquidationEvents(order, event);
+    }
+  }
+
+  private void publishOrderEvent(
+      OrderEntity order,
+      OrderEventEntity event,
+      String eventType
+  ) {
+    eventPublisher.publishEvent(new TradingAccountMutationEvent(
+        order.getUserId(),
         order.getAccountId(),
+        eventType,
+        "ORDER",
         order.getId(),
         event.getId(),
-        event.getEventType(),
-        event.getToStatus().name(),
+        order.getVersion(),
+        event.getCreatedAt()));
+  }
+
+  private void publishLiquidationEvents(OrderEntity order, OrderEventEntity event) {
+    eventPublisher.publishEvent(new TradingAccountMutationEvent(
+        order.getUserId(),
+        order.getAccountId(),
+        "LIQUIDATION",
+        "POSITION",
+        order.getParentPositionId(),
+        order.getId(),
+        order.getVersion(),
         event.getCreatedAt()));
   }
 }

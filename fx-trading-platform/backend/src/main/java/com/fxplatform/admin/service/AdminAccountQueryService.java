@@ -8,7 +8,7 @@ import com.fxplatform.admin.dto.response.AdminAccountResponse;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.ledger.dto.LedgerEntryResponse;
 import com.fxplatform.ledger.repository.LedgerEntryRepository;
-import com.fxplatform.trading.entity.FundingSettlementEntity;
+import com.fxplatform.trading.dto.response.FundingSettlementResponse;
 import com.fxplatform.trading.repository.FundingSettlementRepository;
 import com.fxplatform.wallet.service.WalletService;
 import java.time.Instant;
@@ -83,14 +83,16 @@ public class AdminAccountQueryService {
         .toList();
   }
 
-  public List<FundingSettlementEntity> fundingSettlements(UUID accountId) {
+  public List<FundingSettlementResponse> fundingSettlements(UUID accountId) {
     requireAccount(accountId);
     if (fundingSettlementRepository == null) {
       throw new BusinessException(
           "FUNDING_SETTLEMENT_QUERY_UNAVAILABLE",
           "Funding settlement query is unavailable");
     }
-    return fundingSettlementRepository.findByAccountIdOrderByFundingTimeDesc(accountId);
+    return fundingSettlementRepository.findByAccountIdOrderByFundingTimeDesc(accountId).stream()
+        .map(FundingSettlementResponse::from)
+        .toList();
   }
 
   public List<LedgerEntryResponse> ledger(UUID accountId) {

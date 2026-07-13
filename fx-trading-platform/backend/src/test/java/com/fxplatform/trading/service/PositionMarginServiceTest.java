@@ -39,6 +39,7 @@ import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
@@ -48,8 +49,9 @@ import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
+import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -83,6 +85,28 @@ class PositionMarginServiceTest {
         fixture.account(), new BigDecimal("200.00000000"), fixture.positionId(),
         "Isolated position margin added");
     verify(eventPublisher).publishEvent(any(PositionMarginService.PositionMarginAdjustedEvent.class));
+    ArgumentCaptor<TradingAccountMutationEvent> eventCaptor =
+        ArgumentCaptor.forClass(TradingAccountMutationEvent.class);
+    verify(eventPublisher, times(2)).publishEvent(eventCaptor.capture());
+    assertThat(eventCaptor.getAllValues()).containsExactly(
+        new TradingAccountMutationEvent(
+            fixture.userId(),
+            fixture.accountId(),
+            "MARGIN_ADJUSTED",
+            "POSITION",
+            fixture.positionId(),
+            null,
+            4L,
+            eventCaptor.getAllValues().get(0).occurredAt()),
+        new TradingAccountMutationEvent(
+            fixture.userId(),
+            fixture.accountId(),
+            "POSITION_UPDATED",
+            "POSITION",
+            fixture.positionId(),
+            null,
+            4L,
+            eventCaptor.getAllValues().get(1).occurredAt()));
     verify(demoExecutionGuard, times(2)).requireDemo(
         fixture.account(), ProductType.LINEAR_PERP, "BTCUSDT-PERP");
   }

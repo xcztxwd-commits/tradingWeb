@@ -15,7 +15,7 @@ import com.fxplatform.common.response.ApiResponse;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.ledger.dto.LedgerEntryResponse;
 import com.fxplatform.trading.dto.response.BatchActionResponse;
-import com.fxplatform.trading.entity.FundingSettlementEntity;
+import com.fxplatform.trading.dto.response.FundingSettlementResponse;
 import jakarta.validation.Valid;
 import java.time.Instant;
 import java.util.List;
@@ -50,16 +50,16 @@ public class AdminAccountController {
     return ApiResponse.success(adminAccountQueryService.accounts(page, size));
   }
 
-  @GetMapping("/{accountId}/wallet-balances")
+  @GetMapping("/{id}/wallet-balances")
   public ApiResponse<List<WalletBalanceResponse>> walletBalances(
-      @PathVariable UUID accountId
+      @PathVariable("id") UUID accountId
   ) {
     return ApiResponse.success(adminAccountQueryService.walletBalances(accountId));
   }
 
-  @GetMapping("/{accountId}/asset-ledger")
+  @GetMapping("/{id}/asset-ledger")
   public ApiResponse<List<AssetLedgerEntryResponse>> assetLedger(
-      @PathVariable UUID accountId,
+      @PathVariable("id") UUID accountId,
       @RequestParam(required = false) String walletType,
       @RequestParam(required = false) String asset,
       @RequestParam(required = false) String entryType,
@@ -77,9 +77,9 @@ public class AdminAccountController {
         to));
   }
 
-  @GetMapping("/{accountId}/funding-settlements")
-  public ApiResponse<List<FundingSettlementEntity>> fundingSettlements(
-      @PathVariable UUID accountId
+  @GetMapping("/{id}/funding-settlements")
+  public ApiResponse<List<FundingSettlementResponse>> fundingSettlements(
+      @PathVariable("id") UUID accountId
   ) {
     return ApiResponse.success(adminAccountQueryService.fundingSettlements(accountId));
   }
@@ -92,10 +92,10 @@ public class AdminAccountController {
   }
 
   @PreAuthorize("hasAuthority('trading:account:force-cleanup')")
-  @PostMapping("/{accountId}/force-cleanup")
+  @PostMapping("/{id}/force-cleanup")
   public ApiResponse<BatchActionResponse> forceCleanup(
       @AuthenticationPrincipal UserPrincipal principal,
-      @PathVariable UUID accountId,
+      @PathVariable("id") UUID accountId,
       @Valid @RequestBody AdminAccountCleanupRequest request
   ) {
     AdminActionConfirmation.require(
@@ -109,10 +109,10 @@ public class AdminAccountController {
   }
 
   @PreAuthorize("hasAuthority('trading:account:demo-reset')")
-  @PostMapping("/{accountId}/demo-reset")
+  @PostMapping("/{id}/demo-reset")
   public ApiResponse<DemoResetResponse> resetDemo(
       @AuthenticationPrincipal UserPrincipal principal,
-      @PathVariable UUID accountId,
+      @PathVariable("id") UUID accountId,
       @Valid @RequestBody AdminDemoResetRequest request
   ) {
     AdminActionConfirmation.require(

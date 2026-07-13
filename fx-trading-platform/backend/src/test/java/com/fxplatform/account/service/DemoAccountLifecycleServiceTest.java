@@ -10,6 +10,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
@@ -32,6 +33,7 @@ import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.enums.QuantityUnit;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.AccountSymbolSettingRepository;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
@@ -47,10 +49,11 @@ import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class DemoAccountLifecycleServiceTest {
@@ -64,6 +67,7 @@ class DemoAccountLifecycleServiceTest {
   @Mock OrderRepository orderRepository;
   @Mock DemoExecutionGuard demoExecutionGuard;
   @Mock AuditLogService auditLogService;
+  @Mock ApplicationEventPublisher eventPublisher;
 
   private DemoAccountLifecycleService service;
 
@@ -78,7 +82,8 @@ class DemoAccountLifecycleServiceTest {
         positionRepository,
         orderRepository,
         demoExecutionGuard,
-        auditLogService);
+        auditLogService,
+        eventPublisher);
   }
 
   @Test
@@ -174,6 +179,7 @@ class DemoAccountLifecycleServiceTest {
     verify(accountRepository, never()).save(any());
     verify(walletService, never()).resetBalance(any(), any(), any(), any(), any(), any());
     verify(ledgerService, never()).recordDemoReset(any(), any(), any());
+    verifyNoInteractions(eventPublisher);
   }
 
   @Test
@@ -261,6 +267,37 @@ class DemoAccountLifecycleServiceTest {
   }
 
   @Test
+  void completedResetPublishesDemoResetAndBalanceRefreshEventsForTheAccountOwner() {
+    ResetFixture fixture = resetFixture();
+
+    var response = service.reset(
+        fixture.account().getUserId(), fixture.account().getId(), fixture.requestId());
+
+    ArgumentCaptor<TradingAccountMutationEvent> events =
+        ArgumentCaptor.forClass(TradingAccountMutationEvent.class);
+    verify(eventPublisher, times(2)).publishEvent(events.capture());
+    assertThat(events.getAllValues()).containsExactly(
+        new TradingAccountMutationEvent(
+            fixture.account().getUserId(),
+            fixture.account().getId(),
+            "DEMO_RESET",
+            "ACCOUNT",
+            fixture.account().getId(),
+            fixture.requestId(),
+            response.demoGeneration(),
+            response.resetAt()),
+        new TradingAccountMutationEvent(
+            fixture.account().getUserId(),
+            fixture.account().getId(),
+            "BALANCE_UPDATED",
+            "ACCOUNT",
+            fixture.account().getId(),
+            fixture.requestId(),
+            response.demoGeneration(),
+            response.resetAt()));
+  }
+
+  @Test
   void resetReplayDoesNotIncrementGenerationOrWriteASecondLedger() {
     ResetFixture fixture = resetFixture();
     LedgerEntryEntity existing = new LedgerEntryEntity();
@@ -275,6 +312,7 @@ class DemoAccountLifecycleServiceTest {
 
     assertThat(response.replayed()).isTrue();
     assertThat(fixture.account().getDemoGeneration()).isEqualTo(1L);
+    verifyNoInteractions(eventPublisher);
     verify(accountRepository, never()).save(any());
     verify(ledgerService, never()).recordDemoReset(any(), any(), any());
   }

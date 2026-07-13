@@ -19,6 +19,7 @@ import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.FundingRateRepository;
 import com.fxplatform.trading.repository.FundingSettlementRepository;
 import com.fxplatform.trading.repository.PositionRepository;
@@ -30,12 +31,12 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@RequiredArgsConstructor
 public class FundingService {
 
   private static final int MONEY_SCALE = 8;
@@ -51,6 +52,52 @@ public class FundingService {
   private final SymbolRepository symbolRepository;
   private final TradingInstrumentClassifier instrumentClassifier;
   private final DemoExecutionGuard demoExecutionGuard;
+  private final ApplicationEventPublisher eventPublisher;
+
+  public FundingService(
+      FundingRateRepository fundingRateRepository,
+      FundingSettlementRepository fundingSettlementRepository,
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      SymbolRepository symbolRepository,
+      TradingInstrumentClassifier instrumentClassifier,
+      DemoExecutionGuard demoExecutionGuard
+  ) {
+    this(
+        fundingRateRepository,
+        fundingSettlementRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        instrumentClassifier,
+        demoExecutionGuard,
+        null);
+  }
+
+  @Autowired
+  public FundingService(
+      FundingRateRepository fundingRateRepository,
+      FundingSettlementRepository fundingSettlementRepository,
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      SymbolRepository symbolRepository,
+      TradingInstrumentClassifier instrumentClassifier,
+      DemoExecutionGuard demoExecutionGuard,
+      ApplicationEventPublisher eventPublisher
+  ) {
+    this.fundingRateRepository = fundingRateRepository;
+    this.fundingSettlementRepository = fundingSettlementRepository;
+    this.positionRepository = positionRepository;
+    this.accountRepository = accountRepository;
+    this.ledgerService = ledgerService;
+    this.symbolRepository = symbolRepository;
+    this.instrumentClassifier = instrumentClassifier;
+    this.demoExecutionGuard = demoExecutionGuard;
+    this.eventPublisher = eventPublisher;
+  }
 
   public FundingRateEntity getCurrentFundingRate(String symbol) {
     String normalized = normalizeSymbol(symbol);
@@ -137,6 +184,7 @@ public class FundingService {
     }
 
     if (cashflow.compareTo(BigDecimal.ZERO) == 0) {
+      publishFundingEvents(account, position, settlement, false);
       return FundingSettlementOutcome.inserted(cashflow);
     }
 
@@ -157,7 +205,44 @@ public class FundingService {
         fundingSettlementRepository.updateById(settlement);
       }
     }
+    publishFundingEvents(
+        account,
+        position,
+        settlement,
+        marginMode(position) == MarginMode.CROSS);
     return FundingSettlementOutcome.inserted(cashflow);
+  }
+
+  private void publishFundingEvents(
+      TradingAccountEntity account,
+      PositionEntity position,
+      FundingSettlementEntity settlement,
+      boolean balanceUpdated
+  ) {
+    if (eventPublisher == null || account.getUserId() == null) {
+      return;
+    }
+    Instant occurredAt = Instant.now();
+    eventPublisher.publishEvent(new TradingAccountMutationEvent(
+        account.getUserId(),
+        account.getId(),
+        "FUNDING_SETTLED",
+        "FUNDING_SETTLEMENT",
+        settlement.getId(),
+        position.getId(),
+        position.getVersion(),
+        occurredAt));
+    if (balanceUpdated) {
+      eventPublisher.publishEvent(new TradingAccountMutationEvent(
+          account.getUserId(),
+          account.getId(),
+          "BALANCE_UPDATED",
+          "ACCOUNT",
+          account.getId(),
+          settlement.getId(),
+          position.getVersion(),
+          occurredAt));
+    }
   }
 
   private FundingSettlementEntity fundingSettlement(

@@ -8,17 +8,31 @@ type JsonContent<T> = T extends { content: infer Content }
       : never
   : never
 
-type ResponseBody<
-  Path extends keyof paths,
-  Method extends keyof paths[Path]
-> = paths[Path][Method] extends { responses: { 200: infer Response } }
-  ? JsonContent<Response>
+type OperationAt<Path extends string, Method extends string> =
+  Path extends keyof paths
+    ? Method extends keyof paths[Path]
+      ? NonNullable<paths[Path][Method]>
+      : never
+    : never
+
+type SuccessResponse<Operation> = Operation extends { responses: infer Responses }
+  ? 200 extends keyof Responses
+    ? Responses[200]
+    : never
   : never
 
 type ApiData<T> = T extends { data?: infer Data } ? NonNullable<Data> : never
 
-export type AuthResponse = ApiData<ResponseBody<'/api/auth/login', 'post'>>
-export type SessionStatus = ApiData<ResponseBody<'/api/auth/session', 'get'>>
+export type ApiPathData<Path extends string, Method extends string> = ApiData<
+  JsonContent<SuccessResponse<OperationAt<Path, Method>>>
+>
+
+export type BackendSchemas = components['schemas']
+export type BackendSchema<Name extends string> =
+  Name extends keyof BackendSchemas ? BackendSchemas[Name] : never
+
+export type AuthResponse = ApiPathData<'/api/auth/login', 'post'>
+export type SessionStatus = ApiPathData<'/api/auth/session', 'get'>
 
 export type ApiResponse<T> = {
   success: boolean
@@ -28,5 +42,3 @@ export type ApiResponse<T> = {
   timestamp?: string
   requestId?: string
 }
-
-export type BackendSchemas = components['schemas']

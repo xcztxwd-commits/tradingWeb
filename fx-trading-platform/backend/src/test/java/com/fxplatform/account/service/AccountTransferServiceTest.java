@@ -11,6 +11,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.dto.AccountTransferRequest.Direction;
@@ -23,11 +24,12 @@ import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.enums.LedgerEntryType;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
+import com.fxplatform.trading.repository.OrderRepository;
+import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.service.PerpetualAccountRiskSnapshotService;
 import com.fxplatform.trading.service.PerpetualAccountRiskSnapshotService.AccountRiskProjection;
 import com.fxplatform.trading.service.PerpetualAccountRiskSnapshotService.PreparedAccountRisk;
-import com.fxplatform.trading.repository.OrderRepository;
-import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.service.TradingTransactionExecutor;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
 import com.fxplatform.wallet.enums.WalletType;
@@ -42,9 +44,11 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class AccountTransferServiceTest {
@@ -57,6 +61,7 @@ class AccountTransferServiceTest {
   @Mock PositionRepository positionRepository;
   @Mock OrderRepository orderRepository;
   @Mock TradingTransactionExecutor transactionExecutor;
+  @Mock ApplicationEventPublisher eventPublisher;
 
   private UUID accountId;
   private UUID userId;
@@ -79,7 +84,8 @@ class AccountTransferServiceTest {
         positionRepository,
         orderRepository,
         perpetualAccountRiskSnapshotService,
-        transactionExecutor);
+        transactionExecutor,
+        eventPublisher);
     lenient().when(accountRepository.findByIdAndUserId(accountId, userId))
         .thenReturn(Optional.of(account));
     lenient().when(accountRepository.findByIdAndUserIdForUpdate(accountId, userId))
@@ -141,6 +147,43 @@ class AccountTransferServiceTest {
     verify(ledgerService).recordTransfer(
         account, LedgerEntryType.TRANSFER_IN, amount, requestId, "Spot to perpetual transfer");
     verify(demoExecutionGuard, times(2)).requireDemoAccount(account);
+  }
+
+  @Test
+  void firstCompletedTransferPublishesTransferAndBalanceRefreshEvents() {
+    UUID requestId = UUID.randomUUID();
+    BigDecimal amount = new BigDecimal("1250.00000000");
+    account.setDemoGeneration(4L);
+    when(walletService.debitAvailableWithEntryType(
+        accountId, WalletType.SPOT, "USDT", amount, "TRANSFER", requestId,
+        "Spot to perpetual transfer", "TRANSFER_OUT"))
+        .thenReturn(spot);
+
+    var response = service.transfer(
+        userId, accountId, Direction.SPOT_TO_PERP, amount, requestId);
+
+    ArgumentCaptor<TradingAccountMutationEvent> events =
+        ArgumentCaptor.forClass(TradingAccountMutationEvent.class);
+    verify(eventPublisher, times(2)).publishEvent(events.capture());
+    assertThat(events.getAllValues()).containsExactly(
+        new TradingAccountMutationEvent(
+            userId,
+            accountId,
+            "TRANSFER_COMPLETED",
+            "TRANSFER",
+            requestId,
+            null,
+            4L,
+            response.createdAt()),
+        new TradingAccountMutationEvent(
+            userId,
+            accountId,
+            "BALANCE_UPDATED",
+            "ACCOUNT",
+            accountId,
+            requestId,
+            4L,
+            response.createdAt()));
   }
 
   @Test
@@ -361,6 +404,7 @@ class AccountTransferServiceTest {
     var replay = service.transfer(userId, accountId, Direction.SPOT_TO_PERP, amount, requestId);
 
     assertThat(replay.replayed()).isTrue();
+    verifyNoInteractions(eventPublisher);
     verify(walletService, never()).debitAvailableWithEntryType(
         any(), any(WalletType.class), any(), any(), any(), any(), any(), any());
     verify(ledgerService, never()).recordTransfer(any(), any(), any(), any(), any());
@@ -369,6 +413,7 @@ class AccountTransferServiceTest {
     assertThatThrownBy(() -> service.transfer(userId, accountId, Direction.PERP_TO_SPOT, amount, requestId))
         .isInstanceOfSatisfying(BusinessException.class,
             ex -> assertThat(ex.getCode()).isEqualTo("TRANSFER_REQUEST_CONFLICT"));
+    verifyNoInteractions(eventPublisher);
   }
 
   @Test

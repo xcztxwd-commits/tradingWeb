@@ -514,6 +514,27 @@ class PositionServiceTest {
   }
 
   @Test
+  void storedPositionPageLoadsSymbolMetadataInOneBatch() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(userId, accountId);
+    PositionEntity first = openPosition(accountId, UUID.randomUUID());
+    PositionEntity second = openPosition(accountId, UUID.randomUUID());
+    SymbolEntity eurusd = symbol(
+        "EURUSD", ProductType.FX_MARGIN, "EUR", "USD",
+        new BigDecimal("0.01"), new BigDecimal("100000"), 100);
+    when(symbolRepository.findBySymbols(List.of("EURUSD"))).thenReturn(List.of(eurusd));
+
+    List<PositionResponse> responses = service().toStoredResponses(
+        List.of(first, second), account);
+
+    assertThat(responses).extracting(PositionResponse::id)
+        .containsExactly(first.getId(), second.getId());
+    verify(symbolRepository).findBySymbols(List.of("EURUSD"));
+    verify(symbolRepository, never()).findBySymbol(any());
+  }
+
+  @Test
   void updatePositionProtectionChangesStopLossAndTakeProfitForOwnedOpenPosition() {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();

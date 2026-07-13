@@ -262,10 +262,10 @@ class AdminAccountControllerTest {
   void accountManagementRoutesStayUnderAdminAccountScope() throws Exception {
     RequestMapping root = AdminAccountController.class.getAnnotation(RequestMapping.class);
     assertThat(root.value()).containsExactly("/api/admin/accounts");
-    assertGetMapping("walletBalances", "/{accountId}/wallet-balances", UUID.class);
+    assertGetMapping("walletBalances", "/{id}/wallet-balances", UUID.class);
     assertGetMapping(
         "assetLedger",
-        "/{accountId}/asset-ledger",
+        "/{id}/asset-ledger",
         UUID.class,
         String.class,
         String.class,
@@ -273,16 +273,16 @@ class AdminAccountControllerTest {
         UUID.class,
         Instant.class,
         Instant.class);
-    assertGetMapping("fundingSettlements", "/{accountId}/funding-settlements", UUID.class);
+    assertGetMapping("fundingSettlements", "/{id}/funding-settlements", UUID.class);
     assertPostMapping(
         "forceCleanup",
-        "/{accountId}/force-cleanup",
+        "/{id}/force-cleanup",
         UserPrincipal.class,
         UUID.class,
         AdminAccountCleanupRequest.class);
     assertPostMapping(
         "resetDemo",
-        "/{accountId}/demo-reset",
+        "/{id}/demo-reset",
         UserPrincipal.class,
         UUID.class,
         AdminDemoResetRequest.class);

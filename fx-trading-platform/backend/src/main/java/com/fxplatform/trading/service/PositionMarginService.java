@@ -25,6 +25,7 @@ import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.service.PerpetualAccountRiskSnapshotService.AccountRiskProjection;
@@ -98,6 +99,7 @@ public class PositionMarginService {
                 market,
                 prepared));
         eventPublisher.publishEvent(new PositionMarginAdjustedEvent(response));
+        publishTradingMutationEvents(userId, response);
         return response;
       } catch (BusinessException exception) {
         if (!ErrorCode.MARKET_DATA_STALE.equals(exception.getCode()) || attempt > 0) {
@@ -357,6 +359,31 @@ public class PositionMarginService {
     Instant to = Instant.now();
     CandleRequest candles = new CandleRequest("1m", to.minus(Duration.ofMinutes(30)), to);
     return ExecutableMarketSnapshot.from(marketBundleResolver.resolvePerp(symbol, candles));
+  }
+
+  private void publishTradingMutationEvents(
+      UUID userId,
+      AdjustPositionMarginResponse response
+  ) {
+    Instant occurredAt = Instant.now();
+    eventPublisher.publishEvent(new TradingAccountMutationEvent(
+        userId,
+        response.accountId(),
+        "MARGIN_ADJUSTED",
+        "POSITION",
+        response.positionId(),
+        null,
+        response.version(),
+        occurredAt));
+    eventPublisher.publishEvent(new TradingAccountMutationEvent(
+        userId,
+        response.accountId(),
+        "POSITION_UPDATED",
+        "POSITION",
+        response.positionId(),
+        null,
+        response.version(),
+        occurredAt));
   }
 
   private static AuthorizationException accountNotFound() {

@@ -90,16 +90,18 @@ public class AdminMarketController {
   }
 
   @PreAuthorize("hasAuthority('market:symbol:update')")
-  @GetMapping("/symbols/{symbolId}/funding-config")
-  public ApiResponse<AdminFundingConfigResponse> fundingConfig(@PathVariable UUID symbolId) {
+  @GetMapping("/symbols/{id}/funding-config")
+  public ApiResponse<AdminFundingConfigResponse> fundingConfig(
+      @PathVariable("id") UUID symbolId
+  ) {
     return ApiResponse.success(adminMarketQueryService.fundingConfig(symbolId));
   }
 
   @PreAuthorize("hasAuthority('market:symbol:update')")
-  @PutMapping("/symbols/{symbolId}/funding-config")
+  @PutMapping("/symbols/{id}/funding-config")
   public ApiResponse<AdminFundingConfigResponse> updateFundingConfig(
       @AuthenticationPrincipal UserPrincipal principal,
-      @PathVariable UUID symbolId,
+      @PathVariable("id") UUID symbolId,
       @Valid @RequestBody AdminFundingConfigRequest request
   ) {
     return ApiResponse.success(

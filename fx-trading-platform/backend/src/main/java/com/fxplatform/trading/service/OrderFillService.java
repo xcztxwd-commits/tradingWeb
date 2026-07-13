@@ -25,6 +25,7 @@ import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -33,6 +34,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -49,6 +51,7 @@ public class OrderFillService {
   private final PositionEngine positionEngine;
   private final WalletService walletService;
   private final ProtectionOrderService protectionOrderService;
+  private ApplicationEventPublisher accountMutationPublisher;
   private final MarginCalculator marginCalculator = new MarginCalculator();
   private final PerpMarginCalculator perpMarginCalculator = new PerpMarginCalculator();
   private final TradingInstrumentClassifier instrumentClassifier = new TradingInstrumentClassifier();
@@ -365,6 +368,7 @@ public class OrderFillService {
         effectiveHoldOwner.setHoldAmount(BigDecimal.ZERO);
         orderRepository.save(effectiveHoldOwner);
       }
+      publishFillEvents(order, account, trade, null);
       return order;
     }
     ExecutionResult normalizedFill = normalizeFill(execution, filledQuantity, fee);
@@ -391,6 +395,7 @@ public class OrderFillService {
               positionUpdate,
               authorityMark);
         }
+        publishFillEvents(order, account, trade, positionUpdate);
         return order;
       }
       positionEngine.applyFill(
@@ -400,6 +405,7 @@ public class OrderFillService {
           profile,
           marginDescription);
       chargeTradeFee(account, fee, execution.feeAsset(), profile.kind(), trade.getId());
+      publishFillEvents(order, account, trade, null);
       return order;
     }
 
@@ -440,7 +446,85 @@ public class OrderFillService {
     }
     chargeTradeFee(account, fee, execution.feeAsset(), profile.kind(), trade.getId());
 
+    publishFillEvents(
+        order,
+        account,
+        trade,
+        new PositionEngine.PositionUpdateResult(savedPosition));
+
     return order;
+  }
+
+  @Autowired
+  void setAccountMutationPublisher(ApplicationEventPublisher accountMutationPublisher) {
+    this.accountMutationPublisher = accountMutationPublisher;
+  }
+
+  private void publishFillEvents(
+      OrderEntity order,
+      TradingAccountEntity account,
+      TradeEntity trade,
+      PositionEngine.PositionUpdateResult positionUpdate
+  ) {
+    if (accountMutationPublisher == null
+        || order.getUserId() == null
+        || account.getId() == null
+        || trade.getId() == null) {
+      return;
+    }
+    Instant occurredAt = trade.getExecutedAt() == null ? Instant.now() : trade.getExecutedAt();
+    accountMutationPublisher.publishEvent(new TradingAccountMutationEvent(
+        order.getUserId(),
+        account.getId(),
+        "TRADE_CREATED",
+        "TRADE",
+        trade.getId(),
+        order.getId(),
+        order.getVersion(),
+        occurredAt));
+    accountMutationPublisher.publishEvent(new TradingAccountMutationEvent(
+        order.getUserId(),
+        account.getId(),
+        "BALANCE_UPDATED",
+        "ACCOUNT",
+        account.getId(),
+        trade.getId(),
+        order.getVersion(),
+        occurredAt));
+    publishPositionEvent(order, account, trade, positionUpdate, occurredAt);
+  }
+
+  private void publishPositionEvent(
+      OrderEntity order,
+      TradingAccountEntity account,
+      TradeEntity trade,
+      PositionEngine.PositionUpdateResult update,
+      Instant occurredAt
+  ) {
+    if (update == null) {
+      return;
+    }
+    PositionEntity position = update.position();
+    UUID resourceId = update.reducedPositionId() == null
+        ? position == null ? null : position.getId()
+        : update.reducedPositionId();
+    if (resourceId == null) {
+      return;
+    }
+    boolean closed = update.toQuantity() != null
+        && update.toQuantity().compareTo(BigDecimal.ZERO) == 0;
+    if (!closed && position != null) {
+      closed = position.getStatus() == com.fxplatform.trading.enums.PositionStatus.CLOSED;
+    }
+    accountMutationPublisher.publishEvent(new TradingAccountMutationEvent(
+        order.getUserId(),
+        account.getId(),
+        closed ? "POSITION_CLOSED" : "POSITION_UPDATED",
+        "POSITION",
+        resourceId,
+        trade.getId(),
+        position == null ? null : position.getVersion(),
+        occurredAt));
   }
 
   private void requireFullFill(

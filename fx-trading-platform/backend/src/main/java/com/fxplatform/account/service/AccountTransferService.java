@@ -8,6 +8,7 @@ import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.enums.LedgerEntryType;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.service.PerpetualAccountRiskSnapshotService;
@@ -22,6 +23,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -29,6 +32,8 @@ public class AccountTransferService {
 
   private static final int MONEY_SCALE = 8;
   private static final String ASSET = "USDT";
+  private static final ApplicationEventPublisher NO_OP_EVENT_PUBLISHER = event -> {
+  };
 
   private final TradingAccountRepository accountRepository;
   private final WalletService walletService;
@@ -38,6 +43,7 @@ public class AccountTransferService {
   private final OrderRepository orderRepository;
   private final PerpetualAccountRiskSnapshotService perpetualAccountRiskSnapshotService;
   private final TradingTransactionExecutor transactionExecutor;
+  private final ApplicationEventPublisher eventPublisher;
 
   public AccountTransferService(
       TradingAccountRepository accountRepository,
@@ -49,6 +55,30 @@ public class AccountTransferService {
       PerpetualAccountRiskSnapshotService perpetualAccountRiskSnapshotService,
       TradingTransactionExecutor transactionExecutor
   ) {
+    this(
+        accountRepository,
+        walletService,
+        ledgerService,
+        demoExecutionGuard,
+        positionRepository,
+        orderRepository,
+        perpetualAccountRiskSnapshotService,
+        transactionExecutor,
+        NO_OP_EVENT_PUBLISHER);
+  }
+
+  @Autowired
+  public AccountTransferService(
+      TradingAccountRepository accountRepository,
+      WalletService walletService,
+      LedgerService ledgerService,
+      DemoExecutionGuard demoExecutionGuard,
+      PositionRepository positionRepository,
+      OrderRepository orderRepository,
+      PerpetualAccountRiskSnapshotService perpetualAccountRiskSnapshotService,
+      TradingTransactionExecutor transactionExecutor,
+      ApplicationEventPublisher eventPublisher
+  ) {
     this.accountRepository = accountRepository;
     this.walletService = walletService;
     this.ledgerService = ledgerService;
@@ -57,6 +87,7 @@ public class AccountTransferService {
     this.orderRepository = orderRepository;
     this.perpetualAccountRiskSnapshotService = perpetualAccountRiskSnapshotService;
     this.transactionExecutor = transactionExecutor;
+    this.eventPublisher = eventPublisher;
   }
 
   public AccountTransferResponse transfer(
@@ -190,8 +221,37 @@ public class AccountTransferService {
           description);
     }
 
-    return response(
-        accountId, requestId, direction, normalizedAmount, spot, account, false, Instant.now());
+    Instant completedAt = Instant.now();
+    AccountTransferResponse completed = response(
+        accountId, requestId, direction, normalizedAmount, spot, account, false, completedAt);
+    publishCompletedTransfer(userId, account, requestId, completedAt);
+    return completed;
+  }
+
+  private void publishCompletedTransfer(
+      UUID userId,
+      com.fxplatform.account.entity.TradingAccountEntity account,
+      UUID requestId,
+      Instant completedAt
+  ) {
+    eventPublisher.publishEvent(new TradingAccountMutationEvent(
+        userId,
+        account.getId(),
+        "TRANSFER_COMPLETED",
+        "TRANSFER",
+        requestId,
+        null,
+        account.getDemoGeneration(),
+        completedAt));
+    eventPublisher.publishEvent(new TradingAccountMutationEvent(
+        userId,
+        account.getId(),
+        "BALANCE_UPDATED",
+        "ACCOUNT",
+        account.getId(),
+        requestId,
+        account.getDemoGeneration(),
+        completedAt));
   }
 
   public List<AccountTransferResponse> history(UUID userId, UUID accountId) {

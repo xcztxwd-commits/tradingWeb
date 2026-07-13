@@ -25,6 +25,8 @@ import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.LiquidityRole;
+import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
@@ -46,6 +48,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class OrderFillServiceTest {
@@ -73,6 +76,9 @@ class OrderFillServiceTest {
 
   @Mock
   private AssetLedgerEntryRepository assetLedgerEntryRepository;
+
+  @Mock
+  private ApplicationEventPublisher accountMutationPublisher;
 
   @BeforeEach
   void setUpWalletRepositories() {
@@ -263,6 +269,99 @@ class OrderFillServiceTest {
   }
 
   @Test
+  void completedSpotFillPublishesOneTradeAndOneBalanceRefreshHint() {
+    UUID accountId = UUID.randomUUID();
+    UUID userId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    account.setUserId(userId);
+    OrderEntity order = order(accountId);
+    order.setUserId(userId);
+    order.setVersion(4L);
+    SpotSettlementService spotSettlementService = org.mockito.Mockito.mock(SpotSettlementService.class);
+    OrderFillService service = new OrderFillService(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        spotSettlementService);
+    service.setAccountMutationPublisher(accountMutationPublisher);
+
+    service.fill(
+        order,
+        account,
+        new ExecutionResult(
+            new BigDecimal("50000.00000000"),
+            Instant.parse("2026-07-13T01:00:00Z"),
+            new BigDecimal("0.20"),
+            BigDecimal.ZERO,
+            new BigDecimal("10.00000000"),
+            BigDecimal.ZERO,
+            null,
+            null),
+        null,
+        "Spot fill");
+
+    ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
+    verify(accountMutationPublisher, times(2)).publishEvent(events.capture());
+    assertThat(events.getAllValues())
+        .allSatisfy(event -> assertThat(event).isInstanceOf(TradingAccountMutationEvent.class));
+    assertThat(events.getAllValues().stream()
+        .map(TradingAccountMutationEvent.class::cast)
+        .map(TradingAccountMutationEvent::type))
+        .containsExactly("TRADE_CREATED", "BALANCE_UPDATED");
+    assertThat(events.getAllValues().stream()
+        .map(TradingAccountMutationEvent.class::cast))
+        .allSatisfy(event -> {
+          assertThat(event.userId()).isEqualTo(userId);
+          assertThat(event.accountId()).isEqualTo(accountId);
+          assertThat(event.version()).isEqualTo(4L);
+        });
+  }
+
+  @Test
+  void canonicalPerpetualPositionUpdatePublishesExactlyOneUpdatedHint() {
+    PositionEntity position = new PositionEntity();
+    position.setId(UUID.randomUUID());
+    position.setStatus(PositionStatus.OPEN);
+    position.setVersion(6L);
+
+    List<TradingAccountMutationEvent> events = fillCanonicalPerpetual(
+        new PositionEngine.PositionUpdateResult(position));
+
+    assertThat(events.stream().map(TradingAccountMutationEvent::type))
+        .containsExactly("TRADE_CREATED", "BALANCE_UPDATED", "POSITION_UPDATED");
+    assertThat(events.stream().filter(event -> "POSITION_UPDATED".equals(event.type())))
+        .singleElement()
+        .satisfies(event -> {
+          assertThat(event.resourceId()).isEqualTo(position.getId());
+          assertThat(event.version()).isEqualTo(6L);
+        });
+  }
+
+  @Test
+  void canonicalPerpetualPositionClosePublishesExactlyOneClosedHint() {
+    PositionEntity position = new PositionEntity();
+    position.setId(UUID.randomUUID());
+    position.setStatus(PositionStatus.CLOSED);
+    position.setVersion(7L);
+    PositionEngine.PositionUpdateResult closed = new PositionEngine.PositionUpdateResult(position)
+        .withReduction(position.getId(), new BigDecimal("0.20"), BigDecimal.ZERO);
+
+    List<TradingAccountMutationEvent> events = fillCanonicalPerpetual(closed);
+
+    assertThat(events.stream().map(TradingAccountMutationEvent::type))
+        .containsExactly("TRADE_CREATED", "BALANCE_UPDATED", "POSITION_CLOSED");
+    assertThat(events.stream().filter(event -> "POSITION_CLOSED".equals(event.type())))
+        .singleElement()
+        .satisfies(event -> {
+          assertThat(event.resourceId()).isEqualTo(position.getId());
+          assertThat(event.version()).isEqualTo(7L);
+        });
+  }
+
+  @Test
   void canonicalFullFillCopiesFeeRoleAndSourceMetadataToOneTrade() {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId);
@@ -395,6 +494,72 @@ class OrderFillServiceTest {
         BigDecimal.ZERO,
         null,
         null);
+  }
+
+  private List<TradingAccountMutationEvent> fillCanonicalPerpetual(
+      PositionEngine.PositionUpdateResult positionUpdate
+  ) {
+    UUID accountId = UUID.randomUUID();
+    UUID userId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    account.setUserId(userId);
+    OrderEntity order = order(accountId);
+    order.setUserId(userId);
+    order.setProductType(ProductType.LINEAR_PERP);
+    order.setVersion(4L);
+    PositionEngine positionEngine = org.mockito.Mockito.mock(PositionEngine.class);
+    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(perpSymbol(
+        "BTCUSDT",
+        "LINEAR_PERPETUAL",
+        "BTC",
+        "USDT",
+        "1",
+        "1",
+        "0.005",
+        "USDT",
+        "USDT")));
+    when(positionEngine.applyPerpetualFill(
+        any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(), any()))
+        .thenReturn(positionUpdate);
+    OrderFillService service = new OrderFillService(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        null,
+        positionEngine);
+    service.setAccountMutationPublisher(accountMutationPublisher);
+    Instant filledAt = Instant.parse("2026-07-13T02:00:00Z");
+
+    service.fillPerpetual(
+        order,
+        account,
+        new FullFillResult(
+            new BigDecimal("50000.00000000"),
+            filledAt,
+            new BigDecimal("0.20"),
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            "USDT",
+            LiquidityRole.TAKER,
+            BigDecimal.ZERO,
+            MarketSourceMode.LOCAL_SIMULATED,
+            "local-perp",
+            "BTCUSDT",
+            filledAt.minusSeconds(1),
+            filledAt),
+        new BigDecimal("50000.00000000"),
+        20,
+        "Canonical perpetual fill");
+
+    ArgumentCaptor<Object> captured = ArgumentCaptor.forClass(Object.class);
+    verify(accountMutationPublisher, times(3)).publishEvent(captured.capture());
+    return captured.getAllValues().stream()
+        .map(TradingAccountMutationEvent.class::cast)
+        .toList();
   }
 
   @Test

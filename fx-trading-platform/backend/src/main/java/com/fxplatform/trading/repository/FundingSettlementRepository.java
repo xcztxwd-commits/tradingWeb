@@ -1,6 +1,7 @@
 package com.fxplatform.trading.repository;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.trading.entity.FundingSettlementEntity;
 import java.util.List;
@@ -8,6 +9,22 @@ import java.util.UUID;
 import org.apache.ibatis.annotations.Insert;
 
 public interface FundingSettlementRepository extends FxBaseMapper<FundingSettlementEntity> {
+
+  default Page<FundingSettlementEntity> findPageByAccountId(
+      UUID accountId,
+      String symbol,
+      Page<FundingSettlementEntity> page
+  ) {
+    LambdaQueryWrapper<FundingSettlementEntity> query =
+        new LambdaQueryWrapper<FundingSettlementEntity>()
+            .eq(FundingSettlementEntity::getAccountId, accountId);
+    if (symbol != null && !symbol.isBlank()) {
+      query.eq(FundingSettlementEntity::getSymbol, symbol);
+    }
+    return selectPage(page, query
+        .orderByDesc(FundingSettlementEntity::getFundingTime)
+        .orderByDesc(FundingSettlementEntity::getId));
+  }
 
   default boolean insertIfAbsent(FundingSettlementEntity settlement) {
     return insertOnConflictDoNothing(settlement) == 1;

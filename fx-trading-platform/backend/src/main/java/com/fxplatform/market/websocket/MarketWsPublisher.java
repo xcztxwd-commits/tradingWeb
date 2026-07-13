@@ -4,9 +4,13 @@ import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.MarketDepthResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
+import com.fxplatform.market.dto.MarketSourceChangedResponse;
+import com.fxplatform.market.dto.PerpetualReferenceResponse;
+import com.fxplatform.market.service.MarketSourceSelectionTracker.MarketSourceChangedEvent;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
@@ -37,5 +41,29 @@ public class MarketWsPublisher {
    */
   public void publishRecentTrades(String symbol, List<RecentTradeResponse> trades) {
     messagingTemplate.convertAndSend(SymbolNormalizer.tradesTopic(symbol), trades);
+  }
+
+  public void publishPerpetualReference(PerpetualReferenceResponse reference) {
+    messagingTemplate.convertAndSend(
+        SymbolNormalizer.perpetualReferenceTopic(reference.symbol()),
+        reference);
+  }
+
+  @EventListener
+  public void onMarketSourceChanged(MarketSourceChangedEvent event) {
+    MarketSourceChangedResponse response = new MarketSourceChangedResponse(
+        "MARKET_SOURCE_CHANGED",
+        SymbolNormalizer.normalize(event.platformSymbol()),
+        event.previousProviderCode(),
+        event.previousSourceMode(),
+        event.providerCode(),
+        event.sourceMode(),
+        event.changedAt(),
+        event.asOf(),
+        event.expiresAt(),
+        event.stale());
+    messagingTemplate.convertAndSend(
+        SymbolNormalizer.sourceChangesTopic(event.platformSymbol()),
+        response);
   }
 }

@@ -1,6 +1,8 @@
 package com.fxplatform.trading.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.Instant;
@@ -26,6 +28,8 @@ public class BatchActionRequestEntity {
   private String status;
   private String scopeIds;
   private String responsePayload;
+  @TableField(fill = FieldFill.INSERT)
   private Instant createdAt;
+  @TableField(fill = FieldFill.INSERT_UPDATE)
   private Instant updatedAt;
 }

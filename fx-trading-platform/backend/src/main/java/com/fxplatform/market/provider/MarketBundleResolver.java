@@ -80,7 +80,13 @@ public class MarketBundleResolver {
         throwIfInterrupted();
         if (bundle.isPresent() && matchesCandidate(bundle.get(), candidate) && validator.valid(bundle.get())) {
           recordSuccess(candidate, MarketBundleAssembler.quote(bundle.get(), clock), startedAt);
-          selectionTracker.recordSelection(symbol, bundle.get().providerCode(), bundle.get().sourceMode());
+          selectionTracker.recordSelection(
+              symbol,
+              bundle.get().providerCode(),
+              bundle.get().sourceMode(),
+              bundle.get().asOf(),
+              bundle.get().expiresAt(),
+              false);
           return bundle.get();
         }
       } catch (RuntimeException ignored) {
@@ -103,7 +109,13 @@ public class MarketBundleResolver {
         throwIfInterrupted();
         if (bundle.isPresent() && matchesCandidate(bundle.get(), candidate) && validator.valid(bundle.get())) {
           recordSuccess(candidate, MarketBundleAssembler.quote(bundle.get(), clock), startedAt);
-          selectionTracker.recordSelection(symbol, bundle.get().providerCode(), bundle.get().sourceMode());
+          selectionTracker.recordSelection(
+              symbol,
+              bundle.get().providerCode(),
+              bundle.get().sourceMode(),
+              bundle.get().asOf(),
+              bundle.get().expiresAt(),
+              false);
           return bundle.get();
         }
       } catch (RuntimeException ignored) {

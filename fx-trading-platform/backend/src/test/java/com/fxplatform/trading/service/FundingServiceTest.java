@@ -28,6 +28,7 @@ import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.FundingRateRepository;
 import com.fxplatform.trading.repository.FundingSettlementRepository;
 import com.fxplatform.trading.repository.PositionRepository;
@@ -49,6 +50,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class FundingServiceTest {
@@ -73,6 +75,9 @@ class FundingServiceTest {
 
   @Mock
   private DemoExecutionGuard demoExecutionGuard;
+
+  @Mock
+  private ApplicationEventPublisher eventPublisher;
 
   private final Map<UUID, PositionEntity> positions = new HashMap<>();
 
@@ -305,6 +310,61 @@ class FundingServiceTest {
     assertThat(firstAttempt.getIsolatedMarginAfter()).isEqualByComparingTo("985.00000000");
     assertThat(firstAttempt.getAmount()).isEqualByComparingTo("-5.00000000");
     assertThat(firstAttempt.getMarginMode()).isEqualTo(MarginMode.ISOLATED);
+
+    ArgumentCaptor<TradingAccountMutationEvent> eventCaptor =
+        ArgumentCaptor.forClass(TradingAccountMutationEvent.class);
+    verify(eventPublisher).publishEvent(eventCaptor.capture());
+    TradingAccountMutationEvent event = eventCaptor.getValue();
+    assertThat(event.userId()).isEqualTo(account.getUserId());
+    assertThat(event.accountId()).isEqualTo(accountId);
+    assertThat(event.type()).isEqualTo("FUNDING_SETTLED");
+    assertThat(event.resourceType()).isEqualTo("FUNDING_SETTLEMENT");
+    assertThat(event.resourceId()).isEqualTo(firstAttempt.getId());
+    assertThat(event.relatedResourceId()).isEqualTo(position.getId());
+    assertThat(event.version()).isEqualTo(5L);
+    assertThat(event.occurredAt()).isNotNull();
+  }
+
+  @Test
+  void crossFundingPublishesSettlementAndBalanceEventsAfterTheInsertSucceeds() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "10000.00000000");
+    PositionEntity position = position(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "50000.00000000");
+    FundingRateEntity rate = fundingRate(
+        "BTCUSDT-PERP", "0.0001", "50000.00000000");
+    stubLinearPerpetual(account, position);
+    when(fundingSettlementRepository.insertIfAbsent(any(FundingSettlementEntity.class)))
+        .thenReturn(true);
+
+    service().settleFundingForPosition(position, rate);
+
+    ArgumentCaptor<FundingSettlementEntity> settlementCaptor =
+        ArgumentCaptor.forClass(FundingSettlementEntity.class);
+    verify(fundingSettlementRepository).insertIfAbsent(settlementCaptor.capture());
+    FundingSettlementEntity settlement = settlementCaptor.getValue();
+    ArgumentCaptor<TradingAccountMutationEvent> eventCaptor =
+        ArgumentCaptor.forClass(TradingAccountMutationEvent.class);
+    verify(eventPublisher, times(2)).publishEvent(eventCaptor.capture());
+    assertThat(eventCaptor.getAllValues()).containsExactly(
+        new TradingAccountMutationEvent(
+            account.getUserId(),
+            accountId,
+            "FUNDING_SETTLED",
+            "FUNDING_SETTLEMENT",
+            settlement.getId(),
+            position.getId(),
+            1L,
+            eventCaptor.getAllValues().get(0).occurredAt()),
+        new TradingAccountMutationEvent(
+            account.getUserId(),
+            accountId,
+            "BALANCE_UPDATED",
+            "ACCOUNT",
+            accountId,
+            settlement.getId(),
+            1L,
+            eventCaptor.getAllValues().get(1).occurredAt()));
   }
 
   @Test
@@ -644,12 +704,14 @@ class FundingServiceTest {
         ledgerService,
         symbolRepository,
         new TradingInstrumentClassifier(),
-        demoExecutionGuard);
+        demoExecutionGuard,
+        eventPublisher);
   }
 
   private static TradingAccountEntity account(UUID accountId, String balance) {
     TradingAccountEntity account = new TradingAccountEntity();
     account.setId(accountId);
+    account.setUserId(UUID.randomUUID());
     account.setBaseCurrency("USDT");
     account.setBalance(new BigDecimal(balance));
     account.setEquity(new BigDecimal(balance));

@@ -2,6 +2,7 @@ package com.fxplatform.trading.repository;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderStatus;
@@ -16,6 +17,25 @@ import org.apache.ibatis.annotations.Select;
  * OrderRepository 通过 MyBatis-Plus 访问订单。
  */
 public interface OrderRepository extends FxBaseMapper<OrderEntity> {
+
+  default Page<OrderEntity> findPageByAccountId(
+      UUID accountId,
+      OrderStatus status,
+      String symbol,
+      Page<OrderEntity> page
+  ) {
+    LambdaQueryWrapper<OrderEntity> query = new LambdaQueryWrapper<OrderEntity>()
+        .eq(OrderEntity::getAccountId, accountId);
+    if (status != null) {
+      query.eq(OrderEntity::getStatus, status);
+    }
+    if (symbol != null && !symbol.isBlank()) {
+      query.eq(OrderEntity::getSymbol, symbol);
+    }
+    return selectPage(page, query
+        .orderByDesc(OrderEntity::getCreatedAt)
+        .orderByDesc(OrderEntity::getId));
+  }
 
   /** 按用户和幂等键查询订单，避免重复提交。 */
   default Optional<OrderEntity> findByUserIdAndIdempotencyKey(UUID userId, String idempotencyKey) {

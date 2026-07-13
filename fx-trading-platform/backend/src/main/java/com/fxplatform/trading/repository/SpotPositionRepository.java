@@ -5,6 +5,7 @@ import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.trading.entity.SpotPositionEntity;
 import com.fxplatform.wallet.enums.WalletType;
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -12,6 +13,14 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
 public interface SpotPositionRepository extends FxBaseMapper<SpotPositionEntity> {
+
+  default List<SpotPositionEntity> findAllByIds(Collection<UUID> ids) {
+    if (ids == null || ids.isEmpty()) {
+      return List.of();
+    }
+    return selectList(new LambdaQueryWrapper<SpotPositionEntity>()
+        .in(SpotPositionEntity::getId, ids));
+  }
 
   default Optional<SpotPositionEntity> findByAccountIdAndWalletTypeAndAssetAndCostAsset(
       UUID accountId,

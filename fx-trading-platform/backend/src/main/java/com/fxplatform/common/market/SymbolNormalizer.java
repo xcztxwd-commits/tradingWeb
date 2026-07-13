@@ -31,4 +31,12 @@ public final class SymbolNormalizer {
   public static String tradesTopic(String symbol) {
     return "/topic/market/trades/" + normalize(symbol);
   }
+
+  public static String perpetualReferenceTopic(String symbol) {
+    return "/topic/market/perp-reference/" + normalize(symbol);
+  }
+
+  public static String sourceChangesTopic(String symbol) {
+    return "/topic/market/source-changes/" + normalize(symbol);
+  }
 }
