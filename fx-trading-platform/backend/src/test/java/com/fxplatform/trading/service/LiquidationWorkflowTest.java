@@ -91,6 +91,7 @@ class LiquidationWorkflowTest {
   @Mock CancelAllOrderService cancelAllOrderService;
   @Mock PerpetualAccountRiskSnapshotService accountRiskSnapshotService;
   @Mock SystemCloseOrderService systemCloseOrderService;
+  @Mock LiquidationSettlementService liquidationSettlementService;
 
   @InjectMocks LiquidationService liquidationService;
 
@@ -389,16 +390,22 @@ class LiquidationWorkflowTest {
   }
 
   @Test
-  void oneFailedCrossItemDoesNotRollBackSuccessAndKeepsLiquidationPendingForRetry() {
+  void oneFailedCrossItemKeepsSuccessPendingAndStabilizesTheCommittedAccount() {
     UUID accountId = uuid(104);
     TradingAccountEntity account = account(accountId);
     PositionEntity first = position(uuid(11), accountId, BTC, MarginMode.CROSS);
     PositionEntity second = position(uuid(21), accountId, ETH, MarginMode.CROSS);
     PositionEntity isolated = position(uuid(31), accountId, SOL, MarginMode.ISOLATED);
     stubUnsafeCross(account, List.of(second, isolated, first));
+    liquidationService.setLiquidationSettlementService(liquidationSettlementService);
     when(systemCloseOrderService.closeWhole(
         eq(accountId), eq(first.getId()), eq(OrderOrigin.LIQUIDATION), anyString(), anyString()))
-        .thenReturn(closeResult(account, first));
+        .thenAnswer(invocation -> {
+          account.setBalance(decimal("-10"));
+          account.setEquity(decimal("-10"));
+          account.setFreeMargin(decimal("-10"));
+          return closeResult(account, first);
+        });
     when(systemCloseOrderService.closeWhole(
         eq(accountId), eq(second.getId()), eq(OrderOrigin.LIQUIDATION), anyString(), anyString()))
         .thenThrow(new BusinessException("MARKET_DATA_STALE", "fresh mark unavailable"));
@@ -413,6 +420,7 @@ class LiquidationWorkflowTest {
         eq(accountId), eq(second.getId()), eq(OrderOrigin.LIQUIDATION), anyString(), anyString());
     verify(systemCloseOrderService, never()).closeWhole(
         eq(accountId), eq(isolated.getId()), any(), anyString(), anyString());
+    verify(liquidationSettlementService).settleIfReady(accountId);
 
     ArgumentCaptor<String> stableRequestIds = ArgumentCaptor.forClass(String.class);
     verify(systemCloseOrderService, times(2)).closeWhole(

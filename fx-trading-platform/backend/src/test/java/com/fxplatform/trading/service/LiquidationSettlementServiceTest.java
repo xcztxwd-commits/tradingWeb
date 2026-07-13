@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
@@ -20,8 +21,10 @@ import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.repository.CrossLiquidationChargeRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
+import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
@@ -105,23 +108,153 @@ class LiquidationSettlementServiceTest {
   }
 
   @Test
-  void failedCrossItemKeepsPendingChargesAndAccountStateUntouched() {
+  void pendingCrossLossIsFlooredAndRecordedOnceAcrossRetry() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "-10.00000000");
+    account.setEquity(new BigDecimal("-15.00000000"));
+    account.setFreeMargin(new BigDecimal("-20.00000000"));
+    PositionEntity remaining = new PositionEntity();
+    remaining.setMarginMode(MarginMode.CROSS);
+    CrossLiquidationChargeEntity pending = charge(
+        accountId, uuid(1), uuid(11), "5.00000000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(positionRepository.findOpenLinearPerpByAccountIdForUpdate(accountId))
+        .thenReturn(List.of(remaining));
+    when(chargeRepository.findPendingByAccountIdForUpdate(accountId))
+        .thenReturn(List.of(pending));
+
+    assertThat(service().settleIfReady(accountId)).isFalse();
+    assertThat(service().settleIfReady(accountId)).isFalse();
+
+    assertThat(account.getBalance()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getEquity()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getStatus()).isEqualTo(AccountStatus.LIQUIDATION_PENDING);
+    assertThat(pending.getStatus()).isEqualTo("PENDING");
+    assertThat(pending.getFeeCharged()).isEqualByComparingTo("0.00000000");
+    UUID expectedSettlementId = partialSettlementId(accountId, pending.getOrderId());
+    verify(ledgerService).recordCrossLiquidationShortfall(
+        account,
+        new BigDecimal("10.00000000"),
+        expectedSettlementId,
+        "Cross liquidation bankruptcy shortfall");
+    verify(auditLogService).record(
+        null,
+        "BANKRUPTCY_SHORTFALL",
+        "ACCOUNT",
+        accountId.toString(),
+        "{\"amount\":10.00000000,\"settlementId\":\"" + expectedSettlementId + "\"}");
+    verify(chargeRepository, never()).updateById(any(CrossLiquidationChargeEntity.class));
+    verify(ledgerService, never()).recordLiquidationFee(any(), any(), any(), anyString());
+  }
+
+  @Test
+  void laterProfitableCloseDoesNotReversePreviouslyRecordedShortfall() {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId, "-10.00000000");
     PositionEntity remaining = new PositionEntity();
     remaining.setMarginMode(MarginMode.CROSS);
+    CrossLiquidationChargeEntity first = charge(
+        accountId, uuid(1), uuid(11), "0.00000000");
+    CrossLiquidationChargeEntity second = charge(
+        accountId, uuid(2), uuid(12), "0.00000000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(positionRepository.findOpenLinearPerpByAccountIdForUpdate(accountId))
+        .thenReturn(List.of(remaining), List.of());
+    when(chargeRepository.findPendingByAccountIdForUpdate(accountId))
+        .thenReturn(List.of(first), List.of(first, second));
+
+    assertThat(service().settleIfReady(accountId)).isFalse();
+    account.setBalance(new BigDecimal("5.00000000"));
+    account.setEquity(new BigDecimal("5.00000000"));
+    account.setFreeMargin(new BigDecimal("5.00000000"));
+
+    assertThat(service().settleIfReady(accountId)).isTrue();
+
+    assertThat(account.getBalance()).isEqualByComparingTo("5.00000000");
+    assertThat(account.getEquity()).isEqualByComparingTo("5.00000000");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("5.00000000");
+    assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+    verify(ledgerService).recordCrossLiquidationShortfall(
+        account,
+        new BigDecimal("10.00000000"),
+        partialSettlementId(accountId, first.getOrderId()),
+        "Cross liquidation bankruptcy shortfall");
+    verifyNoMoreInteractions(ledgerService);
+  }
+
+  @Test
+  void eachNewPartialDeficitUsesTheExpandedChargeSetAsAUniqueOperation() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "-10.00000000");
+    PositionEntity remaining = new PositionEntity();
+    remaining.setMarginMode(MarginMode.CROSS);
+    CrossLiquidationChargeEntity first = charge(
+        accountId, uuid(1), uuid(11), "0.00000000");
+    CrossLiquidationChargeEntity second = charge(
+        accountId, uuid(2), uuid(12), "0.00000000");
     when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
     when(positionRepository.findOpenLinearPerpByAccountIdForUpdate(accountId))
         .thenReturn(List.of(remaining));
+    when(chargeRepository.findPendingByAccountIdForUpdate(accountId))
+        .thenReturn(List.of(first), List.of(first, second));
 
     assertThat(service().settleIfReady(accountId)).isFalse();
+    account.setBalance(new BigDecimal("-5.00000000"));
+    account.setEquity(new BigDecimal("-5.00000000"));
+    account.setFreeMargin(new BigDecimal("-5.00000000"));
+    assertThat(service().settleIfReady(accountId)).isFalse();
 
-    assertThat(account.getBalance()).isEqualByComparingTo("-10.00000000");
-    assertThat(account.getStatus()).isEqualTo(AccountStatus.LIQUIDATION_PENDING);
-    verify(chargeRepository, never()).findPendingByAccountIdForUpdate(any());
-    verify(accountRepository, never()).save(any());
-    verify(ledgerService, never()).recordCrossLiquidationShortfall(
-        any(), any(), any(), anyString());
+    assertThat(account.getBalance()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getEquity()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("0.00000000");
+    verify(ledgerService).recordCrossLiquidationShortfall(
+        account,
+        new BigDecimal("10.00000000"),
+        partialSettlementId(accountId, first.getOrderId()),
+        "Cross liquidation bankruptcy shortfall");
+    verify(ledgerService).recordCrossLiquidationShortfall(
+        account,
+        new BigDecimal("5.00000000"),
+        partialSettlementId(accountId, first.getOrderId(), second.getOrderId()),
+        "Cross liquidation bankruptcy shortfall");
+    verifyNoMoreInteractions(ledgerService);
+  }
+
+  @Test
+  void finalFeeShortfallDoesNotReuseThePartialCoreSettlementOperation() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "-10.00000000");
+    PositionEntity remaining = new PositionEntity();
+    remaining.setMarginMode(MarginMode.CROSS);
+    CrossLiquidationChargeEntity charge = charge(
+        accountId, uuid(1), uuid(11), "5.00000000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(positionRepository.findOpenLinearPerpByAccountIdForUpdate(accountId))
+        .thenReturn(List.of(remaining), List.of());
+    when(chargeRepository.findPendingByAccountIdForUpdate(accountId))
+        .thenReturn(List.of(charge));
+
+    assertThat(service().settleIfReady(accountId)).isFalse();
+    assertThat(service().settleIfReady(accountId)).isTrue();
+
+    assertThat(account.getBalance()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getEquity()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+    assertThat(charge.getStatus()).isEqualTo("SETTLED");
+    assertThat(charge.getFeeCharged()).isEqualByComparingTo("0.00000000");
+    verify(ledgerService).recordCrossLiquidationShortfall(
+        account,
+        new BigDecimal("10.00000000"),
+        partialSettlementId(accountId, charge.getOrderId()),
+        "Cross liquidation bankruptcy shortfall");
+    verify(ledgerService).recordCrossLiquidationShortfall(
+        account,
+        new BigDecimal("5.00000000"),
+        finalSettlementId(accountId, charge.getOrderId()),
+        "Cross liquidation bankruptcy shortfall");
+    verifyNoMoreInteractions(ledgerService);
   }
 
   @Test
@@ -204,5 +337,23 @@ class LiquidationSettlementServiceTest {
 
   private static UUID uuid(int suffix) {
     return UUID.fromString(String.format("00000000-0000-0000-0000-%012d", suffix));
+  }
+
+  private static UUID partialSettlementId(UUID accountId, UUID... orderIds) {
+    return settlementId("cross-liquidation-partial:", accountId, orderIds);
+  }
+
+  private static UUID finalSettlementId(UUID accountId, UUID... orderIds) {
+    return settlementId("cross-liquidation:", accountId, orderIds);
+  }
+
+  private static UUID settlementId(String prefix, UUID accountId, UUID... orderIds) {
+    StringJoiner joined = new StringJoiner(":");
+    for (UUID orderId : orderIds) {
+      joined.add(orderId.toString());
+    }
+    String stableOrderIds = joined.length() == 0 ? "no-fee" : joined.toString();
+    return UUID.nameUUIDFromBytes(
+        (prefix + accountId + ":" + stableOrderIds).getBytes(StandardCharsets.UTF_8));
   }
 }

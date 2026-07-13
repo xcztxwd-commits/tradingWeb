@@ -14,6 +14,7 @@ import com.fxplatform.account.enums.AccountType;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.DemoExecutionGuard;
+import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import com.fxplatform.wallet.enums.WalletType;
 import java.math.BigDecimal;
 import java.util.List;
@@ -108,5 +109,120 @@ class AssetConversionServiceTest {
         any(), any(), any(), any(), any(), any(), any(), any());
     verify(walletService, never()).creditAvailableWithEntryType(
         any(), any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void rejectsTheRetiredPerpetualWalletBeforeCreatingOrMutatingWallets() {
+    when(accountRepository.findByIdAndUserIdForUpdate(accountId, userId))
+        .thenReturn(Optional.of(account));
+
+    assertThatThrownBy(() -> service.convert(
+        userId,
+        accountId,
+        WalletType.USDT_PERP,
+        "USDT",
+        WalletType.FX_MARGIN,
+        "USD",
+        BigDecimal.ONE,
+        UUID.randomUUID()))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("UNSUPPORTED_CONVERSION_PAIR"));
+
+    assertThatThrownBy(() -> service.convert(
+        userId,
+        accountId,
+        WalletType.SPOT,
+        "USDT",
+        WalletType.USDT_PERP,
+        "USD",
+        BigDecimal.ONE,
+        UUID.randomUUID()))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("UNSUPPORTED_CONVERSION_PAIR"));
+
+    verify(walletService, never()).lockWalletsInOrder(any(), any());
+    verify(walletService, never()).debitAvailableWithEntryType(
+        any(), any(), any(), any(), any(), any(), any(), any());
+    verify(walletService, never()).creditAvailableWithEntryType(
+        any(), any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void exactReplayReturnsTheOriginalConversionWithoutASecondMutation() {
+    UUID conversionId = UUID.randomUUID();
+    BigDecimal amount = new BigDecimal("1.00000000");
+    when(accountRepository.findByIdAndUserIdForUpdate(accountId, userId))
+        .thenReturn(Optional.of(account));
+    when(walletService.assetLedgerEntriesByReference(
+        accountId, "ASSET_CONVERSION", conversionId))
+        .thenReturn(List.of(
+            conversionEntry(WalletType.SPOT, "USDT", "CONVERT_OUT", "-1.00000000"),
+            conversionEntry(WalletType.FX_MARGIN, "USD", "CONVERT_IN", "1.00000000")));
+
+    AssetConversionService.ConversionResult result = service.convert(
+        userId,
+        accountId,
+        WalletType.SPOT,
+        "USDT",
+        WalletType.FX_MARGIN,
+        "USD",
+        amount,
+        conversionId);
+
+    assertThat(result.fromAmount()).isEqualByComparingTo(amount);
+    assertThat(result.toAmount()).isEqualByComparingTo(amount);
+    verify(walletService, never()).lockWalletsInOrder(any(), any());
+    verify(walletService, never()).debitAvailableWithEntryType(
+        any(), any(), any(), any(), any(), any(), any(), any());
+    verify(walletService, never()).creditAvailableWithEntryType(
+        any(), any(), any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void replayWithChangedAmountOrWalletFailsBeforeAnyWalletMutation() {
+    UUID conversionId = UUID.randomUUID();
+    when(accountRepository.findByIdAndUserIdForUpdate(accountId, userId))
+        .thenReturn(Optional.of(account));
+    when(walletService.assetLedgerEntriesByReference(
+        accountId, "ASSET_CONVERSION", conversionId))
+        .thenReturn(List.of(
+            conversionEntry(WalletType.SPOT, "USDT", "CONVERT_OUT", "-1.00000000"),
+            conversionEntry(WalletType.FX_MARGIN, "USD", "CONVERT_IN", "1.00000000")));
+
+    assertThatThrownBy(() -> service.convert(
+        userId,
+        accountId,
+        WalletType.SPOT,
+        "USDT",
+        WalletType.FUNDING,
+        "USD",
+        new BigDecimal("100.00000000"),
+        conversionId))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo("ASSET_CONVERSION_REQUEST_CONFLICT"));
+
+    verify(walletService, never()).lockWalletsInOrder(any(), any());
+    verify(walletService, never()).debitAvailableWithEntryType(
+        any(), any(), any(), any(), any(), any(), any(), any());
+    verify(walletService, never()).creditAvailableWithEntryType(
+        any(), any(), any(), any(), any(), any(), any(), any());
+  }
+
+  private AssetLedgerEntryEntity conversionEntry(
+      WalletType walletType,
+      String asset,
+      String operationType,
+      String amount
+  ) {
+    AssetLedgerEntryEntity entry = new AssetLedgerEntryEntity();
+    entry.setAccountId(accountId);
+    entry.setWalletType(walletType.code());
+    entry.setAsset(asset);
+    entry.setAmount(new BigDecimal(amount));
+    entry.setEntryType(operationType);
+    entry.setOperationType(operationType);
+    entry.setReferenceType("ASSET_CONVERSION");
+    return entry;
   }
 }

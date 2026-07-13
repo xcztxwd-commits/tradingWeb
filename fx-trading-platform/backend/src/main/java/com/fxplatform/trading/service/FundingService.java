@@ -4,6 +4,7 @@ import static com.fxplatform.common.money.MoneyAmount.orZero;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.entity.LedgerEntryEntity;
@@ -41,6 +42,7 @@ public class FundingService {
 
   private static final int MONEY_SCALE = 8;
   private static final String LEDGER_DESCRIPTION = "Perpetual funding fee";
+  private static final String SHORTFALL_DESCRIPTION = "Funding bankruptcy shortfall";
   private static final Set<String> CRYPTO_BASES = Set.of(
       "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "OKB", "BCH", "LTC");
 
@@ -53,6 +55,7 @@ public class FundingService {
   private final TradingInstrumentClassifier instrumentClassifier;
   private final DemoExecutionGuard demoExecutionGuard;
   private final ApplicationEventPublisher eventPublisher;
+  private final AuditLogService auditLogService;
 
   public FundingService(
       FundingRateRepository fundingRateRepository,
@@ -73,6 +76,31 @@ public class FundingService {
         symbolRepository,
         instrumentClassifier,
         demoExecutionGuard,
+        null,
+        null);
+  }
+
+  public FundingService(
+      FundingRateRepository fundingRateRepository,
+      FundingSettlementRepository fundingSettlementRepository,
+      PositionRepository positionRepository,
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      SymbolRepository symbolRepository,
+      TradingInstrumentClassifier instrumentClassifier,
+      DemoExecutionGuard demoExecutionGuard,
+      ApplicationEventPublisher eventPublisher
+  ) {
+    this(
+        fundingRateRepository,
+        fundingSettlementRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        instrumentClassifier,
+        demoExecutionGuard,
+        eventPublisher,
         null);
   }
 
@@ -86,7 +114,8 @@ public class FundingService {
       SymbolRepository symbolRepository,
       TradingInstrumentClassifier instrumentClassifier,
       DemoExecutionGuard demoExecutionGuard,
-      ApplicationEventPublisher eventPublisher
+      ApplicationEventPublisher eventPublisher,
+      AuditLogService auditLogService
   ) {
     this.fundingRateRepository = fundingRateRepository;
     this.fundingSettlementRepository = fundingSettlementRepository;
@@ -97,6 +126,7 @@ public class FundingService {
     this.instrumentClassifier = instrumentClassifier;
     this.demoExecutionGuard = demoExecutionGuard;
     this.eventPublisher = eventPublisher;
+    this.auditLogService = auditLogService;
   }
 
   public FundingRateEntity getCurrentFundingRate(String symbol) {
@@ -182,17 +212,28 @@ public class FundingService {
     if (!fundingSettlementRepository.insertIfAbsent(settlement)) {
       return FundingSettlementOutcome.skipped(zeroMoney());
     }
+    BigDecimal shortfall = orZero(settlement.getShortfall());
+    BigDecimal appliedCashflow = cashflow.add(shortfall).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
 
     if (cashflow.compareTo(BigDecimal.ZERO) == 0) {
       publishFundingEvents(account, position, settlement, false);
-      return FundingSettlementOutcome.inserted(cashflow);
+      return FundingSettlementOutcome.inserted(appliedCashflow, false);
     }
 
     if (marginMode(position) == MarginMode.ISOLATED) {
-      applyPositionFunding(position, cashflow);
+      applyPositionFunding(position, appliedCashflow);
       positionRepository.save(position);
+      if (shortfall.signum() > 0) {
+        LedgerEntryEntity ledgerEntry = ledgerService.recordFundingFeeSettlement(
+            account,
+            shortfall.negate(),
+            settlement.getId(),
+            LEDGER_DESCRIPTION);
+        attachSettlementLedger(settlement, ledgerEntry);
+        recordFundingShortfall(account, position, settlement, shortfall);
+      }
     } else {
-      applyCrossCashflow(account, position, cashflow);
+      applyCrossCashflow(account, position, appliedCashflow);
       accountRepository.save(account);
       positionRepository.save(position);
       LedgerEntryEntity ledgerEntry = ledgerService.recordFundingFeeSettlement(
@@ -200,9 +241,9 @@ public class FundingService {
           cashflow,
           settlement.getId(),
           LEDGER_DESCRIPTION);
-      if (ledgerEntry != null) {
-        settlement.setLedgerEntryId(ledgerEntry.getId());
-        fundingSettlementRepository.updateById(settlement);
+      attachSettlementLedger(settlement, ledgerEntry);
+      if (shortfall.signum() > 0) {
+        recordFundingShortfall(account, position, settlement, shortfall);
       }
     }
     publishFundingEvents(
@@ -210,7 +251,32 @@ public class FundingService {
         position,
         settlement,
         marginMode(position) == MarginMode.CROSS);
-    return FundingSettlementOutcome.inserted(cashflow);
+    return FundingSettlementOutcome.inserted(appliedCashflow, cashflow.signum() < 0);
+  }
+
+  private void attachSettlementLedger(
+      FundingSettlementEntity settlement,
+      LedgerEntryEntity ledgerEntry
+  ) {
+    if (ledgerEntry == null) {
+      return;
+    }
+    settlement.setLedgerEntryId(ledgerEntry.getId());
+    fundingSettlementRepository.updateById(settlement);
+  }
+
+  private void recordFundingShortfall(
+      TradingAccountEntity account,
+      PositionEntity position,
+      FundingSettlementEntity settlement,
+      BigDecimal shortfall
+  ) {
+    ledgerService.recordFundingBankruptcyShortfall(
+        account,
+        shortfall,
+        settlement.getId(),
+        SHORTFALL_DESCRIPTION);
+    recordFundingShortfallAudit(account, position, settlement, shortfall);
   }
 
   private void publishFundingEvents(
@@ -267,7 +333,7 @@ public class FundingService {
     settlement.setSource(source(fundingRate));
     settlement.setBalanceAfter(balanceAfter(account, position, cashflow));
     settlement.setIsolatedMarginAfter(isolatedMarginAfter(position, cashflow));
-    settlement.setShortfall(zeroMoney());
+    settlement.setShortfall(fundingShortfall(account, position, cashflow));
     return settlement;
   }
 
@@ -301,15 +367,37 @@ public class FundingService {
   private void applyCrossCashflow(
       TradingAccountEntity account,
       PositionEntity position,
-      BigDecimal cashflow
+      BigDecimal appliedCashflow
   ) {
     BigDecimal existingEquity = currentEquity(account);
-    BigDecimal balance = orZero(account.getBalance()).add(cashflow).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    BigDecimal balance = orZero(account.getBalance()).add(appliedCashflow)
+        .max(BigDecimal.ZERO)
+        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
     account.setBalance(balance);
-    account.setEquity(existingEquity.add(cashflow).setScale(MONEY_SCALE, RoundingMode.HALF_UP));
-    account.setFreeMargin(orZero(account.getFreeMargin()).add(cashflow)
+    account.setEquity(existingEquity.add(appliedCashflow).setScale(MONEY_SCALE, RoundingMode.HALF_UP));
+    account.setFreeMargin(orZero(account.getFreeMargin()).add(appliedCashflow)
         .setScale(MONEY_SCALE, RoundingMode.HALF_UP));
-    applyPositionFunding(position, cashflow);
+    applyPositionFunding(position, appliedCashflow);
+  }
+
+  private void recordFundingShortfallAudit(
+      TradingAccountEntity account,
+      PositionEntity position,
+      FundingSettlementEntity settlement,
+      BigDecimal shortfall
+  ) {
+    if (auditLogService == null) {
+      return;
+    }
+    auditLogService.record(
+        null,
+        "BANKRUPTCY_SHORTFALL",
+        "FUNDING_SETTLEMENT",
+        settlement.getId().toString(),
+        "{\"amount\":" + shortfall.toPlainString()
+            + ",\"accountId\":\"" + account.getId()
+            + "\",\"positionId\":\"" + position.getId()
+            + "\",\"marginMode\":\"" + marginMode(position) + "\"}");
   }
 
   private void applyPositionFunding(PositionEntity position, BigDecimal cashflow) {
@@ -373,17 +461,52 @@ public class FundingService {
       PositionEntity position,
       BigDecimal cashflow
   ) {
-    BigDecimal delta = marginMode(position) == MarginMode.ISOLATED ? BigDecimal.ZERO : cashflow;
-    return orZero(account.getBalance()).add(delta).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    BigDecimal delta = marginMode(position) == MarginMode.ISOLATED
+        ? BigDecimal.ZERO
+        : appliedFundingCashflow(account, position, cashflow);
+    return orZero(account.getBalance()).add(delta)
+        .max(BigDecimal.ZERO)
+        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+  }
+
+  private BigDecimal fundingShortfall(
+      TradingAccountEntity account,
+      PositionEntity position,
+      BigDecimal cashflow
+  ) {
+    return fundingPoolBefore(account, position)
+        .add(cashflow)
+        .negate()
+        .max(BigDecimal.ZERO)
+        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+  }
+
+  private BigDecimal appliedFundingCashflow(
+      TradingAccountEntity account,
+      PositionEntity position,
+      BigDecimal cashflow
+  ) {
+    return cashflow.add(fundingShortfall(account, position, cashflow))
+        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+  }
+
+  private BigDecimal fundingPoolBefore(
+      TradingAccountEntity account,
+      PositionEntity position
+  ) {
+    BigDecimal pool = marginMode(position) == MarginMode.ISOLATED
+        ? orZero(position.getMarginHeld()).add(orZero(position.getFundingPnl()))
+        : orZero(account.getBalance());
+    return pool.max(BigDecimal.ZERO).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
   }
 
   private BigDecimal isolatedMarginAfter(PositionEntity position, BigDecimal cashflow) {
     if (marginMode(position) != MarginMode.ISOLATED) {
       return zeroMoney();
     }
-    return orZero(position.getMarginHeld())
-        .add(orZero(position.getFundingPnl()))
-        .add(cashflow)
+    return fundingPoolBefore(null, position)
+        .add(appliedFundingCashflow(null, position, cashflow))
+        .max(BigDecimal.ZERO)
         .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
   }
 
@@ -478,14 +601,25 @@ public class FundingService {
   private record FundingCandidate(UUID positionId, String symbol, FundingRateEntity fundingRate) {
   }
 
-  public record FundingSettlementOutcome(boolean inserted, BigDecimal cashflow) {
+  public record FundingSettlementOutcome(
+      boolean inserted,
+      BigDecimal cashflow,
+      boolean liquidationScanRequired
+  ) {
 
-    private static FundingSettlementOutcome inserted(BigDecimal cashflow) {
-      return new FundingSettlementOutcome(true, cashflow);
+    public FundingSettlementOutcome(boolean inserted, BigDecimal cashflow) {
+      this(inserted, cashflow, inserted && cashflow != null && cashflow.signum() < 0);
+    }
+
+    private static FundingSettlementOutcome inserted(
+        BigDecimal cashflow,
+        boolean liquidationScanRequired
+    ) {
+      return new FundingSettlementOutcome(true, cashflow, liquidationScanRequired);
     }
 
     private static FundingSettlementOutcome skipped(BigDecimal cashflow) {
-      return new FundingSettlementOutcome(false, cashflow);
+      return new FundingSettlementOutcome(false, cashflow, false);
     }
   }
 }

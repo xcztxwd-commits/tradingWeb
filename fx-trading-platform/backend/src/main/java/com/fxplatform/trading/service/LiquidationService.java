@@ -356,12 +356,12 @@ public class LiquidationService {
             accountId, position.getId(), exception);
       }
     }
-    if (!failed) {
-      if (liquidationSettlementService == null) {
+    if (liquidationSettlementService == null) {
+      if (!failed) {
         updateStatus(accountId, AccountStatus.ACTIVE);
-      } else {
-        settleCrossIfReady(accountId);
       }
+    } else {
+      settleCrossIfReady(accountId);
     }
     return closed;
   }

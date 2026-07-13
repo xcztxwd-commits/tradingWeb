@@ -798,7 +798,8 @@ class Task10PostgresProtectionIT {
         protectionOrderService,
         systemCloseOrderService,
         accountRepository,
-        demoExecutionGuard);
+        demoExecutionGuard,
+        orderEventService);
   }
 
   private Fixture createFixture(String suffix) {

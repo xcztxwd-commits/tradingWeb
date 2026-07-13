@@ -17,6 +17,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -32,12 +33,23 @@ import org.springframework.stereotype.Service;
     havingValue = "true")
 public class ProtectiveOrderExecutionService {
 
+  private static final String EXECUTION_FAILURE_EVENT = "PROTECTION_EXECUTION_FAILED";
+  private static final String EXECUTION_FAILURE_MESSAGE = "Protection order execution deferred";
+  private static final Set<String> DEMO_GUARD_REJECTION_CODES = Set.of(
+      ErrorCode.EXECUTION_DISABLED,
+      ErrorCode.DEMO_ACCOUNT_REQUIRED,
+      "DEMO_EXECUTION_REQUIRED",
+      ErrorCode.ACCOUNT_NOT_ACTIVE,
+      ErrorCode.PRODUCT_NOT_ALLOWED,
+      ErrorCode.SYMBOL_NOT_ALLOWED);
+
   private final OrderRepository orderRepository;
   private final MarketBundleResolver marketBundleResolver;
   private final ProtectionOrderService protectionOrderService;
   private final SystemCloseOrderService systemCloseOrderService;
   private final TradingAccountRepository accountRepository;
   private final DemoExecutionGuard demoExecutionGuard;
+  private final OrderEventService orderEventService;
 
   @Autowired
   public ProtectiveOrderExecutionService(
@@ -46,7 +58,8 @@ public class ProtectiveOrderExecutionService {
       ProtectionOrderService protectionOrderService,
       SystemCloseOrderService systemCloseOrderService,
       TradingAccountRepository accountRepository,
-      DemoExecutionGuard demoExecutionGuard
+      DemoExecutionGuard demoExecutionGuard,
+      OrderEventService orderEventService
   ) {
     this.orderRepository = orderRepository;
     this.marketBundleResolver = marketBundleResolver;
@@ -54,6 +67,7 @@ public class ProtectiveOrderExecutionService {
     this.systemCloseOrderService = systemCloseOrderService;
     this.accountRepository = accountRepository;
     this.demoExecutionGuard = demoExecutionGuard;
+    this.orderEventService = orderEventService;
   }
 
   @Scheduled(fixedDelayString = "${trading.protective-order-scan-ms:1000}")
@@ -69,17 +83,26 @@ public class ProtectiveOrderExecutionService {
       if (!isBoundProtection(protection)) {
         continue;
       }
+      boolean demoAuthorized = false;
       try {
         requireDemoAccount(protection);
+        demoAuthorized = true;
         if (executeCandidateWithRetry(protection)) {
           executed++;
         }
       } catch (BusinessException exception) {
+        if (demoAuthorized && !DEMO_GUARD_REJECTION_CODES.contains(exception.getCode())) {
+          recordWorkerFailure(protection, exception.getCode());
+        }
         log.debug(
-            "Protection order {} was not executed after business rejection {}",
+            "Protection order {} was not executed after business rejection {}: {}",
             protection.getId(),
-            exception.getCode());
+            exception.getCode(),
+            exception.getMessage());
       } catch (RuntimeException exception) {
+        if (demoAuthorized) {
+          recordWorkerFailure(protection, ErrorCode.EXECUTION_UNAVAILABLE);
+        }
         log.warn(
             "Protection order {} failed without aborting later candidates: {}: {}",
             protection.getId(),
@@ -88,6 +111,23 @@ public class ProtectiveOrderExecutionService {
       }
     }
     return executed;
+  }
+
+  private void recordWorkerFailure(OrderEntity protection, String errorCode) {
+    try {
+      orderEventService.recordWorkerFailure(
+          protection.getId(),
+          EXECUTION_FAILURE_EVENT,
+          OrderStatus.PENDING_ACTIVATION,
+          errorCode,
+          EXECUTION_FAILURE_MESSAGE);
+    } catch (RuntimeException eventFailure) {
+      log.warn(
+          "Protection order {} failure event could not be persisted: {}: {}",
+          protection.getId(),
+          eventFailure.getClass().getSimpleName(),
+          eventFailure.getMessage());
+    }
   }
 
   private boolean executeCandidateWithRetry(OrderEntity protection) {

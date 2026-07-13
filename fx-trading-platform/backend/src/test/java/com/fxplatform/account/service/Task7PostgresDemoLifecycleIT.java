@@ -240,6 +240,51 @@ class Task7PostgresDemoLifecycleIT {
   }
 
   @Test
+  void conversionRequestIdCannotMintAssetsWhenItsFingerprintChanges() {
+    Fixture fixture = createFixture("conversion-request-conflict");
+    UUID conversionId = UUID.randomUUID();
+    assetConversionService.convert(
+        fixture.userId(),
+        fixture.accountId(),
+        WalletType.SPOT,
+        "USDT",
+        WalletType.FX_MARGIN,
+        "USD",
+        BigDecimal.ONE,
+        conversionId);
+
+    assertThatThrownBy(() -> assetConversionService.convert(
+        fixture.userId(),
+        fixture.accountId(),
+        WalletType.SPOT,
+        "USDT",
+        WalletType.FUNDING,
+        "USD",
+        new BigDecimal("100.00000000"),
+        conversionId))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo("ASSET_CONVERSION_REQUEST_CONFLICT"));
+
+    assertThat(decimal("""
+        SELECT available FROM core.wallet_balances
+        WHERE account_id = ? AND wallet_type = 'SPOT' AND asset = 'USDT'
+        """, fixture.accountId())).isEqualByComparingTo("49999.00000000");
+    assertThat(decimal("""
+        SELECT available FROM core.wallet_balances
+        WHERE account_id = ? AND wallet_type = 'FX_MARGIN' AND asset = 'USD'
+        """, fixture.accountId())).isEqualByComparingTo("1.00000000");
+    assertThat(count("""
+        SELECT count(*) FROM core.wallet_balances
+        WHERE account_id = ? AND wallet_type = 'FUNDING' AND asset = 'USD'
+        """, fixture.accountId())).isZero();
+    assertThat(count("""
+        SELECT count(*) FROM ledger.asset_ledger_entries
+        WHERE account_id = ? AND reference_type = 'ASSET_CONVERSION' AND reference_id = ?
+        """, fixture.accountId(), conversionId)).isEqualTo(2);
+  }
+
+  @Test
   void conversionAndResetSerializeWithoutWalletOrderDeadlockAndPreserveCurrentFunds() throws Exception {
     Fixture fixture = createFixture("conversion-reset-race");
     CountDownLatch start = new CountDownLatch(1);

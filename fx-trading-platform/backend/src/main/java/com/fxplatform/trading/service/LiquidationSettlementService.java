@@ -91,10 +91,6 @@ public class LiquidationSettlementService {
     demoExecutionGuard.requireDemoRiskReductionAccount(account);
     List<PositionEntity> openPositions = positionRepository
         .findOpenLinearPerpByAccountIdForUpdate(accountId);
-    if (openPositions.stream().anyMatch(position -> position.getMarginMode() == MarginMode.CROSS)) {
-      return false;
-    }
-
     List<CrossLiquidationChargeEntity> charges = chargeRepository
         .findPendingByAccountIdForUpdate(accountId);
     BigDecimal protectedIsolatedMargin = money(openPositions.stream()
@@ -106,6 +102,17 @@ public class LiquidationSettlementService {
         protectedIsolatedMargin.subtract(orZero(account.getBalance())).max(BigDecimal.ZERO));
     if (coreShortfall.signum() > 0) {
       creditCash(account, coreShortfall);
+    }
+    floorCashState(account);
+
+    if (openPositions.stream().anyMatch(position -> position.getMarginMode() == MarginMode.CROSS)) {
+      accountRepository.save(account);
+      recordShortfall(
+          account,
+          accountId,
+          coreShortfall,
+          partialSettlementId(accountId, charges));
+      return false;
     }
 
     BigDecimal totalFee = money(charges.stream()
@@ -121,6 +128,7 @@ public class LiquidationSettlementService {
       BigDecimal itemCharge = money(money(charge.getFeeDue()).min(remainingCharge));
       if (itemCharge.signum() > 0) {
         debitCash(account, itemCharge);
+        floorCashState(account);
         accountRepository.save(account);
         ledgerService.recordLiquidationFee(
             account,
@@ -140,36 +148,66 @@ public class LiquidationSettlementService {
     if (restoreActive && account.getStatus() == AccountStatus.LIQUIDATION_PENDING) {
       account.setStatus(AccountStatus.ACTIVE);
     }
+    floorCashState(account);
     accountRepository.save(account);
-    if (totalShortfall.signum() > 0) {
-      UUID settlementId = settlementId(accountId, charges);
-      ledgerService.recordCrossLiquidationShortfall(
-          account,
-          totalShortfall,
-          settlementId,
-          "Cross liquidation bankruptcy shortfall");
-      auditLogService.record(
-          null,
-          "BANKRUPTCY_SHORTFALL",
-          "ACCOUNT",
-          accountId.toString(),
-          "{\"amount\":" + totalShortfall.toPlainString()
-              + ",\"settlementId\":\"" + settlementId + "\"}");
-    }
+    recordShortfall(
+        account,
+        accountId,
+        totalShortfall,
+        settlementId(accountId, charges));
     return true;
+  }
+
+  private void recordShortfall(
+      TradingAccountEntity account,
+      UUID accountId,
+      BigDecimal amount,
+      UUID settlementId
+  ) {
+    if (amount.signum() <= 0) {
+      return;
+    }
+    ledgerService.recordCrossLiquidationShortfall(
+        account,
+        amount,
+        settlementId,
+        "Cross liquidation bankruptcy shortfall");
+    auditLogService.record(
+        null,
+        "BANKRUPTCY_SHORTFALL",
+        "ACCOUNT",
+        accountId.toString(),
+        "{\"amount\":" + amount.toPlainString()
+            + ",\"settlementId\":\"" + settlementId + "\"}");
   }
 
   private static UUID settlementId(
       UUID accountId,
       List<CrossLiquidationChargeEntity> charges
   ) {
+    return settlementId("cross-liquidation:", accountId, charges);
+  }
+
+  private static UUID partialSettlementId(
+      UUID accountId,
+      List<CrossLiquidationChargeEntity> charges
+  ) {
+    return settlementId("cross-liquidation-partial:", accountId, charges);
+  }
+
+  private static UUID settlementId(
+      String prefix,
+      UUID accountId,
+      List<CrossLiquidationChargeEntity> charges
+  ) {
     String orderIds = charges.stream()
         .map(CrossLiquidationChargeEntity::getOrderId)
+        .sorted()
         .map(UUID::toString)
         .reduce((left, right) -> left + ":" + right)
         .orElse("no-fee");
     return UUID.nameUUIDFromBytes(
-        ("cross-liquidation:" + accountId + ":" + orderIds)
+        (prefix + accountId + ":" + orderIds)
             .getBytes(StandardCharsets.UTF_8));
   }
 
@@ -183,6 +221,12 @@ public class LiquidationSettlementService {
     account.setBalance(money(orZero(account.getBalance()).subtract(amount)));
     account.setEquity(money(orZero(account.getEquity()).subtract(amount)));
     account.setFreeMargin(money(orZero(account.getFreeMargin()).subtract(amount)));
+  }
+
+  private static void floorCashState(TradingAccountEntity account) {
+    account.setBalance(money(orZero(account.getBalance()).max(BigDecimal.ZERO)));
+    account.setEquity(money(orZero(account.getEquity()).max(BigDecimal.ZERO)));
+    account.setFreeMargin(money(orZero(account.getFreeMargin()).max(BigDecimal.ZERO)));
   }
 
   private static BigDecimal money(BigDecimal value) {

@@ -12,12 +12,89 @@ import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.OrderEventRepository;
 import com.fxplatform.trading.repository.OrderRepository;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.core.annotation.AnnotatedElementUtils;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 class OrderEventServiceTest {
+
+  @Test
+  void workerFailureEventUsesAnIndependentTransactionAndKeepsPendingState() throws Exception {
+    Transactional transactional = AnnotatedElementUtils.findMergedAnnotation(
+        OrderEventService.class.getMethod(
+            "recordWorkerFailure",
+            UUID.class,
+            String.class,
+            OrderStatus.class,
+            String.class,
+            String.class),
+        Transactional.class);
+
+    assertThat(transactional).isNotNull();
+    assertThat(transactional.propagation()).isEqualTo(Propagation.REQUIRES_NEW);
+
+    OrderEventRepository eventRepository = org.mockito.Mockito.mock(OrderEventRepository.class);
+    OrderRepository orderRepository = org.mockito.Mockito.mock(OrderRepository.class);
+    ApplicationEventPublisher eventPublisher = org.mockito.Mockito.mock(ApplicationEventPublisher.class);
+    OrderEventService service = new OrderEventService(
+        eventRepository, orderRepository, eventPublisher);
+    UUID orderId = UUID.randomUUID();
+    OrderEntity pending = new OrderEntity();
+    pending.setId(orderId);
+    pending.setStatus(OrderStatus.PENDING);
+    when(orderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(pending));
+    when(eventRepository.save(org.mockito.ArgumentMatchers.any(OrderEventEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    service.recordWorkerFailure(
+        orderId,
+        "ORDER_EXECUTION_FAILED",
+        OrderStatus.PENDING,
+        "MARKET_DATA_STALE",
+        "expired after row locks");
+
+    ArgumentCaptor<OrderEventEntity> event = ArgumentCaptor.forClass(OrderEventEntity.class);
+    verify(eventRepository).save(event.capture());
+    assertThat(event.getValue().getOrderId()).isEqualTo(orderId);
+    assertThat(event.getValue().getEventType()).isEqualTo("ORDER_EXECUTION_FAILED");
+    assertThat(event.getValue().getFromStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(event.getValue().getToStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(event.getValue().getReasonCode()).isEqualTo("MARKET_DATA_STALE");
+    assertThat(event.getValue().getMessage()).isEqualTo("expired after row locks");
+  }
+
+  @Test
+  void workerFailureEventIsSkippedWhenThePersistedOrderIsAlreadyTerminal() {
+    OrderEventRepository eventRepository = org.mockito.Mockito.mock(OrderEventRepository.class);
+    OrderRepository orderRepository = org.mockito.Mockito.mock(OrderRepository.class);
+    ApplicationEventPublisher eventPublisher = org.mockito.Mockito.mock(ApplicationEventPublisher.class);
+    OrderEventService service = new OrderEventService(
+        eventRepository, orderRepository, eventPublisher);
+    UUID orderId = UUID.randomUUID();
+    OrderEntity filled = new OrderEntity();
+    filled.setId(orderId);
+    filled.setStatus(OrderStatus.FILLED);
+    when(orderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(filled));
+    when(eventRepository.save(org.mockito.ArgumentMatchers.any(OrderEventEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    service.recordWorkerFailure(
+        orderId,
+        "ORDER_EXECUTION_FAILED",
+        OrderStatus.PENDING,
+        "MARKET_DATA_STALE",
+        "Pending order execution deferred");
+
+    verify(eventRepository, org.mockito.Mockito.never()).save(
+        org.mockito.ArgumentMatchers.any(OrderEventEntity.class));
+    verify(eventPublisher, org.mockito.Mockito.never()).publishEvent(
+        org.mockito.ArgumentMatchers.any());
+  }
 
   @Test
   void acceptedOrderPublishesAcceptedHintBeforeItsFirstTimelineEvent() {

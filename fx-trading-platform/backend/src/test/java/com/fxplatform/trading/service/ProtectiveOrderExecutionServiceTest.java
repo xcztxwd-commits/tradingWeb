@@ -66,6 +66,9 @@ class ProtectiveOrderExecutionServiceTest {
   @Mock
   private DemoExecutionGuard demoExecutionGuard;
 
+  @Mock
+  private OrderEventService orderEventService;
+
   private ProtectiveOrderExecutionService service;
 
   @BeforeEach
@@ -76,7 +79,8 @@ class ProtectiveOrderExecutionServiceTest {
         protectionOrderService,
         systemCloseOrderService,
         accountRepository,
-        demoExecutionGuard);
+        demoExecutionGuard,
+        orderEventService);
     when(accountRepository.findById(any(UUID.class)))
         .thenAnswer(invocation -> java.util.Optional.of(account(invocation.getArgument(0))));
   }
@@ -265,6 +269,40 @@ class ProtectiveOrderExecutionServiceTest {
     assertThat(executed).isEqualTo(1);
     verify(systemCloseOrderService).executeProtection(eq(raceLoser.getId()), any());
     verify(systemCloseOrderService).executeProtection(eq(winner.getId()), any());
+    verify(orderEventService).recordWorkerFailure(
+        raceLoser.getId(),
+        "PROTECTION_EXECUTION_FAILED",
+        OrderStatus.PENDING_ACTIVATION,
+        "POSITION_NOT_OPEN",
+        "Protection order execution deferred");
+  }
+
+  @Test
+  void recordsRuntimeFailureWithoutChangingPendingActivationOrHold() {
+    OrderEntity protection = protection(
+        OrderSide.SELL,
+        ProtectionType.TAKE_PROFIT,
+        TriggerExecutionType.MARKET);
+    protection.setHoldAmount(new BigDecimal("12.34"));
+    BigDecimal mark = new BigDecimal("51000");
+    when(orderRepository.findBoundProtectionsByStatus(OrderStatus.PENDING_ACTIVATION))
+        .thenReturn(List.of(protection));
+    when(marketBundleResolver.resolvePerp(eq(SYMBOL), any(CandleRequest.class)))
+        .thenReturn(bundle(SYMBOL, mark, mark));
+    when(protectionOrderService.isTriggered(protection, mark)).thenReturn(true);
+    when(systemCloseOrderService.executeProtection(eq(protection.getId()), any()))
+        .thenThrow(new IllegalStateException("settlement transaction failed"));
+
+    assertThat(service.executeProtectiveOrders()).isZero();
+
+    assertThat(protection.getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    assertThat(protection.getHoldAmount()).isEqualByComparingTo("12.34");
+    verify(orderEventService).recordWorkerFailure(
+        protection.getId(),
+        "PROTECTION_EXECUTION_FAILED",
+        OrderStatus.PENDING_ACTIVATION,
+        "EXECUTION_UNAVAILABLE",
+        "Protection order execution deferred");
   }
 
   @Test
@@ -334,6 +372,8 @@ class ProtectiveOrderExecutionServiceTest {
         demoAccount, ProductType.LINEAR_PERP, SYMBOL);
     verify(marketBundleResolver, never()).resolvePerp(eq("ETHUSDT-PERP"), any());
     verify(systemCloseOrderService).executeProtection(eq(demoCandidate.getId()), any());
+    verify(orderEventService, never()).recordWorkerFailure(
+        eq(liveRejected.getId()), any(), any(), any(), any());
   }
 
   private static Stream<Arguments> triggerDirections() {

@@ -89,7 +89,7 @@ class AccountControllerWalletTest {
     UUID accountId = UUID.randomUUID();
     UUID conversionId = UUID.randomUUID();
     AssetConversionRequest request = new AssetConversionRequest(
-        "USDT_PERP",
+        "SPOT",
         "USDT",
         "FX_MARGIN",
         "USD",
@@ -97,7 +97,7 @@ class AccountControllerWalletTest {
         conversionId);
     AssetConversionResponse conversion = new AssetConversionResponse(
         accountId,
-        "USDT_PERP",
+        "SPOT",
         "USDT",
         "FX_MARGIN",
         "USD",

@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -203,6 +204,52 @@ class PendingOrderExecutionServiceTest {
     verify(marketBundleResolver, org.mockito.Mockito.times(2)).resolveSpot(eq("BTCUSDT"), any());
     verify(transactionExecutor, org.mockito.Mockito.times(2)).execute(any());
     verify(tradeRepository, org.mockito.Mockito.times(1)).save(any(TradeEntity.class));
+    verify(orderEventService).recordWorkerFailure(
+        first.getId(),
+        "ORDER_EXECUTION_FAILED",
+        OrderStatus.PENDING,
+        "EXECUTION_UNAVAILABLE",
+        "Pending order execution deferred");
+  }
+
+  @Test
+  void recordsBusinessFailureAfterCandidateRollbackWithoutChangingPendingHold() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity order = p0PendingOrder(accountId, "business-failure-event");
+    TradingAccountEntity account = account(accountId);
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(spotBundle());
+    when(fullFillCoordinator.execute(any(), any()))
+        .thenThrow(new BusinessException("MARKET_DATA_STALE", "expired after row locks"));
+
+    assertThat(p0Service().executePendingOrders()).isZero();
+
+    assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(order.getHoldAmount()).isEqualByComparingTo("100");
+    verify(orderEventService).recordWorkerFailure(
+        order.getId(),
+        "ORDER_EXECUTION_FAILED",
+        OrderStatus.PENDING,
+        "MARKET_DATA_STALE",
+        "Pending order execution deferred");
+  }
+
+  @Test
+  void demoGuardRejectionDoesNotWriteAnOrderEvent() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity order = p0PendingOrder(accountId, "live-guard-rejection");
+    TradingAccountEntity account = account(accountId);
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    doThrow(new BusinessException("DEMO_ACCOUNT_REQUIRED", "Live account rejected"))
+        .when(demoExecutionGuard).requireDemo(account, ProductType.CRYPTO_SPOT, "BTCUSDT");
+
+    assertThat(p0Service().executePendingOrders()).isZero();
+
+    verify(orderEventService, never())
+        .recordWorkerFailure(any(), any(), any(), any(), any());
+    verify(marketBundleResolver, never()).resolveSpot(any(), any());
   }
 
   @Test

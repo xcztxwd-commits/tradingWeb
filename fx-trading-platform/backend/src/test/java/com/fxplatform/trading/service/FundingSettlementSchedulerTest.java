@@ -46,6 +46,9 @@ class FundingSettlementSchedulerTest {
   @Mock
   private FundingService fundingService;
 
+  @Mock
+  private LiquidationService liquidationService;
+
   @Test
   void schedulerHasNoProcessMemoryFundingCursor() {
     assertThat(Arrays.stream(FundingSettlementScheduler.class.getDeclaredFields())
@@ -131,6 +134,52 @@ class FundingSettlementSchedulerTest {
   }
 
   @Test
+  void negativeFundingScansEachAccountOnceOnlyAfterItsWholeBatchSettles() {
+    UUID accountId = UUID.randomUUID();
+    FundingRateEntity rate = rate("BTCUSDT-PERP", "2026-07-13T08:00:00Z");
+    PositionEntity first = position("BTCUSDT-PERP");
+    PositionEntity second = position("BTCUSDT-PERP");
+    first.setAccountId(accountId);
+    second.setAccountId(accountId);
+    when(fundingRateRepository.findDueRates(null, NOW)).thenReturn(List.of(rate));
+    when(positionRepository.findBySymbolAndStatusOrderByOpenedAtAsc(
+        "BTCUSDT-PERP", PositionStatus.OPEN)).thenReturn(List.of(first, second));
+    when(fundingService.settleFundingForPositionOutcome(first, rate))
+        .thenReturn(new FundingService.FundingSettlementOutcome(true, BigDecimal.ONE.negate(), true));
+    when(fundingService.settleFundingForPositionOutcome(second, rate))
+        .thenReturn(new FundingService.FundingSettlementOutcome(true, BigDecimal.ZERO, true));
+
+    assertThat(scheduler().settleDueFunding()).isEqualTo(2);
+
+    InOrder ordered = inOrder(fundingService, liquidationService);
+    ordered.verify(fundingService).settleFundingForPositionOutcome(first, rate);
+    ordered.verify(fundingService).settleFundingForPositionOutcome(second, rate);
+    ordered.verify(liquidationService).scanAccount(accountId);
+    verify(liquidationService).scanAccount(accountId);
+  }
+
+  @Test
+  void oneFailedSettlementCannotDiscardAnAlreadyCommittedLiquidationTrigger() {
+    UUID accountId = UUID.randomUUID();
+    FundingRateEntity rate = rate("BTCUSDT-PERP", "2026-07-13T08:00:00Z");
+    PositionEntity inserted = position("BTCUSDT-PERP");
+    PositionEntity failed = position("BTCUSDT-PERP");
+    inserted.setAccountId(accountId);
+    failed.setAccountId(accountId);
+    when(fundingRateRepository.findDueRates(null, NOW)).thenReturn(List.of(rate));
+    when(positionRepository.findBySymbolAndStatusOrderByOpenedAtAsc(
+        "BTCUSDT-PERP", PositionStatus.OPEN)).thenReturn(List.of(inserted, failed));
+    when(fundingService.settleFundingForPositionOutcome(inserted, rate))
+        .thenReturn(new FundingService.FundingSettlementOutcome(true, BigDecimal.ONE.negate(), true));
+    when(fundingService.settleFundingForPositionOutcome(failed, rate))
+        .thenThrow(new BusinessException("FUNDING_SETTLEMENT_FAILED", "fixture failure"));
+
+    assertThat(scheduler().settleDueFunding()).isEqualTo(1);
+
+    verify(liquidationService).scanAccount(accountId);
+  }
+
+  @Test
   void schedulerKeepsEachPositionSettlementOutsideOneBatchTransaction() throws Exception {
     assertThat(FundingSettlementScheduler.class.getMethod("settleDueFunding")
         .isAnnotationPresent(Transactional.class))
@@ -155,6 +204,7 @@ class FundingSettlementSchedulerTest {
         fundingRateRepository,
         positionRepository,
         fundingService,
+        liquidationService,
         CLOCK);
   }
 

@@ -92,7 +92,7 @@ market:
     max-active-symbols: ${MARKET_REALTIME_MAX_ACTIVE_SYMBOLS:80}
     dynamic-symbols-enabled: ${MARKET_REALTIME_DYNAMIC_SYMBOLS_ENABLED:true}
   provider-instrument-sync:
-    enabled: ${MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED:true}
+    enabled: ${MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED:false}
     initial-delay-ms: ${MARKET_PROVIDER_INSTRUMENT_SYNC_INITIAL_DELAY_MS:60000}
     fixed-delay-ms: ${MARKET_PROVIDER_INSTRUMENT_SYNC_FIXED_DELAY_MS:21600000}
   provider-symbol-cache-ttl-ms: ${MARKET_PROVIDER_SYMBOL_CACHE_TTL_MS:300000}

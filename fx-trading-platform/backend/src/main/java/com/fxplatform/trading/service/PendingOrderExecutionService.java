@@ -54,6 +54,15 @@ import org.slf4j.LoggerFactory;
 public class PendingOrderExecutionService {
 
   private static final Logger log = LoggerFactory.getLogger(PendingOrderExecutionService.class);
+  private static final String EXECUTION_FAILURE_EVENT = "ORDER_EXECUTION_FAILED";
+  private static final String EXECUTION_FAILURE_MESSAGE = "Pending order execution deferred";
+  private static final Set<String> DEMO_GUARD_REJECTION_CODES = Set.of(
+      ErrorCode.EXECUTION_DISABLED,
+      ErrorCode.DEMO_ACCOUNT_REQUIRED,
+      "DEMO_EXECUTION_REQUIRED",
+      ErrorCode.ACCOUNT_NOT_ACTIVE,
+      ErrorCode.PRODUCT_NOT_ALLOWED,
+      ErrorCode.SYMBOL_NOT_ALLOWED);
 
   private static final Set<String> P0_SYMBOLS = Set.of(
       "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
@@ -279,19 +288,29 @@ public class PendingOrderExecutionService {
   public int executePendingOrders() {
     int filled = 0;
     for (OrderEntity order : orderRepository.findByStatus(OrderStatus.PENDING)) {
+      boolean demoAuthorized = false;
       try {
+        TradingAccountEntity accountSnapshot = requireDemoCandidate(order);
+        demoAuthorized = true;
         boolean executed = isP0Order(order)
-            ? prepareAndExecuteP0(order)
-            : prepareAndExecuteLegacy(order);
+            ? prepareAndExecuteP0(order, accountSnapshot)
+            : prepareAndExecuteLegacy(order, accountSnapshot);
         if (executed) {
           filled++;
         }
       } catch (BusinessException exception) {
+        if (demoAuthorized && !DEMO_GUARD_REJECTION_CODES.contains(exception.getCode())) {
+          recordWorkerFailure(order, exception.getCode());
+        }
         log.debug(
-            "Pending order {} remains pending after business rejection {}",
+            "Pending order {} remains pending after business rejection {}: {}",
             order.getId(),
-            exception.getCode());
+            exception.getCode(),
+            exception.getMessage());
       } catch (RuntimeException exception) {
+        if (demoAuthorized) {
+          recordWorkerFailure(order, ErrorCode.EXECUTION_UNAVAILABLE);
+        }
         log.warn(
             "Pending order {} failed without aborting later candidates: {}: {}",
             order.getId(),
@@ -302,6 +321,31 @@ public class PendingOrderExecutionService {
     return filled;
   }
 
+  private TradingAccountEntity requireDemoCandidate(OrderEntity order) {
+    ProductType productType = requestedProduct(order.getSymbol());
+    TradingAccountEntity account = accountRepository.findById(order.getAccountId())
+        .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
+    demoExecutionGuard.requireDemo(account, productType, order.getSymbol());
+    return account;
+  }
+
+  private void recordWorkerFailure(OrderEntity order, String errorCode) {
+    try {
+      orderEventService.recordWorkerFailure(
+          order.getId(),
+          EXECUTION_FAILURE_EVENT,
+          OrderStatus.PENDING,
+          errorCode,
+          EXECUTION_FAILURE_MESSAGE);
+    } catch (RuntimeException eventFailure) {
+      log.warn(
+          "Pending order {} failure event could not be persisted: {}: {}",
+          order.getId(),
+          eventFailure.getClass().getSimpleName(),
+          eventFailure.getMessage());
+    }
+  }
+
   @Autowired
   void setPendingOrderExecutionProcessor(
       PendingOrderExecutionProcessor pendingOrderExecutionProcessor
@@ -309,11 +353,11 @@ public class PendingOrderExecutionService {
     this.pendingOrderExecutionProcessor = pendingOrderExecutionProcessor;
   }
 
-  private boolean prepareAndExecuteP0(OrderEntity order) {
-    TradingAccountEntity accountSnapshot = accountRepository.findById(order.getAccountId())
-        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+  private boolean prepareAndExecuteP0(
+      OrderEntity order,
+      TradingAccountEntity accountSnapshot
+  ) {
     ProductType productType = requestedProduct(order.getSymbol());
-    demoExecutionGuard.requireDemo(accountSnapshot, productType, order.getSymbol());
 
     if (productType == ProductType.CRYPTO_SPOT && pendingOrderExecutionProcessor != null) {
       return prepareAndExecuteSpot(order);
@@ -706,14 +750,14 @@ public class PendingOrderExecutionService {
     return true;
   }
 
-  private boolean prepareAndExecuteLegacy(OrderEntity order) {
+  private boolean prepareAndExecuteLegacy(
+      OrderEntity order,
+      TradingAccountEntity accountSnapshot
+  ) {
     if (order.getRequestedPrice() == null) {
       return false;
     }
     ProductType productType = requestedProduct(order.getSymbol());
-    TradingAccountEntity accountSnapshot = accountRepository.findById(order.getAccountId())
-        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
-    demoExecutionGuard.requireDemo(accountSnapshot, productType, order.getSymbol());
     QuoteResponse quote = quoteService.freshQuote(order.getSymbol());
     if (!isTriggered(order, quote)) {
       return false;

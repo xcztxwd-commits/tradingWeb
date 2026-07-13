@@ -275,6 +275,22 @@ public class LedgerService {
     return saveIdempotent(account, LedgerEntryType.FUNDING_FEE, amount, account.getBalance(), "FUNDING_SETTLEMENT", settlementId, description);
   }
 
+  public LedgerEntryEntity recordFundingBankruptcyShortfall(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID settlementId,
+      String description
+  ) {
+    return saveIdempotent(
+        account,
+        LedgerEntryType.BANKRUPTCY_SHORTFALL,
+        amount,
+        account.getBalance(),
+        "FUNDING_SETTLEMENT",
+        settlementId,
+        description);
+  }
+
   public LedgerEntryEntity recordLiquidationFee(
       TradingAccountEntity account,
       BigDecimal amount,

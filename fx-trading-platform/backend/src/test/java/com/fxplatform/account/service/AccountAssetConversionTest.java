@@ -51,7 +51,7 @@ class AccountAssetConversionTest {
     account.setId(accountId);
     account.setUserId(userId);
     AssetConversionRequest request = new AssetConversionRequest(
-        "USDT_PERP",
+        "SPOT",
         "USDT",
         "FX_MARGIN",
         "USD",
@@ -59,7 +59,7 @@ class AccountAssetConversionTest {
         conversionId);
     AssetConversionService.ConversionResult result = new AssetConversionService.ConversionResult(
         accountId,
-        "USDT_PERP",
+        "SPOT",
         "USDT",
         "FX_MARGIN",
         "USD",
@@ -71,7 +71,7 @@ class AccountAssetConversionTest {
     when(assetConversionService.convert(
         userId,
         accountId,
-        WalletType.USDT_PERP,
+        WalletType.SPOT,
         "USDT",
         WalletType.FX_MARGIN,
         "USD",
@@ -87,12 +87,12 @@ class AccountAssetConversionTest {
     AssetConversionResponse response = service.convertAsset(userId, accountId, request);
 
     assertThat(response.accountId()).isEqualTo(accountId);
-    assertThat(response.fromWalletType()).isEqualTo("USDT_PERP");
+    assertThat(response.fromWalletType()).isEqualTo("SPOT");
     assertThat(response.toAsset()).isEqualTo("USD");
     verify(assetConversionService).convert(
         userId,
         accountId,
-        WalletType.USDT_PERP,
+        WalletType.SPOT,
         "USDT",
         WalletType.FX_MARGIN,
         "USD",

@@ -265,6 +265,40 @@ class LedgerServiceTest {
   }
 
   @Test
+  void fundingBankruptcyShortfallUsesItsOwnIdempotentSettlementOperation() {
+    UUID accountId = UUID.randomUUID();
+    UUID settlementId = UUID.randomUUID();
+    TradingAccountEntity account = new TradingAccountEntity();
+    account.setId(accountId);
+    account.setBaseCurrency("USDT");
+    account.setBalance(BigDecimal.ZERO.setScale(8));
+    List<LedgerEntryEntity> savedEntries = new ArrayList<>();
+
+    when(ledgerEntryRepository.findByBusinessOperation(
+        accountId, "FUNDING_SETTLEMENT", settlementId, "BANKRUPTCY_SHORTFALL"))
+        .thenAnswer(invocation -> savedEntries.stream().findFirst().orElse(null));
+    when(ledgerEntryRepository.save(any(LedgerEntryEntity.class)))
+        .thenAnswer(invocation -> {
+          LedgerEntryEntity entry = invocation.getArgument(0);
+          savedEntries.add(entry);
+          return entry;
+        });
+
+    LedgerService service = new LedgerService(ledgerEntryRepository, accountRepository);
+    service.recordFundingBankruptcyShortfall(
+        account, new BigDecimal("1.00000000"), settlementId, "Funding bankruptcy shortfall");
+    service.recordFundingBankruptcyShortfall(
+        account, new BigDecimal("1.00000000"), settlementId, "Funding bankruptcy shortfall");
+
+    assertThat(savedEntries).singleElement().satisfies(entry -> {
+      assertThat(entry.getEntryType()).isEqualTo(LedgerEntryType.BANKRUPTCY_SHORTFALL);
+      assertThat(entry.getAmount()).isEqualByComparingTo("1.00000000");
+      assertThat(entry.getReferenceType()).isEqualTo("FUNDING_SETTLEMENT");
+      assertThat(entry.getReferenceId()).isEqualTo(settlementId);
+    });
+  }
+
+  @Test
   void orderHoldAndReleaseDeltasAreRecordedForEachPendingOrderLifecycleStep() {
     UUID accountId = UUID.randomUUID();
     UUID orderId = UUID.randomUUID();

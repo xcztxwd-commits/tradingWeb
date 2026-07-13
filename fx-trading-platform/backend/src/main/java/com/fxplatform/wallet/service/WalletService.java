@@ -150,6 +150,17 @@ public class WalletService {
         to);
   }
 
+  public List<AssetLedgerEntryEntity> assetLedgerEntriesByReference(
+      UUID accountId,
+      String referenceType,
+      UUID referenceId
+  ) {
+    return assetLedgerEntryRepository.findByReference(
+        accountId,
+        normalizeOptional(referenceType),
+        referenceId);
+  }
+
   public boolean hasBusinessOperation(
       UUID accountId,
       WalletType walletType,

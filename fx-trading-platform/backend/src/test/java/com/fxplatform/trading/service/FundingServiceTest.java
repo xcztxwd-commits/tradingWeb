@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.entity.LedgerEntryEntity;
@@ -78,6 +79,9 @@ class FundingServiceTest {
 
   @Mock
   private ApplicationEventPublisher eventPublisher;
+
+  @Mock
+  private AuditLogService auditLogService;
 
   private final Map<UUID, PositionEntity> positions = new HashMap<>();
 
@@ -243,6 +247,88 @@ class FundingServiceTest {
     verify(ledgerService).recordFundingFeeSettlement(
         eq(account), eq(new BigDecimal("-5.00000000")), any(UUID.class),
         eq("Perpetual funding fee"));
+  }
+
+  @Test
+  void crossFundingFloorsThePerpBalanceAndPersistsTheUnpaidShortfall() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "1.00000000");
+    account.setUsedMargin(BigDecimal.ZERO.setScale(8));
+    account.setFreeMargin(new BigDecimal("1.00000000"));
+    PositionEntity position = position(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "100.00000000");
+    position.setMarginMode(MarginMode.CROSS);
+    FundingRateEntity rate = fundingRate("BTCUSDT-PERP", "0.02", "100.00000000");
+
+    stubLinearPerpetual(account, position);
+    when(fundingSettlementRepository.insertIfAbsent(any(FundingSettlementEntity.class)))
+        .thenReturn(true);
+
+    BigDecimal cashflow = service().settleFundingForPosition(position, rate);
+
+    assertThat(cashflow).isEqualByComparingTo("-1.00000000");
+    assertThat(account.getBalance()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getEquity()).isEqualByComparingTo("0.00000000");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("0.00000000");
+    assertThat(position.getFundingPnl()).isEqualByComparingTo("-1.00000000");
+
+    ArgumentCaptor<FundingSettlementEntity> settlementCaptor =
+        ArgumentCaptor.forClass(FundingSettlementEntity.class);
+    verify(fundingSettlementRepository).insertIfAbsent(settlementCaptor.capture());
+    FundingSettlementEntity settlement = settlementCaptor.getValue();
+    assertThat(settlement.getBalanceAfter()).isEqualByComparingTo("0.00000000");
+    assertThat(settlement.getShortfall()).isEqualByComparingTo("1.00000000");
+    verify(ledgerService).recordFundingFeeSettlement(
+        account, new BigDecimal("-2.00000000"), settlement.getId(), "Perpetual funding fee");
+    verify(ledgerService).recordFundingBankruptcyShortfall(
+        account, new BigDecimal("1.00000000"), settlement.getId(), "Funding bankruptcy shortfall");
+    verify(auditLogService).record(
+        org.mockito.ArgumentMatchers.isNull(),
+        eq("BANKRUPTCY_SHORTFALL"),
+        eq("FUNDING_SETTLEMENT"),
+        eq(settlement.getId().toString()),
+        org.mockito.ArgumentMatchers.contains("\"marginMode\":\"CROSS\""));
+  }
+
+  @Test
+  void isolatedFundingFloorsTheEffectiveSlotAndPersistsTheUnpaidShortfall() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "100.00000000");
+    PositionEntity position = position(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "100.00000000");
+    position.setMarginMode(MarginMode.ISOLATED);
+    position.setMarginHeld(new BigDecimal("1.00000000"));
+    position.setFundingPnl(BigDecimal.ZERO.setScale(8));
+    FundingRateEntity rate = fundingRate("BTCUSDT-PERP", "0.02", "100.00000000");
+
+    stubLinearPerpetual(account, position);
+    when(fundingSettlementRepository.insertIfAbsent(any(FundingSettlementEntity.class)))
+        .thenReturn(true);
+
+    BigDecimal cashflow = service().settleFundingForPosition(position, rate);
+
+    assertThat(cashflow).isEqualByComparingTo("-1.00000000");
+    assertThat(account.getBalance()).isEqualByComparingTo("100.00000000");
+    assertThat(position.getMarginHeld()).isEqualByComparingTo("1.00000000");
+    assertThat(position.getFundingPnl()).isEqualByComparingTo("-1.00000000");
+
+    ArgumentCaptor<FundingSettlementEntity> settlementCaptor =
+        ArgumentCaptor.forClass(FundingSettlementEntity.class);
+    verify(fundingSettlementRepository).insertIfAbsent(settlementCaptor.capture());
+    FundingSettlementEntity settlement = settlementCaptor.getValue();
+    assertThat(settlement.getBalanceAfter()).isEqualByComparingTo("100.00000000");
+    assertThat(settlement.getIsolatedMarginAfter()).isEqualByComparingTo("0.00000000");
+    assertThat(settlement.getShortfall()).isEqualByComparingTo("1.00000000");
+    verify(ledgerService).recordFundingFeeSettlement(
+        account, new BigDecimal("-1.00000000"), settlement.getId(), "Perpetual funding fee");
+    verify(ledgerService).recordFundingBankruptcyShortfall(
+        account, new BigDecimal("1.00000000"), settlement.getId(), "Funding bankruptcy shortfall");
+    verify(auditLogService).record(
+        org.mockito.ArgumentMatchers.isNull(),
+        eq("BANKRUPTCY_SHORTFALL"),
+        eq("FUNDING_SETTLEMENT"),
+        eq(settlement.getId().toString()),
+        org.mockito.ArgumentMatchers.contains("\"marginMode\":\"ISOLATED\""));
   }
 
   @Test
@@ -705,7 +791,8 @@ class FundingServiceTest {
         symbolRepository,
         new TradingInstrumentClassifier(),
         demoExecutionGuard,
-        eventPublisher);
+        eventPublisher,
+        auditLogService);
   }
 
   private static TradingAccountEntity account(UUID accountId, String balance) {

@@ -80,7 +80,7 @@ class AdminFinanceCommandServiceTest {
         null,
         "bank slip ok",
         "deposit-1");
-    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    when(accountRepository.findByIdForUpdate(account.getId())).thenReturn(Optional.of(account));
     when(fundOperationRepository.findByAccountIdAndOperationTypeAndIdempotencyKey(
         account.getId(), "DEPOSIT", "deposit-1")).thenReturn(Optional.empty());
     when(fundOperationRepository.insertIfAbsent(any(AdminFundOperationEntity.class)))
@@ -119,6 +119,92 @@ class AdminFinanceCommandServiceTest {
   }
 
   @Test
+  void depositComputesFromTheLatestLockedBalance() {
+    UUID actorUserId = UUID.randomUUID();
+    TradingAccountEntity stale = account(new BigDecimal("100.00"), BigDecimal.ZERO);
+    TradingAccountEntity locked = account(new BigDecimal("120.00"), BigDecimal.ZERO);
+    locked.setId(stale.getId());
+    locked.setUserId(stale.getUserId());
+    AdminFundOperationRequest request = new AdminFundOperationRequest(
+        new BigDecimal("10.00"),
+        "concurrent deposit",
+        null,
+        null,
+        "deposit-locked-balance");
+    when(fundOperationRepository.findByAccountIdAndOperationTypeAndIdempotencyKey(
+        stale.getId(), "DEPOSIT", "deposit-locked-balance")).thenReturn(Optional.empty());
+    when(accountRepository.findByIdForUpdate(stale.getId())).thenReturn(Optional.of(locked));
+    when(fundOperationRepository.insertIfAbsent(any(AdminFundOperationEntity.class)))
+        .thenAnswer(invocation -> {
+          AdminFundOperationEntity operation = invocation.getArgument(0);
+          operation.setId(UUID.randomUUID());
+          return 1;
+        });
+
+    var response = service().deposit(actorUserId, stale.getId(), request);
+
+    assertThat(response.beforeBalance()).isEqualByComparingTo("120.00");
+    assertThat(response.afterBalance()).isEqualByComparingTo("130.00");
+    assertThat(locked.getBalance()).isEqualByComparingTo("130.00");
+    assertThat(stale.getBalance()).isEqualByComparingTo("100.00");
+    verify(accountRepository).findByIdForUpdate(stale.getId());
+    verify(accountRepository, never()).findById(stale.getId());
+    verify(ledgerService).recordAdminAdjustment(
+        locked,
+        new BigDecimal("10.00"),
+        response.id(),
+        "concurrent deposit");
+  }
+
+  @Test
+  void depositAddsTheDeltaWithoutErasingUnrealizedPnlOrMarginHolds() {
+    TradingAccountEntity account = account(new BigDecimal("100.00"), new BigDecimal("10.00"));
+    account.setEquity(new BigDecimal("120.00"));
+    account.setFreeMargin(new BigDecimal("110.00"));
+    when(accountRepository.findByIdForUpdate(account.getId())).thenReturn(Optional.of(account));
+    when(fundOperationRepository.save(any(AdminFundOperationEntity.class)))
+        .thenAnswer(invocation -> {
+          AdminFundOperationEntity operation = invocation.getArgument(0);
+          operation.setId(UUID.randomUUID());
+          return operation;
+        });
+
+    service().deposit(
+        UUID.randomUUID(),
+        account.getId(),
+        new AdminFundOperationRequest(
+            new BigDecimal("10.00"), "deposit with open position", null, null, null));
+
+    assertThat(account.getBalance()).isEqualByComparingTo("110.00");
+    assertThat(account.getEquity()).isEqualByComparingTo("130.00");
+    assertThat(account.getUsedMargin()).isEqualByComparingTo("10.00");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("120.00");
+  }
+
+  @Test
+  void withdrawalUsesTheLockedFreeMarginInsteadOfRebuildingItFromBalance() {
+    TradingAccountEntity account = account(new BigDecimal("100.00"), new BigDecimal("10.00"));
+    account.setEquity(new BigDecimal("80.00"));
+    account.setFreeMargin(new BigDecimal("70.00"));
+    when(accountRepository.findByIdForUpdate(account.getId())).thenReturn(Optional.of(account));
+
+    assertThatThrownBy(() -> service().withdraw(
+            UUID.randomUUID(),
+            account.getId(),
+            new AdminFundOperationRequest(
+                new BigDecimal("80.00"), "withdraw with open loss", null, null, null)))
+        .isInstanceOf(BusinessException.class)
+        .hasMessageContaining("Insufficient free margin");
+
+    assertThat(account.getBalance()).isEqualByComparingTo("100.00");
+    assertThat(account.getEquity()).isEqualByComparingTo("80.00");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("70.00");
+    verify(fundOperationRepository, never()).save(any());
+    verify(accountRepository, never()).save(any());
+    verifyNoInteractions(ledgerService);
+  }
+
+  @Test
   void depositReturnsExistingOperationForRepeatedIdempotencyKey() {
     UUID actorUserId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
@@ -151,7 +237,7 @@ class AdminFinanceCommandServiceTest {
 
     assertThat(response.id()).isEqualTo(operationId);
     assertThat(response.afterBalance()).isEqualByComparingTo("1250.00");
-    verify(accountRepository, never()).findById(accountId);
+    verify(accountRepository, never()).findByIdForUpdate(accountId);
     verify(accountRepository, never()).save(any());
     verify(fundOperationRepository, never()).insertIfAbsent(any());
     verify(fundOperationRepository, never()).save(any());
@@ -174,7 +260,7 @@ class AdminFinanceCommandServiceTest {
         account.getId(), "DEPOSIT", "deposit-retry-1"))
         .thenReturn(Optional.empty())
         .thenAnswer(invocation -> Optional.of(storedOperation.get()));
-    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    when(accountRepository.findByIdForUpdate(account.getId())).thenReturn(Optional.of(account));
     when(fundOperationRepository.insertIfAbsent(any(AdminFundOperationEntity.class)))
         .thenAnswer(invocation -> {
           AdminFundOperationEntity operation = invocation.getArgument(0);
@@ -220,7 +306,7 @@ class AdminFinanceCommandServiceTest {
         account.getId(), "WITHDRAWAL", "withdraw-retry-1"))
         .thenReturn(Optional.empty())
         .thenAnswer(invocation -> Optional.of(storedOperation.get()));
-    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    when(accountRepository.findByIdForUpdate(account.getId())).thenReturn(Optional.of(account));
     when(fundOperationRepository.insertIfAbsent(any(AdminFundOperationEntity.class)))
         .thenAnswer(invocation -> {
           AdminFundOperationEntity operation = invocation.getArgument(0);
@@ -262,7 +348,7 @@ class AdminFinanceCommandServiceTest {
         null,
         null,
         "withdraw-1");
-    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    when(accountRepository.findByIdForUpdate(account.getId())).thenReturn(Optional.of(account));
 
     AdminFinanceCommandService service = service();
 
@@ -284,7 +370,7 @@ class AdminFinanceCommandServiceTest {
         "chargeback proof",
         "adjust-1",
         "CONFIRM_ADJUSTMENT");
-    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    when(accountRepository.findByIdForUpdate(account.getId())).thenReturn(Optional.of(account));
     when(fundOperationRepository.findByAccountIdAndOperationTypeAndIdempotencyKey(
         account.getId(), "ADJUSTMENT", "adjust-1")).thenReturn(Optional.empty());
     when(fundOperationRepository.insertIfAbsent(any(AdminFundOperationEntity.class)))
@@ -328,7 +414,7 @@ class AdminFinanceCommandServiceTest {
         account.getId(), "ADJUSTMENT", "adjust-retry-1"))
         .thenReturn(Optional.empty())
         .thenAnswer(invocation -> Optional.of(storedOperation.get()));
-    when(accountRepository.findById(account.getId())).thenReturn(Optional.of(account));
+    when(accountRepository.findByIdForUpdate(account.getId())).thenReturn(Optional.of(account));
     when(fundOperationRepository.insertIfAbsent(any(AdminFundOperationEntity.class)))
         .thenAnswer(invocation -> {
           AdminFundOperationEntity operation = invocation.getArgument(0);

@@ -13,6 +13,8 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * OrderEventService 是交易模块的业务服务。
@@ -43,6 +45,28 @@ public class OrderEventService {
     OrderEventEntity saved = orderEventRepository.save(event);
     publishTradingSessionEvent(saved);
     return saved;
+  }
+
+  /** Persists a retryable worker failure after the candidate mutation transaction has rolled back. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void recordWorkerFailure(
+      UUID orderId,
+      String eventType,
+      OrderStatus pendingStatus,
+      String errorCode,
+      String message
+  ) {
+    OrderEntity persisted = orderRepository.findByIdForUpdate(orderId).orElse(null);
+    if (persisted == null || persisted.getStatus() != pendingStatus) {
+      return;
+    }
+    record(
+        orderId,
+        eventType,
+        pendingStatus,
+        pendingStatus,
+        errorCode,
+        message);
   }
 
   public List<OrderEventResponse> events(UUID orderId) {
