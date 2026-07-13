@@ -25,7 +25,7 @@ export function toPerpetualReferenceView(
     || sourceMismatch
     || Boolean(source && !isFreshSource(source, now))
     || Boolean(expectedSource && !isFreshSource(expectedSource, now))
-  const funding = formatFundingCycle(reference.fundingRate, reference.nextFundingTime, now, unavailable)
+  const funding = formatFundingCycle(reference.fundingRate, reference.fundingTime, now, unavailable)
   return {
     markPrice: unavailable ? '--' : formatReferencePrice(reference.mark),
     indexPrice: unavailable ? '--' : formatReferencePrice(reference.index),
@@ -64,11 +64,11 @@ function formatReferencePrice(value: number | undefined) {
 
 function formatFundingCycle(
   rate: number | undefined,
-  nextFundingTime: string | undefined,
+  fundingTime: string | undefined,
   now: number,
   unavailable: boolean
 ) {
-  const target = nextFundingTime ? Date.parse(nextFundingTime) : Number.NaN
+  const target = fundingTime ? Date.parse(fundingTime) : Number.NaN
   if (unavailable || rate === undefined || !Number.isFinite(rate) || !Number.isFinite(target) || target <= now) {
     return { rate: '--', countdown: '--' }
   }

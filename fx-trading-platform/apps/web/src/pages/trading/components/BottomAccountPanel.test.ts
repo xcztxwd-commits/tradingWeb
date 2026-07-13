@@ -5,6 +5,7 @@ import { bottomAccountTabLabelKeys, bottomAccountTabs } from './bottomAccountTab
 import {
   bottomAccountPanelTestData,
   getBottomAccountBatchAction,
+  getBottomAccountBatchActionError,
   getBottomAccountTabView,
   resolveBottomAccountPanelData
 } from './bottomAccountPanelData.ts'
@@ -211,6 +212,24 @@ describe('bottom account panel tabs', () => {
     assert.equal(getBottomAccountBatchAction('currentOrders', currentOrders, true, true)?.disabled, true)
   })
 
+  it('summarizes failed items from a partially successful batch response', () => {
+    assert.equal(getBottomAccountBatchActionError({
+      items: [
+        { status: 'CANCELED' },
+        { status: 'FAILED', errorCode: 'INSUFFICIENT_MARGIN', message: 'Not enough margin' }
+      ]
+    }, 'Batch action failed.'), 'Batch action failed. 1/2: INSUFFICIENT_MARGIN: Not enough margin')
+  })
+
+  it('summarizes every failure when all batch items fail', () => {
+    assert.equal(getBottomAccountBatchActionError({
+      items: [
+        { status: 'FAILED', errorCode: 'POSITION_NOT_OPEN' },
+        { status: 'FAILED', message: 'Market unavailable' }
+      ]
+    }, 'Batch action failed.'), 'Batch action failed. 2/2: POSITION_NOT_OPEN; Market unavailable')
+  })
+
   it('shares confirmed pending-safe batch controls across desktop and mobile terminals', () => {
     const batchSource = readFileSync(join(currentDir, 'BottomAccountBatchAction.tsx'), 'utf8')
     const desktopSource = readFileSync(join(currentDir, 'TradingDesktopView.tsx'), 'utf8')
@@ -220,6 +239,8 @@ describe('bottom account panel tabs', () => {
     assert.match(source, /<BottomAccountBatchAction/)
     assert.match(batchSource, /window\.confirm/)
     assert.match(batchSource, /setPending\(true\)/)
+    assert.match(batchSource, /const response = await handler\(\)/)
+    assert.match(batchSource, /getBottomAccountBatchActionError\(response, t\('orders\.batchActionFailed'\)\)/)
     assert.match(batchSource, /role="alert"/)
     assert.match(batchSource, /disabled=\{action\.disabled \|\| pending/)
     assert.match(batchSource, /useEffect\(\(\) => setError\(null\), \[action\?\.kind\]\)/)

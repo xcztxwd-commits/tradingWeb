@@ -1,6 +1,6 @@
 import type { OrderResponse, PositionResponse } from '../../../components/tables/types'
 import type { AccountSummary, LedgerEntry } from '../../../types/trading'
-import type { AccountTransferResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
+import type { AccountTransferResponse, BatchActionResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
 import { isCurrentOrderStatus } from '../../orders/orderActionPolicy.ts'
 import type { BottomAccountTab } from './bottomAccountTabs.ts'
 
@@ -93,6 +93,16 @@ export function getBottomAccountBatchAction(
     return { kind: 'close-all-positions', disabled: !sessionReady || pending || view.positions.length === 0 }
   }
   return null
+}
+
+export function getBottomAccountBatchActionError(response: BatchActionResponse, fallback: string) {
+  const items = response.items ?? []
+  const failures = items.filter((item) => item.status === 'FAILED')
+  if (failures.length === 0) return null
+  const details = failures
+    .map(({ errorCode, message }) => [errorCode, message].filter(Boolean).join(': '))
+    .filter(Boolean)
+  return `${fallback} ${failures.length}/${items.length}${details.length > 0 ? `: ${details.join('; ')}` : ''}`
 }
 
 type BottomAccountPanelInput = {

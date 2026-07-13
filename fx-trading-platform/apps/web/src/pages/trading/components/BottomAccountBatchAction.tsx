@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { BatchActionResponse } from '@fx-platform/shared-types'
 import type { BottomAccountTab } from './bottomAccountTabs'
-import { getBottomAccountBatchAction } from './bottomAccountPanelData'
+import { getBottomAccountBatchAction, getBottomAccountBatchActionError } from './bottomAccountPanelData'
 import type { BottomAccountTabView } from './bottomAccountPanelData'
 import styles from './BottomAccountPanel.module.css'
 
@@ -40,7 +40,8 @@ export function BottomAccountBatchAction({
     setPending(true)
     setError(null)
     try {
-      await handler()
+      const response = await handler()
+      setError(getBottomAccountBatchActionError(response, t('orders.batchActionFailed')))
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('orders.batchActionFailed'))
     } finally {

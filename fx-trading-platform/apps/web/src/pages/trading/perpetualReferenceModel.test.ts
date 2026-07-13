@@ -16,7 +16,7 @@ describe('perpetual reference view model', () => {
       expiresAt: '2026-07-13T00:00:05.000Z',
       stale: false,
       fundingRate: 0.0001,
-      fundingTime: '2026-07-13T00:00:00.000Z',
+      fundingTime: '2026-07-13T04:00:01.000Z',
       nextFundingTime: '2026-07-13T08:00:01.000Z',
       fundingSource: 'BINANCE'
     }, undefined, Date.parse('2026-07-13T00:00:01.000Z'))
@@ -25,7 +25,7 @@ describe('perpetual reference view model', () => {
       markPrice: '60,001.25',
       indexPrice: '59,998.5',
       fundingRate: '0.0100%',
-      fundingCountdown: '08:00:00',
+      fundingCountdown: '04:00:00',
       marketSource: 'PUBLIC_EXTERNAL',
       providerCode: 'binance',
       stale: false
@@ -52,7 +52,8 @@ describe('perpetual reference view model', () => {
       sourceMode: 'LOCAL_SIMULATED',
       stale: false,
       fundingRate: -0.00025,
-      nextFundingTime: '2026-07-13T08:00:00.000Z'
+      fundingTime: '2026-07-13T08:00:00.000Z',
+      nextFundingTime: '2026-07-13T16:00:00.000Z'
     }, undefined, now)
 
     assert.equal(incomplete.fundingRate, '--')
