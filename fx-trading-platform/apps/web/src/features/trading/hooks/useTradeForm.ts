@@ -398,10 +398,18 @@ export function validateOrder(form: TradeFormState, options: ValidationOptions, 
     errors.push('triggerPrice')
   }
 
-  if (form.attachedProtections.length > 10 || form.attachedProtections.some((protection) =>
-    toNumber(protection.triggerPrice) <= 0
-    || (protection.triggerExecutionType === 'LIMIT' && toNumber(protection.price) <= 0)
-  )) {
+  const parentProtectionQuantity = form.quantityUnit === 'QUOTE' ? toNumber(form.total) : amount
+  const protectionTotals = { TAKE_PROFIT: 0, STOP_LOSS: 0 }
+  const invalidProtection = form.attachedProtections.some((protection) => {
+    const quantity = toNumber(protection.quantity)
+    protectionTotals[protection.protectionType] += quantity
+    return toNumber(protection.triggerPrice) <= 0
+      || (protection.triggerExecutionType === 'LIMIT' && toNumber(protection.price) <= 0)
+      || quantity <= 0
+      || protection.quantityUnit !== form.quantityUnit
+      || protectionTotals[protection.protectionType] > parentProtectionQuantity
+  })
+  if (form.attachedProtections.length > 10 || invalidProtection) {
     errors.push('attachedProtections')
   }
 

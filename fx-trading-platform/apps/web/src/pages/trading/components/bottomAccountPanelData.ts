@@ -75,6 +75,26 @@ export type BottomAccountTabView =
       rows: unknown[][]
     }
 
+export type BottomAccountBatchAction = {
+  kind: 'cancel-all-orders' | 'close-all-positions'
+  disabled: boolean
+}
+
+export function getBottomAccountBatchAction(
+  tab: BottomAccountTab,
+  view: BottomAccountTabView,
+  sessionReady: boolean,
+  pending: boolean
+): BottomAccountBatchAction | null {
+  if (tab === 'currentOrders' && view.kind === 'orders') {
+    return { kind: 'cancel-all-orders', disabled: !sessionReady || pending || view.orders.length === 0 }
+  }
+  if (tab === 'currentPositions' && view.kind === 'positions') {
+    return { kind: 'close-all-positions', disabled: !sessionReady || pending || view.positions.length === 0 }
+  }
+  return null
+}
+
 type BottomAccountPanelInput = {
   account?: AccountSummary
   orders?: OrderResponse[]

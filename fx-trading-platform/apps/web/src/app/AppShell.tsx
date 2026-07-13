@@ -11,6 +11,7 @@ import { getSessionStatus } from '../services/authApi'
 import { AccountUserMenu } from './components/AccountUserMenu'
 import { TradingNavMenu } from './components/TradingNavMenu'
 import { authRoutes, authenticatedNavItems, guestNavItems, mobileNavItems, type AppNavItem } from './navigation'
+import { resolveMobileTradingPath } from './tradingRoutes'
 
 type AppShellProps = {
   children: ReactNode
@@ -149,11 +150,12 @@ function TopNavLink({ item, pathname }: { item: AppNavItem; pathname: string }) 
 function MobileNavLink({ item, pathname }: { item: AppNavItem; pathname: string }) {
   const { t } = useTranslation()
   const tradeClassName = item.to.startsWith('/trade/') ? ' mobile-tab--trade' : ''
+  const target = item.to.startsWith('/trade/') ? resolveMobileTradingPath(pathname) : item.to
 
   return (
     <NavLink
-      end={item.to === '/'}
-      to={item.to}
+      end={target === '/'}
+      to={target}
       className={({ isActive }) => `mobile-tab${tradeClassName}${isActive || isConfiguredNavPathActive(item, pathname) ? ' active' : ''}`}
     >
       <item.icon size={19} aria-hidden="true" />

@@ -16,15 +16,26 @@ export function usePerpetualReference(symbol: string, enabled: boolean, expected
       return
     }
     let active = true
-    void getPerpetualReference(symbol)
-      .then((response) => {
-        if (active) setReference(toPerpetualReferenceView(response, expectedSourceRef.current))
-      })
-      .catch(() => {
-        if (active) setReference(null)
-      })
+    let refreshRunning = false
+    const refresh = () => {
+      if (refreshRunning) return
+      refreshRunning = true
+      void getPerpetualReference(symbol)
+        .then((response) => {
+          if (active) setReference(toPerpetualReferenceView(response, expectedSourceRef.current))
+        })
+        .catch(() => {
+          if (active) setReference(null)
+        })
+        .finally(() => {
+          refreshRunning = false
+        })
+    }
+    refresh()
+    const refreshTimer = globalThis.setInterval(refresh, 1_000)
     return () => {
       active = false
+      globalThis.clearInterval(refreshTimer)
     }
   }, [enabled, expectedSourceKey, symbol])
 

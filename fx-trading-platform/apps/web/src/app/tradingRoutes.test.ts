@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
 import {
   defaultTradingSymbols,
   normalizeTradingProductSymbol,
+  resolveMobileTradingPath,
   resolveSafeTradingPath,
   tradingProductSymbols
 } from './tradingRoutes.ts'
@@ -36,6 +38,24 @@ describe('canonical trading routes', () => {
     assert.equal(resolveSafeTradingPath('inverse', 'BTCUSD-PERP'), '/trade/spot/BTCUSDT')
     assert.equal(resolveSafeTradingPath('options', 'BTC-USD-OPTION'), '/trade/spot/BTCUSDT')
     assert.equal(resolveSafeTradingPath('perpetual', 'EURUSD'), '/trade/perpetual/BTCUSDT-PERP')
+  })
+
+  it('keeps the mobile Trading tab on the exact current terminal route', () => {
+    assert.equal(resolveMobileTradingPath('/trade/spot/ETHUSDT'), '/trade/spot/ETHUSDT')
+    assert.equal(resolveMobileTradingPath('/trade/perpetual/ETHUSDT-PERP'), '/trade/perpetual/ETHUSDT-PERP')
+  })
+
+  it('uses the default Spot terminal for the mobile Trading tab outside a canonical terminal route', () => {
+    assert.equal(resolveMobileTradingPath('/wallet'), '/trade/spot/BTCUSDT')
+    assert.equal(resolveMobileTradingPath('/trade/perpetual/EURUSD'), '/trade/spot/BTCUSDT')
+  })
+
+  it('wires the route-aware resolver into AppShell without rewriting the static mobile nav', () => {
+    const source = readFileSync(new URL('./AppShell.tsx', import.meta.url), 'utf8')
+
+    assert.match(source, /resolveMobileTradingPath/)
+    assert.match(source, /resolveMobileTradingPath\(pathname\)/)
+    assert.doesNotMatch(source, /mobileNavItems\[[^\]]+\]\.to\s*=/)
   })
 
   it('stores versioned last symbols independently for Spot and Perpetual', () => {

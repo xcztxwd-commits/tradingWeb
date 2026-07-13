@@ -414,6 +414,18 @@ describe('user order page automation hooks', () => {
     assert.match(orders, /data-order-status=\{order\.status\}/)
   })
 
+  it('dispatches normal and protective order actions without legacy TP or SL fields', () => {
+    assert.match(orders, /policy\.cancelVia === 'PROTECTION'/)
+    assert.match(orders, /policy\.modifyVia === 'PROTECTION'/)
+    assert.match(orders, /cancelProtection\(order\.id, token\)/)
+    assert.match(orders, /updateProtection\(editingOrder\.id, payload, token\)/)
+    assert.match(orders, /buildNormalOrderUpdatePayload/)
+    assert.doesNotMatch(orders, /form\.get\('stopLoss'\)/)
+    assert.doesNotMatch(orders, /form\.get\('takeProfit'\)/)
+    assert.doesNotMatch(orders, /<input name="stopLoss"/)
+    assert.doesNotMatch(orders, /<input name="takeProfit"/)
+  })
+
   it('keeps position actions addressable by backend position identity', () => {
     assert.match(positions, /data-position-id=\{position\.id\}/)
     assert.match(positions, /data-position-status=\{position\.status\}/)

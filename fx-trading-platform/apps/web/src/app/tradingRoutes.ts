@@ -31,3 +31,12 @@ export function resolveSafeTradingPath(product: unknown, symbol?: unknown) {
   const safeSymbol = normalizeTradingProductSymbol(safeProduct, symbol) ?? defaultTradingSymbols[safeProduct]
   return buildTradingPath(safeProduct, safeSymbol)
 }
+
+export function resolveMobileTradingPath(pathname: string) {
+  const match = /^\/trade\/(spot|perpetual)\/([^/]+)$/.exec(pathname)
+  if (!match) return resolveSafeTradingPath('spot')
+  const product = match[1]
+  if (!isTradingProduct(product)) return resolveSafeTradingPath('spot')
+  const symbol = normalizeTradingProductSymbol(product, match[2])
+  return symbol ? buildTradingPath(product, symbol) : resolveSafeTradingPath('spot')
+}

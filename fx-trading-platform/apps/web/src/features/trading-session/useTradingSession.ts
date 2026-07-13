@@ -3,10 +3,13 @@ import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
+  cancelAllTradingOrders,
+  closeAllTradingPositions,
   firstOrCreatedAccount,
   isAuthSessionFailure,
   loadTradingAccountData,
   mutateTradingPosition,
+  runTradingBatchAction,
   submitTradingOco,
   submitTradingOrder,
   updateTradingPositionProtection
@@ -296,6 +299,26 @@ export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
     [accountId, refreshAccountData, token]
   )
 
+  const submitCancelAllOrders = useCallback(async () => {
+    if (!token || !accountId) throw new Error('Trading account is not ready')
+    return runTradingBatchAction(
+      accountId,
+      token,
+      cancelAllTradingOrders,
+      () => refreshAccountData(token, accountId)
+    )
+  }, [accountId, refreshAccountData, token])
+
+  const submitCloseAllPositions = useCallback(async () => {
+    if (!token || !accountId) throw new Error('Trading account is not ready')
+    return runTradingBatchAction(
+      accountId,
+      token,
+      closeAllTradingPositions,
+      () => refreshAccountData(token, accountId)
+    )
+  }, [accountId, refreshAccountData, token])
+
   const submitProtectionUpdate = useCallback(
     async (position: PositionResponse, payload: UpdatePositionProtectionPayload) => {
       if (!token || !accountId) return
@@ -328,6 +351,8 @@ export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
     retrySession,
     submitOrder,
     submitOco,
+    cancelAllOrders: submitCancelAllOrders,
+    closeAllPositions: submitCloseAllPositions,
     closePosition: submitClosePosition,
     updatePositionProtection: submitProtectionUpdate
   }

@@ -2,7 +2,12 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { bottomAccountTabLabelKeys, bottomAccountTabs } from './bottomAccountTabs.ts'
-import { bottomAccountPanelTestData, getBottomAccountTabView, resolveBottomAccountPanelData } from './bottomAccountPanelData.ts'
+import {
+  bottomAccountPanelTestData,
+  getBottomAccountBatchAction,
+  getBottomAccountTabView,
+  resolveBottomAccountPanelData
+} from './bottomAccountPanelData.ts'
 import * as positionDisplayModel from './positionDisplayModel.ts'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -167,7 +172,7 @@ describe('bottom account panel tabs', () => {
     assert.match(positionsGridSource, /positions\.maintenanceMargin/)
     assert.match(positionsGridSource, /row\.maintenanceMargin/)
     assert.match(positionsGridSource, /positions\.takeProfitStopLoss/)
-    assert.match(positionsGridSource, /positions\.closeAllMarket/)
+    assert.match(positionsGridSource, /title=\{t\('positions\.closePosition'\)\}/)
     assert.match(contentSource, /mode=\{activeTab === 'historicalPositions' \? 'history' : 'current'\}/)
     assert.match(positionsGridSource, /PositionActionDialog/)
     assert.match(positionsGridSource, /onClosePosition\(selectedPosition, mutation\)/)
@@ -177,6 +182,52 @@ describe('bottom account panel tabs', () => {
     assert.match(actionDialogSource, /MultiLevelProtectionEditor/)
     assert.match(actionDialogSource, /marginAdjustmentSupported/)
     assert.match(actionDialogSource, /Position version is unavailable from the current positions contract\./)
+  })
+
+  it('offers account batch actions only for non-empty ready current collections', () => {
+    const data = resolveBottomAccountPanelData({
+      orders: [{
+        id: 'order-1', symbol: 'BTCUSDT', side: 'BUY', orderType: 'LIMIT', status: 'PENDING',
+        lots: 1, executionPrice: 60000, createdAt: '2026-07-13T00:00:00Z'
+      }],
+      positions: [{
+        id: 'position-1', symbol: 'BTCUSDT-PERP', side: 'BUY', lots: 1, openPrice: 60000,
+        currentPrice: 60100, floatingPnl: 100, realizedPnl: 0, marginHeld: 3000, status: 'OPEN'
+      }]
+    })
+    const currentOrders = getBottomAccountTabView('currentOrders', data)
+    const currentPositions = getBottomAccountTabView('currentPositions', data)
+    const emptyOrders = getBottomAccountTabView('currentOrders', resolveBottomAccountPanelData())
+
+    assert.deepEqual(getBottomAccountBatchAction('currentOrders', currentOrders, true, false), {
+      kind: 'cancel-all-orders', disabled: false
+    })
+    assert.deepEqual(getBottomAccountBatchAction('currentPositions', currentPositions, true, false), {
+      kind: 'close-all-positions', disabled: false
+    })
+    assert.equal(getBottomAccountBatchAction('historicalOrders', currentOrders, true, false), null)
+    assert.equal(getBottomAccountBatchAction('currentOrders', emptyOrders, true, false)?.disabled, true)
+    assert.equal(getBottomAccountBatchAction('currentOrders', currentOrders, false, false)?.disabled, true)
+    assert.equal(getBottomAccountBatchAction('currentOrders', currentOrders, true, true)?.disabled, true)
+  })
+
+  it('shares confirmed pending-safe batch controls across desktop and mobile terminals', () => {
+    const batchSource = readFileSync(join(currentDir, 'BottomAccountBatchAction.tsx'), 'utf8')
+    const desktopSource = readFileSync(join(currentDir, 'TradingDesktopView.tsx'), 'utf8')
+    const mobileSource = readFileSync(join(currentDir, 'TradingMobileView.tsx'), 'utf8')
+    const positionsGridSource = readFileSync(join(currentDir, 'BottomAccountPositionsGrid.tsx'), 'utf8')
+
+    assert.match(source, /<BottomAccountBatchAction/)
+    assert.match(batchSource, /window\.confirm/)
+    assert.match(batchSource, /setPending\(true\)/)
+    assert.match(batchSource, /role="alert"/)
+    assert.match(batchSource, /disabled=\{action\.disabled \|\| pending/)
+    assert.match(batchSource, /useEffect\(\(\) => setError\(null\), \[action\?\.kind\]\)/)
+    for (const viewSource of [desktopSource, mobileSource]) {
+      assert.match(viewSource, /onCancelAllOrders=\{accountPanel\.onCancelAllOrders\}/)
+      assert.match(viewSource, /onCloseAllPositions=\{accountPanel\.onCloseAllPositions\}/)
+    }
+    assert.doesNotMatch(positionsGridSource, /title=\{t\('positions\.closeAllMarket'\)\}/)
   })
 
   it('renders account trades, funding settlements, and transfers from API data', () => {

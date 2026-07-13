@@ -702,11 +702,22 @@ const jaJP = {
     filterSeparator: '、',
     noLimit: '指定なし',
     viewOrders: '注文を見る',
+    cancelAll: 'すべての注文を取消',
+    cancelAllConfirm: 'この口座のすべての未約定注文を取り消しますか？',
+    closeAllPositions: 'すべてのポジションを決済',
+    closeAllPositionsConfirm: 'この口座のすべてのポジションを成行で決済しますか？',
+    batchActionFailed: '一括操作に失敗しました。',
+    triggerExecutionType: 'トリガー実行方式',
     actionSummary: {
+      cancelOnly: '取消可能',
       available: '変更可 / 取消可',
       unavailable: '現在の状態では操作できません'
     },
     actionReasons: {
+      productNotModifiable: 'この商品または注文タイプは変更できません。',
+      ocoNotModifiable: 'OCO の子注文は個別に変更できません。',
+      protectionUnavailable: 'この保護注文は有効なポジションに関連付けられていません。',
+      versionUnavailable: '保護注文のバージョンがありません。更新後に再試行してください。',
       accepted: '注文は受理済みです。現在の状態では{{action}}をサポートしていません。',
       working: '注文はマッチング中です。現在の状態では{{action}}をサポートしていません。',
       partiallyFilled: '注文は一部約定済みです。現在の状態では{{action}}をサポートしていません。',
@@ -728,6 +739,7 @@ const jaJP = {
     lifecycle: '注文ライフサイクル'
   },
   positions: {
+    manageProtectionOrders: '保護注文を管理',
     title: 'ポジション',
     summary: '現在ポジション、履歴、決済記録、TP/SL 設定を確認し、リスクを明示して決済します。',
     center: 'ポジションセンター',

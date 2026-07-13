@@ -69,9 +69,7 @@ export function TradingPage({ product }: TradingPageProps) {
     sessionAuthStatus,
     loginRequired,
     retrySession,
-    submitOrder,
-    submitOco,
-    closePosition
+    submitOrder, submitOco, cancelAllOrders, closeAllPositions, closePosition
   } = useTradingSession()
   const { favorites: favoriteSymbols, toggleFavorite } = useMarketFavorites(token)
   const { layout, activePreset, applyPreset, beginSplitResize, resizeByDelta, endResize, movePanel, resetLayout } = useResizableLayout()
@@ -106,8 +104,8 @@ export function TradingPage({ product }: TradingPageProps) {
   const sessionStatusLabel = getTradingSessionStatusLabel(sessionMode, sessionAuthStatus, t)
   const sessionStatusText = getTradingSessionStatusText({ sessionMode, sessionAuthStatus, sessionError, loginRequired, t })
   const balances = useMemo(
-    () => deriveTradingBalances(account, positions, selectedSymbol, walletBalances),
-    [account, positions, selectedSymbol, walletBalances]
+    () => deriveTradingBalances(product, account, positions, selectedSymbol, walletBalances),
+    [account, positions, product, selectedSymbol, walletBalances]
   )
   const perpetualControls = usePerpetualTradingControls({
     accountId,
@@ -261,6 +259,8 @@ export function TradingPage({ product }: TradingPageProps) {
     fundingSettlements,
     transfers,
     sessionReady,
+    onCancelAllOrders: cancelAllOrders,
+    onCloseAllPositions: closeAllPositions,
     onClosePosition: closePosition
   }
   const viewProps: TradingTerminalViewProps = {
@@ -285,6 +285,7 @@ export function TradingPage({ product }: TradingPageProps) {
     onRetrySession: retrySession,
     onSelectSymbol: selectSymbol,
     onFavorite: toggleFavorite,
+    product,
     quote: selectedQuote,
     quotes,
     sessionError,

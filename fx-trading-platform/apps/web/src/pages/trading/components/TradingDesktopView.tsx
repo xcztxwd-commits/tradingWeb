@@ -33,6 +33,7 @@ export function TradingDesktopView({
   onSelectPrice,
   onSelectSymbol,
   onFavorite,
+  product,
   quote,
   quotes,
   sessionError,
@@ -72,7 +73,7 @@ export function TradingDesktopView({
           watchlist={<MarketSidebar markets={markets} quotes={quotes} favorites={favorites} selectedSymbol={symbol} onSelect={onSelectSymbol} onFavorite={onFavorite} />}
           header={
             <div className={styles.headerRow}>
-              <SymbolHeader market={market} quote={quote} onOpenMarkets={onOpenMarkets} onOpenQuote={onOpenQuote} />
+              <SymbolHeader market={market} marginMode={perpetualControls.marginMode} product={product} quote={quote} onOpenMarkets={onOpenMarkets} onOpenQuote={onOpenQuote} />
             </div>
           }
           chart={
@@ -141,6 +142,8 @@ export function TradingDesktopView({
               transfers={accountPanel.transfers}
               sessionReady={accountPanel.sessionReady}
               currentSymbol={symbol}
+              onCancelAllOrders={accountPanel.onCancelAllOrders}
+              onCloseAllPositions={accountPanel.onCloseAllPositions}
               onClosePosition={accountPanel.onClosePosition}
             />
           }

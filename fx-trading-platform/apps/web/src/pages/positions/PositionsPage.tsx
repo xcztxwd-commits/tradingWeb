@@ -10,6 +10,11 @@ import { formatApiError } from '../../components/user-page/userPageModels'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
 import type { PositionResponse } from '../../components/tables/types'
 import type { UpdatePositionProtectionPayload } from '../../types/trading'
+import {
+  canUseLegacyPositionProtection,
+  executePositionProtectionUpdate,
+  resolvePositionProtectionPath
+} from './positionProtectionPolicy'
 
 type PositionView = 'CURRENT' | 'HISTORY'
 type ProtectionFormValues = {
@@ -108,11 +113,21 @@ export function PositionsPage() {
   }
 
   const startProtectionEdit = (position: PositionResponse) => {
+    const canonicalPath = resolvePositionProtectionPath(position)
+    if (canonicalPath) {
+      navigate(canonicalPath)
+      return
+    }
     clearMessages()
     setProtectionError(null)
     setProtectionForm(createProtectionForm(position))
     setEditingPosition(position)
   }
+
+  const openProtectionWorkflow = useCallback((position: PositionResponse) => {
+    const path = resolvePositionProtectionPath(position)
+    if (path) navigate(path)
+  }, [navigate])
 
   const updateProtectionField = (field: keyof ProtectionFormValues, value: string) => {
     setProtectionForm((current) => ({ ...current, [field]: value }))
@@ -130,9 +145,17 @@ export function PositionsPage() {
     setBusyPositionId(editingPosition.id)
     clearMessages()
     try {
-      await updatePositionProtection(editingPosition, result.payload)
+      const outcome = await executePositionProtectionUpdate(
+        editingPosition,
+        result.payload,
+        updatePositionProtection
+      )
       setEditingPosition(null)
       setProtectionError(null)
+      if (outcome.kind === 'canonical') {
+        navigate(outcome.path)
+        return
+      }
       setNotice(t('positions.tpSlUpdated'))
     } catch (error) {
       setApiError(formatApiError(error))
@@ -190,7 +213,14 @@ export function PositionsPage() {
 
       <DataTable
         rows={visiblePositions}
-        columns={positionColumns(view, busyPositionId, openCloseDialog, startProtectionEdit, t)}
+        columns={positionColumns(
+          view,
+          busyPositionId,
+          openCloseDialog,
+          startProtectionEdit,
+          openProtectionWorkflow,
+          t
+        )}
         rowKey={(position) => position.id}
         emptyMessage={view === 'CURRENT' ? t('positions.emptyCurrent') : t('positions.emptyHistory')}
         emptyAction={{ label: t('dashboard.viewMarkets'), href: '/markets' }}
@@ -341,6 +371,7 @@ function positionColumns(
   busyPositionId: string | null,
   openCloseDialog: (position: PositionResponse, trigger: HTMLButtonElement) => void,
   startProtectionEdit: (position: PositionResponse) => void,
+  openProtectionWorkflow: (position: PositionResponse) => void,
   t: TFunction
 ): Array<DataTableColumn<PositionResponse>> {
   const columns: Array<DataTableColumn<PositionResponse>> = [
@@ -362,8 +393,8 @@ function positionColumns(
     { key: 'floatingPnl', label: t('positions.unrealizedPnl'), sortable: true, render: (position) => formatOptionalAmount(position.floatingPnl) },
     { key: 'realizedPnl', label: t('positions.realizedPnl'), sortable: true, render: (position) => formatOptionalAmount(position.realizedPnl) },
     { key: 'marginHeld', label: 'Margin', sortable: true },
-    { key: 'stopLoss', label: 'SL', render: (position) => position.stopLoss ?? '-' },
-    { key: 'takeProfit', label: 'TP', render: (position) => position.takeProfit ?? '-' },
+    { key: 'stopLoss', label: 'SL', render: (position) => canUseLegacyPositionProtection(position) ? position.stopLoss ?? '-' : '-' },
+    { key: 'takeProfit', label: 'TP', render: (position) => canUseLegacyPositionProtection(position) ? position.takeProfit ?? '-' : '-' },
     { key: 'protectionStatus', label: t('positions.tpSlStatus'), render: (position) => formatProtectionStatus(position, t) },
     { key: 'status', label: t('common.status'), sortable: true, render: (position) => <StatusChip status={position.status} /> }
   ]
@@ -372,16 +403,24 @@ function positionColumns(
     columns.push({
       key: 'actions',
       label: t('common.action'),
-      render: (position) => (
-        <div className="user-page__actions" data-position-id={position.id} data-position-status={position.status}>
-          <button type="button" className="table-action table-action--secondary" onClick={() => startProtectionEdit(position)} disabled={busyPositionId === position.id}>
-            TP/SL
-          </button>
-          <button type="button" className="table-action table-action--danger" onClick={(event) => openCloseDialog(position, event.currentTarget)} disabled={busyPositionId === position.id}>
-            {t('positions.closePosition')}
-          </button>
-        </div>
-      )
+      render: (position) => {
+        const canonicalPath = resolvePositionProtectionPath(position)
+        return (
+          <div className="user-page__actions" data-position-id={position.id} data-position-status={position.status}>
+            <button
+              type="button"
+              className="table-action table-action--secondary"
+              onClick={() => canonicalPath ? openProtectionWorkflow(position) : startProtectionEdit(position)}
+              disabled={busyPositionId === position.id}
+            >
+              {canonicalPath ? t('positions.manageProtectionOrders') : 'TP/SL'}
+            </button>
+            <button type="button" className="table-action table-action--danger" onClick={(event) => openCloseDialog(position, event.currentTarget)} disabled={busyPositionId === position.id}>
+              {t('positions.closePosition')}
+            </button>
+          </div>
+        )
+      }
     })
   }
 
@@ -474,6 +513,7 @@ function formatPriceExample(value: number) {
 }
 
 function formatProtectionStatus(position: PositionResponse, t: TFunction) {
+  if (!canUseLegacyPositionProtection(position)) return t('positions.manageProtectionOrders')
   if (position.stopLoss && position.takeProfit) return t('positions.protectionBoth')
   if (position.stopLoss) return t('positions.protectionStopLossOnly')
   if (position.takeProfit) return t('positions.protectionTakeProfitOnly')

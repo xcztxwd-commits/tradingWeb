@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { AccountTransferResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
+import type { AccountTransferResponse, BatchActionResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
 
 import type { OrderResponse, PositionResponse } from '../../../components/tables/types'
 import type { AccountSummary, LedgerEntry } from '../../../types/trading'
@@ -10,6 +10,7 @@ import { getBottomAccountTabView, resolveBottomAccountPanelData } from './bottom
 import type { StrategyRow } from './bottomAccountPanelData'
 import { mergePositions, resolveAccountPanelSelection } from './bottomAccountPanelSelection'
 import { BottomAccountContent } from './BottomAccountContent'
+import { BottomAccountBatchAction } from './BottomAccountBatchAction'
 import type { PositionMutationHandler } from './BottomAccountPositionsGrid'
 import styles from './BottomAccountPanel.module.css'
 import { TableSkeleton } from './TerminalSkeleton'
@@ -28,6 +29,8 @@ type Props = {
   sessionReady?: boolean
   currentSymbol?: string
   onClosePosition?: PositionMutationHandler
+  onCancelAllOrders?: () => Promise<BatchActionResponse>
+  onCloseAllPositions?: () => Promise<BatchActionResponse>
 }
 
 export function BottomAccountPanel({
@@ -43,7 +46,9 @@ export function BottomAccountPanel({
   loading = false,
   sessionReady = false,
   currentSymbol,
-  onClosePosition
+  onClosePosition,
+  onCancelAllOrders,
+  onCloseAllPositions
 }: Props = {}) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<BottomAccountTab>('currentOrders')
@@ -91,6 +96,13 @@ export function BottomAccountPanel({
           {t('trading.onlyCurrentSymbol')}
           {currentSymbol ? <strong>{currentSymbol}</strong> : null}
         </label>
+        <BottomAccountBatchAction
+          activeTab={activeTab}
+          activeView={activeView}
+          sessionReady={sessionReady}
+          onCancelAllOrders={onCancelAllOrders}
+          onCloseAllPositions={onCloseAllPositions}
+        />
       </div>
 
       <div id={panelId} className={styles.body} role="tabpanel" aria-busy={loading}>

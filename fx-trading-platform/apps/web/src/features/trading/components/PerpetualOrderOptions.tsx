@@ -22,22 +22,30 @@ export function PerpetualOrderOptions({
     id: String(index),
     protectionType: protection.protectionType,
     triggerPrice: String(protection.triggerPrice),
-    protectedQuantity: form.amount,
+    protectedQuantity: protection.quantity === undefined ? '' : String(protection.quantity),
     executionType: protection.triggerExecutionType,
     limitPrice: protection.price === undefined ? '' : String(protection.price)
   }))
 
   const updateLevel = (id: string, patch: Partial<Omit<ProtectionLevel, 'id'>>) => {
     const index = Number(id)
-    onProtectionsChange(form.attachedProtections.map((protection, current) => current === index ? {
-      ...protection,
-      protectionType: patch.protectionType ?? protection.protectionType,
-      triggerPrice: patch.triggerPrice === undefined ? protection.triggerPrice : Number(patch.triggerPrice),
-      triggerExecutionType: patch.executionType ?? protection.triggerExecutionType,
-      price: (patch.executionType ?? protection.triggerExecutionType) === 'LIMIT'
-        ? Number(patch.limitPrice ?? protection.price ?? 0)
-        : undefined
-    } : protection))
+    onProtectionsChange(form.attachedProtections.map((protection, current) => {
+      if (current !== index) return protection
+      const quantity = patch.protectedQuantity === undefined
+        ? protection.quantity
+        : Number(patch.protectedQuantity)
+      return {
+        ...protection,
+        protectionType: patch.protectionType ?? protection.protectionType,
+        triggerPrice: patch.triggerPrice === undefined ? protection.triggerPrice : Number(patch.triggerPrice),
+        triggerExecutionType: patch.executionType ?? protection.triggerExecutionType,
+        price: (patch.executionType ?? protection.triggerExecutionType) === 'LIMIT'
+          ? Number(patch.limitPrice ?? protection.price ?? 0)
+          : undefined,
+        quantity,
+        quantityUnit: quantity === undefined ? undefined : form.quantityUnit
+      }
+    }))
   }
 
   const addLevel = (protectionType: ProtectionLevel['protectionType']) => {
@@ -46,7 +54,9 @@ export function PerpetualOrderOptions({
       protectionType,
       triggerPrice: 0,
       triggerPriceType: 'MARK_PRICE',
-      triggerExecutionType: 'MARKET'
+      triggerExecutionType: 'MARKET',
+      quantity: 0,
+      quantityUnit: form.quantityUnit
     }])
   }
 
@@ -69,7 +79,7 @@ export function PerpetualOrderOptions({
         levels={levels}
         disabled={disabled}
         error={error}
-        showQuantity={false}
+        quantityUnit={form.quantityUnit}
         onLevelChange={updateLevel}
         onAdd={addLevel}
         onRemove={(id) => onProtectionsChange(form.attachedProtections.filter((_, index) => index !== Number(id)))}

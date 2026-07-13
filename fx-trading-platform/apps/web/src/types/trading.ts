@@ -6,6 +6,7 @@ import type {
   PositionSide,
   QuantityUnit,
   TradingSettingsResponse,
+  UpdateOrderRequest,
   UpdatePositionModeRequest,
   UpdateSymbolSettingsRequest
 } from '@fx-platform/shared-types'
@@ -150,12 +151,7 @@ export type QuantityUnitValue = QuantityUnit
 export type PositionModePayload = UpdatePositionModeRequest
 export type SymbolSettingsPayload = UpdateSymbolSettingsRequest
 
-export type UpdateOrderPayload = {
-  quantity?: string
-  price?: string
-  stopLoss?: string
-  takeProfit?: string
-}
+export type UpdateOrderPayload = Pick<UpdateOrderRequest, 'quantity' | 'price'>
 
 export type UpdatePositionProtectionPayload = {
   stopLoss?: string

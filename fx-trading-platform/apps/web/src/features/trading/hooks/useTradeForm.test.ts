@@ -25,16 +25,50 @@ describe('trade form sizing algorithms', () => {
       protectionType: 'STOP_LOSS',
       triggerPrice: 0,
       triggerExecutionType: 'LIMIT',
-      price: 0
+      price: 0,
+      quantity: 1,
+      quantityUnit: 'BASE'
     }]
 
     assert.equal(validateOrder(form, { balances: { USDT: 50_000 }, market: perpetualMarket, minAmount: 0, minNotional: 0 }).errors.includes('attachedProtections'), true)
     form.attachedProtections = Array.from({ length: 11 }, (_, index) => ({
       protectionType: 'TAKE_PROFIT' as const,
       triggerPrice: 60_000 + index,
-      triggerExecutionType: 'MARKET' as const
+      triggerExecutionType: 'MARKET' as const,
+      quantity: 0.05,
+      quantityUnit: 'BASE' as const
     }))
     assert.equal(validateOrder(form, { balances: { USDT: 50_000 }, market: perpetualMarket, minAmount: 0, minNotional: 0 }).errors.includes('attachedProtections'), true)
+  })
+
+  it('requires attached quantities and caps each protection type at the parent quantity', () => {
+    const perpetualMarket = createPanelMarket(
+      'BTCUSDT-PERP',
+      { bids: [{ price: 50_000 }], asks: [{ price: 50_001 }], lastPrice: 50_000 },
+      { productType: 'LINEAR_PERP', leverage: 10 }
+    )
+    const form = {
+      ...createInitialTradeForm('buy', perpetualMarket),
+      orderType: 'market' as const,
+      amount: '1',
+      total: '50000',
+      attachedProtections: [
+        { protectionType: 'TAKE_PROFIT' as const, triggerPrice: 60_000, triggerExecutionType: 'MARKET' as const, quantity: 0.4, quantityUnit: 'BASE' as const },
+        { protectionType: 'TAKE_PROFIT' as const, triggerPrice: 61_000, triggerExecutionType: 'MARKET' as const, quantity: 0.6, quantityUnit: 'BASE' as const },
+        { protectionType: 'STOP_LOSS' as const, triggerPrice: 45_000, triggerExecutionType: 'MARKET' as const, quantity: 1, quantityUnit: 'BASE' as const }
+      ]
+    }
+    const options = { balances: { USDT: 50_000 }, market: perpetualMarket, minAmount: 0, minNotional: 0 }
+
+    assert.equal(validateOrder(form, options).errors.includes('attachedProtections'), false)
+    assert.equal(validateOrder({
+      ...form,
+      attachedProtections: form.attachedProtections.map((protection, index) => index === 1 ? { ...protection, quantity: 0.7 } : protection)
+    }, options).errors.includes('attachedProtections'), true)
+    assert.equal(validateOrder({
+      ...form,
+      attachedProtections: [{ ...form.attachedProtections[0], quantity: undefined }]
+    }, options).errors.includes('attachedProtections'), true)
   })
   it('initializes canonical order controls for Spot and Perpetual forms', () => {
     const spot = createPanelMarket(

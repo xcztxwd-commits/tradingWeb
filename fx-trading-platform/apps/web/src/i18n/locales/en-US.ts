@@ -702,11 +702,22 @@ const enUS = {
     filterSeparator: ', ',
     noLimit: 'Any',
     viewOrders: 'View orders',
+    cancelAll: 'Cancel all orders',
+    cancelAllConfirm: 'Cancel every current order in this account?',
+    closeAllPositions: 'Close all positions',
+    closeAllPositionsConfirm: 'Close every current position in this account at market?',
+    batchActionFailed: 'The batch action failed.',
+    triggerExecutionType: 'Trigger execution',
     actionSummary: {
+      cancelOnly: 'Can cancel',
       available: 'Can modify / cancel',
       unavailable: 'Current status is unavailable'
     },
     actionReasons: {
+      productNotModifiable: 'This product or order type cannot be modified.',
+      ocoNotModifiable: 'An OCO leg cannot be modified independently.',
+      protectionUnavailable: 'This protection is not attached to an active position.',
+      versionUnavailable: 'The protection version is unavailable. Refresh before modifying.',
       accepted: 'Order accepted. Current status does not support {{action}}.',
       working: 'Order is matching. Current status does not support {{action}}.',
       partiallyFilled: 'Order is partially filled. Current status does not support {{action}}.',
@@ -728,6 +739,7 @@ const enUS = {
     lifecycle: 'Order lifecycle'
   },
   positions: {
+    manageProtectionOrders: 'Manage protection orders',
     title: 'Positions',
     summary: 'View current positions, history, close records, and TP/SL settings with explicit risk actions.',
     center: 'Position Center',

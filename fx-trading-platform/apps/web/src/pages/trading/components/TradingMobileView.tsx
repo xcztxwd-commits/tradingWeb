@@ -76,6 +76,8 @@ export function TradingMobileView({
               transfers={accountPanel.transfers}
               sessionReady={accountPanel.sessionReady}
               currentSymbol={symbol}
+              onCancelAllOrders={accountPanel.onCancelAllOrders}
+              onCloseAllPositions={accountPanel.onCloseAllPositions}
               onClosePosition={accountPanel.onClosePosition}
             />
           }

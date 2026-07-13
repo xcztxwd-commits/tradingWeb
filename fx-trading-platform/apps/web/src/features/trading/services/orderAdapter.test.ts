@@ -179,13 +179,17 @@ describe('trading order adapter', () => {
         triggerPrice: 62000,
         triggerPriceType: 'MARK_PRICE' as const,
         triggerExecutionType: 'LIMIT' as const,
-        price: 61950
+        price: 61950,
+        quantity: 0.04,
+        quantityUnit: 'BASE' as const
       },
       {
         protectionType: 'STOP_LOSS' as const,
         triggerPrice: 58000,
         triggerPriceType: 'MARK_PRICE' as const,
-        triggerExecutionType: 'MARKET' as const
+        triggerExecutionType: 'MARKET' as const,
+        quantity: 0.1,
+        quantityUnit: 'BASE' as const
       }
     ]
     const form = {

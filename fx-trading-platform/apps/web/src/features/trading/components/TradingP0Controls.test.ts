@@ -30,6 +30,10 @@ describe('P0 Spot and perpetual trading controls', () => {
     assert.match(orderFormSide, /form\.quantityUnit === 'QUOTE'/)
     assert.match(tradePanel, /settingsReady/)
     assert.match(perpetualOptions, /form\.side === 'buy' \? 'LONG' : 'SHORT'/)
+    assert.match(perpetualOptions, /quantityUnit=\{form\.quantityUnit\}/)
+    assert.match(perpetualOptions, /protectedQuantity: protection\.quantity === undefined \? '' : String\(protection\.quantity\)/)
+    assert.match(perpetualOptions, /const quantity = patch\.protectedQuantity === undefined/)
+    assert.doesNotMatch(perpetualOptions, /showQuantity=\{false\}/)
   })
 
   it('shares perpetual settings and reference truth with desktop and mobile order entry', () => {

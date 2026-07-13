@@ -92,6 +92,10 @@ export async function apiPatch<T>(path: string, body: unknown, token?: string): 
   )
 }
 
+export async function apiDelete<T>(path: string, token?: string): Promise<T> {
+  return request<T>(path, { method: 'DELETE' }, token)
+}
+
 async function request<T>(path: string, init: RequestInit, token?: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (token) {

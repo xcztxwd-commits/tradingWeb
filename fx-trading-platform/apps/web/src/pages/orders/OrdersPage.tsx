@@ -8,10 +8,11 @@ import { DataTable, type DataTableColumn } from '../../components/user-page/Data
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { filterByStatus, formatApiError } from '../../components/user-page/userPageModels'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
-import { cancelOrder, getOrderEvents, modifyOrder } from '../../services/tradingApi'
+import { cancelOrder, cancelProtection, getOrderEvents, modifyOrder, updateProtection } from '../../services/tradingApi'
 import type { OrderResponse } from '../../components/tables/types'
-import type { OrderEventResponse, UpdateOrderPayload } from '../../types/trading'
+import type { OrderEventResponse } from '../../types/trading'
 import { formatOrderActionReason, getOrderActionPolicy, isCurrentOrderStatus } from './orderActionPolicy'
+import { buildNormalOrderUpdatePayload, buildProtectionUpdatePayload } from './orderActionPayloads'
 
 type OrderView = 'CURRENT' | 'HISTORY' | 'TRADES' | 'EVENTS'
 
@@ -22,7 +23,10 @@ const viewOptions: Array<{ value: OrderView; labelKey: string; emptyKey: string 
   { value: 'EVENTS', labelKey: 'orders.actions', emptyKey: 'orders.emptyActions' }
 ]
 
-const statusOptions = ['ALL', 'PENDING', 'ACCEPTED', 'WORKING', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED']
+const statusOptions = [
+  'ALL', 'RECEIVED', 'VALIDATING', 'PENDING', 'PENDING_ACTIVATION', 'ACCEPTED', 'WORKING',
+  'PARTIALLY_FILLED', 'CANCEL_PENDING', 'FILLED', 'CANCELED', 'REJECTED'
+]
 
 export function OrdersPage() {
   const navigate = useNavigate()
@@ -66,7 +70,8 @@ export function OrdersPage() {
     setBusyOrderId(order.id)
     clearMessages()
     try {
-      await cancelOrder(order.id, token)
+      if (policy.cancelVia === 'PROTECTION') await cancelProtection(order.id, token)
+      else await cancelOrder(order.id, token)
       await retrySession()
       setNotice(t('orders.cancelSuccess'))
     } catch (error) {
@@ -102,16 +107,27 @@ export function OrdersPage() {
     event.preventDefault()
     if (!token || !editingOrder) return
     const form = new FormData(event.currentTarget)
-    const payload: UpdateOrderPayload = nonEmptyPayload({
+    const fields = {
       quantity: form.get('quantity'),
       price: form.get('price'),
-      stopLoss: form.get('stopLoss'),
-      takeProfit: form.get('takeProfit')
-    })
+      triggerPrice: form.get('triggerPrice'),
+      triggerExecutionType: form.get('triggerExecutionType')
+    }
+    const policy = getOrderActionPolicy(editingOrder)
     setBusyOrderId(editingOrder.id)
     clearMessages()
     try {
-      await modifyOrder(editingOrder.id, payload, token)
+      if (policy.modifyVia === 'PROTECTION') {
+        const payload = buildProtectionUpdatePayload(editingOrder, fields)
+        if (!payload) {
+          setNotice(t('orders.actionReasons.versionUnavailable'))
+          return
+        }
+        await updateProtection(editingOrder.id, payload, token)
+      } else {
+        const payload = buildNormalOrderUpdatePayload(fields)
+        await modifyOrder(editingOrder.id, payload, token)
+      }
       setEditingOrder(null)
       await retrySession()
       setNotice(t('orders.modifySuccess'))
@@ -214,14 +230,21 @@ export function OrdersPage() {
               <span>{t('common.price')}</span>
               <input name="price" defaultValue={String(editingOrder.price ?? '')} />
             </label>
-            <label>
-              <span>{t('trading.stopLoss')}</span>
-              <input name="stopLoss" />
-            </label>
-            <label>
-              <span>{t('trading.takeProfit')}</span>
-              <input name="takeProfit" />
-            </label>
+            {getOrderActionPolicy(editingOrder).modifyVia === 'PROTECTION' ? (
+              <>
+                <label>
+                  <span>{t('trading.triggerPrice')}</span>
+                  <input name="triggerPrice" defaultValue={String(editingOrder.triggerPrice ?? '')} />
+                </label>
+                <label>
+                  <span>{t('orders.triggerExecutionType')}</span>
+                  <select name="triggerExecutionType" defaultValue={editingOrder.triggerExecutionType ?? 'MARKET'}>
+                    <option value="MARKET">MARKET</option>
+                    <option value="LIMIT">LIMIT</option>
+                  </select>
+                </label>
+              </>
+            ) : null}
             <button type="submit" className="table-action table-action--primary" disabled={busyOrderId === editingOrder.id}>
               {t('common.save')}
             </button>
@@ -387,14 +410,6 @@ function getOrderEmptyMessage(view: OrderView, status: string, symbol: string, f
 
   if (filters.length === 0) return selectedView ? t(selectedView.emptyKey) : t('orders.emptyHistory')
   return t('orders.emptyFiltered', { view: viewLabel, filters: filters.join(t('orders.filterSeparator')) })
-}
-
-function nonEmptyPayload(values: Record<string, FormDataEntryValue | null>): UpdateOrderPayload {
-  return Object.fromEntries(
-    Object.entries(values)
-      .map(([key, value]) => [key, String(value ?? '').trim()])
-      .filter(([, value]) => value)
-  )
 }
 
 function formatTime(value: string | null | undefined) {

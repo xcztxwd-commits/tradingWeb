@@ -25,13 +25,12 @@ export function toPerpetualReferenceView(
     || sourceMismatch
     || Boolean(source && !isFreshSource(source, now))
     || Boolean(expectedSource && !isFreshSource(expectedSource, now))
+  const funding = formatFundingCycle(reference.fundingRate, reference.nextFundingTime, now, unavailable)
   return {
     markPrice: unavailable ? '--' : formatReferencePrice(reference.mark),
     indexPrice: unavailable ? '--' : formatReferencePrice(reference.index),
-    // The current backend reference contract does not expose an active funding cycle.
-    // Keep the UI explicitly empty instead of fabricating a tradable rate/countdown.
-    fundingRate: '--',
-    fundingCountdown: '--',
+    fundingRate: funding.rate,
+    fundingCountdown: funding.countdown,
     marketSource: reference.sourceMode ?? 'LIVE',
     providerCode: reference.providerCode,
     stale: unavailable
@@ -61,4 +60,24 @@ function sameProviderSource(left: MarketSourceMetadata, right: MarketSourceMetad
 function formatReferencePrice(value: number | undefined) {
   if (value === undefined || !Number.isFinite(value) || value <= 0) return '--'
   return value.toLocaleString(undefined, { maximumFractionDigits: 10 })
+}
+
+function formatFundingCycle(
+  rate: number | undefined,
+  nextFundingTime: string | undefined,
+  now: number,
+  unavailable: boolean
+) {
+  const target = nextFundingTime ? Date.parse(nextFundingTime) : Number.NaN
+  if (unavailable || rate === undefined || !Number.isFinite(rate) || !Number.isFinite(target) || target <= now) {
+    return { rate: '--', countdown: '--' }
+  }
+  const remainingSeconds = Math.ceil((target - now) / 1_000)
+  const hours = Math.floor(remainingSeconds / 3_600)
+  const minutes = Math.floor((remainingSeconds % 3_600) / 60)
+  const seconds = remainingSeconds % 60
+  return {
+    rate: `${(rate * 100).toFixed(4)}%`,
+    countdown: [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':')
+  }
 }

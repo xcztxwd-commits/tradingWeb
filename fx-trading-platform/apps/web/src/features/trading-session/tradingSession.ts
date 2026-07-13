@@ -3,7 +3,9 @@ import { ApiClientError } from '../../services/apiClient'
 import { getLedgerEntries } from '../../services/ledgerApi'
 import {
   adjustPositionMargin,
+  cancelAllOrders,
   closePosition,
+  closeAllPositions,
   createOcoOrder,
   createOrder,
   createPositionProtection,
@@ -18,6 +20,8 @@ import {
 import type {
   AccountTransferResponse,
   AdjustPositionMarginRequest,
+  BatchActionRequest,
+  BatchActionResponse,
   ClosePositionRequest,
   CreateProtectionRequest,
   FundingSettlement,
@@ -117,6 +121,30 @@ export async function submitTradingOco(payload: OcoOrderPayload, token?: string 
   return createOcoOrder(payload, token)
 }
 
+export function cancelAllTradingOrders(payload: BatchActionRequest, token: string) {
+  return cancelAllOrders(payload, token)
+}
+
+export function closeAllTradingPositions(payload: BatchActionRequest, token: string) {
+  return closeAllPositions(payload, token)
+}
+
+type TradingBatchAction<T> = (payload: BatchActionRequest, token: string) => Promise<T>
+
+export async function runTradingBatchAction<T = BatchActionResponse>(
+  accountId: string,
+  token: string,
+  action: TradingBatchAction<T>,
+  refresh: () => Promise<unknown>
+) {
+  const payload = { accountId, requestId: globalThis.crypto.randomUUID() }
+  try {
+    return await action(payload, token)
+  } finally {
+    await refresh().catch(() => undefined)
+  }
+}
+
 export async function mutateTradingPosition(
   accountId: string,
   positionId: string,
@@ -150,7 +178,14 @@ export function updateTradingPositionProtection(
   return updatePositionProtection(accountId, positionId, payload, token)
 }
 
+export function selectActiveDemoAccount(accounts: AccountSummary[]) {
+  return accounts.find((account) =>
+    account.accountType.trim().toUpperCase() === 'DEMO'
+    && account.status.trim().toUpperCase() === 'ACTIVE'
+  )
+}
+
 export async function firstOrCreatedAccount(token: string) {
   const accounts = await getAccounts(token)
-  return accounts[0] ?? createDemoAccount(token)
+  return selectActiveDemoAccount(accounts) ?? createDemoAccount(token)
 }

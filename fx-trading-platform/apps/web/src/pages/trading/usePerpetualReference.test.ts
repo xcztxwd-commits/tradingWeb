@@ -13,4 +13,9 @@ describe('usePerpetualReference request identity', () => {
     assert.match(source, /\[enabled, expectedSourceKey, symbol\]/)
     assert.doesNotMatch(source, /\[enabled, expectedSource, symbol\]/)
   })
+
+  it('refreshes the expiring backend reference and cleans up its timer', () => {
+    assert.match(source, /refresh\(\)\s*const refreshTimer = globalThis\.setInterval\(refresh, 1_000\)/)
+    assert.match(source, /globalThis\.clearInterval\(refreshTimer\)/)
+  })
 })

@@ -182,7 +182,7 @@ export function PositionsGrid({
                     <button
                       type="button"
                       className={styles.closeButton}
-                      title={t('positions.closeAllMarket')}
+                      title={t('positions.closePosition')}
                       onClick={() => openPositionActions(position)}
                     >
                       {t('positions.closePosition')}

@@ -702,11 +702,22 @@ const zhCN = {
     filterSeparator: '，',
     noLimit: '不限',
     viewOrders: '查看订单',
+    cancelAll: '全部撤单',
+    cancelAllConfirm: '确认撤销此账户的全部当前委托吗？',
+    closeAllPositions: '全部平仓',
+    closeAllPositionsConfirm: '确认按市价平掉此账户的全部当前持仓吗？',
+    batchActionFailed: '批量操作失败。',
+    triggerExecutionType: '触发执行方式',
     actionSummary: {
+      cancelOnly: '可撤单',
       available: '可改单 / 可撤单',
       unavailable: '当前状态暂不可操作'
     },
     actionReasons: {
+      productNotModifiable: '此产品或订单类型不支持改单。',
+      ocoNotModifiable: 'OCO 子单不能独立修改。',
+      protectionUnavailable: '该保护单未关联有效持仓。',
+      versionUnavailable: '保护单版本不可用，请刷新后再修改。',
       accepted: '订单已受理，当前状态不支持{{action}}。',
       working: '订单正在撮合中，当前状态不支持{{action}}。',
       partiallyFilled: '订单已部分成交，当前状态不支持{{action}}。',
@@ -728,6 +739,7 @@ const zhCN = {
     lifecycle: '订单生命周期'
   },
   positions: {
+    manageProtectionOrders: '管理保护单',
     title: '持仓',
     summary: '查看当前持仓、历史持仓、平仓记录和 TP/SL 设置，执行风险明确的平仓动作。',
     center: '持仓中心',
