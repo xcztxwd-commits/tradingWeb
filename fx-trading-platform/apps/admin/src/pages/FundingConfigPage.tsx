@@ -5,6 +5,7 @@ import { getSymbolsPage } from '../services/adminApi'
 import { getFundingConfig, loadAllAdminPages, updateFundingConfig } from '../services/adminTradingApi'
 import { getValidAdminToken } from '../services/adminToken'
 import { DataTable, display, formatDateTime, PageHeader, StateBlock, useAdminData } from './adminPageUtils'
+import { formatFundingFallbackState } from './fundingFallbackModel'
 
 type FundingConfigForm = {
   fundingSourcePriority: string
@@ -144,7 +145,7 @@ export function FundingConfigPage() {
             { title: '周期（分钟）', render: (row) => display(row.fixedFundingIntervalMinutes) },
             { title: '过期阈值（秒）', render: (row) => display(row.fundingStaleSeconds) },
             { title: '实际选择源', render: (row) => display(row.actualSource) },
-            { title: '回退状态 / 原因', render: (row) => fundingFallbackState(row) },
+            { title: '回退状态 / 原因', render: (row) => formatFundingFallbackState(row) },
             { title: '上次 asOf', render: (row) => formatDateTime(row.asOf) },
             { title: '下次资金费时间', render: (row) => formatDateTime(row.nextFundingTime) },
             { title: '操作', render: (row) => <button type="button" onClick={() => startEditing(row)}>编辑</button> }
@@ -168,19 +169,6 @@ async function loadFundingConfigs(token: string): Promise<AdminFundingConfigResp
   const symbols = await loadAllAdminPages((page, size) => getSymbolsPage(token, page, size))
   const perpetualSymbols = symbols.filter((symbol) => symbol.productType === 'LINEAR_PERP')
   return Promise.all(perpetualSymbols.map((symbol) => getFundingConfig(symbol.id, token)))
-}
-
-function fundingFallbackState(config: AdminFundingConfigResponse) {
-  const priorities = (config.fundingSourcePriority ?? [])
-    .map((source) => source.trim().toUpperCase())
-    .filter(Boolean)
-  const actualSource = String(config.actualSource ?? '').trim().toUpperCase()
-  const sourceMode = config.sourceMode ? ` · ${config.sourceMode}` : ''
-  if (!actualSource) return `UNAVAILABLE · 未选出实际来源${sourceMode}`
-  if (!priorities.length || actualSource === priorities[0]) {
-    return `PRIMARY · ${actualSource}${sourceMode}`
-  }
-  return `FALLBACK · 首选 ${priorities[0]} 未被选中 → ${actualSource}${sourceMode}`
 }
 
 function toFundingConfigRequest(form: FundingConfigForm): AdminFundingConfigRequest | null {

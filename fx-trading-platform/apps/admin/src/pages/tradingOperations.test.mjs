@@ -15,6 +15,7 @@ function source(relativePath) {
 const accountDetailSource = source('AccountDetailPage.tsx')
 const fundingSettlementsSource = source('FundingSettlementsPage.tsx')
 const fundingConfigSource = source('FundingConfigPage.tsx')
+const fundingFallbackModelSource = source('fundingFallbackModel.ts')
 const tradingApiSource = source('../services/adminTradingApi.ts')
 
 describe('admin demo trading operation pages', () => {
@@ -69,9 +70,11 @@ describe('admin demo trading operation pages', () => {
     assert.match(fundingConfigSource, /loadAllAdminPages/)
     assert.match(fundingConfigSource, /getFundingConfig/)
     assert.match(fundingConfigSource, /updateFundingConfig/)
-    assert.match(fundingConfigSource, /fundingFallbackState/)
-    assert.match(fundingConfigSource, /FALLBACK/)
-    assert.match(fundingConfigSource, /PRIMARY/)
+    assert.match(fundingConfigSource, /formatFundingFallbackState/)
+    assert.match(fundingFallbackModelSource, /config\.fallbackReason/)
+    assert.match(fundingFallbackModelSource, /config\.sourceMode/)
+    assert.match(fundingFallbackModelSource, /FALLBACK/)
+    assert.match(fundingFallbackModelSource, /PRIMARY/)
 
     for (const field of [
       'fundingSourcePriority',
@@ -79,7 +82,6 @@ describe('admin demo trading operation pages', () => {
       'fixedFundingIntervalMinutes',
       'fundingStaleSeconds',
       'actualSource',
-      'sourceMode',
       'asOf',
       'nextFundingTime'
     ]) {
