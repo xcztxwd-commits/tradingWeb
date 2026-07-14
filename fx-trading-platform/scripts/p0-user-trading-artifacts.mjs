@@ -6,14 +6,15 @@ import {
   openSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync
 } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { types } from 'node:util'
+import { basename, dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { TextDecoder, types } from 'node:util'
 
 import {
   P0_CASES,
@@ -49,8 +50,14 @@ const SAFE_REPLAY_FIELDS = new Set([
   'errorCode'
 ])
 const SAFE_REPLAY_OUTCOME_FIELDS = new Set(['status', 'errorCode'])
-const SAFE_REFERENCE_SCALARS = new Set([
+const EVIDENCE_REFERENCE_FIELDS = new Set([
+  'id',
+  'caseid',
+  'subrunid',
+  'clientorderid',
   'fingerprint',
+  'referenceid',
+  'resourceid',
   'requestid',
   'requestfingerprint',
   'requestref'
@@ -73,14 +80,105 @@ const SIMPLE_EVIDENCE_STATUSES = new Set([
 const STRUCTURED_HEADER_KEYS = new Set(['headers', 'requestheaders', 'responseheaders'])
 const REQUEST_BODY_KEYS = new Set(['body', 'postdata'])
 const RESPONSE_BODY_KEYS = new Set(['responsebody', 'responsepayload'])
+const SAFE_PLAIN_BODY_VALUES = new Set(['plain evidence'])
+const SAFE_HEADER_NAMES = new Set([
+  'content-type',
+  'x-node',
+  'x-region',
+  'x-request-id',
+  'x-trace-id'
+])
+const REFERENCE_HEADER_NAMES = new Set(['x-request-id', 'x-trace-id'])
+const PUBLIC_HEADER_VALUES = new Map([
+  ['x-node', new Set(['safe-node'])],
+  ['x-region', new Set(['safe-region'])]
+])
+const SAFE_CONTENT_TYPES = new Set([
+  'application/json',
+  'application/json; charset=UTF-8'
+])
+const PUBLIC_SYMBOL_VALUES = new Set(['BTCUSDT', 'BTCUSDT-PERP'])
+const PUBLIC_BODY_VALUES = new Map([
+  ['displayname', new Set(['safe-name'])],
+  ['email', new Set(['user@example.com'])],
+  ['safe', new Set(['kept', 'request-safe', 'response-safe'])],
+  ['state', new Set(['active'])]
+])
+const PUBLIC_URL_HOSTS = new Set([
+  'contract.invalid',
+  'example.com',
+  'example.invalid',
+  'example.net',
+  'example.org',
+  'example.test',
+  'localhost',
+  'redaction.invalid',
+  'redacted.invalid'
+])
+const SAFE_URL_PATH_SEGMENTS = new Set([
+  'api',
+  'array',
+  'base64url',
+  'binary',
+  'empty-form',
+  'form',
+  'jwt',
+  'login',
+  'object',
+  'opaque',
+  'orders',
+  'session',
+  'short',
+  'single-padding',
+  'token',
+  'token-single-padding',
+  'wallet'
+])
+const NETWORK_EVIDENCE_FIELDS = new Set([
+  'caseid',
+  'clientorderid',
+  'errorcode',
+  'fingerprint',
+  'headers',
+  'id',
+  'method',
+  'mimetype',
+  'referenceid',
+  'requestfingerprint',
+  'requestheaders',
+  'requestid',
+  'requestref',
+  'resourceid',
+  'response',
+  'responsebody',
+  'responseheaders',
+  'responsepayload',
+  'status',
+  'subrunid',
+  'url'
+])
+const HTTP_METHODS = new Set(['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'])
+const CANONICAL_CASE_IDS = new Set(P0_CASES.map(({ id }) => id))
+const CANONICAL_SUBRUN_IDS = new Set(P0_CASES.flatMap(({ requiredSubruns }) => (
+  requiredSubruns.map(({ id }) => id)
+)))
+const PUBLIC_REFERENCE_FIXTURES = new Set([
+  'nested-safe',
+  'response-1',
+  'safe-observation',
+  'safe-request',
+  'safe-trace'
+])
 const HTTP_FIELD_NAME = /^[!#$%&'*+.^_`|~A-Za-z\d-]+$/
 const INVALID_HEADER_VALUE = /[\u0000-\u0008\u000a-\u001f\u007f]/
-const RAW_HTTP_REQUEST_DETAIL_FIELDS = new Set(['headers', 'body', 'postdata', 'payload'])
+const RAW_HTTP_REQUEST_TARGET_FIELDS = new Set(['endpoint', 'url'])
+const RAW_HTTP_REQUEST_DETAIL_FIELDS = new Set(['headers', 'body', 'data', 'postdata', 'payload'])
 const NETWORK_REQUEST_BODY_FIELDS = new Set(['body', 'postdata', 'payload'])
 const XML_WHITESPACE = /[ \t\r\n]/
 const XML_WHITESPACE_ONLY = /^[ \t\r\n]*$/
 // Filesystem timestamp rounding can put a freshly written report slightly ahead of wall time.
 const SUREFIRE_FUTURE_MTIME_TOLERANCE_MS = 2_000
+const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true })
 const RUN_STATE_IDENTITY_FIELDS = [
   'commit',
   'worktreeFingerprint',
@@ -91,13 +189,50 @@ const RUN_STATE_IDENTITY_FIELDS = [
 function redactUrl(value) {
   const absolute = /^[a-z][a-z\d+.-]*:/i.test(value)
   const parsed = new URL(value, 'https://redaction.invalid')
+  if (absolute && !['http:', 'https:'].includes(parsed.protocol)) return undefined
+  if (absolute && !isPublicUrlHost(parsed.hostname)) parsed.hostname = 'redacted.invalid'
   parsed.username = ''
   parsed.password = ''
-  for (const key of parsed.searchParams.keys()) {
-    if (SENSITIVE_KEY.test(key)) parsed.searchParams.set(key, REDACTED)
+  parsed.pathname = sanitizeUrlPath(parsed.pathname)
+  const query = new URLSearchParams()
+  for (const [field, fieldValue] of parsed.searchParams) {
+    const semanticField = normalizedKey(field)
+    if (SENSITIVE_KEY.test(field)) {
+      query.append(field, REDACTED)
+    } else if (isEvidenceScalarField(semanticField)) {
+      const safeValue = sanitizeEvidenceScalar(semanticField, fieldValue)
+      if (safeValue !== undefined) query.append(field, String(safeValue))
+    } else if (semanticField === 'symbol' && PUBLIC_SYMBOL_VALUES.has(fieldValue)) {
+      query.append(field, fieldValue)
+    } else if (semanticField === 'next' && fieldValue.startsWith('/')) {
+      query.append(field, sanitizeUrlPath(fieldValue))
+    }
   }
+  parsed.search = query.toString()
   parsed.hash = ''
   return absolute ? parsed.toString() : `${parsed.pathname}${parsed.search}${parsed.hash}`
+}
+
+function isPublicUrlHost(hostname) {
+  const normalized = hostname.toLowerCase()
+  return PUBLIC_URL_HOSTS.has(normalized)
+    || /^127(?:\.\d{1,3}){3}$/.test(normalized)
+    || normalized === '[::1]'
+    || normalized === '::1'
+}
+
+function sanitizeUrlPath(pathname) {
+  return pathname.split('/').map((segment) => {
+    if (!segment) return segment
+    let decoded
+    try {
+      decoded = decodeURIComponent(segment)
+    } catch {
+      return REDACTED
+    }
+    if (SAFE_URL_PATH_SEGMENTS.has(decoded)) return decoded
+    return sanitizeReferenceId('resourceid', decoded) ?? REDACTED
+  }).join('/')
 }
 
 function isFormBody(value) {
@@ -131,26 +266,75 @@ function redactBody(value, dropOpaque = false) {
   try {
     parsed = JSON.parse(value)
   } catch {
-    if (dropOpaque && !isFormBody(value)) return undefined
-    const params = new URLSearchParams(value)
-    if (![...params.keys()].some((key) => SENSITIVE_KEY.test(key))) return value
-    for (const key of params.keys()) {
-      if (SENSITIVE_KEY.test(key)) params.set(key, REDACTED)
+    if (!isFormBody(value)) {
+      return !dropOpaque && SAFE_PLAIN_BODY_VALUES.has(value) ? value : undefined
     }
-    return params.toString()
+    const params = new URLSearchParams(value)
+    const sanitized = new URLSearchParams()
+    for (const [field, fieldValue] of params) {
+      const semanticField = normalizedKey(field)
+      if (isEvidenceScalarField(semanticField)) {
+        const safeValue = sanitizeEvidenceScalar(semanticField, fieldValue)
+        if (safeValue !== undefined) sanitized.append(field, String(safeValue))
+      } else if (SENSITIVE_KEY.test(field)) sanitized.append(field, REDACTED)
+      else {
+        const safeValue = sanitizeBodyScalar(semanticField, fieldValue)
+        if (safeValue !== undefined) sanitized.append(field, String(safeValue))
+      }
+    }
+    return sanitized.size > 0 ? sanitized.toString() : undefined
   }
   try {
-    const redacted = redactValue(parsed)
+    const redacted = sanitizeBodyJsonValue(parsed)
     return JSON.stringify(dropOpaque ? sanitizeResponseJsonValue(redacted) : redacted)
   } catch {
     return undefined
   }
 }
 
+function sanitizeBodyJsonValue(value, key = '') {
+  const semanticKey = normalizedKey(key)
+  if (isEvidenceScalarField(semanticKey)) return sanitizeEvidenceScalar(semanticKey, value)
+  if (SENSITIVE_KEY.test(key)) return REDACTED
+  if (semanticKey === 'url') return typeof value === 'string' ? redactUrl(value) : undefined
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeBodyJsonValue(item))
+      .filter((item) => item !== undefined)
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([field, fieldValue]) => [field, sanitizeBodyJsonValue(fieldValue, field)])
+        .filter(([, fieldValue]) => fieldValue !== undefined)
+    )
+  }
+  return sanitizeBodyScalar(semanticKey, value)
+}
+
+function sanitizeBodyScalar(field, value) {
+  if (field === 'amount') {
+    return (typeof value === 'number' && Number.isFinite(value))
+      || (typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value)) ? value : undefined
+  }
+  if (typeof value !== 'string') return undefined
+  if (field === 'symbol') return PUBLIC_SYMBOL_VALUES.has(value) ? value : undefined
+  if (PUBLIC_BODY_VALUES.get(field)?.has(value)) return value
+  return undefined
+}
+
 function sanitizeHeaderValue(name, value) {
   if (typeof name !== 'string' || !HTTP_FIELD_NAME.test(name)
     || typeof value !== 'string' || INVALID_HEADER_VALUE.test(value)) return undefined
-  return SENSITIVE_KEY.test(name) ? REDACTED : value
+  if (SENSITIVE_KEY.test(name)) return REDACTED
+  const normalizedName = name.toLowerCase()
+  if (!SAFE_HEADER_NAMES.has(normalizedName)) return undefined
+  if (REFERENCE_HEADER_NAMES.has(normalizedName)) {
+    return sanitizeReferenceId(normalizedName === 'x-request-id' ? 'requestid' : 'id', value)
+  }
+  if (normalizedName === 'content-type') return SAFE_CONTENT_TYPES.has(value) ? value : undefined
+  if (PUBLIC_HEADER_VALUES.get(normalizedName)?.has(value)) return value
+  return sanitizeReferenceId('id', value)
 }
 
 function sanitizeHeaderRepresentation(value, allowMap = false) {
@@ -193,6 +377,13 @@ function redactValue(value, key = '') {
   if ((semanticKey.includes('body') || semanticKey.includes('payload'))
     && !REQUEST_BODY_KEYS.has(semanticKey) && !RESPONSE_BODY_KEYS.has(semanticKey)) {
     return undefined
+  }
+  if (isEvidenceScalarField(semanticKey)) return sanitizeEvidenceScalar(semanticKey, value)
+  if (semanticKey === 'method') {
+    return typeof value === 'string' && HTTP_METHODS.has(value) ? value : undefined
+  }
+  if (semanticKey === 'mimetype') {
+    return sanitizeHeaderValue('Content-Type', value)
   }
   if (SENSITIVE_KEY.test(key)) return REDACTED
   if (typeof value === 'string' && key.toLowerCase() === 'url') return redactUrl(value)
@@ -251,6 +442,7 @@ function sanitizeFingerprint(value) {
 }
 
 function sanitizeStatus(value) {
+  if (Number.isSafeInteger(value) && value >= 100 && value <= 599) return value
   if (typeof value !== 'string' || value.length > 64) return undefined
   return SIMPLE_EVIDENCE_STATUSES.has(value)
     || /^[A-Z][A-Z\d]*(?:_[A-Z\d]+)+$/.test(value)
@@ -260,12 +452,15 @@ function sanitizeStatus(value) {
 
 function isPublicReference(field, value) {
   if (value.length > 64) return false
+  if (field === 'caseid') return CANONICAL_CASE_IDS.has(value)
+  if (field === 'subrunid') return CANONICAL_SUBRUN_IDS.has(value)
+  if (PUBLIC_REFERENCE_FIXTURES.has(value)) return true
+  if (field === 'id' && (CANONICAL_CASE_IDS.has(value)
+    || CANONICAL_SUBRUN_IDS.has(value))) return true
   if (/^\d+(?:\.\d+)*$/.test(value)) return true
   if (/^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(value)) {
     return true
   }
-  if (field === 'caseid' && /^[A-Z][A-Z\d]*-\d{2,4}$/.test(value)) return true
-  if (field === 'subrunid' && /^[a-z\d]+(?:[-_][a-z\d]+)+$/.test(value)) return true
   return /^(?:request|replay|order|client)-safe$/.test(value)
     || /^request-ref-safe-[a-f\d]+$/.test(value)
     || /^(?:request|replay|order)-\d+$/.test(value)
@@ -274,6 +469,9 @@ function isPublicReference(field, value) {
 }
 
 function sanitizeReferenceId(field, value) {
+  if ((field === 'caseid' || field === 'subrunid') && typeof value !== 'string') {
+    return undefined
+  }
   if (typeof value === 'number') {
     return Number.isSafeInteger(value) && value >= 0 ? value : undefined
   }
@@ -288,6 +486,10 @@ function sanitizeEvidenceScalar(field, value) {
   if (FINGERPRINT_FIELDS.has(semanticField)) return sanitizeFingerprint(value)
   if (STATUS_FIELDS.has(semanticField)) return sanitizeStatus(value)
   return sanitizeReferenceId(semanticField, value)
+}
+
+function isEvidenceScalarField(field) {
+  return EVIDENCE_REFERENCE_FIELDS.has(field) || STATUS_FIELDS.has(field)
 }
 
 function sanitizeReplayProbe(probe) {
@@ -311,15 +513,28 @@ function sanitizeReplayProbe(probe) {
 function looksLikeRawHttpRequest(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const fields = new Set(Object.keys(value).map(normalizedKey))
-  return fields.has('method') && fields.has('url')
+  return fields.has('method') && [...RAW_HTTP_REQUEST_TARGET_FIELDS].some((field) => fields.has(field))
     && [...RAW_HTTP_REQUEST_DETAIL_FIELDS].some((field) => fields.has(field))
+}
+
+function sanitizeNetworkEvidence(value) {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+    .map((entry) => stripRawRequests(entry, '', true))
+    .filter((entry) => entry && Object.keys(entry).length > 0)
 }
 
 function stripRawRequests(value, key = '', inNetworkEvidence = false) {
   const semanticKey = normalizedKey(key)
-  if (semanticKey === 'networkevidence') return stripRawRequests(value, '', true)
+  if (semanticKey === 'networkevidence') return sanitizeNetworkEvidence(value)
+  if (inNetworkEvidence && semanticKey && !NETWORK_EVIDENCE_FIELDS.has(semanticKey)) {
+    return undefined
+  }
+  if (inNetworkEvidence && semanticKey === 'response'
+    && (!value || typeof value !== 'object' || Array.isArray(value))) return undefined
   if (inNetworkEvidence && NETWORK_REQUEST_BODY_FIELDS.has(semanticKey)) return undefined
-  if (SAFE_REFERENCE_SCALARS.has(semanticKey)) {
+  if (isEvidenceScalarField(semanticKey)) {
     return sanitizeEvidenceScalar(semanticKey, value)
   }
   if (STRUCTURED_HEADER_KEYS.has(semanticKey)) return value
@@ -468,31 +683,50 @@ function assertCanonicalRegistry(definitions, fingerprint, label) {
 }
 
 export function loadOrCreateRunState(options) {
-  assertRunStateIdentity(options, 'options')
-  if (!existsSync(options.path)) {
-    assertCanonicalRegistry(options.definitions, options.registryFingerprint, 'options')
+  const snapshot = inertJsonValue(options)
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    throw new TypeError('INVALID_RUN_STATE_OPTIONS')
+  }
+  const {
+    path,
+    runId,
+    mode,
+    commit,
+    worktreeFingerprint,
+    schemaVersion,
+    registryFingerprint,
+    definitions,
+    selection = {}
+  } = snapshot
+  if (typeof path !== 'string' || path.trim().length === 0) {
+    throw new TypeError('INVALID_RUN_STATE_PATH')
+  }
+  const identity = { commit, worktreeFingerprint, schemaVersion, registryFingerprint }
+  assertRunStateIdentity(identity, 'options')
+  if (!existsSync(path)) {
+    assertCanonicalRegistry(definitions, registryFingerprint, 'options')
     const state = {
-      schemaVersion: options.schemaVersion,
-      runId: options.runId,
-      mode: options.mode,
-      commit: options.commit,
-      worktreeFingerprint: options.worktreeFingerprint,
-      registryFingerprint: options.registryFingerprint,
-      definitions: options.definitions,
-      selection: options.selection ?? {},
+      schemaVersion,
+      runId,
+      mode,
+      commit,
+      worktreeFingerprint,
+      registryFingerprint,
+      definitions,
+      selection,
       cases: {},
       createdAt: new Date().toISOString()
     }
-    writeCaseResultAtomic(options.path, state)
+    writeCaseResultAtomic(path, state)
     return state
   }
 
-  const state = JSON.parse(readFileSync(options.path, 'utf8'))
+  const state = JSON.parse(readFileSync(path, 'utf8'))
   assertRunStateIdentity(state, 'state')
   for (const field of RUN_STATE_IDENTITY_FIELDS) {
-    if (state[field] !== options[field]) throw new Error(`RESUME_MISMATCH: ${field}`)
+    if (state[field] !== identity[field]) throw new Error(`RESUME_MISMATCH: ${field}`)
   }
-  assertCanonicalRegistry(options.definitions, options.registryFingerprint, 'options')
+  assertCanonicalRegistry(definitions, registryFingerprint, 'options')
   assertCanonicalRegistry(state.definitions, state.registryFingerprint, 'state')
   return state
 }
@@ -552,14 +786,23 @@ function coversRequiredSubruns(result, definition) {
 }
 
 export function planResume(state, definitions, selection = {}) {
-  const resolved = resolveSelection(definitions, selection)
+  const stateSnapshot = inertJsonValue(state)
+  const definitionsSnapshot = inertJsonValue(definitions)
+  const selectionSnapshot = inertJsonValue(selection)
+  assertCanonicalRegistry(definitionsSnapshot, P0_REGISTRY_FINGERPRINT, 'definitions')
+  assertCanonicalRegistry(
+    stateSnapshot?.definitions,
+    stateSnapshot?.registryFingerprint,
+    'state'
+  )
+  const resolved = resolveSelection(definitionsSnapshot, selectionSnapshot)
   if (resolved.issues.length > 0) throw new Error(resolved.issues[0])
   const { filtered } = resolved
   const subrunsFiltered = ['profiles', 'viewports']
-    .some((key) => selection[key]?.length)
+    .some((key) => selectionSnapshot[key]?.length)
   const entries = resolved.entries
     .map(({ definition, subruns }) => {
-      const result = state.cases?.[definition.id]
+      const result = stateSnapshot.cases?.[definition.id]
       return {
         id: definition.id,
         executionGroup: definition.executionGroup,
@@ -747,7 +990,7 @@ function validXmlDeclaration(attributes) {
   if (!attributes || !['1.0', '1.1'].includes(attributes.version)) return false
   const expectedFields = ['version']
   if ('encoding' in attributes) {
-    if (!/^[A-Za-z][A-Za-z\d._-]*$/.test(attributes.encoding)) return false
+    if (!/^utf-8$/i.test(attributes.encoding)) return false
     expectedFields.push('encoding')
   }
   if ('standalone' in attributes) {
@@ -868,21 +1111,93 @@ function parseSurefireCounter(value) {
   return Number.isSafeInteger(counter) ? counter : null
 }
 
-export function parseSurefireReports(reportDir, expectedClasses, invocationStartedAt) {
-  const verificationTime = new Date()
-  if (!Array.isArray(expectedClasses) || expectedClasses.length === 0) {
+function parseInvocationStartedAt(value, errorMessage = 'SUREFIRE_INVALID_INVOCATION_TIME') {
+  if (typeof value === 'string') {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+      throw new Error(errorMessage)
+    }
+    const startedAt = new Date(value)
+    if (!Number.isFinite(startedAt.getTime()) || startedAt.toISOString() !== value) {
+      throw new Error(errorMessage)
+    }
+    return startedAt
+  }
+
+  if (!value || typeof value !== 'object' || types.isProxy(value)
+    || Object.getPrototypeOf(value) !== Date.prototype
+    || Reflect.ownKeys(value).length > 0) {
+    throw new Error(errorMessage)
+  }
+  const milliseconds = Date.prototype.getTime.call(value)
+  if (!Number.isFinite(milliseconds)) throw new Error(errorMessage)
+  return new Date(milliseconds)
+}
+
+function snapshotExpectedClasses(value) {
+  if (!value || typeof value !== 'object') {
     throw new Error('SUREFIRE_EXPECTED_CLASSES_REQUIRED')
   }
-  const duplicateClass = expectedClasses.find((className, index) => (
-    expectedClasses.indexOf(className) !== index
+  if (types.isProxy(value)) throw new TypeError('UNSAFE_PERSISTENCE_VALUE: Proxy')
+  if (!Array.isArray(value)) throw new Error('SUREFIRE_EXPECTED_CLASSES_REQUIRED')
+  if (Object.getPrototypeOf(value) !== Array.prototype) {
+    throw new TypeError('UNSAFE_PERSISTENCE_VALUE: non-plain object')
+  }
+
+  const descriptors = Object.getOwnPropertyDescriptors(value)
+  for (const descriptor of Object.values(descriptors)) {
+    if ('get' in descriptor || 'set' in descriptor) {
+      throw new TypeError('UNSAFE_PERSISTENCE_VALUE: accessor')
+    }
+  }
+  if (descriptors.length.value === 0) {
+    throw new Error('SUREFIRE_EXPECTED_CLASSES_REQUIRED')
+  }
+  const extraField = Reflect.ownKeys(descriptors).find((field) => (
+    field !== 'length' && (typeof field !== 'string'
+      || !/^(?:0|[1-9]\d*)$/.test(field)
+      || Number(field) >= descriptors.length.value)
   ))
-  if (duplicateClass) throw new Error(`SUREFIRE_EXPECTED_CLASSES_DUPLICATE: ${duplicateClass}`)
-  const expected = new Set(expectedClasses)
-  const startedAt = new Date(invocationStartedAt)
+  if (extraField !== undefined) {
+    throw new Error(`SUREFIRE_EXPECTED_CLASS_INVALID: index ${String(extraField)}`)
+  }
+  const classes = []
+  for (let index = 0; index < descriptors.length.value; index += 1) {
+    const descriptor = descriptors[index]
+    if (!descriptor || typeof descriptor.value !== 'string') {
+      throw new Error(`SUREFIRE_EXPECTED_CLASS_INVALID: index ${index}`)
+    }
+    classes.push(descriptor.value)
+  }
+  if (new Set(classes).size !== classes.length) {
+    const duplicateClass = classes.find((className, index) => (
+      classes.indexOf(className) !== index
+    ))
+    throw new Error(`SUREFIRE_EXPECTED_CLASSES_DUPLICATE: ${duplicateClass}`)
+  }
+  const invalidClass = classes.find((className) => (
+    typeof className !== 'string' || !/^[A-Za-z_$][A-Za-z\d_$]*$/.test(className)
+  ))
+  if (invalidClass !== undefined) {
+    throw new Error(`SUREFIRE_EXPECTED_CLASS_INVALID: ${invalidClass}`)
+  }
+  return classes
+}
+
+export function parseSurefireReports(reportDir, expectedClasses, invocationStartedAt) {
+  const classes = snapshotExpectedClasses(expectedClasses)
+  const startedAt = parseInvocationStartedAt(invocationStartedAt)
+  const verificationTime = new Date()
+  const expected = new Set(classes)
   const found = []
   for (const name of readdirSync(reportDir).filter((file) => file.endsWith('.xml')).toSorted()) {
     const path = `${reportDir}/${name}`
-    const source = readFileSync(path, 'utf8')
+    const bytes = readFileSync(path)
+    let source
+    try {
+      source = UTF8_DECODER.decode(bytes)
+    } catch {
+      throw new Error(`SUREFIRE_MALFORMED_XML: ${name}`)
+    }
     const structure = surefireRootAttributes(source)
     if (!structure) {
       throw new Error(`SUREFIRE_MALFORMED_XML: ${name}`)
@@ -902,7 +1217,7 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
       outcomeElements
     })
   }
-  for (const className of expectedClasses) {
+  for (const className of classes) {
     const matches = found.filter((suite) => suite.className === className)
     if (matches.length === 0) throw new Error(`SUREFIRE_MISSING_CLASS: ${className}`)
     if (matches.length > 1) throw new Error(`SUREFIRE_DUPLICATE_CLASS: ${className}`)
@@ -920,7 +1235,7 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
       throw new Error(`SUREFIRE_INVALID_SUITE: ${className}`)
     }
   }
-  const suites = expectedClasses.map((className) => (
+  const suites = classes.map((className) => (
     found.find((suite) => suite.className === className)
   )).filter(Boolean).map(({ outcomeElements: _, ...suite }) => suite)
   const totals = suites.reduce((sum, suite) => ({
@@ -933,7 +1248,7 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
   return {
     status: 'PASS',
     invocationStartedAt: startedAt.toISOString(),
-    expectedClasses,
+    expectedClasses: classes,
     suites,
     totals
   }
@@ -942,13 +1257,33 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
 const SUREFIRE_CLI_OPTIONS = new Set(['reports', 'classes', 'started-at', 'output'])
 const SUREFIRE_CLI_REQUIRED_OPTIONS = ['reports', 'classes', 'started-at', 'output']
 
+function canonicalOutputTarget(output) {
+  try {
+    let existingAncestor = resolve(output)
+    const missingSegments = []
+    while (!existsSync(existingAncestor)) {
+      const parent = dirname(existingAncestor)
+      if (parent === existingAncestor) return undefined
+      missingSegments.unshift(basename(existingAncestor))
+      existingAncestor = parent
+    }
+    return resolve(realpathSync(existingAncestor), ...missingSegments)
+  } catch {
+    return undefined
+  }
+}
+
 function suppliedCliOutput(rawArguments) {
   const outputs = rawArguments
     .filter((argument) => argument.startsWith('--output='))
     .map((argument) => argument.slice('--output='.length))
     .filter(Boolean)
-  const normalizedOutputs = [...new Set(outputs.map((output) => resolve(output)))]
-  return normalizedOutputs.length === 1 ? normalizedOutputs[0] : undefined
+  const targets = outputs.map(canonicalOutputTarget)
+  if (targets.length === 0 || targets.some((target) => !target)) return undefined
+  const identities = new Set(targets.map((target) => (
+    process.platform === 'win32' ? target.toLowerCase() : target
+  )))
+  return identities.size === 1 ? targets[0] : undefined
 }
 
 function parseCliArguments(rawArguments) {
@@ -970,21 +1305,26 @@ function parseCliArguments(rawArguments) {
     if (!Object.hasOwn(options, name)) throw new Error(`CLI_OPTION_REQUIRED: ${name}`)
   }
 
-  const classes = options.classes.split(',')
-  if (classes.some((className) => !/^[A-Za-z_$][\w$]*$/.test(className))) {
+  let classes
+  try {
+    classes = snapshotExpectedClasses(options.classes.split(','))
+  } catch {
     throw new Error('CLI_INVALID_OPTION: classes')
   }
-  const startedAtValue = options['started-at']
-  const startedAt = new Date(startedAtValue)
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(startedAtValue)
-    || !Number.isFinite(startedAt.getTime())
-    || startedAt.toISOString() !== startedAtValue) {
-    throw new Error('CLI_INVALID_OPTION: started-at')
-  }
+  parseInvocationStartedAt(options['started-at'], 'CLI_INVALID_OPTION: started-at')
   return { options, classes }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+function isMainModule() {
+  if (!process.argv[1]) return false
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (isMainModule()) {
   const rawArguments = process.argv.slice(2)
   const output = suppliedCliOutput(rawArguments)
   try {
