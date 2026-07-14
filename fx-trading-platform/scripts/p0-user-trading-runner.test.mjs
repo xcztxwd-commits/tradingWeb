@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -597,6 +598,8 @@ test('dispatch invokes the declared handler and fails fast when it is absent', a
   )
 })
 
+const persistenceDigest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
+
 test('case evidence replaces atomically without leaving partial files', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-artifact-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -646,8 +649,8 @@ test('persistence rejects unsupported root evidence atomically', (t) => {
   })
   assert.deepEqual(JSON.parse(readFileSync(ordinaryPath, 'utf8')), {
     id: 'AUTH-02',
-    nested: { kept: 'safe' },
-    values: ['safe']
+    nested: { kept: persistenceDigest('safe') },
+    values: [persistenceDigest('safe')]
   })
 })
 
@@ -731,12 +734,15 @@ test('persistence serialization ignores toJSON hooks and non-JSON values', (t) =
     assert.equal(source.includes(nestedMarker), false)
     assert.equal(source.includes('toJSON'), false)
   }
-  assert.deepEqual(JSON.parse(rootSource), { id: 'AUTH-01', safe: 'root-safe' })
+  assert.deepEqual(JSON.parse(rootSource), {
+    id: 'AUTH-01',
+    safe: persistenceDigest('root-safe')
+  })
   assert.deepEqual(JSON.parse(nestedSource), {
     id: 'AUTH-02',
-    safe: 'outer-safe',
-    nested: { safe: 'inner-safe' },
-    values: ['kept', { safe: 'deep-safe' }]
+    safe: persistenceDigest('outer-safe'),
+    nested: { safe: persistenceDigest('inner-safe') },
+    values: [persistenceDigest('kept'), { safe: persistenceDigest('deep-safe') }]
   })
 })
 
@@ -751,7 +757,11 @@ for (const scenario of [
     const directory = mkdtempSync(join(tmpdir(), 'p0-accessor-input-'))
     t.after(() => rmSync(directory, { recursive: true, force: true }))
     const resultPath = join(directory, 'result.json')
-    const baseline = { id: 'AUTH-01', status: 'FAIL', reason: 'baseline' }
+    const baseline = {
+      id: 'AUTH-01',
+      status: 'FAIL',
+      reason: persistenceDigest('baseline')
+    }
     const marker = `FORBIDDEN_ACCESSOR_${scenario}`
     let calls = 0
     let input
@@ -802,7 +812,11 @@ for (const scenario of ['root-proxy', 'nested-proxy']) {
     const directory = mkdtempSync(join(tmpdir(), 'p0-proxy-input-'))
     t.after(() => rmSync(directory, { recursive: true, force: true }))
     const resultPath = join(directory, 'result.json')
-    const baseline = { id: 'AUTH-01', status: 'FAIL', reason: 'baseline' }
+    const baseline = {
+      id: 'AUTH-01',
+      status: 'FAIL',
+      reason: persistenceDigest('baseline')
+    }
     let traps = 0
     const proxy = new Proxy({ evidence: 'safe' }, {
       get(target, key, receiver) {
@@ -849,7 +863,11 @@ for (const [scenario, value] of [
     const directory = mkdtempSync(join(tmpdir(), 'p0-non-finite-'))
     t.after(() => rmSync(directory, { recursive: true, force: true }))
     const resultPath = join(directory, 'result.json')
-    const baseline = { id: 'AUTH-01', status: 'FAIL', reason: 'baseline' }
+    const baseline = {
+      id: 'AUTH-01',
+      status: 'FAIL',
+      reason: persistenceDigest('baseline')
+    }
     writeCaseResultAtomic(resultPath, baseline)
 
     assert.throws(
@@ -861,6 +879,7 @@ for (const [scenario, value] of [
 }
 
 test('network evidence redacts secrets recursively without mutating live replay data', () => {
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
   const entry = {
     url: '/api/orders?access_token=query-secret&symbol=BTCUSDT',
     headers: {
@@ -883,7 +902,7 @@ test('network evidence redacts secrets recursively without mutating live replay 
   assert.equal(entry.headers.Authorization, 'Bearer header-secret')
   assert.equal(redacted.headers.Authorization, '[REDACTED]')
   assert.equal(redacted.headers.Cookie, '[REDACTED]')
-  assert.equal(redacted.headers['X-Trace-Id'], 'safe-trace')
+  assert.equal(redacted.headers['X-Trace-Id'], digest('safe-trace'))
   assert.equal(new URL(redacted.url, 'https://contract.invalid').searchParams.get('access_token'), '[REDACTED]')
   assert.equal(new URL(redacted.url, 'https://contract.invalid').searchParams.get('symbol'), 'BTCUSDT')
   assert.deepEqual(JSON.parse(redacted.postData), {
@@ -896,23 +915,395 @@ test('network evidence redacts secrets recursively without mutating live replay 
   const form = redactNetworkEntry({
     url: 'https://example.invalid/login?token=url-secret&next=%2Fwallet',
     body: 'password=form-secret&email=user%40example.com',
-    postData: 'plain evidence'
+    postData: JSON.stringify({ symbol: 'ETHUSDT', status: 'ACCEPTED' })
   })
   assert.equal(new URL(form.url).searchParams.get('token'), '[REDACTED]')
   assert.equal(new URLSearchParams(form.body).get('password'), '[REDACTED]')
-  assert.equal(new URLSearchParams(form.body).get('email'), 'user@example.com')
-  assert.equal(form.postData, 'plain evidence')
+  assert.equal(new URLSearchParams(form.body).has('email'), false)
+  assert.deepEqual(JSON.parse(form.postData), { symbol: 'ETHUSDT', status: 'ACCEPTED' })
 
   const plainText = redactNetworkEntry({
     body: 'opaque credential words',
-    postData: 'plain evidence'
+    postData: JSON.stringify({ symbol: 'SOLUSDT-PERP', sourceMode: 'LOCAL_SIMULATED' })
   })
   assert.equal('body' in plainText, false)
-  assert.equal(plainText.postData, 'plain evidence')
+  assert.deepEqual(JSON.parse(plainText.postData), {
+    symbol: 'SOLUSDT-PERP',
+    sourceMode: 'LOCAL_SIMULATED'
+  })
+})
+
+test('public and persistence share a context-aware safe evidence boundary', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-context-safe-evidence-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const markers = {
+    nested: 'ITEM2_NESTED_CREDENTIAL_7b1a',
+    array: 'ITEM2_ARRAY_CREDENTIAL_2c2b',
+    failure: 'ITEM2_FAILURE_CREDENTIAL_3d3c',
+    blocker: 'ITEM2_BLOCKER_CREDENTIAL_4e4d',
+    checkpoint: 'ITEM2_CHECKPOINT_CREDENTIAL_5f5e',
+    dynamicKey: 'ITEM2_DYNAMIC_KEY_CREDENTIAL_6a6f',
+    rawEndpoint: 'ITEM2_RAW_ENDPOINT_CREDENTIAL_7b70',
+    rawData: 'ITEM2_RAW_DATA_CREDENTIAL_8c81',
+    rawResponse: 'ITEM2_RAW_RESPONSE_CREDENTIAL_9d92',
+    urlUserinfo: 'ITEM2_URL_USERINFO_CREDENTIAL_ae03',
+    urlQuery: 'ITEM2_URL_QUERY_CREDENTIAL_bf14',
+    urlBody: 'ITEM2_URL_BODY_CREDENTIAL_c025',
+    bearer: 'ITEM2_BEARER_CREDENTIAL_d136',
+    cookie: 'ITEM2_COOKIE_CREDENTIAL_e247',
+    session: 'ITEM2_SESSION_CREDENTIAL_f358',
+    password: 'ITEM2_PASSWORD_CREDENTIAL_0469',
+    token: 'ITEM2_TOKEN_CREDENTIAL_157a',
+    jwt: 'eyJhbGciOiJIUzI1NiJ9.SVRFTTJfSldUX0NSRURFTlRJQUxfMjY4Yg.signature268b',
+    base64: 'SVRFTTJfQkFTRTY0X0NSRURFTlRJQUxfMzc5Yw==',
+    aws: 'AKIAITEM2CRED48AD90E',
+    opaque: 'mQ9ITEM2opaqueCredential59be+/='
+  }
+  const usefulOpaque = 'ordinary-correlation-item2-6acf'
+  const expectedOpaque = `sha256:${createHash('sha256').update(usefulOpaque).digest('hex')}`
+  const evidence = {
+    id: 'AUTH-01',
+    status: 'PASS',
+    method: 'GET',
+    symbol: 'BTCUSDT',
+    flag: true,
+    count: 7,
+    empty: null,
+    note: usefulOpaque,
+    ordinary: {
+      nestedNote: `Bearer ${markers.nested}`,
+      list: [`token=${markers.array}`]
+    },
+    failure: { message: `password=${markers.failure}` },
+    blocker: { message: `session=${markers.blocker}` },
+    checkpoint: { message: `Cookie: session=${markers.checkpoint}` },
+    [`password-${markers.dynamicKey}`]: 'redact-me',
+    rawRequestAlias: {
+      method: 'POST',
+      endpoint: `/api/${markers.rawEndpoint}`,
+      data: { session: `session=${markers.rawData}` },
+      response: { note: `Bearer ${markers.rawResponse}` }
+    },
+    url: {
+      userinfo: `password=${markers.urlUserinfo}`,
+      query: { token: markers.urlQuery },
+      body: [`Bearer ${markers.urlBody}`]
+    },
+    credentialSamples: [
+      `Bearer ${markers.bearer}`,
+      `Cookie: session=${markers.cookie}`,
+      `session=${markers.session}`,
+      `password=${markers.password}`,
+      `token=${markers.token}`,
+      markers.jwt,
+      markers.base64,
+      markers.aws,
+      markers.opaque
+    ]
+  }
+  const original = structuredClone(evidence)
+
+  const redacted = redactNetworkEntry(evidence)
+  writeCaseResultAtomic(resultPath, evidence)
+
+  assert.deepEqual(evidence, original)
+  const publicSource = JSON.stringify(redacted)
+  const persistedSource = readFileSync(resultPath, 'utf8')
+  for (const marker of Object.values(markers)) {
+    assert.equal(publicSource.includes(marker), false, `public ${marker}`)
+    assert.equal(persistedSource.includes(marker), false, `persisted ${marker}`)
+  }
+  const persisted = JSON.parse(persistedSource)
+  for (const safe of [redacted, persisted]) {
+    assert.equal(safe.id, 'AUTH-01')
+    assert.equal(safe.status, 'PASS')
+    assert.equal(safe.method, 'GET')
+    assert.equal(safe.symbol, 'BTCUSDT')
+    assert.equal(safe.flag, true)
+    assert.equal(safe.count, 7)
+    assert.equal(safe.empty, null)
+    assert.equal(safe.note, expectedOpaque)
+    assert.equal('url' in safe, false)
+    assert.equal('rawRequestAlias' in safe, false)
+  }
+})
+
+test('persistence preserves the real P0 typed evidence contract', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-domain-evidence-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const symbols = [
+    'BTCUSDT',
+    'ETHUSDT',
+    'BNBUSDT',
+    'SOLUSDT',
+    'XRPUSDT',
+    'BTCUSDT-PERP',
+    'ETHUSDT-PERP',
+    'BNBUSDT-PERP',
+    'SOLUSDT-PERP',
+    'XRPUSDT-PERP'
+  ]
+  const orderStatuses = [
+    'RECEIVED',
+    'VALIDATING',
+    'ACCEPTED',
+    'WORKING',
+    'PARTIALLY_FILLED',
+    'PENDING_ACTIVATION',
+    'PENDING',
+    'FILLED',
+    'CANCEL_PENDING',
+    'CANCELED',
+    'CANCELLED',
+    'REJECTED',
+    'EXPIRED',
+    'FAILED'
+  ]
+  const tradingEventTypes = [
+    'ORDER_ACCEPTED',
+    'ORDER_PENDING',
+    'ORDER_FILLED',
+    'ORDER_CANCELED',
+    'ORDER_REJECTED',
+    'ORDER_EXPIRED',
+    'ORDER_MODIFIED',
+    'TRADE_CREATED',
+    'BALANCE_UPDATED',
+    'POSITION_UPDATED',
+    'POSITION_CLOSED',
+    'PROTECTION_CREATED',
+    'PROTECTION_UPDATED',
+    'PROTECTION_ACTIVATED',
+    'PROTECTION_TRIGGERED',
+    'PROTECTION_RESIZED',
+    'PROTECTION_CANCELED',
+    'PROTECTION_EXPIRED',
+    'FUNDING_SETTLED',
+    'MARGIN_ADJUSTED',
+    'TRANSFER_COMPLETED',
+    'LIQUIDATION',
+    'DEMO_RESET',
+    'MARKET_SOURCE_CHANGED'
+  ]
+  const ledgerEntryTypes = [
+    'DEMO_INIT',
+    'DEMO_RESET',
+    'TRANSFER_IN',
+    'TRANSFER_OUT',
+    'DEMO_DEPOSIT',
+    'ORDER_HOLD',
+    'ORDER_RELEASE',
+    'MARGIN_HOLD',
+    'MARGIN_RELEASE',
+    'TRADE_FEE',
+    'TRADE_PNL',
+    'FUNDING_FEE',
+    'FINANCING',
+    'CONVERSION_FEE',
+    'LIQUIDATION_FEE',
+    'BANKRUPTCY_SHORTFALL',
+    'FORCED_CLOSE',
+    'ADMIN_ADJUSTMENT',
+    'CREDIT_AVAILABLE',
+    'DEBIT_AVAILABLE',
+    'LOCK_AVAILABLE',
+    'RELEASE_LOCKED',
+    'DEBIT_LOCKED'
+  ]
+  const snapshots = {
+    catalog: symbols.map((symbol) => ({ symbol })),
+    market: {
+      symbol: 'ETHUSDT',
+      bid: '3450.10',
+      ask: '3450.20',
+      last: '3450.15',
+      mark: '3450.12',
+      index: '3450.08',
+      provider: 'binance',
+      providerCode: 'binance',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      asOf: '2026-07-14T00:00:00.000Z',
+      expiresAt: '2026-07-14T00:00:05.000Z',
+      stale: false
+    },
+    order: {
+      id: '11111111-1111-4111-8111-111111111111',
+      clientOrderId: '22222222-2222-4222-8222-222222222222',
+      symbol: 'BTCUSDT',
+      status: 'FILLED',
+      origin: 'USER',
+      side: 'BUY',
+      type: 'LIMIT',
+      orderType: 'LIMIT',
+      quantity: '0.25000000',
+      unit: 'BASE',
+      quantityUnit: 'BASE',
+      baseQuantity: '0.25000000',
+      fill: '0.25000000',
+      filledQuantity: '0.25000000',
+      price: '68000.50',
+      fee: '8.50006250',
+      feeAsset: 'USDT',
+      liquidityRole: 'TAKER',
+      realizedPnl: '12.25',
+      reduceOnly: false,
+      version: 3,
+      createdAt: '2026-07-14T00:01:00.000Z'
+    },
+    trade: {
+      id: '33333333-3333-4333-8333-333333333333',
+      orderId: '11111111-1111-4111-8111-111111111111',
+      symbol: 'BTCUSDT-PERP',
+      side: 'SELL',
+      price: '68125.75',
+      quantity: '2',
+      fee: '0.75',
+      feeAsset: 'USDT',
+      liquidityRole: 'MAKER',
+      realizedPnl: '-3.50',
+      providerCode: 'binance-usdm',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      executedAt: '2026-07-14T00:02:00.000Z'
+    },
+    position: {
+      id: '44444444-4444-4444-8444-444444444444',
+      symbol: 'SOLUSDT-PERP',
+      slot: 1,
+      side: 'LONG',
+      positionSide: 'LONG',
+      quantity: '12.5',
+      entry: '145.20',
+      mark: '146.10',
+      upl: '11.25',
+      realizedPnl: '3.75',
+      margin: '90.75',
+      leverage: 20,
+      maintenance: '18.15',
+      liquidation: '132.40',
+      marginMode: 'ISOLATED',
+      status: 'OPEN',
+      version: 9,
+      openedAt: '2026-07-14T00:03:00.000Z'
+    },
+    account: {
+      balance: '100000.00',
+      equity: '100015.00',
+      usedMargin: '90.75',
+      freeMargin: '99924.25',
+      available: '99924.25',
+      locked: '75.00',
+      total: '100000.00'
+    },
+    wallet: {
+      walletType: 'USDT_PERP',
+      asset: 'USDT',
+      available: '9975.00',
+      locked: '25.00',
+      total: '10000.00'
+    },
+    ledger: {
+      operation: 'ORDER_HOLD',
+      operationType: 'ORDER_HOLD',
+      entryType: 'TRADE_FEE',
+      eventType: 'ORDER_FILLED',
+      referenceType: 'ORDER',
+      amount: '-8.50006250',
+      referenceId: '11111111-1111-4111-8111-111111111111',
+      balanceAfter: '99991.49993750',
+      resourceType: 'ORDER',
+      resourceId: '11111111-1111-4111-8111-111111111111',
+      createdAt: '2026-07-14T00:04:00.000Z'
+    },
+    enums: {
+      orderStatuses: orderStatuses.map((status) => ({ status })),
+      orderTypes: ['MARKET', 'LIMIT', 'STOP', 'STOP_MARKET'].map((orderType) => ({ orderType })),
+      sides: ['BUY', 'SELL'].map((side) => ({ side })),
+      positionSides: ['BOTH', 'LONG', 'SHORT'].map((positionSide) => ({ positionSide })),
+      origins: [
+        'USER',
+        'PROTECTIVE',
+        'LIQUIDATION',
+        'ADMIN_FORCE_CLOSE',
+        'BATCH_CLOSE',
+        'OCO'
+      ].map((origin) => ({ origin })),
+      units: ['BASE', 'QUOTE', 'CONTRACTS'].map((quantityUnit) => ({ quantityUnit })),
+      marginModes: ['CASH', 'CROSS', 'ISOLATED'].map((marginMode) => ({ marginMode })),
+      liquidityRoles: ['MAKER', 'TAKER'].map((liquidityRole) => ({ liquidityRole })),
+      sourceModes: ['PUBLIC_EXTERNAL', 'LOCAL_SIMULATED'].map((sourceMode) => ({ sourceMode })),
+      providers: [
+        'binance',
+        'okx',
+        'local-spot',
+        'binance-usdm',
+        'okx-swap',
+        'local-perp'
+      ].map((providerCode) => ({ providerCode })),
+      eventTypes: tradingEventTypes.map((eventType) => ({ eventType })),
+      ledgerEntryTypes: ledgerEntryTypes.map((entryType) => ({ entryType }))
+    }
+  }
+  const marker = 'ITEM3_TYPED_FIELD_CREDENTIAL_7bd1'
+  const credentialFields = [
+    'symbol',
+    'bid',
+    'provider',
+    'providerCode',
+    'sourceMode',
+    'asOf',
+    'status',
+    'origin',
+    'side',
+    'orderType',
+    'quantity',
+    'quantityUnit',
+    'feeAsset',
+    'liquidityRole',
+    'positionSide',
+    'marginMode',
+    'walletType',
+    'asset',
+    'operationType',
+    'entryType',
+    'eventType',
+    'referenceType',
+    'resourceType',
+    'createdAt'
+  ]
+  const result = {
+    id: 'AUTH-01',
+    status: 'PASS',
+    snapshots,
+    rejected: Object.fromEntries(
+      credentialFields.map((field) => [field, `Bearer ${marker}-${field}`])
+    ),
+    invalidTypes: {
+      bid: '01.0',
+      quantity: '1e3',
+      leverage: 20.5,
+      version: -1,
+      stale: 'false',
+      asOf: '2026-07-14T08:00:00+08:00'
+    }
+  }
+  const original = structuredClone(result)
+
+  writeCaseResultAtomic(resultPath, result)
+
+  assert.deepEqual(result, original)
+  const source = readFileSync(resultPath, 'utf8')
+  assert.equal(source.includes(marker), false)
+  const persisted = JSON.parse(source)
+  assert.deepEqual(persisted.snapshots, snapshots)
+  assert.deepEqual(persisted.rejected, {})
+  assert.deepEqual(persisted.invalidTypes, {})
 })
 
 test('network redaction sanitizes URL userinfo and explicit header representations', () => {
   const unknownMarker = 'UNKNOWN_HEADER_STRUCTURE_8ad4'
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
   const entry = {
     url: 'https://trader:plain-password@example.invalid/orders?token=query-secret&symbol=BTCUSDT#access_token=fragment-secret&tab=open',
     headers: {
@@ -946,22 +1337,22 @@ test('network redaction sanitizes URL userinfo and explicit header representatio
   assert.deepEqual(redacted.headers, {
     Authorization: '[REDACTED]',
     Cookie: '[REDACTED]',
-    'X-Trace-Id': 'safe-trace'
+    'X-Trace-Id': digest('safe-trace')
   })
   assert.deepEqual(redacted.responseHeaders, [
     { name: 'Set-Cookie', value: '[REDACTED]' },
     { name: 'Content-Type', value: 'application/json' },
     ['Authorization', '[REDACTED]'],
-    ['X-Request-Id', 'safe-request'],
+    ['X-Request-Id', digest('safe-request')],
     'Cookie: [REDACTED]',
-    'X-Region: safe-region'
+    `X-Region: ${digest('safe-region')}`
   ])
   assert.equal(JSON.stringify(redacted).includes(unknownMarker), false)
 })
 
 test('header evidence hashes bounded unknown values and rejects credential-shaped values', () => {
   const opaqueHeader = 'opaque-marker'
-  const credentialHeader = 'secret-token'
+  const credentialHeader = 'token=HEADER_CREDENTIAL_SECRET_4f8a'
   const accessKeySubtype = 'application/AKIAIOSFODNN7EXAMPLE'
   const secretCharset = `application/json; charset=${credentialHeader}`
   const entry = {
@@ -978,7 +1369,7 @@ test('header evidence hashes bounded unknown values and rejects credential-shape
     ]
   }
   const original = structuredClone(entry)
-  const digest = `sha256:${createHash('sha256').update(opaqueHeader).digest('hex')}`
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
 
   const redacted = redactNetworkEntry(entry)
 
@@ -988,10 +1379,10 @@ test('header evidence hashes bounded unknown values and rejects credential-shape
   assert.equal(serialized.includes(credentialHeader), false)
   assert.equal(serialized.includes(accessKeySubtype), false)
   assert.deepEqual(redacted, {
-    headers: { 'X-Node': digest },
+    headers: { 'X-Node': digest(opaqueHeader) },
     responseHeaders: [
-      ['X-Node', 'safe-node'],
-      ['X-Region', 'safe-region'],
+      ['X-Node', digest('safe-node')],
+      ['X-Region', digest('safe-region')],
       ['Content-Type', 'application/json']
     ]
   })
@@ -1003,6 +1394,7 @@ test('persistence drops raw header text blobs without mutating safe network meta
   const resultPath = join(directory, 'result.json')
   const requestMarker = 'RAW_AUTHORIZATION_HEADER_TEXT_f271'
   const responseMarker = 'RAW_SET_COOKIE_HEADER_TEXT_88d4'
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
   const result = {
     id: 'AUTH-01',
     networkEvidence: [{
@@ -1031,7 +1423,7 @@ test('persistence drops raw header text blobs without mutating safe network meta
     url: '/api/orders?symbol=BTCUSDT',
     status: 200,
     mimeType: 'application/json',
-    headers: { 'X-Trace-Id': 'safe-trace' }
+    headers: { 'X-Trace-Id': digest('safe-trace') }
   })
 })
 
@@ -1078,6 +1470,7 @@ test('header evidence rejects control injection and raw aliases', (t) => {
     }]
   }
   const original = structuredClone(result)
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
 
   writeCaseResultAtomic(resultPath, result)
 
@@ -1086,14 +1479,14 @@ test('header evidence rejects control injection and raw aliases', (t) => {
   for (const marker of Object.values(markers)) assert.equal(source.includes(marker), false, marker)
   assert.deepEqual(JSON.parse(source).networkEvidence[0], {
     headers: {
-      'X-Trace-Id': 'safe-trace',
+      'X-Trace-Id': digest('safe-trace'),
       Authorization: '[REDACTED]'
     },
-    requestHeaders: { 'X-Request-Id': 'safe-request' },
+    requestHeaders: { 'X-Request-Id': digest('safe-request') },
     responseHeaders: [
       { name: 'Content-Type', value: 'application/json' },
-      ['X-Region', 'safe-region'],
-      'X-Node: safe-node'
+      ['X-Region', digest('safe-region')],
+      `X-Node: ${digest('safe-node')}`
     ]
   })
 })
@@ -1111,6 +1504,7 @@ test('persistence routes header and body evidence by positive schema', (t) => {
     bodyAlias: 'RAW_BODY_ALIAS_b4d7',
     payloadAlias: 'RAW_PAYLOAD_ALIAS_83ac'
   }
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
   const result = {
     id: 'AUTH-01',
     headerLines: `Authorization: Bearer ${markers.headerLines}`,
@@ -1125,10 +1519,18 @@ test('persistence routes header and body evidence by positive schema', (t) => {
     headers: { Authorization: 'Bearer request-secret', 'X-Trace-Id': 'safe-trace' },
     requestHeaders: [['X-Request-Id', 'safe-request']],
     responseHeaders: [{ name: 'Set-Cookie', value: 'session=response-secret' }],
-    Bo_Dy: JSON.stringify({ password: 'request-json-secret', safe: 'request-safe' }),
-    POST_DATA: 'password=request-form-secret&safe=request-form-safe',
-    response_body: JSON.stringify({ accessToken: 'response-json-secret', safe: 'response-safe' }),
-    'Response-Payload': 'password=response-form-secret&safe=response-form-safe'
+    Bo_Dy: JSON.stringify({
+      password: 'request-json-secret',
+      symbol: 'ETHUSDT',
+      status: 'ACCEPTED'
+    }),
+    POST_DATA: 'password=request-form-secret&symbol=BNBUSDT',
+    response_body: JSON.stringify({
+      accessToken: 'response-json-secret',
+      symbol: 'SOLUSDT-PERP',
+      sourceMode: 'LOCAL_SIMULATED'
+    }),
+    'Response-Payload': 'password=response-form-secret&status=FILLED'
   }
   const original = structuredClone(result)
 
@@ -1151,23 +1553,27 @@ test('persistence routes header and body evidence by positive schema', (t) => {
   ]) assert.equal(alias in persisted, false, alias)
   assert.deepEqual(persisted.headers, {
     Authorization: '[REDACTED]',
-    'X-Trace-Id': 'safe-trace'
+    'X-Trace-Id': digest('safe-trace')
   })
-  assert.deepEqual(persisted.requestHeaders, [['X-Request-Id', 'safe-request']])
+  assert.deepEqual(persisted.requestHeaders, [['X-Request-Id', digest('safe-request')]])
   assert.deepEqual(persisted.responseHeaders, [{ name: 'Set-Cookie', value: '[REDACTED]' }])
   assert.deepEqual(JSON.parse(persisted.Bo_Dy), {
     password: '[REDACTED]',
-    safe: 'request-safe'
+    symbol: 'ETHUSDT',
+    status: 'ACCEPTED'
   })
   assert.equal(new URLSearchParams(persisted.POST_DATA).get('password'), '[REDACTED]')
+  assert.equal(new URLSearchParams(persisted.POST_DATA).get('symbol'), 'BNBUSDT')
   assert.deepEqual(JSON.parse(persisted.response_body), {
     accessToken: '[REDACTED]',
-    safe: 'response-safe'
+    symbol: 'SOLUSDT-PERP',
+    sourceMode: 'LOCAL_SIMULATED'
   })
   assert.equal(
     new URLSearchParams(persisted['Response-Payload']).get('password'),
     '[REDACTED]'
   )
+  assert.equal(new URLSearchParams(persisted['Response-Payload']).get('status'), 'FILLED')
 })
 
 test('persistence applies positive header body URL and network schemas', (t) => {
@@ -1192,9 +1598,9 @@ test('persistence applies positive header body URL and network schemas', (t) => 
     id: 'AUTH-01',
     body: JSON.stringify({
       data: markers.requestData,
-      safe: 'request-safe',
+      symbol: 'BNBUSDT',
+      status: 'ACCEPTED',
       amount: '10',
-      email: 'user@example.com',
       password: 'request-password-secret'
     }),
     arbitraryEvidence: [{
@@ -1220,13 +1626,18 @@ test('persistence applies positive header body URL and network schemas', (t) => 
       ],
       responseBody: JSON.stringify({
         data: markers.responseData,
-        profile: { displayName: 'safe-name', unknown: markers.responseData },
-        state: 'active',
+        market: {
+          symbol: 'XRPUSDT',
+          sourceMode: 'PUBLIC_EXTERNAL',
+          unknown: markers.responseData
+        },
+        status: 'FILLED',
         accessToken: 'response-token-secret'
       }),
       responsePayload: new URLSearchParams({
         data: markers.formData,
-        state: 'active',
+        symbol: 'XRPUSDT',
+        status: 'FILLED',
         password: 'form-password-secret'
       }).toString(),
       requestData: markers.networkAlias,
@@ -1246,9 +1657,9 @@ test('persistence applies positive header body URL and network schemas', (t) => 
   for (const marker of Object.values(markers)) assert.equal(source.includes(marker), false, marker)
   const persisted = JSON.parse(source)
   assert.deepEqual(JSON.parse(persisted.body), {
-    safe: 'request-safe',
+    symbol: 'BNBUSDT',
+    status: 'ACCEPTED',
     amount: '10',
-    email: 'user@example.com',
     password: '[REDACTED]'
   })
   assert.deepEqual(persisted.arbitraryEvidence, [])
@@ -1283,13 +1694,14 @@ test('persistence applies positive header body URL and network schemas', (t) => 
     ['Content-Type', 'application/json']
   ])
   assert.deepEqual(JSON.parse(network.responseBody), {
-    profile: { displayName: 'safe-name' },
-    state: 'active',
+    market: { symbol: 'XRPUSDT', sourceMode: 'PUBLIC_EXTERNAL' },
+    status: 'FILLED',
     accessToken: '[REDACTED]'
   })
   const form = new URLSearchParams(network.responsePayload)
   assert.equal(form.has('data'), false)
-  assert.equal(form.get('state'), 'active')
+  assert.equal(form.get('symbol'), 'XRPUSDT')
+  assert.equal(form.get('status'), 'FILLED')
   assert.equal(form.get('password'), '[REDACTED]')
   assert.deepEqual(network.response, { status: 201 })
 })
@@ -1313,11 +1725,12 @@ test('body and URL schemas accept only contract-owned raw strings', (t) => {
       })
     }, {
       body: JSON.stringify({
-        symbol: 'BTCUSDT-PERP',
-        safe: 'request-safe',
-        state: 'active',
-        displayName: 'safe-name',
-        email: 'user@example.com'
+        symbol: 'ETHUSDT-PERP',
+        status: 'FILLED',
+        side: 'BUY',
+        orderType: 'MARKET',
+        quantity: '1.25',
+        sourceMode: 'PUBLIC_EXTERNAL'
       })
     }],
     networkEvidence: [{
@@ -1342,11 +1755,12 @@ test('body and URL schemas accept only contract-owned raw strings', (t) => {
   const persisted = JSON.parse(source)
   assert.deepEqual(JSON.parse(persisted.checks[0].body), {})
   assert.deepEqual(JSON.parse(persisted.checks[1].body), {
-    symbol: 'BTCUSDT-PERP',
-    safe: 'request-safe',
-    state: 'active',
-    displayName: 'safe-name',
-    email: 'user@example.com'
+    symbol: 'ETHUSDT-PERP',
+    status: 'FILLED',
+    side: 'BUY',
+    orderType: 'MARKET',
+    quantity: '1.25',
+    sourceMode: 'PUBLIC_EXTERNAL'
   })
   const unsafeUrl = new URL(persisted.networkEvidence[0].url)
   assert.equal(unsafeUrl.hostname, 'redacted.invalid')
@@ -1431,6 +1845,7 @@ test('persistence strips raw replay requests but keeps sanitized replay and netw
     replay: 'REPLAY_PROBE_ONLY_8e62',
     network: 'NETWORK_SECRET_ONLY_2bd5'
   }
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
 
   writeCaseResultAtomic(resultPath, {
     id: 'RES-01',
@@ -1468,8 +1883,8 @@ test('persistence strips raw replay requests but keeps sanitized replay and netw
   assert.equal('rawRequest' in persisted, false)
   assert.equal('requestPayload' in persisted, false)
   assert.deepEqual(persisted.replayProbes, [{
-    id: 'replay-1',
-    referenceId: 'order-1',
+    id: digest('replay-1'),
+    referenceId: digest('order-1'),
     fingerprint: `sha256:${'1'.repeat(64)}`,
     outcome: { status: 'REJECTED', errorCode: 'REQUEST_CONFLICT' }
   }])
@@ -1492,6 +1907,7 @@ test('persistence rejects semantic request containers and nested replay tuples',
     body: 'REQUEST_BODY_BYPASS_961c',
     tuple: 'REQUEST_TUPLE_BYPASS_a74e'
   }
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
 
   writeCaseResultAtomic(resultPath, {
     id: 'RES-01',
@@ -1533,10 +1949,10 @@ test('persistence rejects semantic request containers and nested replay tuples',
   }
   const persisted = JSON.parse(serialized)
   assert.deepEqual(persisted.replayProbes, [{
-    id: 'replay-safe',
-    referenceId: 'order-safe',
-    requestId: 'request-safe',
-    clientOrderId: 'client-safe',
+    id: digest('replay-safe'),
+    referenceId: digest('order-safe'),
+    requestId: digest('request-safe'),
+    clientOrderId: digest('client-safe'),
     fingerprint: `sha256:${'2'.repeat(64)}`,
     requestFingerprint: `sha256:${'3'.repeat(64)}`,
     outcome: { status: 'REJECTED', errorCode: 'REQUEST_CONFLICT' }
@@ -1560,6 +1976,7 @@ test('persistence drops structurally raw HTTP requests outside sanitized network
     networkPostData: 'NETWORK_REQUEST_POST_DATA_3e64',
     networkPayload: 'NETWORK_REQUEST_PAYLOAD_972b'
   }
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
 
   writeCaseResultAtomic(resultPath, {
     id: 'RES-01',
@@ -1593,7 +2010,7 @@ test('persistence drops structurally raw HTTP requests outside sanitized network
   assert.equal(serialized.includes('"rawReplayPayload"'), false)
   const persisted = JSON.parse(serialized)
   assert.deepEqual(persisted.arbitraryEvidence, [
-    { id: 'safe-observation', status: 'OBSERVED' }
+    { id: digest('safe-observation'), status: 'OBSERVED' }
   ])
   assert.deepEqual(persisted.networkEvidence, [{
     method: 'POST',
@@ -1609,6 +2026,7 @@ test('persistence keeps only scalar user action requestRef evidence', (t) => {
   const resultPath = join(directory, 'result.json')
   const requestRef = 'request-ref-safe-78b1'
   const attackMarker = 'REQUEST_REF_OBJECT_ATTACK_d497'
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
 
   writeCaseResultAtomic(resultPath, {
     id: 'AUTH-01',
@@ -1628,8 +2046,8 @@ test('persistence keeps only scalar user action requestRef evidence', (t) => {
   const serialized = readFileSync(resultPath, 'utf8')
   assert.equal(serialized.includes(attackMarker), false)
   assert.deepEqual(JSON.parse(serialized).userActions, [
-    { action: 'submit-order', requestRef },
-    { action: 'non-scalar-attack' }
+    { action: digest('submit-order'), requestRef: digest(requestRef) },
+    { action: digest('non-scalar-attack') }
   ])
 })
 
@@ -1687,6 +2105,12 @@ test('persistence sanitizes scalar reference and replay fields and drops standal
     errorCode: 'REQUEST_CONFLICT',
     outcome: { status: 'REJECTED', errorCode: 'REQUEST_CONFLICT' }
   }
+  const persistedSafeReplay = {
+    ...safeReplay,
+    id: digest(safeReplay.id),
+    referenceId: digest(safeReplay.referenceId),
+    clientOrderId: digest(safeReplay.clientOrderId)
+  }
   const result = {
     id: 'AUTH-01',
     userActions: [
@@ -1715,22 +2139,28 @@ test('persistence sanitizes scalar reference and replay fields and drops standal
   for (const marker of Object.values(markers)) assert.equal(source.includes(marker), false)
   const persisted = JSON.parse(source)
   assert.deepEqual(persisted.userActions, [
-    { action: 'unsafe-ref' },
-    { action: 'safe-ref', requestRef: 'request-ref-safe-78b1' },
-    { action: 'unsafe-id' },
-    { action: 'safe-id', requestId: '1234.56' },
+    { action: digest('unsafe-ref') },
+    { action: digest('safe-ref'), requestRef: digest('request-ref-safe-78b1') },
+    { action: digest('unsafe-id') },
+    { action: digest('safe-id'), requestId: '1234.56' },
     {
-      action: 'unsafe-request-fingerprint',
+      action: digest('unsafe-request-fingerprint'),
       requestFingerprint: digest(`password=${markers.requestFingerprint}`)
     },
-    { action: 'safe-request-fingerprint', requestFingerprint: `sha256:${'c'.repeat(64)}` },
-    { action: 'unsafe-fingerprint', fingerprint: digest(`token=${markers.fingerprint}`) },
-    { action: 'safe-fingerprint', fingerprint: `sha256:${'d'.repeat(64)}` }
+    {
+      action: digest('safe-request-fingerprint'),
+      requestFingerprint: `sha256:${'c'.repeat(64)}`
+    },
+    {
+      action: digest('unsafe-fingerprint'),
+      fingerprint: digest(`token=${markers.fingerprint}`)
+    },
+    { action: digest('safe-fingerprint'), fingerprint: `sha256:${'d'.repeat(64)}` }
   ])
   assert.deepEqual(persisted.replayProbes, [{
     fingerprint: digest(`token=${markers.replayFingerprint}`),
     requestFingerprint: digest(`secret=${markers.replayRequestFingerprint}`)
-  }, safeReplay])
+  }, persistedSafeReplay])
   assert.equal('payload' in persisted, false)
   assert.equal('requestPayload' in persisted, false)
 })
@@ -1793,15 +2223,15 @@ test('persistence hashes opaque references with field-specific rules', (t) => {
   }
   const persisted = JSON.parse(source)
   assert.deepEqual(persisted.userActions, [
-    { action: 'jwt-ref', requestRef: digest(jwt) },
-    { action: 'base64url-id', requestId: digest(base64url) },
-    { action: 'opaque-ref', requestRef: digest(opaque) },
-    { action: 'opaque-id', requestId: digest(opaque) },
-    { action: 'jwt-fingerprint', requestFingerprint: digest(jwt) },
-    { action: 'canonical-fingerprint', fingerprint: canonicalFingerprint },
-    { action: 'cdp-request', requestId: '1234.56' },
-    { action: 'uuid-request', requestRef: uuid },
-    { action: 'client-request', requestRef: 'client_order-42' }
+    { action: digest('jwt-ref'), requestRef: digest(jwt) },
+    { action: digest('base64url-id'), requestId: digest(base64url) },
+    { action: digest('opaque-ref'), requestRef: digest(opaque) },
+    { action: digest('opaque-id'), requestId: digest(opaque) },
+    { action: digest('jwt-fingerprint'), requestFingerprint: digest(jwt) },
+    { action: digest('canonical-fingerprint'), fingerprint: canonicalFingerprint },
+    { action: digest('cdp-request'), requestId: '1234.56' },
+    { action: digest('uuid-request'), requestRef: uuid },
+    { action: digest('client-request'), requestRef: digest('client_order-42') }
   ])
   assert.deepEqual(persisted.replayProbes, [
     {
@@ -1809,10 +2239,123 @@ test('persistence hashes opaque references with field-specific rules', (t) => {
       referenceId: digest(base64url),
       fingerprint: digest(opaque)
     },
-    result.replayProbes[1]
+    {
+      id: digest('replay-1'),
+      caseId: 'AUTH-01',
+      subrunId: 'desktop-ui-core',
+      referenceId: digest('order/123'),
+      requestId: '1234.56',
+      clientOrderId: uuid,
+      fingerprint: canonicalFingerprint,
+      requestFingerprint: canonicalFingerprint,
+      status: 'REJECTED',
+      errorCode: 'REQUEST_CONFLICT',
+      outcome: { status: 'REJECTED', errorCode: 'REQUEST_CONFLICT' }
+    }
   ])
   assert.equal(persisted.userActions[2].requestRef, persisted.userActions[3].requestId)
   assert.equal(persisted.userActions[2].requestRef, persisted.replayProbes[0].fingerprint)
+})
+
+test('reference fields hash bounded correlations and expose only exact public identities', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-bounded-references-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const caseId = P0_CASES[0].id
+  const subrunId = P0_CASES[0].requiredSubruns[0].id
+  const uuid = '550e8400-e29b-41d4-a716-446655440000'
+  const correlations = {
+    secretary: 'secretary-correlation-123',
+    tokenized: 'tokenized-order-correlation-456',
+    longDigits: '1234567890123456789012345678901234567890',
+    longDotted: '1234567890.1234567890.1234567890.1234567890',
+    aws: 'AKIAIOSFODNN7EXAMPLE',
+    jwt: 'eyJhbGciOiJub25lIn0.eyJzdWIiOiJJVEVNNF9KV1QifQ.signaturepart',
+    base64: 'SVRFTTRfQkFTRTY0X0NPVlJFTEFUSU9OX01BUktFUg==',
+    opaque: 'Opaque+Item4Correlation==A7f4',
+    client: 'client_order-unknown-correlation-789',
+    order: 'order/unknown-correlation-987'
+  }
+  const credentialMarkers = {
+    bearer: 'ITEM4_BEARER_CREDENTIAL_17a1',
+    cookie: 'ITEM4_COOKIE_CREDENTIAL_28b2',
+    session: 'ITEM4_SESSION_CREDENTIAL_39c3',
+    password: 'ITEM4_PASSWORD_CREDENTIAL_40d4',
+    token: 'ITEM4_TOKEN_CREDENTIAL_51e5'
+  }
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
+  const result = {
+    id: caseId,
+    userActions: [
+      ...Object.values(correlations).map((requestRef) => ({ requestRef })),
+      { requestId: correlations.secretary },
+      { referenceId: correlations.secretary },
+      { requestRef: `Bearer ${credentialMarkers.bearer}` },
+      { requestRef: `Cookie: session=${credentialMarkers.cookie}` },
+      { requestRef: `session=${credentialMarkers.session}` },
+      { requestRef: `password=${credentialMarkers.password}` },
+      { requestRef: `token=${credentialMarkers.token}` }
+    ],
+    publicReferences: [
+      { id: caseId },
+      { caseId },
+      { subrunId },
+      { requestId: '1234.56' },
+      { referenceId: '1234.56' },
+      { requestRef: uuid },
+      { requestId: correlations.longDigits }
+    ],
+    numericReferences: {
+      id: 303,
+      requestId: 404,
+      referenceId: 505,
+      caseId: 606,
+      subrunId: 707
+    },
+    checkpoint: {
+      id: correlations.opaque,
+      referenceId: correlations.secretary,
+      clientOrderId: correlations.client,
+      requestId: correlations.tokenized
+    }
+  }
+  const original = structuredClone(result)
+
+  writeCaseResultAtomic(resultPath, result)
+
+  assert.deepEqual(result, original)
+  const source = readFileSync(resultPath, 'utf8')
+  for (const value of Object.values(correlations)) assert.equal(source.includes(value), false, value)
+  for (const marker of Object.values(credentialMarkers)) assert.equal(source.includes(marker), false, marker)
+  const persisted = JSON.parse(source)
+  Object.values(correlations).forEach((value, index) => {
+    assert.equal(persisted.userActions[index].requestRef, digest(value), value)
+  })
+  assert.equal(persisted.userActions[10].requestId, digest(correlations.secretary))
+  assert.equal(persisted.userActions[11].referenceId, digest(correlations.secretary))
+  for (const action of persisted.userActions.slice(12)) assert.equal('requestRef' in action, false)
+  assert.deepEqual(persisted.publicReferences, [
+    { id: caseId },
+    { caseId },
+    { subrunId },
+    { requestId: '1234.56' },
+    { referenceId: digest('1234.56') },
+    { requestRef: uuid },
+    { requestId: digest(correlations.longDigits) }
+  ])
+  assert.deepEqual(persisted.numericReferences, {
+    id: 303,
+    requestId: 404,
+    referenceId: 505
+  })
+  assert.deepEqual(persisted.checkpoint, {
+    id: digest(correlations.opaque),
+    referenceId: digest(correlations.secretary),
+    clientOrderId: digest(correlations.client),
+    requestId: digest(correlations.tokenized)
+  })
+  assert.equal(persisted.userActions[0].requestRef, persisted.userActions[10].requestId)
+  assert.equal(persisted.userActions[0].requestRef, persisted.checkpoint.referenceId)
 })
 
 test('persistence hashes nonpublic references and allowlists status evidence', (t) => {
@@ -1890,17 +2433,17 @@ test('persistence hashes nonpublic references and allowlists status evidence', (
   ]) assert.equal(source.includes(credential), false, credential)
   const persisted = JSON.parse(source)
   assert.deepEqual(persisted.userActions, [
-    { action: 'client-opaque', requestRef: digest(clientOpaque) },
-    { action: 'client-opaque-lower', requestId: digest(clientOpaqueLower) },
-    { action: 'access-key', requestRef: digest(accessKey) },
-    { action: 'jwt', requestRef: digest(jwt) },
-    { action: 'base64url', requestId: digest(base64url) },
-    { action: 'plus-equals', requestRef: digest(plusEquals) },
-    { action: 'opaque-fingerprint', requestFingerprint: digest(fingerprintValue) },
-    { action: 'canonical-fingerprint', fingerprint: canonicalFingerprint },
-    { action: 'cdp-id', requestId: '1234.56' },
-    { action: 'uuid-id', requestRef: uuid },
-    { action: 'proven-request-id', requestRef: 'request-ref-safe-78b1' }
+    { action: digest('client-opaque'), requestRef: digest(clientOpaque) },
+    { action: digest('client-opaque-lower'), requestId: digest(clientOpaqueLower) },
+    { action: digest('access-key'), requestRef: digest(accessKey) },
+    { action: digest('jwt'), requestRef: digest(jwt) },
+    { action: digest('base64url'), requestId: digest(base64url) },
+    { action: digest('plus-equals'), requestRef: digest(plusEquals) },
+    { action: digest('opaque-fingerprint'), requestFingerprint: digest(fingerprintValue) },
+    { action: digest('canonical-fingerprint'), fingerprint: canonicalFingerprint },
+    { action: digest('cdp-id'), requestId: '1234.56' },
+    { action: digest('uuid-id'), requestRef: uuid },
+    { action: digest('proven-request-id'), requestRef: digest('request-ref-safe-78b1') }
   ])
   assert.deepEqual(persisted.replayProbes, [{
     id: digest(clientOpaque),
@@ -1908,7 +2451,19 @@ test('persistence hashes nonpublic references and allowlists status evidence', (
     requestId: digest(accessKey),
     clientOrderId: digest(clientOpaqueLower),
     fingerprint: digest(plusEquals)
-  }, safeReplay])
+  }, {
+    id: digest('replay-1'),
+    caseId: 'AUTH-01',
+    subrunId: 'desktop-ui-core',
+    referenceId: digest('order/123'),
+    requestId: '1234.56',
+    clientOrderId: digest('client_order-1'),
+    fingerprint: canonicalFingerprint,
+    requestFingerprint: canonicalFingerprint,
+    status: 'REJECTED',
+    errorCode: 'REQUEST_CONFLICT',
+    outcome: { status: 'REJECTED', errorCode: 'REQUEST_CONFLICT' }
+  }])
   assert.equal(persisted.userActions[5].requestRef, persisted.replayProbes[0].referenceId)
   assert.equal(persisted.userActions[5].requestRef, persisted.replayProbes[0].fingerprint)
 })
@@ -2043,7 +2598,7 @@ test('persistence applies one global evidence field schema with canonical case a
     errorCode: 'REQUEST_CONFLICT'
   })
   assert.deepEqual(persisted.metadata, {
-    id: 'nested-safe',
+    id: digest('nested-safe'),
     status: 'OBSERVED',
     requestId: '1234.56',
     referenceId: uuid,
@@ -2094,7 +2649,17 @@ test('persistence applies one global evidence field schema with canonical case a
     clientOrderId: digest(base64url),
     fingerprint: digest(fingerprintValue),
     errorCode: 'REQUEST_CONFLICT'
-  }, result.replayProbes[1]])
+  }, {
+    id: digest('replay-1'),
+    caseId: canonicalCaseId,
+    subrunId: canonicalSubrunId,
+    referenceId: digest('order/123'),
+    requestId: '1234.56',
+    clientOrderId: digest('client_order-1'),
+    fingerprint: canonicalFingerprint,
+    status: 'REJECTED',
+    errorCode: 'REQUEST_CONFLICT'
+  }])
   assert.equal(persisted.checkpoint.id, network.id)
   assert.equal(network.id, JSON.parse(network.responseBody).id)
   assert.equal(network.id, persistedForm.get('referenceId'))
@@ -2120,14 +2685,18 @@ test('persistence redacts parseable response bodies and drops opaque response pa
         status: 200,
         responseBody: JSON.stringify({
           accessToken: markers.accessToken,
-          profile: { password: markers.password, displayName: 'safe-name' }
+          order: {
+            password: markers.password,
+            symbol: 'ETHUSDT',
+            status: 'FILLED'
+          }
         })
       },
       {
         method: 'POST',
         url: '/api/session',
         status: 200,
-        responsePayload: `password=${markers.formPassword}&state=active`
+        responsePayload: `password=${markers.formPassword}&symbol=BNBUSDT`
       },
       {
         method: 'GET',
@@ -2147,11 +2716,11 @@ test('persistence redacts parseable response bodies and drops opaque response pa
   const persisted = JSON.parse(serialized)
   assert.deepEqual(JSON.parse(persisted.networkEvidence[0].responseBody), {
     accessToken: '[REDACTED]',
-    profile: { password: '[REDACTED]', displayName: 'safe-name' }
+    order: { password: '[REDACTED]', symbol: 'ETHUSDT', status: 'FILLED' }
   })
   const form = new URLSearchParams(persisted.networkEvidence[1].responsePayload)
   assert.equal(form.get('password'), '[REDACTED]')
-  assert.equal(form.get('state'), 'active')
+  assert.equal(form.get('symbol'), 'BNBUSDT')
   assert.equal('responseBody' in persisted.networkEvidence[2], false)
 })
 
@@ -2168,13 +2737,13 @@ test('JSON body sanitizer does not form-fallback after parse', (t) => {
       })
     },
     canonicalForm: {
-      body: 'password=form-secret&email=user%40example.com'
+      body: 'password=form-secret&symbol=BNBUSDT'
     },
     validJson: {
       body: JSON.stringify({
         url: '/api/orders?access_token=query-secret&symbol=BTCUSDT',
         password: 'json-secret',
-        safe: 'kept'
+        status: 'ACCEPTED'
       })
     }
   }
@@ -2189,11 +2758,11 @@ test('JSON body sanitizer does not form-fallback after parse', (t) => {
   assert.equal('body' in persisted.parsedFailure, false)
   const form = new URLSearchParams(persisted.canonicalForm.body)
   assert.equal(form.get('password'), '[REDACTED]')
-  assert.equal(form.get('email'), 'user@example.com')
+  assert.equal(form.get('symbol'), 'BNBUSDT')
   assert.deepEqual(JSON.parse(persisted.validJson.body), {
     url: '/api/orders?access_token=%5BREDACTED%5D&symbol=BTCUSDT',
     password: '[REDACTED]',
-    safe: 'kept'
+    status: 'ACCEPTED'
   })
 })
 
@@ -2224,7 +2793,7 @@ test('response evidence drops padded base64 but keeps canonical credential form'
         method: 'POST',
         url: '/api/login',
         status: 200,
-        responsePayload: 'password=canonical-secret&state=active'
+        responsePayload: 'password=canonical-secret&status=FILLED'
       }
     ]
   })
@@ -2238,7 +2807,7 @@ test('response evidence drops padded base64 but keeps canonical credential form'
   assert.equal('responsePayload' in evidence[3], false)
   const form = new URLSearchParams(evidence[4].responsePayload)
   assert.equal(form.get('password'), '[REDACTED]')
-  assert.equal(form.get('state'), 'active')
+  assert.equal(form.get('status'), 'FILLED')
 })
 
 test('response evidence drops opaque JSON and empty form leaves', (t) => {
@@ -2248,6 +2817,7 @@ test('response evidence drops opaque JSON and empty form leaves', (t) => {
   const jwt = 'eyJhbGciOiJub25lIn0.eyJzdWIiOiJSRVZJRVzdX0pTT05fU0NBTEFSIn0.signature'
   const base64url = 'QmFzZTY0VXJsUmVzcG9uc2VMZWFmQ3JlZGVudGlhbF9NYXJrZXJfMTIzNDU2Nzg5MA'
   const opaque = 'OpaqueResponseCredentialA7f4C9e2'
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
   const result = {
     id: 'AUTH-01',
     networkEvidence: [
@@ -2275,7 +2845,7 @@ test('response evidence drops opaque JSON and empty form leaves', (t) => {
         method: 'GET',
         url: '/api/form',
         status: 200,
-        responsePayload: 'password=form-secret&state=active'
+        responsePayload: 'password=form-secret&symbol=XRPUSDT'
       },
       {
         method: 'GET',
@@ -2284,7 +2854,7 @@ test('response evidence drops opaque JSON and empty form leaves', (t) => {
         responseBody: JSON.stringify({
           id: 'response-1',
           accessToken: 'object-token',
-          profile: { displayName: 'safe-name' }
+          market: { symbol: 'SOLUSDT-PERP', sourceMode: 'LOCAL_SIMULATED' }
         })
       }
     ]
@@ -2301,19 +2871,25 @@ test('response evidence drops opaque JSON and empty form leaves', (t) => {
   assert.equal('responsePayload' in evidence[1], false)
   assert.equal('responseBody' in evidence[2], false)
   assert.deepEqual(JSON.parse(evidence[3].responseBody), [
-    [{ id: 'nested-safe', accessToken: '[REDACTED]' }],
-    { id: 'safe-observation', status: 'OBSERVED', password: '[REDACTED]' }
+    [{ id: digest('nested-safe'), accessToken: '[REDACTED]' }],
+    { id: digest('safe-observation'), status: 'OBSERVED', password: '[REDACTED]' }
   ])
   assert.equal('responsePayload' in evidence[4], false)
   const form = new URLSearchParams(evidence[5].responsePayload)
   assert.equal(form.get('password'), '[REDACTED]')
-  assert.equal(form.get('state'), 'active')
+  assert.equal(form.get('symbol'), 'XRPUSDT')
   assert.deepEqual(JSON.parse(evidence[6].responseBody), {
-    id: 'response-1',
+    id: digest('response-1'),
     accessToken: '[REDACTED]',
-    profile: { displayName: 'safe-name' }
+    market: { symbol: 'SOLUSDT-PERP', sourceMode: 'LOCAL_SIMULATED' }
   })
 })
+
+const RUN_STATE_COMMIT_A = 'a'.repeat(40)
+const RUN_STATE_COMMIT_B = 'b'.repeat(40)
+const RUN_STATE_TREE_A = 'c'.repeat(64)
+const RUN_STATE_TREE_B = 'd'.repeat(64)
+const runStateDigest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
 
 test('run state is created atomically and resumes only an identical evidence identity', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-state-'))
@@ -2323,8 +2899,8 @@ test('run state is created atomically and resumes only an identical evidence ide
     path: statePath,
     runId: 'discovery-contract',
     mode: 'DISCOVERY',
-    commit: 'commit-a',
-    worktreeFingerprint: 'tree-a',
+    commit: RUN_STATE_COMMIT_A,
+    worktreeFingerprint: RUN_STATE_TREE_A,
     schemaVersion: 1,
     registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
     definitions: P0_CASES,
@@ -2332,24 +2908,30 @@ test('run state is created atomically and resumes only an identical evidence ide
   }
 
   const created = loadOrCreateRunState(options)
-  assert.equal(created.runId, 'discovery-contract')
+  assert.equal(created.runId, runStateDigest('discovery-contract'))
   assert.deepEqual(created.cases, {})
   assert.equal(existsSync(`${statePath}.tmp`), false)
   created.cases['AUTH-01'] = { status: 'PASS', scopeComplete: true }
   writeCaseResultAtomic(statePath, created)
-  assert.deepEqual(loadOrCreateRunState(options).cases, created.cases)
+  assert.deepEqual(loadOrCreateRunState(options), created)
 
   for (const [field, value] of [
-    ['commit', 'commit-b'],
-    ['worktreeFingerprint', 'tree-b'],
-    ['schemaVersion', 2],
-    ['registryFingerprint', 'registry-b']
+    ['commit', RUN_STATE_COMMIT_B],
+    ['worktreeFingerprint', RUN_STATE_TREE_B],
+    ['schemaVersion', 2]
   ]) {
     assert.throws(
       () => loadOrCreateRunState({ ...options, [field]: value }),
       new RegExp(`^Error: RESUME_MISMATCH: ${field}$`)
     )
   }
+  assert.throws(
+    () => loadOrCreateRunState({
+      ...options,
+      registryFingerprint: 'e'.repeat(64)
+    }),
+    /^Error: INVALID_RUN_STATE_IDENTITY: options\.registryFingerprint$/
+  )
 })
 
 test('run state rejects missing, null, blank or invalid evidence identity', (t) => {
@@ -2358,8 +2940,8 @@ test('run state rejects missing, null, blank or invalid evidence identity', (t) 
   const valid = {
     runId: 'identity-contract',
     mode: 'DISCOVERY',
-    commit: 'commit-a',
-    worktreeFingerprint: 'tree-a',
+    commit: RUN_STATE_COMMIT_A,
+    worktreeFingerprint: RUN_STATE_TREE_A,
     schemaVersion: 1,
     registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
     definitions: P0_CASES,
@@ -2369,7 +2951,7 @@ test('run state rejects missing, null, blank or invalid evidence identity', (t) 
     commit: [undefined, null, '', '   ', 42, {}],
     worktreeFingerprint: [undefined, null, '', '   ', 42, {}],
     schemaVersion: [undefined, null, '', '   ', 0, -1, 1.5, {}],
-    registryFingerprint: [undefined, null, '', '   ', 42, {}]
+    registryFingerprint: [undefined, null, '', '   ', 'e'.repeat(64), 42, {}]
   }
   let sequence = 0
 
@@ -2422,8 +3004,8 @@ test('run state snapshots inert options before path and registry access', (t) =>
     path,
     runId: 'snapshot-contract',
     mode: 'DISCOVERY',
-    commit: 'commit-a',
-    worktreeFingerprint: 'tree-a',
+    commit: RUN_STATE_COMMIT_A,
+    worktreeFingerprint: RUN_STATE_TREE_A,
     schemaVersion: 1,
     registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
     definitions: P0_CASES,
@@ -2517,7 +3099,7 @@ test('run state snapshots inert options before path and registry access', (t) =>
     selection: Object.freeze({})
   })
   const created = loadOrCreateRunState(frozenOptions)
-  assert.equal(created.runId, 'snapshot-contract')
+  assert.equal(created.runId, runStateDigest('snapshot-contract'))
   assert.deepEqual(loadOrCreateRunState(frozenOptions), created)
 })
 
@@ -2592,8 +3174,8 @@ test('canonical registry rejects a forged caller fingerprint', (t) => {
       path: join(directory, 'run-state.json'),
       runId: 'registry-contract',
       mode: 'DISCOVERY',
-      commit: 'commit-a',
-      worktreeFingerprint: 'tree-a',
+      commit: RUN_STATE_COMMIT_A,
+      worktreeFingerprint: RUN_STATE_TREE_A,
       schemaVersion: 1,
       registryFingerprint: 'forged-registry-fingerprint',
       definitions: P0_CASES,
@@ -2610,8 +3192,8 @@ test('canonical registry rejects persisted definitions with a copied fingerprint
   const identity = {
     runId: 'registry-contract',
     mode: 'DISCOVERY',
-    commit: 'commit-a',
-    worktreeFingerprint: 'tree-a',
+    commit: RUN_STATE_COMMIT_A,
+    worktreeFingerprint: RUN_STATE_TREE_A,
     schemaVersion: 1,
     registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
     selection: {}
@@ -2646,6 +3228,318 @@ test('canonical registry reaches terminal PASS only with all exact results', () 
   assert.deepEqual(report.issues, [])
 })
 
+test('aggregate snapshots immutable evidence and rejects malformed identity arrays', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-aggregate-identity-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const definition = P0_CASES[0]
+  const selection = { caseIds: [definition.id] }
+  const result = passingCase(definition)
+  const capture = (run) => {
+    try {
+      return { value: run() }
+    } catch (error) {
+      return { error: error.message }
+    }
+  }
+  const load = (definitions, selected, label) => loadOrCreateRunState({
+    path: join(directory, `${label}.json`),
+    runId: `aggregate-identity-${label}`,
+    mode: 'DISCOVERY',
+    commit: 'commit-a',
+    worktreeFingerprint: 'tree-a',
+    schemaVersion: 1,
+    registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+    definitions,
+    selection: selected
+  })
+
+  let definitionsGetterCalls = 0
+  const changingDefinitionsState = {
+    registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+    selection: {}
+  }
+  Object.defineProperty(changingDefinitionsState, 'definitions', {
+    enumerable: true,
+    get() {
+      definitionsGetterCalls += 1
+      return definitionsGetterCalls === 1 ? P0_CASES : [definition]
+    }
+  })
+  let selectionGetterCalls = 0
+  const changingSelection = {}
+  Object.defineProperty(changingSelection, 'caseIds', {
+    enumerable: true,
+    get() {
+      selectionGetterCalls += 1
+      return selectionGetterCalls === 1 ? [] : [definition.id]
+    }
+  })
+  let resultGetterCalls = 0
+  const resultWithGetter = passingCase(definition)
+  Object.defineProperty(resultWithGetter, 'status', {
+    enumerable: true,
+    get() {
+      resultGetterCalls += 1
+      return 'PASS'
+    }
+  })
+  const proxyCounts = {
+    state: 0,
+    definitions: 0,
+    selection: 0,
+    results: 0,
+    result: 0
+  }
+  const proxiedState = new Proxy(aggregateState(selection), {
+    get(target, field, receiver) {
+      proxyCounts.state += 1
+      return Reflect.get(target, field, receiver)
+    }
+  })
+  const proxiedDefinitions = new Proxy(P0_CASES, {
+    get(target, field, receiver) {
+      proxyCounts.definitions += 1
+      return Reflect.get(target, field, receiver)
+    }
+  })
+  const proxiedSelection = new Proxy(selection, {
+    get(target, field, receiver) {
+      proxyCounts.selection += 1
+      return Reflect.get(target, field, receiver)
+    }
+  })
+  const proxiedResults = new Proxy([result], {
+    get(target, field, receiver) {
+      proxyCounts.results += 1
+      return Reflect.get(target, field, receiver)
+    }
+  })
+  const proxiedResult = new Proxy(result, {
+    get(target, field, receiver) {
+      proxyCounts.result += 1
+      return Reflect.get(target, field, receiver)
+    }
+  })
+  const aggregateBoundaryOutcomes = {
+    'changing-definitions': capture(() => aggregateReport(
+      changingDefinitionsState,
+      [result]
+    )),
+    'changing-selection': capture(() => aggregateReport(
+      aggregateState(changingSelection),
+      [result]
+    )),
+    'result-getter': capture(() => aggregateReport(
+      aggregateState(selection),
+      [resultWithGetter]
+    )),
+    'state-proxy': capture(() => aggregateReport(proxiedState, [result])),
+    'definitions-proxy': capture(() => aggregateReport({
+      definitions: proxiedDefinitions,
+      registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+      selection
+    }, [result])),
+    'selection-proxy': capture(() => aggregateReport(
+      aggregateState(proxiedSelection),
+      [result]
+    )),
+    'results-proxy': capture(() => aggregateReport(
+      aggregateState(selection),
+      proxiedResults
+    )),
+    'result-proxy': capture(() => aggregateReport(
+      aggregateState(selection),
+      [proxiedResult]
+    ))
+  }
+
+  const malformedArray = (base, variant, proxyValue) => {
+    const value = [...base]
+    const counts = { getter: 0, trap: 0 }
+    if (variant === 'hole') value.length += 1
+    if (variant === 'undefined') value.push(undefined)
+    if (variant === 'function') value.push(() => proxyValue)
+    if (variant === 'symbol') value.push(Symbol('review9-identity'))
+    if (variant === 'accessor') {
+      Object.defineProperty(value, value.length, {
+        enumerable: true,
+        get() {
+          counts.getter += 1
+          return proxyValue
+        }
+      })
+    }
+    if (variant === 'proxy-element') {
+      value.push(new Proxy(
+        proxyValue && typeof proxyValue === 'object' ? proxyValue : { value: proxyValue },
+        {
+          get(target, field, receiver) {
+            counts.trap += 1
+            return Reflect.get(target, field, receiver)
+          }
+        }
+      ))
+    }
+    if (variant === 'enumerable-property') {
+      Object.defineProperty(value, 'review9Extra', {
+        value: proxyValue,
+        enumerable: true
+      })
+    }
+    if (variant === 'nonenumerable-property') {
+      Object.defineProperty(value, 'review9Extra', {
+        value: proxyValue,
+        enumerable: false
+      })
+    }
+    return { value, counts }
+  }
+  const variants = [
+    'hole',
+    'undefined',
+    'function',
+    'symbol',
+    'accessor',
+    'proxy-element',
+    'enumerable-property',
+    'nonenumerable-property'
+  ]
+  const malformedOutcomes = variants.map((variant) => {
+    const definitions = malformedArray(P0_CASES, variant, definition)
+    const selected = malformedArray([definition.id], variant, definition.id)
+    const requiredSubruns = malformedArray(
+      definition.requiredSubruns,
+      variant,
+      definition.requiredSubruns[0]
+    )
+    const definitionsWithRequiredSubruns = [
+      { ...definition, requiredSubruns: requiredSubruns.value },
+      ...P0_CASES.slice(1)
+    ]
+    const results = malformedArray([result], variant, result)
+    const actualSubruns = malformedArray(result.subruns, variant, result.subruns[0])
+    const resultWithSubruns = { ...result, subruns: actualSubruns.value }
+    return {
+      variant,
+      counters: [
+        definitions.counts,
+        selected.counts,
+        requiredSubruns.counts,
+        results.counts,
+        actualSubruns.counts
+      ],
+      outcomes: {
+        'load-definitions': capture(() => load(
+          definitions.value,
+          selection,
+          `${variant}-load-definitions`
+        )),
+        'plan-caller-definitions': capture(() => planResume(
+          resumeState(),
+          definitions.value,
+          selection
+        )),
+        'plan-state-definitions': capture(() => planResume({
+          definitions: definitions.value,
+          registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+          cases: {}
+        }, P0_CASES, selection)),
+        'aggregate-definitions': capture(() => aggregateReport({
+          definitions: definitions.value,
+          registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+          selection
+        }, [result])),
+        'load-selection': capture(() => load(
+          P0_CASES,
+          { caseIds: selected.value },
+          `${variant}-load-selection`
+        )),
+        'plan-selection': capture(() => planResume(
+          resumeState(),
+          P0_CASES,
+          { caseIds: selected.value }
+        )),
+        'aggregate-selection': capture(() => aggregateReport(
+          aggregateState({ caseIds: selected.value }),
+          [result]
+        )),
+        'load-required-subruns': capture(() => load(
+          definitionsWithRequiredSubruns,
+          selection,
+          `${variant}-load-required-subruns`
+        )),
+        'plan-caller-required-subruns': capture(() => planResume(
+          resumeState(),
+          definitionsWithRequiredSubruns,
+          selection
+        )),
+        'plan-state-required-subruns': capture(() => planResume({
+          definitions: definitionsWithRequiredSubruns,
+          registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+          cases: {}
+        }, P0_CASES, selection)),
+        'aggregate-required-subruns': capture(() => aggregateReport({
+          definitions: definitionsWithRequiredSubruns,
+          registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+          selection
+        }, [result])),
+        'aggregate-results': capture(() => aggregateReport(
+          aggregateState(selection),
+          results.value
+        )),
+        'aggregate-result-subruns': capture(() => aggregateReport(
+          aggregateState(selection),
+          [resultWithSubruns]
+        ))
+      }
+    }
+  })
+
+  const incomplete = passingCase(definition)
+  incomplete.subruns = []
+  const incompleteReport = aggregateReport(aggregateState(selection), [incomplete])
+
+  const assertAggregateRejected = (outcome, label) => {
+    assert.equal(outcome.error, undefined, label)
+    assert.equal(outcome.value.verdict, 'FAIL', label)
+    assert.deepEqual(outcome.value.issues, ['INVALID_AGGREGATE_INPUT'], label)
+  }
+  for (const [label, outcome] of Object.entries(aggregateBoundaryOutcomes)) {
+    assertAggregateRejected(outcome, label)
+  }
+  assert.equal(definitionsGetterCalls, 0)
+  assert.equal(selectionGetterCalls, 0)
+  assert.equal(resultGetterCalls, 0)
+  assert.deepEqual(proxyCounts, {
+    state: 0,
+    definitions: 0,
+    selection: 0,
+    results: 0,
+    result: 0
+  })
+
+  for (const { variant, counters, outcomes } of malformedOutcomes) {
+    for (const [boundary, outcome] of Object.entries(outcomes)) {
+      const label = `${variant}/${boundary}`
+      if (boundary.startsWith('aggregate-')) {
+        assertAggregateRejected(outcome, label)
+      } else {
+        assert.match(
+          outcome.error ?? '',
+          /^(?:UNSAFE_IDENTITY_ARRAY|UNSAFE_PERSISTENCE_VALUE: (?:accessor|Proxy))$/,
+          label
+        )
+      }
+    }
+    for (const counts of counters) {
+      assert.deepEqual(counts, { getter: 0, trap: 0 }, variant)
+    }
+  }
+  assert.equal(incompleteReport.verdict, 'FAIL')
+  assert.ok(incompleteReport.issues.includes(`INCOMPLETE_MATRIX: ${definition.id}`))
+  assert.equal(incompleteReport.counts.PASS, 0)
+})
+
 test('canonical registry remains full for valid filtered case and phase runs', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-registry-filtered-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -2659,8 +3553,8 @@ test('canonical registry remains full for valid filtered case and phase runs', (
       path: join(directory, `run-state-${index}.json`),
       runId: `registry-filter-${index}`,
       mode: 'DISCOVERY',
-      commit: 'commit-a',
-      worktreeFingerprint: 'tree-a',
+      commit: RUN_STATE_COMMIT_A,
+      worktreeFingerprint: RUN_STATE_TREE_A,
       schemaVersion: 1,
       registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
       definitions: P0_CASES,
@@ -3851,8 +4745,92 @@ test('verify-surefire CLI exits nonzero and persists parser rejection evidence',
   assert.equal(execution.status, 1)
   assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
     status: 'FAIL',
-    error: 'SUREFIRE_STALE_REPORT: PostgresDatabaseIT'
+    error: 'SUREFIRE_STALE_REPORT'
   })
+})
+
+test('artifact CLI emits stable secret-free diagnostics for caller-controlled failures', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-cli-safe-diagnostics-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const markers = {
+    unknownCommand: 'ITEM5_UNKNOWN_COMMAND_SECRET_19ac',
+    malformedOption: 'ITEM5_MALFORMED_OPTION_SECRET_2abd',
+    reportsPath: 'ITEM5_REPORTS_PATH_SECRET_3bce',
+    outputPath: 'ITEM5_OUTPUT_PATH_SECRET_4cdf',
+    xmlFilename: 'ITEM5_XML_FILENAME_SECRET_5de0',
+    writeError: 'ITEM5_WRITE_ERROR_SECRET_6ef1'
+  }
+  const markerValues = Object.values(markers)
+  const startedAt = new Date(Date.now() - 5_000).toISOString()
+  const assertSecretFree = (value) => {
+    for (const marker of markerValues) assert.equal(value.includes(marker), false, marker)
+  }
+  const execute = (...arguments_) => spawnSync(process.execPath, [
+    artifactsScript,
+    ...arguments_
+  ], { encoding: 'utf8' })
+  const assertFailure = (execution, code, output) => {
+    assert.equal(execution.status, 1)
+    assert.match(execution.stderr, new RegExp(`(?:^|\\n)${code}(?:\\n|$)`))
+    assertSecretFree(execution.stderr)
+    if (!output) return
+    const source = readFileSync(output, 'utf8')
+    assertSecretFree(source)
+    assert.deepEqual(JSON.parse(source), { status: 'FAIL', error: code })
+  }
+
+  const unknownOutput = join(root, 'unknown.json')
+  assertFailure(
+    execute(`unknown-${markers.unknownCommand}`, `--output=${unknownOutput}`),
+    'CLI_UNKNOWN_COMMAND',
+    unknownOutput
+  )
+
+  const malformedOutput = join(root, 'malformed.json')
+  assertFailure(
+    execute('verify-surefire', `--malformed-${markers.malformedOption}`, `--output=${malformedOutput}`),
+    'CLI_MALFORMED_OPTION',
+    malformedOutput
+  )
+
+  const missingReports = join(root, `reports-${markers.reportsPath}`)
+  const pathOutput = join(root, `output-${markers.outputPath}`, 'gate.json')
+  assertFailure(execute(
+    'verify-surefire',
+    `--reports=${missingReports}`,
+    '--classes=SafeDiagnosticIT',
+    `--started-at=${startedAt}`,
+    `--output=${pathOutput}`
+  ), 'CLI_INTERNAL_ERROR', pathOutput)
+
+  const malformedReports = join(root, 'malformed-reports')
+  mkdirSync(malformedReports)
+  writeFileSync(join(malformedReports, `TEST-${markers.xmlFilename}.xml`), '<testsuite')
+  const xmlOutput = join(root, 'malformed-xml.json')
+  assertFailure(execute(
+    'verify-surefire',
+    `--reports=${malformedReports}`,
+    '--classes=SafeDiagnosticIT',
+    `--started-at=${startedAt}`,
+    `--output=${xmlOutput}`
+  ), 'SUREFIRE_MALFORMED_XML', xmlOutput)
+
+  const validReports = join(root, 'valid-reports')
+  writeSurefireSuite(validReports, 'TEST-safe-diagnostic.xml', {
+    name: 'com.fxplatform.SafeDiagnosticIT'
+  })
+  const blockedParent = join(root, `blocked-${markers.writeError}`)
+  writeFileSync(blockedParent, 'not-a-directory')
+  const blockedOutput = join(blockedParent, 'gate.json')
+  const writeExecution = execute(
+    'verify-surefire',
+    `--reports=${validReports}`,
+    '--classes=SafeDiagnosticIT',
+    `--started-at=${startedAt}`,
+    `--output=${blockedOutput}`
+  )
+  assertFailure(writeExecution, 'CLI_WRITE_FAILED')
+  assert.equal(existsSync(blockedOutput), false)
 })
 
 test('strict artifact CLI rejects a missing command', () => {
@@ -3877,7 +4855,7 @@ test('strict artifact CLI rejects an unknown command and replaces a supplied gat
   assert.equal(execution.status, 1)
   assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
     status: 'FAIL',
-    error: 'CLI_UNKNOWN_COMMAND: typo-command'
+    error: 'CLI_UNKNOWN_COMMAND'
   })
 })
 
@@ -3885,22 +4863,22 @@ const INVALID_CLI_OPTION_FIXTURES = [
   {
     label: 'malformed option',
     option: '--reports',
-    error: 'CLI_MALFORMED_OPTION: --reports'
+    error: 'CLI_MALFORMED_OPTION'
   },
   {
     label: 'duplicate option',
     option: '--classes=StrictCliIT',
-    error: 'CLI_DUPLICATE_OPTION: classes'
+    error: 'CLI_DUPLICATE_OPTION'
   },
   {
     label: 'unknown option',
     option: '--extra=value',
-    error: 'CLI_UNKNOWN_OPTION: extra'
+    error: 'CLI_UNKNOWN_OPTION'
   },
   {
     label: 'empty option',
     option: '--classes=',
-    error: 'CLI_OPTION_REQUIRED: classes'
+    error: 'CLI_OPTION_REQUIRED'
   }
 ]
 
@@ -3960,7 +4938,7 @@ test('strict artifact CLI writes duplicate normalized output failure only to a u
   assert.equal(duplicateExecution.status, 1)
   assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
     status: 'FAIL',
-    error: 'CLI_DUPLICATE_OPTION: output'
+    error: 'CLI_DUPLICATE_OPTION'
   })
 
   const firstOutput = join(root, 'first.json')
@@ -3982,6 +4960,41 @@ test('strict artifact CLI writes duplicate normalized output failure only to a u
   assert.equal(conflictingExecution.status, 1)
   assert.equal(readFileSync(firstOutput, 'utf8'), firstBaseline)
   assert.equal(readFileSync(secondOutput, 'utf8'), secondBaseline)
+})
+
+test('strict artifact CLI replaces every hardlink alias with duplicate output failure', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-cli-hardlink-output-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const reports = join(root, 'reports')
+  const startedAt = new Date(Date.now() - 5_000).toISOString()
+  writeSurefireSuite(reports, 'TEST-hardlink.xml', {
+    name: 'com.fxplatform.PostgresDatabaseIT'
+  })
+  const firstOutput = join(root, 'hardlink-a.json')
+  const secondOutput = join(root, 'hardlink-b.json')
+  const stalePass = '{"status":"PASS","stale":"hardlink"}\n'
+  writeFileSync(firstOutput, stalePass)
+  linkSync(firstOutput, secondOutput)
+
+  const execution = spawnSync(process.execPath, [
+    artifactsScript,
+    'verify-surefire',
+    `--reports=${reports}`,
+    '--classes=PostgresDatabaseIT',
+    `--started-at=${startedAt}`,
+    `--output=${firstOutput}`,
+    `--output=${secondOutput}`
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 1, execution.stderr)
+  for (const output of [firstOutput, secondOutput]) {
+    const source = readFileSync(output, 'utf8')
+    assert.notEqual(source, stalePass)
+    assert.deepEqual(JSON.parse(source), {
+      status: 'FAIL',
+      error: 'CLI_DUPLICATE_OPTION'
+    })
+  }
 })
 
 test('strict artifact CLI resolves output filesystem identities without guessing targets', (t) => {
@@ -4061,17 +5074,17 @@ test('strict artifact CLI resolves output filesystem identities without guessing
   assert.equal(identityExecution.status, 1, identityExecution.stderr)
   assert.deepEqual(JSON.parse(readFileSync(identityOutput, 'utf8')), {
     status: 'FAIL',
-    error: 'CLI_DUPLICATE_OPTION: output'
+    error: 'CLI_DUPLICATE_OPTION'
   })
   assert.equal(symlinkExecution.status, 1, symlinkExecution.stderr)
   assert.deepEqual(JSON.parse(readFileSync(symlinkTarget, 'utf8')), {
     status: 'FAIL',
-    error: 'CLI_DUPLICATE_OPTION: output'
+    error: 'CLI_DUPLICATE_OPTION'
   })
   assert.equal(missingOutputExecution.status, 1)
-  assert.match(missingOutputExecution.stderr, /CLI_OPTION_REQUIRED: output/)
+  assert.match(missingOutputExecution.stderr, /CLI_OPTION_REQUIRED/)
   assert.equal(malformedOutputExecution.status, 1)
-  assert.match(malformedOutputExecution.stderr, /CLI_MALFORMED_OPTION: --output/)
+  assert.match(malformedOutputExecution.stderr, /CLI_MALFORMED_OPTION/)
   assert.equal(normalExecution.status, 0, normalExecution.stderr)
   assert.equal(JSON.parse(readFileSync(normalTarget, 'utf8')).status, 'PASS')
 })
@@ -4108,7 +5121,7 @@ test('strict artifact CLI requires canonical started-at UTC instant', (t) => {
     assert.equal(execution.status, 1, startedAt)
     assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
       status: 'FAIL',
-      error: 'CLI_INVALID_OPTION: started-at'
+      error: 'CLI_INVALID_OPTION'
     }, startedAt)
   }
 
@@ -4170,7 +5183,7 @@ test('strict artifact CLI executes through a filesystem alias', (t) => {
   assert.equal(invalidExecution.status, 1, invalidExecution.stderr)
   assert.deepEqual(JSON.parse(readFileSync(invalidOutput, 'utf8')), {
     status: 'FAIL',
-    error: 'SUREFIRE_MALFORMED_XML: TEST-alias-malformed.xml'
+    error: 'SUREFIRE_MALFORMED_XML'
   })
   assert.equal(validExecution.status, 0, validExecution.stderr)
   assert.equal(JSON.parse(readFileSync(validOutput, 'utf8')).status, 'PASS')
