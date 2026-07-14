@@ -2,6 +2,9 @@ import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
   existsSync,
+  fstatSync,
+  fsyncSync,
+  ftruncateSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -111,6 +114,7 @@ const SAFE_DIAGNOSTIC_CODES = new Set([
   'SUREFIRE_MISSING_CLASS',
   'SUREFIRE_DUPLICATE_CLASS',
   'SUREFIRE_STALE_REPORT',
+  'SUREFIRE_UNSTABLE_REPORT',
   'SUREFIRE_FUTURE_REPORT',
   'SUREFIRE_INVALID_SUITE'
 ])
@@ -328,7 +332,8 @@ const WS_EVENT_VALUES = new Set([
 const TYPE_VALUES = new Set([...ORDER_TYPE_VALUES, ...TRADING_EVENT_VALUES, ...WS_EVENT_VALUES])
 const DOMAIN_ENUM_FIELDS = new Map([
   ['symbol', PUBLIC_SYMBOL_VALUES],
-  ['mode', new Set(['DISCOVERY', 'EXECUTION'])],
+  ['mode', new Set(['DISCOVERY', 'EXECUTION', 'CERTIFICATION'])],
+  ['verdict', new Set(['PASS', 'PARTIAL_PASS', 'FAIL', 'BLOCKED'])],
   ['phase', CANONICAL_PHASE_VALUES],
   ['profile', CANONICAL_PROFILE_VALUES],
   ['viewport', CANONICAL_VIEWPORT_VALUES],
@@ -437,13 +442,27 @@ const UTC_TIMESTAMP_FIELDS = new Set([
   'executedat',
   'expiresat',
   'filledat',
+  'invocationstartedat',
   'lastsnapshotat',
+  'modifiedat',
   'openedat',
   'updatedat'
 ])
 const P0_SUREFIRE_CLASSES = new Set([
   'PostgresDatabaseIT',
-  'Task5PostgresFullFillIT'
+  'V46V47EmptyDatabaseIT',
+  'V45ToV47DemoResetIT',
+  'Task5PostgresFullFillIT',
+  'Task6PostgresSpotIT',
+  'Task7PostgresDemoLifecycleIT',
+  'Task8PostgresTradingSettingsIT',
+  'Task9PostgresPerpetualOrderIT',
+  'Task10PostgresProtectionIT',
+  'Task11PostgresFundingIT',
+  'DemoTradingConcurrencyIT',
+  'PerpetualPositionConcurrencyIT',
+  'ProtectionOrderConcurrencyIT',
+  'FundingLiquidationConcurrencyIT'
 ])
 const SCALAR_ARRAY_FIELDS = new Map([
   ['caseids', 'caseid'],
@@ -476,6 +495,74 @@ const RUN_STATE_IDENTITY_KEYS = new Set([
   'schemaversion',
   'registryfingerprint'
 ])
+const CONTRACT_STRUCTURAL_FIELDS = new Set([
+  'account',
+  'action',
+  'arbitraryevidence',
+  'blocker',
+  'cases',
+  'catalog',
+  'checkpoint',
+  'checks',
+  'complete',
+  'count',
+  'counts',
+  'credentialsamples',
+  'data',
+  'definitions',
+  'empty',
+  'entries',
+  'enums',
+  'evidence',
+  'eventtypes',
+  'executiongroup',
+  'failure',
+  'file',
+  'filtered',
+  'flag',
+  'issues',
+  'ledger',
+  'ledgerentrytypes',
+  'list',
+  'liquidityroles',
+  'market',
+  'marginmodes',
+  'metadata',
+  'modifiedat',
+  'nested',
+  'networkevidence',
+  'note',
+  'ordinary',
+  'order',
+  'orderstatuses',
+  'ordertypes',
+  'origins',
+  'outcome',
+  'position',
+  'positionsides',
+  'providers',
+  'publicreferences',
+  'replayprobes',
+  'requiredsubruns',
+  'response',
+  'scopecomplete',
+  'selection',
+  'sides',
+  'snapshots',
+  'sourcemodes',
+  'subruns',
+  'suitename',
+  'suites',
+  'totals',
+  'trade',
+  'units',
+  'url',
+  'useractions',
+  'values',
+  'verdict',
+  'wallet'
+])
+const STATUS_COUNT_KEYS = new Set(['PASS', 'FAIL', 'BLOCKED', 'INVALID_TEST', 'MISSING'])
 
 function redactUrl(value) {
   if (typeof value !== 'string') return undefined
@@ -547,8 +634,11 @@ function sanitizeResponseJsonValue(value, keyed = false) {
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
-        .map(([field, fieldValue]) => [field, sanitizeResponseJsonValue(fieldValue, true)])
-        .filter(([, fieldValue]) => fieldValue !== undefined)
+        .map(([field, fieldValue]) => [
+          sanitizeGenericObjectKey(field),
+          sanitizeResponseJsonValue(fieldValue, true)
+        ])
+        .filter(([field, fieldValue]) => field !== undefined && fieldValue !== undefined)
     )
   }
   return keyed ? value : undefined
@@ -602,8 +692,11 @@ function sanitizeBodyJsonValue(value, key = '') {
   if (value && typeof value === 'object') {
     return Object.fromEntries(
       Object.entries(value)
-        .map(([field, fieldValue]) => [field, sanitizeBodyJsonValue(fieldValue, field)])
-        .filter(([, fieldValue]) => fieldValue !== undefined)
+        .map(([field, fieldValue]) => [
+          sanitizeGenericObjectKey(field),
+          sanitizeBodyJsonValue(fieldValue, field)
+        ])
+        .filter(([field, fieldValue]) => field !== undefined && fieldValue !== undefined)
     )
   }
   return sanitizeBodyScalar(semanticKey, value)
@@ -712,8 +805,11 @@ function redactValue(value, key = '') {
 
   const redacted = Object.fromEntries(
     Object.entries(value)
-      .map(([entryKey, entryValue]) => [entryKey, redactValue(entryValue, entryKey)])
-      .filter(([, entryValue]) => entryValue !== undefined)
+      .map(([entryKey, entryValue]) => [
+        sanitizeGenericObjectKey(entryKey),
+        redactValue(entryValue, entryKey)
+      ])
+      .filter(([entryKey, entryValue]) => entryKey !== undefined && entryValue !== undefined)
   )
   if (typeof value.name === 'string' && SENSITIVE_KEY.test(value.name) && 'value' in value) {
     redacted.value = REDACTED
@@ -727,6 +823,32 @@ export function redactNetworkEntry(entry) {
 
 function normalizedKey(key) {
   return key.replaceAll(/[^a-z\d]/gi, '').toLowerCase()
+}
+
+function sanitizeGenericObjectKey(field) {
+  if (typeof field !== 'string') return undefined
+  if (isCanonicalSensitiveField(field)) return field
+  if (isSensitiveFieldName(field) || isCredentialEnvelope(field)) return undefined
+  const semanticField = normalizedKey(field)
+  if (CONTRACT_STRUCTURAL_FIELDS.has(semanticField)
+    || EVIDENCE_REFERENCE_FIELDS.has(semanticField)
+    || STATUS_FIELDS.has(semanticField)
+    || DIAGNOSTIC_FIELDS.has(semanticField)
+    || RUN_STATE_IDENTITY_KEYS.has(semanticField)
+    || DOMAIN_ENUM_FIELDS.has(semanticField)
+    || DECIMAL_FIELDS.has(semanticField)
+    || INTEGER_FIELDS.has(semanticField)
+    || BOOLEAN_FIELDS.has(semanticField)
+    || UTC_TIMESTAMP_FIELDS.has(semanticField)
+    || SCALAR_ARRAY_FIELDS.has(semanticField)
+    || STRUCTURED_HEADER_KEYS.has(semanticField)
+    || REQUEST_BODY_KEYS.has(semanticField)
+    || RESPONSE_BODY_KEYS.has(semanticField)
+    || ['classname', 'method', 'mimetype', 'surefireclass'].includes(semanticField)
+    || CANONICAL_CASE_IDS.has(field)
+    || CANONICAL_SUBRUN_IDS.has(field)
+    || STATUS_COUNT_KEYS.has(field)) return field
+  return sanitizeUnknownString(field)
 }
 
 function isDomainScalarField(field) {
@@ -1034,7 +1156,7 @@ function inertJsonValue(value, key = '', strictArrays = false) {
     return inert
   }
 
-  const inert = {}
+  const inert = Object.create(null)
   for (const [field, descriptor] of Object.entries(descriptors)) {
     if (!descriptor.enumerable) continue
     const fieldValue = inertJsonValue(descriptor.value, field, strictArrays)
@@ -1134,11 +1256,16 @@ export function loadOrCreateRunState(options) {
     worktreeFingerprint,
     schemaVersion,
     registryFingerprint,
-    definitions,
-    selection = {}
+    definitions
   } = snapshot
+  const selection = Object.hasOwn(snapshot, 'selection')
+    ? snapshot.selection
+    : Object.create(null)
   if (typeof path !== 'string' || path.trim().length === 0) {
     throw new TypeError('INVALID_RUN_STATE_PATH')
+  }
+  if (!validSelectionSnapshot(selection)) {
+    throw new TypeError('INVALID_RUN_STATE_SELECTION')
   }
   const identity = normalizedRunStateIdentity(
     { commit, worktreeFingerprint, schemaVersion, registryFingerprint },
@@ -1172,14 +1299,30 @@ export function loadOrCreateRunState(options) {
   return state
 }
 
-function hasSelection(selection, key, value) {
-  return !selection[key]?.length || selection[key].includes(value)
-}
-
 const SELECTION_FIELDS = ['caseIds', 'phases', 'profiles', 'viewports']
 
+function selectionValues(selection, key) {
+  return Object.hasOwn(selection, key) ? selection[key] : undefined
+}
+
+function validSelectionSnapshot(selection) {
+  return Boolean(selection) && typeof selection === 'object' && !Array.isArray(selection)
+    && Object.keys(selection).every((key) => (
+      SELECTION_FIELDS.includes(key)
+      && Array.isArray(selectionValues(selection, key))
+      && selectionValues(selection, key).every((value) => (
+        typeof value === 'string' && value.length > 0
+      ))
+    ))
+}
+
+function hasSelection(selection, key, value) {
+  const values = selectionValues(selection, key)
+  return !values?.length || values.includes(value)
+}
+
 function resolveSelection(definitions, selection) {
-  const filtered = SELECTION_FIELDS.some((key) => selection[key]?.length)
+  const filtered = SELECTION_FIELDS.some((key) => selectionValues(selection, key)?.length)
   const entries = definitions
     .filter((definition) => (
       hasSelection(selection, 'caseIds', definition.id)
@@ -1202,7 +1345,7 @@ function resolveSelection(definitions, selection) {
   }
   const issues = []
   for (const key of SELECTION_FIELDS) {
-    const missing = [...new Set(selection[key] ?? [])]
+    const missing = [...new Set(selectionValues(selection, key) ?? [])]
       .filter((value) => !coverage[key].has(value))
     if (missing.length > 0) issues.push(`INVALID_SELECTION: ${key}=${missing.join(',')}`)
   }
@@ -1230,6 +1373,9 @@ export function planResume(state, definitions, selection = {}) {
   const stateSnapshot = inertIdentityValue(state)
   const definitionsSnapshot = inertIdentityValue(definitions)
   const selectionSnapshot = inertIdentityValue(selection)
+  if (!validSelectionSnapshot(selectionSnapshot)) {
+    throw new TypeError('INVALID_SELECTION: malformed')
+  }
   assertCanonicalRegistry(definitionsSnapshot, P0_REGISTRY_FINGERPRINT, 'definitions')
   assertCanonicalRegistry(
     stateSnapshot?.definitions,
@@ -1240,7 +1386,7 @@ export function planResume(state, definitions, selection = {}) {
   if (resolved.issues.length > 0) throw new Error(resolved.issues[0])
   const { filtered } = resolved
   const subrunsFiltered = ['profiles', 'viewports']
-    .some((key) => selectionSnapshot[key]?.length)
+    .some((key) => selectionValues(selectionSnapshot, key)?.length)
   const entries = resolved.entries
     .map(({ definition, subruns }) => {
       const result = stateSnapshot.cases?.[definition.id]
@@ -1269,7 +1415,7 @@ export function planResume(state, definitions, selection = {}) {
       action: groupRerun ? 'RUN' : 'SKIP',
       reason,
       scopeComplete: entry.complete && !groupRerun,
-      subruns: entry.subruns
+      subruns: entry.subruns.map((subrun) => ({ ...subrun }))
     }
   })
 
@@ -1321,7 +1467,20 @@ export function aggregateReport(state, results) {
     }
   }
 
-  const selection = stateSnapshot.selection ?? {}
+  const selection = Object.hasOwn(stateSnapshot, 'selection')
+    ? stateSnapshot.selection
+    : Object.create(null)
+  if (!validSelectionSnapshot(selection)
+    || resultsSnapshot.some((result) => (
+      !result || typeof result !== 'object' || Array.isArray(result)
+    ))) {
+    return {
+      verdict: 'FAIL',
+      scopeComplete: false,
+      counts: { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 },
+      issues: ['INVALID_AGGREGATE_INPUT']
+    }
+  }
   const invalidRegistry = registryIssue(
     stateSnapshot.definitions,
     stateSnapshot.registryFingerprint
@@ -1337,7 +1496,7 @@ export function aggregateReport(state, results) {
   const resolved = resolveSelection(stateSnapshot.definitions, selection)
   const { filtered } = resolved
   const subrunsFiltered = ['profiles', 'viewports']
-    .some((key) => selection[key]?.length)
+    .some((key) => selectionValues(selection, key)?.length)
   const definitions = resolved.entries.map(({ definition }) => definition)
   const selectedById = new Map(resolved.entries.map(({ definition, subruns }) => (
     [definition.id, subruns]
@@ -1649,6 +1808,26 @@ function snapshotExpectedClasses(value) {
   return classes
 }
 
+function readStableReport(path) {
+  let descriptor
+  try {
+    descriptor = openSync(path, 'r')
+    const before = fstatSync(descriptor, { bigint: true })
+    const bytes = readFileSync(descriptor)
+    const after = fstatSync(descriptor, { bigint: true })
+    if (['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs']
+      .some((field) => before[field] !== after[field])) {
+      throw new Error('SUREFIRE_UNSTABLE_REPORT')
+    }
+    return {
+      bytes,
+      modifiedAt: new Date(Number(after.mtimeNs / 1_000_000n)).toISOString()
+    }
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor)
+  }
+}
+
 export function parseSurefireReports(reportDir, expectedClasses, invocationStartedAt) {
   const classes = snapshotExpectedClasses(expectedClasses)
   const startedAt = parseInvocationStartedAt(invocationStartedAt)
@@ -1657,7 +1836,7 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
   const found = []
   for (const name of readdirSync(reportDir).filter((file) => file.endsWith('.xml')).toSorted()) {
     const path = `${reportDir}/${name}`
-    const bytes = readFileSync(path)
+    const { bytes, modifiedAt } = readStableReport(path)
     let source
     try {
       source = UTF8_DECODER.decode(bytes)
@@ -1675,7 +1854,7 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
       className,
       suiteName: attributes.name,
       file: name,
-      modifiedAt: statSync(path).mtime.toISOString(),
+      modifiedAt,
       tests: parseSurefireCounter(attributes.tests),
       skipped: parseSurefireCounter(attributes.skipped),
       failures: parseSurefireCounter(attributes.failures),
@@ -1744,20 +1923,21 @@ function platformPathIdentity(path) {
 }
 
 function cliOutputCandidate(output) {
-  const target = canonicalOutputTarget(output)
+  const alias = resolve(output)
+  const target = canonicalOutputTarget(alias)
   if (!target) return undefined
   try {
     if (!existsSync(target)) {
       return {
-        alias: target,
-        aliasIdentity: platformPathIdentity(target),
+        alias,
+        aliasIdentity: platformPathIdentity(alias),
         comparisonIdentity: `path:${platformPathIdentity(target)}`
       }
     }
     const { dev, ino } = statSync(target, { bigint: true })
     return {
-      alias: target,
-      aliasIdentity: platformPathIdentity(target),
+      alias,
+      aliasIdentity: platformPathIdentity(alias),
       comparisonIdentity: `file:${dev}:${ino}`
     }
   } catch {
@@ -1778,6 +1958,74 @@ function suppliedCliOutputs(rawArguments) {
     aliases: [...new Map(candidates.map((candidate) => (
       [candidate.aliasIdentity, candidate.alias]
     ))).values()]
+  }
+}
+
+function invalidateExistingOutputAliases(aliases, source) {
+  const opened = []
+  let failed = false
+  for (const alias of aliases) {
+    if (!existsSync(alias)) continue
+    let descriptor
+    try {
+      descriptor = openSync(alias, 'r+')
+      const descriptorStat = fstatSync(descriptor, { bigint: true })
+      const pathStat = statSync(alias, { bigint: true })
+      if (!descriptorStat.isFile()
+        || descriptorStat.dev !== pathStat.dev
+        || descriptorStat.ino !== pathStat.ino) {
+        failed = true
+        continue
+      }
+      opened.push({
+        descriptor,
+        identity: `${descriptorStat.dev}:${descriptorStat.ino}`
+      })
+      descriptor = undefined
+    } catch {
+      failed = true
+    } finally {
+      if (descriptor !== undefined) {
+        try {
+          closeSync(descriptor)
+        } catch {
+          failed = true
+        }
+      }
+    }
+  }
+
+  const invalidated = new Set()
+  try {
+    for (const { descriptor, identity } of opened) {
+      if (invalidated.has(identity)) continue
+      try {
+        ftruncateSync(descriptor, 0)
+        writeFileSync(descriptor, source, 'utf8')
+        fsyncSync(descriptor)
+        invalidated.add(identity)
+      } catch {
+        failed = true
+      }
+    }
+  } finally {
+    for (const { descriptor } of opened) {
+      try {
+        closeSync(descriptor)
+      } catch {
+        failed = true
+      }
+    }
+  }
+  return failed
+}
+
+function outputIsTerminalPass(output) {
+  try {
+    const evidence = JSON.parse(readFileSync(output, 'utf8'))
+    return Boolean(evidence) && typeof evidence === 'object' && evidence.status === 'PASS'
+  } catch {
+    return false
   }
 }
 
@@ -1839,14 +2087,23 @@ if (isMainModule()) {
     writeCaseResultAtomic(options.output, result)
   } catch (error) {
     const diagnostic = cliDiagnosticCode(error)
-    let writeFailed = false
-    try {
-      for (const output of outputs?.aliases ?? []) {
+    const aliases = outputs?.aliases ?? []
+    const failure = { status: 'FAIL', error: diagnostic }
+    const failureSource = `${JSON.stringify(failure, null, 2)}\n`
+    let writeFailed = invalidateExistingOutputAliases(aliases, failureSource)
+    for (const output of aliases) {
+      try {
         writeCaseResultAtomic(output, { status: 'FAIL', error: diagnostic })
+      } catch {
+        writeFailed = true
       }
-    } catch {
-      writeFailed = true
     }
+    const staleAliases = aliases.filter(outputIsTerminalPass)
+    if (staleAliases.length > 0) {
+      writeFailed = true
+      if (invalidateExistingOutputAliases(staleAliases, failureSource)) writeFailed = true
+    }
+    if (aliases.some(outputIsTerminalPass)) writeFailed = true
     if (writeFailed) console.error('CLI_WRITE_FAILED')
     console.error(diagnostic)
     process.exitCode = 1

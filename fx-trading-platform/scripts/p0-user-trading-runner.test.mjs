@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   symlinkSync,
@@ -14,9 +15,9 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import {
   aggregateReport,
@@ -649,7 +650,7 @@ test('persistence rejects unsupported root evidence atomically', (t) => {
   })
   assert.deepEqual(JSON.parse(readFileSync(ordinaryPath, 'utf8')), {
     id: 'AUTH-02',
-    nested: { kept: persistenceDigest('safe') },
+    nested: { [persistenceDigest('kept')]: persistenceDigest('safe') },
     values: [persistenceDigest('safe')]
   })
 })
@@ -736,13 +737,16 @@ test('persistence serialization ignores toJSON hooks and non-JSON values', (t) =
   }
   assert.deepEqual(JSON.parse(rootSource), {
     id: 'AUTH-01',
-    safe: persistenceDigest('root-safe')
+    [persistenceDigest('safe')]: persistenceDigest('root-safe')
   })
   assert.deepEqual(JSON.parse(nestedSource), {
     id: 'AUTH-02',
-    safe: persistenceDigest('outer-safe'),
-    nested: { safe: persistenceDigest('inner-safe') },
-    values: [persistenceDigest('kept'), { safe: persistenceDigest('deep-safe') }]
+    [persistenceDigest('safe')]: persistenceDigest('outer-safe'),
+    nested: { [persistenceDigest('safe')]: persistenceDigest('inner-safe') },
+    values: [
+      persistenceDigest('kept'),
+      { [persistenceDigest('safe')]: persistenceDigest('deep-safe') }
+    ]
   })
 })
 
@@ -1029,6 +1033,67 @@ test('public and persistence share a context-aware safe evidence boundary', (t) 
   }
 })
 
+test('dynamic credential-shaped object keys never survive public or persisted evidence', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-dynamic-key-evidence-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const credentialKeys = {
+    aws: 'AKIAABCDEFGHIJKLMNOP',
+    jwt: 'eyJhbGciOiJIUzI1NiJ9.REVIEW10PAYLOAD.REVIEW10SIGNATURE',
+    base64: 'SVRFTTJfQkFTRTY0X0NSRURFTlRJQUxfMzc5Yw==',
+    bearer: 'Bearer REVIEW10_DYNAMIC_KEY_CREDENTIAL',
+    cookie: 'Cookie: session=REVIEW10_DYNAMIC_KEY_CREDENTIAL',
+    sensitive: 'password-REVIEW10_DYNAMIC_KEY_CREDENTIAL'
+  }
+  const evidence = {
+    id: 'AUTH-01',
+    status: 'PASS',
+    selection: {
+      caseIds: ['AUTH-01'],
+      [credentialKeys.base64]: true
+    },
+    cases: {
+      'AUTH-01': {
+        status: 'PASS',
+        subruns: [{
+          id: 'desktop-ui-core',
+          profile: 'UI_CORE',
+          viewport: 'desktop',
+          status: 'PASS',
+          [credentialKeys.jwt]: true,
+          outcome: { [credentialKeys.cookie]: true }
+        }]
+      },
+      [credentialKeys.aws]: { status: 'PASS' }
+    },
+    counts: {
+      PASS: 1,
+      [credentialKeys.bearer]: true
+    },
+    [credentialKeys.sensitive]: true
+  }
+  const original = structuredClone(evidence)
+
+  const redacted = redactNetworkEntry(evidence)
+  writeCaseResultAtomic(resultPath, evidence)
+
+  assert.deepEqual(evidence, original)
+  const publicSource = JSON.stringify(redacted)
+  const persistedSource = readFileSync(resultPath, 'utf8')
+  for (const credentialKey of Object.values(credentialKeys)) {
+    assert.equal(publicSource.includes(credentialKey), false, `public ${credentialKey}`)
+    assert.equal(persistedSource.includes(credentialKey), false, `persisted ${credentialKey}`)
+  }
+  for (const safe of [redacted, JSON.parse(persistedSource)]) {
+    assert.equal(safe.id, 'AUTH-01')
+    assert.equal(safe.status, 'PASS')
+    assert.deepEqual(safe.selection.caseIds, ['AUTH-01'])
+    assert.equal(safe.cases['AUTH-01'].status, 'PASS')
+    assert.equal(safe.cases['AUTH-01'].subruns[0].id, 'desktop-ui-core')
+    assert.equal(safe.counts.PASS, 1)
+  }
+})
+
 test('persistence preserves the real P0 typed evidence contract', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-domain-evidence-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -1297,8 +1362,88 @@ test('persistence preserves the real P0 typed evidence contract', (t) => {
   assert.equal(source.includes(marker), false)
   const persisted = JSON.parse(source)
   assert.deepEqual(persisted.snapshots, snapshots)
-  assert.deepEqual(persisted.rejected, {})
-  assert.deepEqual(persisted.invalidTypes, {})
+  const keyDigest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
+  assert.equal(Object.hasOwn(persisted, 'rejected'), false)
+  assert.equal(Object.hasOwn(persisted, 'invalidTypes'), false)
+  assert.deepEqual(persisted[keyDigest('rejected')], {})
+  assert.deepEqual(persisted[keyDigest('invalidTypes')], {})
+})
+
+test('typed P0 gate evidence round-trips verdict modes timestamps and backend classes', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-gate-contract-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const expectedClasses = [
+    'PostgresDatabaseIT',
+    'V46V47EmptyDatabaseIT',
+    'V45ToV47DemoResetIT',
+    'Task5PostgresFullFillIT',
+    'Task6PostgresSpotIT',
+    'Task7PostgresDemoLifecycleIT',
+    'Task8PostgresTradingSettingsIT',
+    'Task9PostgresPerpetualOrderIT',
+    'Task10PostgresProtectionIT',
+    'Task11PostgresFundingIT',
+    'DemoTradingConcurrencyIT',
+    'PerpetualPositionConcurrencyIT',
+    'ProtectionOrderConcurrencyIT',
+    'FundingLiquidationConcurrencyIT'
+  ]
+  const invocationStartedAt = '2026-07-15T00:00:00.000Z'
+  const suites = expectedClasses.map((className, index) => ({
+    className,
+    modifiedAt: new Date(Date.UTC(2026, 6, 15, 0, index + 1)).toISOString()
+  }))
+  const cases = {
+    'AUTH-01': { verdict: 'PASS', mode: 'DISCOVERY' },
+    'AUTH-02': { verdict: 'PARTIAL_PASS', mode: 'CERTIFICATION' },
+    'AUTH-03': { verdict: 'FAIL', mode: 'DISCOVERY' },
+    'CAT-01': { verdict: 'BLOCKED', mode: 'CERTIFICATION' }
+  }
+  const arbitrary = {
+    verdict: 'ARBITRARY_VERDICT_REVIEW10',
+    mode: 'ARBITRARY_MODE_REVIEW10',
+    invocationStartedAt: 'not-a-canonical-instant-review10',
+    expectedClasses: ['ArbitraryReview10IT'],
+    suites: [{
+      className: 'ArbitraryReview10IT',
+      modifiedAt: 'not-a-canonical-instant-review10'
+    }]
+  }
+  const evidence = {
+    id: 'AUTH-01',
+    verdict: 'PASS',
+    mode: 'DISCOVERY',
+    invocationStartedAt,
+    expectedClasses,
+    suites,
+    cases,
+    metadata: arbitrary
+  }
+  const original = structuredClone(evidence)
+
+  const redacted = redactNetworkEntry(evidence)
+  writeCaseResultAtomic(resultPath, evidence)
+
+  assert.deepEqual(evidence, original)
+  const publicSource = JSON.stringify(redacted)
+  const persistedSource = readFileSync(resultPath, 'utf8')
+  for (const value of Object.values(arbitrary).flatMap((item) => (
+    Array.isArray(item) ? item.map((entry) => (
+      typeof entry === 'string' ? entry : JSON.stringify(entry)
+    )) : [item]
+  ))) {
+    if (typeof value === 'string') assert.equal(publicSource.includes(value), false, value)
+    if (typeof value === 'string') assert.equal(persistedSource.includes(value), false, value)
+  }
+  for (const safe of [redacted, JSON.parse(persistedSource)]) {
+    assert.equal(safe.verdict, 'PASS')
+    assert.equal(safe.mode, 'DISCOVERY')
+    assert.equal(safe.invocationStartedAt, invocationStartedAt)
+    assert.deepEqual(safe.expectedClasses, expectedClasses)
+    assert.deepEqual(safe.suites, suites)
+    assert.deepEqual(safe.cases, cases)
+  }
 })
 
 test('network redaction sanitizes URL userinfo and explicit header representations', () => {
@@ -2343,7 +2488,8 @@ test('reference fields hash bounded correlations and expose only exact public id
     { requestRef: uuid },
     { requestId: digest(correlations.longDigits) }
   ])
-  assert.deepEqual(persisted.numericReferences, {
+  assert.equal(Object.hasOwn(persisted, 'numericReferences'), false)
+  assert.deepEqual(persisted[persistenceDigest('numericReferences')], {
     id: 303,
     requestId: 404,
     referenceId: 505
@@ -2605,11 +2751,13 @@ test('persistence applies one global evidence field schema with canonical case a
     caseId: canonicalCaseId,
     subrunId: canonicalSubrunId
   })
-  assert.deepEqual(persisted.forgedMembership, {
+  assert.equal(Object.hasOwn(persisted, 'forgedMembership'), false)
+  assert.deepEqual(persisted[persistenceDigest('forgedMembership')], {
     caseId: digest(forgedCaseId),
     subrunId: digest(forgedSubrunId)
   })
-  assert.deepEqual(persisted.numericMembership, {
+  assert.equal(Object.hasOwn(persisted, 'numericMembership'), false)
+  assert.deepEqual(persisted[persistenceDigest('numericMembership')], {
     id: 303,
     requestId: 404,
     referenceId: 505
@@ -2755,11 +2903,17 @@ test('JSON body sanitizer does not form-fallback after parse', (t) => {
   const source = readFileSync(resultPath, 'utf8')
   assert.equal(source.includes(marker), false)
   const persisted = JSON.parse(source)
-  assert.equal('body' in persisted.parsedFailure, false)
-  const form = new URLSearchParams(persisted.canonicalForm.body)
+  for (const key of ['parsedFailure', 'canonicalForm', 'validJson']) {
+    assert.equal(Object.hasOwn(persisted, key), false)
+  }
+  const parsedFailure = persisted[persistenceDigest('parsedFailure')]
+  const canonicalForm = persisted[persistenceDigest('canonicalForm')]
+  const validJson = persisted[persistenceDigest('validJson')]
+  assert.equal('body' in parsedFailure, false)
+  const form = new URLSearchParams(canonicalForm.body)
   assert.equal(form.get('password'), '[REDACTED]')
   assert.equal(form.get('symbol'), 'BNBUSDT')
-  assert.deepEqual(JSON.parse(persisted.validJson.body), {
+  assert.deepEqual(JSON.parse(validJson.body), {
     url: '/api/orders?access_token=%5BREDACTED%5D&symbol=BTCUSDT',
     password: '[REDACTED]',
     status: 'ACCEPTED'
@@ -3226,6 +3380,172 @@ test('canonical registry reaches terminal PASS only with all exact results', () 
   assert.equal(report.scopeComplete, true)
   assert.equal(report.counts.PASS, 60)
   assert.deepEqual(report.issues, [])
+})
+
+test('prototype inheritance cannot forge aggregate or resume evidence', () => {
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+      import { createHash } from 'node:crypto'
+
+      const { aggregateReport, planResume } = await import(${JSON.stringify(artifactsUrl)})
+      const { P0_CASES } = await import(${JSON.stringify(casesUrl)})
+      const fingerprint = createHash('sha256')
+        .update(JSON.stringify(P0_CASES))
+        .digest('hex')
+      const passingCase = (definition) => ({
+        id: definition.id,
+        status: 'PASS',
+        scopeComplete: true,
+        subruns: definition.requiredSubruns.map((subrun) => ({
+          ...subrun,
+          status: 'PASS'
+        }))
+      })
+      const allCases = Object.fromEntries(P0_CASES.map((definition) => [
+        definition.id,
+        passingCase(definition)
+      ]))
+      const aggregateState = (selection) => ({
+        definitions: P0_CASES,
+        registryFingerprint: fingerprint,
+        selection
+      })
+      const resumeState = {
+        ...aggregateState({}),
+        cases: allCases
+      }
+      const baselinePlan = planResume(resumeState, P0_CASES, {})
+      const first = P0_CASES[0]
+      const inheritedValues = {
+        caseIds: [first.id],
+        phases: [first.phase],
+        profiles: [first.requiredSubruns[0].profile],
+        viewports: [first.requiredSubruns[0].viewport]
+      }
+      const observations = Object.create(null)
+
+      for (const field of Object.keys(inheritedValues)) {
+        let calls = 0
+        Object.defineProperty(Object.prototype, field, {
+          configurable: true,
+          get() {
+            calls += 1
+            if (field === 'caseIds' && calls === 1) return []
+            return inheritedValues[field]
+          }
+        })
+        try {
+          observations[field] = {
+            aggregate: aggregateReport(aggregateState({}), [passingCase(first)]),
+            plan: planResume(resumeState, P0_CASES, {})
+          }
+        } finally {
+          delete Object.prototype[field]
+          observations[field].calls = calls
+        }
+      }
+
+      const traversalValues = {
+        definitions: P0_CASES,
+        registryFingerprint: fingerprint,
+        selection: {},
+        cases: allCases,
+        id: first.id,
+        status: 'PASS',
+        scopeComplete: true,
+        subruns: passingCase(first).subruns,
+        requiredSubruns: first.requiredSubruns,
+        executionGroup: first.executionGroup
+      }
+      const traversalCalls = Object.fromEntries(
+        Object.keys(traversalValues).map((field) => [field, 0])
+      )
+      for (const [field, value] of Object.entries(traversalValues)) {
+        Object.defineProperty(Object.prototype, field, {
+          configurable: true,
+          get() {
+            traversalCalls[field] += 1
+            return value
+          }
+        })
+      }
+      let traversalReport
+      let traversalPlanError
+      try {
+        traversalReport = aggregateReport({}, [{}])
+        try {
+          planResume({}, P0_CASES, {})
+        } catch (error) {
+          traversalPlanError = error.message
+        }
+      } finally {
+        for (const field of Object.keys(traversalValues)) delete Object.prototype[field]
+      }
+
+      assert.notEqual(
+        observations.caseIds.aggregate.verdict,
+        'PASS',
+        'changing inherited caseIds forged terminal PASS'
+      )
+      for (const [field, observation] of Object.entries(observations)) {
+        assert.equal(observation.calls, 0, field)
+        assert.deepEqual(observation.plan, baselinePlan, field)
+      }
+      assert.deepEqual(traversalCalls, Object.fromEntries(
+        Object.keys(traversalValues).map((field) => [field, 0])
+      ))
+      assert.equal(traversalReport.verdict, 'FAIL')
+      assert.deepEqual(traversalReport.issues, ['MISSING_REGISTRY'])
+      assert.equal(traversalPlanError, 'MISSING_REGISTRY: state')
+
+      const filteredSelection = { caseIds: [first.id] }
+      const filteredReport = aggregateReport(
+        aggregateState(filteredSelection),
+        [passingCase(first)]
+      )
+      const filteredPlan = planResume(resumeState, P0_CASES, filteredSelection)
+      assert.equal(filteredReport.verdict, 'PARTIAL_PASS')
+      assert.equal(filteredPlan.filtered, true)
+      assert.equal(filteredPlan.entries.length, 1)
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
+  assert.equal(execution.stdout, '')
+})
+
+test('malformed aggregate inputs fail closed without throwing', () => {
+  const definition = P0_CASES[0]
+  const fixtures = [
+    ['selection object with array-like length', { caseIds: { length: 1 } }, [passingCase(definition)]],
+    ['selection string', { caseIds: definition.id }, [passingCase(definition)]],
+    ['selection null element', { caseIds: [null] }, [passingCase(definition)]],
+    ['phase null element', { phases: [null] }, [passingCase(definition)]],
+    ['profile null element', { profiles: [null] }, [passingCase(definition)]],
+    ['viewport null element', { viewports: [null] }, [passingCase(definition)]],
+    ['selection array root', [null], [passingCase(definition)]],
+    ['null selection', null, [passingCase(definition)]],
+    ['null result', {}, [null]]
+  ]
+  const expected = {
+    verdict: 'FAIL',
+    scopeComplete: false,
+    counts: { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 },
+    issues: ['INVALID_AGGREGATE_INPUT']
+  }
+
+  for (const [label, selection, results] of fixtures) {
+    let report
+    assert.doesNotThrow(() => {
+      report = aggregateReport(aggregateState(selection), results)
+    }, label)
+    assert.deepEqual(report, expected, label)
+  }
 })
 
 test('aggregate snapshots immutable evidence and rejects malformed identity arrays', (t) => {
@@ -4087,6 +4407,86 @@ function writeSurefireSuite(directory, fileName, attributes, modifiedAt = new Da
   utimesSync(path, modifiedAt, modifiedAt)
   return path
 }
+
+test('Surefire parser binds bytes and freshness to one opened report', () => {
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+      import {
+        mkdirSync,
+        mkdtempSync,
+        renameSync,
+        rmSync,
+        utimesSync,
+        writeFileSync
+      } from 'node:fs'
+      import { tmpdir } from 'node:os'
+      import { join } from 'node:path'
+      import { TextDecoder } from 'node:util'
+
+      const { parseSurefireReports } = await import(${JSON.stringify(artifactsUrl)})
+      const root = mkdtempSync(join(tmpdir(), 'p0-surefire-path-race-'))
+      const reports = join(root, 'reports')
+      const reportPath = join(reports, 'TEST-path-race.xml')
+      const replacementPath = join(reports, 'replacement.xml.pending')
+      const staleBackup = join(reports, 'stale.xml.backup')
+      const xml = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<testsuite name="com.fxplatform.PathRaceIT" tests="1" skipped="0" failures="0" errors="0">',
+        '</testsuite>'
+      ].join('\\n')
+      mkdirSync(reports)
+      writeFileSync(reportPath, xml)
+      writeFileSync(replacementPath, xml)
+      const invocationStartedAt = new Date(Date.now() - 5_000)
+      const staleTime = new Date(invocationStartedAt.getTime() - 5_000)
+      const freshTime = new Date()
+      utimesSync(reportPath, staleTime, staleTime)
+      utimesSync(replacementPath, freshTime, freshTime)
+
+      const originalDecode = TextDecoder.prototype.decode
+      let decodeCalls = 0
+      let outcome
+      TextDecoder.prototype.decode = function (...arguments_) {
+        decodeCalls += 1
+        if (decodeCalls === 1) {
+          renameSync(reportPath, staleBackup)
+          renameSync(replacementPath, reportPath)
+        }
+        return Reflect.apply(originalDecode, this, arguments_)
+      }
+      try {
+        try {
+          outcome = {
+            result: parseSurefireReports(
+              reports,
+              ['PathRaceIT'],
+              invocationStartedAt
+            )
+          }
+        } catch (error) {
+          outcome = { error: error.message }
+        }
+      } finally {
+        TextDecoder.prototype.decode = originalDecode
+        rmSync(root, { recursive: true, force: true })
+      }
+
+      assert.equal(decodeCalls, 1)
+      assert.notEqual(outcome.result?.status, 'PASS', 'old stale bytes used fresh path metadata')
+      assert.match(
+        outcome.error ?? '',
+        /^SUREFIRE_(?:STALE|UNSTABLE)_REPORT: PathRaceIT$/
+      )
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
+  assert.equal(execution.stdout, '')
+})
 
 test('Surefire API validates time classes UTF-8 and declaration before trusting reports', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-surefire-api-boundary-'))
@@ -4995,6 +5395,147 @@ test('strict artifact CLI replaces every hardlink alias with duplicate output fa
       error: 'CLI_DUPLICATE_OPTION'
     })
   }
+})
+
+test('strict artifact CLI invalidates every hardlink alias before best-effort failure writes', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-cli-hardlink-failure-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const marker = 'ITEM5_HARDLINK_DIAGNOSTIC_SECRET'
+  const firstOutput = join(root, `hardlink-first-${marker}.json`)
+  const longName = `${marker}-${'x'.repeat(220 - marker.length - 6)}.json`
+  const secondOutput = join(root, longName)
+  const stalePass = '{"status":"PASS","stale":"hardlink-failure"}\n'
+  writeFileSync(firstOutput, stalePass)
+  linkSync(firstOutput, secondOutput)
+
+  const execution = spawnSync(process.execPath, [
+    artifactsScript,
+    'verify-surefire',
+    `--reports=${join(root, 'unused-reports')}`,
+    '--classes=HardlinkFailureIT',
+    `--started-at=${new Date().toISOString()}`,
+    `--output=${firstOutput}`,
+    `--output=${secondOutput}`
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 1)
+  assert.equal(execution.stderr.includes(marker), false)
+  for (const output of [firstOutput, secondOutput]) {
+    const evidence = JSON.parse(readFileSync(output, 'utf8'))
+    assert.notEqual(evidence.status, 'PASS', output)
+  }
+})
+
+test('strict artifact CLI writes failure through the supplied lexical alias after redirect', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-cli-redirect-output-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const marker = 'ITEM5_REDIRECT_DIAGNOSTIC_SECRET'
+  const reports = join(root, 'reports')
+  const hookPath = join(root, 'redirect-hook.mjs')
+  const redirectMarker = join(root, 'redirect-complete.txt')
+  const firstDirectory = join(root, `first-${marker}`)
+  const secondDirectory = join(root, `second-${marker}`)
+  mkdirSync(reports)
+  mkdirSync(firstDirectory)
+  mkdirSync(secondDirectory)
+  writeFileSync(join(reports, `TEST-${marker}.xml`), '<testsuite')
+  const firstTarget = join(firstDirectory, 'gate.json')
+  const secondTarget = join(secondDirectory, 'gate.json')
+  writeFileSync(firstTarget, '{"status":"PASS","target":"first"}\n')
+  writeFileSync(secondTarget, '{"status":"PASS","target":"second"}\n')
+
+  let aliasPath
+  let lexicalOutput
+  let originalTarget
+  let redirectTarget
+  if (process.platform === 'win32') {
+    aliasPath = join(root, 'output-alias')
+    symlinkSync(firstDirectory, aliasPath, 'junction')
+    lexicalOutput = join(aliasPath, 'gate.json')
+    originalTarget = firstDirectory
+    redirectTarget = secondDirectory
+  } else {
+    aliasPath = join(root, 'gate-alias.json')
+    symlinkSync(firstTarget, aliasPath, 'file')
+    lexicalOutput = aliasPath
+    originalTarget = firstTarget
+    redirectTarget = secondTarget
+  }
+  for (const path of [aliasPath, originalTarget, redirectTarget]) {
+    const relativePath = relative(resolve(root), resolve(path))
+    assert.ok(
+      relativePath
+      && relativePath !== '..'
+      && !relativePath.startsWith(`..${sep}`)
+      && !isAbsolute(relativePath),
+      path
+    )
+  }
+  writeFileSync(hookPath, [
+    "import fs, { rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'",
+    "import { syncBuiltinESMExports } from 'node:module'",
+    "import { isAbsolute, relative, resolve, sep } from 'node:path'",
+    'const originalReadFileSync = fs.readFileSync',
+    'let redirected = false',
+    'fs.readFileSync = function (input, ...arguments_) {',
+    '  const result = Reflect.apply(originalReadFileSync, this, [input, ...arguments_])',
+    "  if (!redirected && typeof input === 'number') {",
+    '    redirected = true',
+    '    fs.readFileSync = originalReadFileSync',
+    '    syncBuiltinESMExports()',
+    '    const root = resolve(process.env.P0_TEMP_ROOT)',
+    '    for (const path of [',
+    '      process.env.P0_OUTPUT_ALIAS,',
+    '      process.env.P0_ORIGINAL_TARGET,',
+    '      process.env.P0_REDIRECT_TARGET',
+    '    ]) {',
+    '      const relativePath = relative(root, resolve(path))',
+    "      if (!relativePath || relativePath === '..'",
+    "        || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath)) {",
+    "        throw new Error('TEST_REDIRECT_OUTSIDE_TEMP_ROOT')",
+    '      }',
+    '    }',
+    "    if (process.platform === 'win32') {",
+    '      rmSync(process.env.P0_OUTPUT_ALIAS, { recursive: true, force: true })',
+    "      symlinkSync(process.env.P0_REDIRECT_TARGET, process.env.P0_OUTPUT_ALIAS, 'junction')",
+    '    } else {',
+    '      unlinkSync(process.env.P0_OUTPUT_ALIAS)',
+    "      symlinkSync(process.env.P0_REDIRECT_TARGET, process.env.P0_OUTPUT_ALIAS, 'file')",
+    '    }',
+    "    writeFileSync(process.env.P0_REDIRECT_MARKER, 'redirected')",
+    '  }',
+    '  return result',
+    '}',
+    'syncBuiltinESMExports()'
+  ].join('\n'))
+
+  const execution = spawnSync(process.execPath, [
+    '--import',
+    pathToFileURL(hookPath).href,
+    artifactsScript,
+    'verify-surefire',
+    `--reports=${reports}`,
+    '--classes=RedirectOutputIT',
+    `--started-at=${new Date(Date.now() - 5_000).toISOString()}`,
+    `--output=${lexicalOutput}`
+  ], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      P0_TEMP_ROOT: root,
+      P0_OUTPUT_ALIAS: aliasPath,
+      P0_ORIGINAL_TARGET: originalTarget,
+      P0_REDIRECT_MARKER: redirectMarker,
+      P0_REDIRECT_TARGET: redirectTarget
+    }
+  })
+
+  assert.equal(existsSync(redirectMarker), true, execution.stderr)
+  assert.equal(readFileSync(redirectMarker, 'utf8'), 'redirected')
+  assert.equal(realpathSync(lexicalOutput), realpathSync(secondTarget))
+  assert.equal(execution.status, 1)
+  assert.equal(execution.stderr.includes(marker), false)
+  assert.equal(JSON.parse(readFileSync(lexicalOutput, 'utf8')).status, 'FAIL')
 })
 
 test('strict artifact CLI resolves output filesystem identities without guessing targets', (t) => {
