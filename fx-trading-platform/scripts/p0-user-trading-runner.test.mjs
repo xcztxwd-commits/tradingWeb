@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   utimesSync,
   writeFileSync
@@ -613,6 +615,26 @@ test('case evidence replaces atomically without leaving partial files', (t) => {
   assert.equal(existsSync(`${resultPath}.tmp`), false)
 })
 
+test('atomic writer uses a unique adjacent temp without touching a foreign fixed temp', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-unique-temp-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const foreignTempPath = `${resultPath}.tmp`
+  const foreignMarker = 'FOREIGN_TEMP_OWNER_4f8c'
+  writeFileSync(resultPath, '{"status":"OLD"}\n')
+  writeFileSync(foreignTempPath, foreignMarker)
+
+  writeCaseResultAtomic(resultPath, { id: 'AUTH-01', status: 'PASS' })
+
+  assert.deepEqual(JSON.parse(readFileSync(resultPath, 'utf8')), {
+    id: 'AUTH-01',
+    status: 'PASS'
+  })
+  assert.equal(existsSync(foreignTempPath), true)
+  assert.equal(readFileSync(foreignTempPath, 'utf8'), foreignMarker)
+  assert.deepEqual(readdirSync(directory).toSorted(), ['result.json', 'result.json.tmp'])
+})
+
 test('persistence serialization ignores toJSON hooks and non-JSON values', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-inert-json-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -681,6 +703,126 @@ test('persistence serialization ignores toJSON hooks and non-JSON values', (t) =
     values: ['kept', { safe: 'deep-safe' }]
   })
 })
+
+for (const scenario of [
+  'root-toJSON-getter',
+  'nested-toJSON-getter',
+  'root-ordinary-getter',
+  'nested-ordinary-getter',
+  'mutating-getter'
+]) {
+  test(`persistence input safety rejects accessors without executing: ${scenario}`, (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'p0-accessor-input-'))
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    const resultPath = join(directory, 'result.json')
+    const baseline = { id: 'AUTH-01', status: 'FAIL', reason: 'baseline' }
+    const marker = `FORBIDDEN_ACCESSOR_${scenario}`
+    let calls = 0
+    let input
+
+    if (scenario === 'mutating-getter') {
+      input = { id: 'AUTH-01' }
+      Object.defineProperty(input, 'mutator', {
+        enumerable: true,
+        get() {
+          calls += 1
+          input.later = marker
+          return 'safe'
+        }
+      })
+      input.later = 'unchanged'
+    } else {
+      const nested = scenario.startsWith('nested')
+      const target = {}
+      Object.defineProperty(target, scenario.includes('toJSON') ? 'toJSON' : 'evidence', {
+        enumerable: true,
+        get() {
+          calls += 1
+          return marker
+        }
+      })
+      input = nested ? { id: 'AUTH-01', nested: target } : { id: 'AUTH-01' }
+      if (!nested) Object.defineProperties(input, Object.getOwnPropertyDescriptors(target))
+    }
+
+    writeCaseResultAtomic(resultPath, baseline)
+    let failure
+    try {
+      writeCaseResultAtomic(resultPath, input)
+    } catch (error) {
+      failure = error
+    }
+
+    assert.equal(calls, 0)
+    assert.ok(failure instanceof TypeError)
+    assert.deepEqual(JSON.parse(readFileSync(resultPath, 'utf8')), baseline)
+    assert.equal(readFileSync(resultPath, 'utf8').includes(marker), false)
+    if (scenario === 'mutating-getter') assert.equal(input.later, 'unchanged')
+  })
+}
+
+for (const scenario of ['root-proxy', 'nested-proxy']) {
+  test(`persistence input safety rejects proxies without executing traps: ${scenario}`, (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'p0-proxy-input-'))
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    const resultPath = join(directory, 'result.json')
+    const baseline = { id: 'AUTH-01', status: 'FAIL', reason: 'baseline' }
+    let traps = 0
+    const proxy = new Proxy({ evidence: 'safe' }, {
+      get(target, key, receiver) {
+        traps += 1
+        return Reflect.get(target, key, receiver)
+      },
+      getOwnPropertyDescriptor(target, key) {
+        traps += 1
+        return Reflect.getOwnPropertyDescriptor(target, key)
+      },
+      getPrototypeOf(target) {
+        traps += 1
+        return Reflect.getPrototypeOf(target)
+      },
+      ownKeys(target) {
+        traps += 1
+        return Reflect.ownKeys(target)
+      }
+    })
+    const input = scenario === 'root-proxy'
+      ? proxy
+      : { id: 'AUTH-01', nested: proxy }
+
+    writeCaseResultAtomic(resultPath, baseline)
+    let failure
+    try {
+      writeCaseResultAtomic(resultPath, input)
+    } catch (error) {
+      failure = error
+    }
+
+    assert.equal(traps, 0)
+    assert.ok(failure instanceof TypeError)
+    assert.deepEqual(JSON.parse(readFileSync(resultPath, 'utf8')), baseline)
+  })
+}
+
+for (const [scenario, value] of [
+  ['NaN', Number.NaN],
+  ['positive-Infinity', Number.POSITIVE_INFINITY],
+  ['negative-Infinity', Number.NEGATIVE_INFINITY]
+]) {
+  test(`persistence input safety rejects non-finite numbers atomically: ${scenario}`, (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'p0-non-finite-'))
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    const resultPath = join(directory, 'result.json')
+    const baseline = { id: 'AUTH-01', status: 'FAIL', reason: 'baseline' }
+    writeCaseResultAtomic(resultPath, baseline)
+
+    assert.throws(
+      () => writeCaseResultAtomic(resultPath, { id: 'AUTH-01', metrics: { value } }),
+      TypeError
+    )
+    assert.deepEqual(JSON.parse(readFileSync(resultPath, 'utf8')), baseline)
+  })
+}
 
 test('network evidence redacts secrets recursively without mutating live replay data', () => {
   const entry = {
@@ -772,6 +914,44 @@ test('network redaction sanitizes URL userinfo and explicit header representatio
     'X-Region: safe-region'
   ])
   assert.equal(JSON.stringify(redacted).includes(unknownMarker), false)
+})
+
+test('persistence drops raw header text blobs without mutating safe network metadata', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-header-text-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const requestMarker = 'RAW_AUTHORIZATION_HEADER_TEXT_f271'
+  const responseMarker = 'RAW_SET_COOKIE_HEADER_TEXT_88d4'
+  const result = {
+    id: 'AUTH-01',
+    networkEvidence: [{
+      method: 'GET',
+      url: '/api/orders?symbol=BTCUSDT',
+      status: 200,
+      mimeType: 'application/json',
+      headersText: `Authorization: Bearer ${requestMarker}\r\nX-Trace-Id: safe-trace`,
+      responseHeadersText: `Set-Cookie: session=${responseMarker}\r\nContent-Type: application/json`,
+      headers: { 'X-Trace-Id': 'safe-trace' }
+    }]
+  }
+  const original = JSON.parse(JSON.stringify(result))
+
+  writeCaseResultAtomic(resultPath, result)
+
+  assert.deepEqual(result, original)
+  const source = readFileSync(resultPath, 'utf8')
+  assert.equal(source.includes(requestMarker), false)
+  assert.equal(source.includes(responseMarker), false)
+  const evidence = JSON.parse(source).networkEvidence[0]
+  assert.equal('headersText' in evidence, false)
+  assert.equal('responseHeadersText' in evidence, false)
+  assert.deepEqual(evidence, {
+    method: 'GET',
+    url: '/api/orders?symbol=BTCUSDT',
+    status: 200,
+    mimeType: 'application/json',
+    headers: { 'X-Trace-Id': 'safe-trace' }
+  })
 })
 
 test('atomic evidence never persists credentials', (t) => {
@@ -1001,6 +1181,101 @@ test('persistence keeps only scalar user action requestRef evidence', (t) => {
   ])
 })
 
+test('persistence sanitizes scalar reference and replay fields and drops standalone payloads', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-scalar-reference-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const markers = {
+    requestRef: 'UNSAFE_REQUEST_REF_91ac',
+    requestId: 'UNSAFE_REQUEST_ID_77e2',
+    requestFingerprint: 'UNSAFE_REQUEST_FINGERPRINT_a62d',
+    fingerprint: 'UNSAFE_FINGERPRINT_04b8',
+    replayId: 'UNSAFE_REPLAY_ID_103a',
+    replayCaseId: 'UNSAFE_REPLAY_CASE_ID_82cf',
+    replaySubrunId: 'UNSAFE_REPLAY_SUBRUN_ID_11f0',
+    replayReferenceId: 'UNSAFE_REPLAY_REFERENCE_ID_43b1',
+    replayRequestId: 'UNSAFE_REPLAY_REQUEST_ID_5d9e',
+    replayClientOrderId: 'UNSAFE_REPLAY_CLIENT_ORDER_ID_b447',
+    replayFingerprint: 'UNSAFE_REPLAY_FINGERPRINT_3f20',
+    replayRequestFingerprint: 'UNSAFE_REPLAY_REQUEST_FINGERPRINT_8c62',
+    replayStatus: 'UNSAFE_REPLAY_STATUS_54d3',
+    replayErrorCode: 'UNSAFE_REPLAY_ERROR_CODE_65ae',
+    outcomeStatus: 'UNSAFE_OUTCOME_STATUS_706c',
+    outcomeErrorCode: 'UNSAFE_OUTCOME_ERROR_CODE_0f19',
+    payload: 'UNSAFE_STANDALONE_PAYLOAD_9f5c',
+    requestPayload: 'UNSAFE_STANDALONE_REQUEST_PAYLOAD_f43b'
+  }
+  const unsafeReplay = {
+    id: `Bearer ${markers.replayId}`,
+    caseId: `session=${markers.replayCaseId}`,
+    subrunId: `password=${markers.replaySubrunId}`,
+    referenceId: `Cookie: ${markers.replayReferenceId}`,
+    requestId: `request\r\n${markers.replayRequestId}`,
+    clientOrderId: `client\u0000${markers.replayClientOrderId}`,
+    fingerprint: `token=${markers.replayFingerprint}`,
+    requestFingerprint: `secret=${markers.replayRequestFingerprint}`,
+    status: `PASS ${markers.replayStatus}`,
+    errorCode: `ERROR=${markers.replayErrorCode}`,
+    outcome: {
+      status: `FAIL\r\n${markers.outcomeStatus}`,
+      errorCode: `PASSWORD=${markers.outcomeErrorCode}`
+    }
+  }
+  const safeReplay = {
+    id: 'replay-1',
+    caseId: 'AUTH-01',
+    subrunId: 'desktop-ui-core',
+    referenceId: 'order/123',
+    requestId: '1234.56',
+    clientOrderId: 'client_order-1',
+    fingerprint: 'sha256:abcdef012345',
+    requestFingerprint: 'sha256:request-abcdef',
+    status: 'REJECTED',
+    errorCode: 'REQUEST_CONFLICT',
+    outcome: { status: 'REJECTED', errorCode: 'REQUEST_CONFLICT' }
+  }
+  const result = {
+    id: 'AUTH-01',
+    userActions: [
+      { action: 'unsafe-ref', requestRef: `Bearer ${markers.requestRef}` },
+      { action: 'safe-ref', requestRef: 'request-ref-safe-78b1' },
+      { action: 'unsafe-id', requestId: `Cookie: ${markers.requestId}` },
+      { action: 'safe-id', requestId: '1234.56' },
+      {
+        action: 'unsafe-request-fingerprint',
+        requestFingerprint: `password=${markers.requestFingerprint}`
+      },
+      { action: 'safe-request-fingerprint', requestFingerprint: 'sha256:request-safe' },
+      { action: 'unsafe-fingerprint', fingerprint: `token=${markers.fingerprint}` },
+      { action: 'safe-fingerprint', fingerprint: 'sha256:fingerprint-safe' }
+    ],
+    replayProbes: [unsafeReplay, safeReplay],
+    payload: `password=${markers.payload}`,
+    requestPayload: `secret=${markers.requestPayload}`
+  }
+  const original = structuredClone(result)
+
+  writeCaseResultAtomic(resultPath, result)
+
+  assert.deepEqual(result, original)
+  const source = readFileSync(resultPath, 'utf8')
+  for (const marker of Object.values(markers)) assert.equal(source.includes(marker), false)
+  const persisted = JSON.parse(source)
+  assert.deepEqual(persisted.userActions, [
+    { action: 'unsafe-ref' },
+    { action: 'safe-ref', requestRef: 'request-ref-safe-78b1' },
+    { action: 'unsafe-id' },
+    { action: 'safe-id', requestId: '1234.56' },
+    { action: 'unsafe-request-fingerprint' },
+    { action: 'safe-request-fingerprint', requestFingerprint: 'sha256:request-safe' },
+    { action: 'unsafe-fingerprint' },
+    { action: 'safe-fingerprint', fingerprint: 'sha256:fingerprint-safe' }
+  ])
+  assert.deepEqual(persisted.replayProbes, [{}, safeReplay])
+  assert.equal('payload' in persisted, false)
+  assert.equal('requestPayload' in persisted, false)
+})
+
 test('persistence redacts parseable response bodies and drops opaque response payloads without mutation', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-response-redaction-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -1059,13 +1334,25 @@ test('response evidence drops padded base64 but keeps canonical credential form'
   const directory = mkdtempSync(join(tmpdir(), 'p0-response-form-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const resultPath = join(directory, 'result.json')
-  const paddedBase64 = ['YQ==', 'c2VjcmV0X3Rva2VuPQ==']
+  const paddedBase64 = [
+    'YQ==',
+    'c2VjcmV0X3Rva2VuPQ==',
+    'YWI=',
+    'c2VjcmV0X3Rva2VuPWE='
+  ]
 
   writeCaseResultAtomic(resultPath, {
     id: 'AUTH-01',
     networkEvidence: [
       { method: 'GET', url: '/api/short', status: 200, responseBody: paddedBase64[0] },
       { method: 'GET', url: '/api/token', status: 200, responsePayload: paddedBase64[1] },
+      { method: 'GET', url: '/api/single-padding', status: 200, responseBody: paddedBase64[2] },
+      {
+        method: 'GET',
+        url: '/api/token-single-padding',
+        status: 200,
+        responsePayload: paddedBase64[3]
+      },
       {
         method: 'POST',
         url: '/api/login',
@@ -1080,7 +1367,9 @@ test('response evidence drops padded base64 but keeps canonical credential form'
   const evidence = JSON.parse(source).networkEvidence
   assert.equal('responseBody' in evidence[0], false)
   assert.equal('responsePayload' in evidence[1], false)
-  const form = new URLSearchParams(evidence[2].responsePayload)
+  assert.equal('responseBody' in evidence[2], false)
+  assert.equal('responsePayload' in evidence[3], false)
+  const form = new URLSearchParams(evidence[4].responsePayload)
   assert.equal(form.get('password'), '[REDACTED]')
   assert.equal(form.get('state'), 'active')
 })
@@ -1096,8 +1385,8 @@ test('run state is created atomically and resumes only an identical evidence ide
     commit: 'commit-a',
     worktreeFingerprint: 'tree-a',
     schemaVersion: 1,
-    registryFingerprint: 'registry-a',
-    definitions: P0_CASES.slice(0, 2),
+    registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+    definitions: P0_CASES,
     selection: {}
   }
 
@@ -1131,8 +1420,8 @@ test('run state rejects missing, null, blank or invalid evidence identity', (t) 
     commit: 'commit-a',
     worktreeFingerprint: 'tree-a',
     schemaVersion: 1,
-    registryFingerprint: 'registry-a',
-    definitions: P0_CASES.slice(0, 1),
+    registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+    definitions: P0_CASES,
     selection: {}
   }
   const invalidValues = {
@@ -1194,6 +1483,217 @@ function passingCase(definition) {
   }
 }
 
+function registryFingerprint(definitions) {
+  return createHash('sha256').update(JSON.stringify(definitions)).digest('hex')
+}
+
+function uniquePassingCases(definitions) {
+  return [...new Map(definitions.map((definition) => [
+    definition.id,
+    passingCase(definition)
+  ])).values()]
+}
+
+const CANONICAL_REGISTRY_FINGERPRINT = registryFingerprint(P0_CASES)
+
+function aggregateState(selection = {}) {
+  return {
+    definitions: P0_CASES,
+    registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+    selection
+  }
+}
+
+const INVALID_AGGREGATE_REGISTRIES = {
+  'one-case': P0_CASES.slice(0, 1),
+  '59-cases': P0_CASES.slice(0, 59),
+  'replacement-id': [
+    ...P0_CASES.slice(0, 59),
+    { ...P0_CASES[59], id: 'UNKNOWN-99' }
+  ],
+  'duplicate-id': [...P0_CASES.slice(0, 59), P0_CASES[0]],
+  'metadata-drift': [
+    { ...P0_CASES[0], executionGroup: 'drifted-auth-session' },
+    ...P0_CASES.slice(1)
+  ]
+}
+
+for (const [scenario, definitions] of Object.entries(INVALID_AGGREGATE_REGISTRIES)) {
+  test(`canonical registry rejects aggregate universe: ${scenario}`, () => {
+    const report = aggregateReport({
+      definitions,
+      registryFingerprint: registryFingerprint(definitions),
+      selection: {}
+    }, uniquePassingCases(definitions))
+
+    assert.equal(report.verdict, 'FAIL')
+    assert.equal(report.scopeComplete, false)
+    assert.ok(report.issues.includes('INVALID_REGISTRY'))
+  })
+}
+
+test('canonical registry rejects a forged caller fingerprint', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-registry-forged-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+
+  assert.throws(
+    () => loadOrCreateRunState({
+      path: join(directory, 'run-state.json'),
+      runId: 'registry-contract',
+      mode: 'DISCOVERY',
+      commit: 'commit-a',
+      worktreeFingerprint: 'tree-a',
+      schemaVersion: 1,
+      registryFingerprint: 'forged-registry-fingerprint',
+      definitions: P0_CASES,
+      selection: {}
+    }),
+    /^Error: REGISTRY_FINGERPRINT_MISMATCH: options$/
+  )
+})
+
+test('canonical registry rejects persisted definitions with a copied fingerprint', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-registry-persisted-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const statePath = join(directory, 'run-state.json')
+  const identity = {
+    runId: 'registry-contract',
+    mode: 'DISCOVERY',
+    commit: 'commit-a',
+    worktreeFingerprint: 'tree-a',
+    schemaVersion: 1,
+    registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+    selection: {}
+  }
+  writeCaseResultAtomic(statePath, {
+    ...identity,
+    definitions: P0_CASES.slice(0, 59),
+    cases: {},
+    createdAt: '2026-07-14T00:00:00.000Z'
+  })
+
+  assert.throws(
+    () => loadOrCreateRunState({
+      ...identity,
+      path: statePath,
+      definitions: P0_CASES
+    }),
+    /^Error: INVALID_REGISTRY: state$/
+  )
+})
+
+test('canonical registry reaches terminal PASS only with all exact results', () => {
+  const report = aggregateReport({
+    definitions: P0_CASES,
+    registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+    selection: {}
+  }, P0_CASES.map(passingCase))
+
+  assert.equal(report.verdict, 'PASS')
+  assert.equal(report.scopeComplete, true)
+  assert.equal(report.counts.PASS, 60)
+  assert.deepEqual(report.issues, [])
+})
+
+test('canonical registry remains full for valid filtered case and phase runs', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-registry-filtered-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const selections = [
+    { caseIds: ['AUTH-03'] },
+    { phases: ['funding'] }
+  ]
+
+  for (const [index, selection] of selections.entries()) {
+    const state = loadOrCreateRunState({
+      path: join(directory, `run-state-${index}.json`),
+      runId: `registry-filter-${index}`,
+      mode: 'DISCOVERY',
+      commit: 'commit-a',
+      worktreeFingerprint: 'tree-a',
+      schemaVersion: 1,
+      registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+      definitions: P0_CASES,
+      selection
+    })
+    const selected = P0_CASES.filter((definition) => (
+      (!selection.caseIds || selection.caseIds.includes(definition.id))
+      && (!selection.phases || selection.phases.includes(definition.phase))
+    ))
+    const report = aggregateReport(state, selected.map(passingCase))
+
+    assert.equal(state.definitions.length, 60)
+    assert.equal(state.registryFingerprint, CANONICAL_REGISTRY_FINGERPRINT)
+    assert.equal(report.verdict, 'PARTIAL_PASS')
+    assert.equal(report.scopeComplete, false)
+    assert.deepEqual(report.issues, [])
+  }
+})
+
+function passingSelectedCase(definition, selection) {
+  const subruns = definition.requiredSubruns.filter((subrun) => (
+    (!selection.profiles?.length || selection.profiles.includes(subrun.profile))
+    && (!selection.viewports?.length || selection.viewports.includes(subrun.viewport))
+  ))
+  return {
+    id: definition.id,
+    status: 'PASS',
+    scopeComplete: !selection.profiles?.length && !selection.viewports?.length,
+    subruns: subruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+  }
+}
+
+const INVALID_SELECTOR_FIXTURES = [
+  {
+    label: 'mixed caseIds',
+    selection: { caseIds: ['AUTH-03', 'UNKNOWN-99'] }
+  },
+  {
+    label: 'mixed phases',
+    selection: { phases: ['funding', 'unknown-phase'] }
+  },
+  {
+    label: 'mixed profiles',
+    selection: { caseIds: ['SOURCE-03'], profiles: ['FUNDING_ONLY', 'UNKNOWN_PROFILE'] }
+  },
+  {
+    label: 'mixed viewports',
+    selection: { caseIds: ['UI-02'], viewports: ['mobile', 'watch'] }
+  },
+  {
+    label: 'profile without selected-case coverage',
+    selection: { caseIds: ['AUTH-03'], profiles: ['UI_CORE', 'FUNDING_ONLY'] }
+  },
+  {
+    label: 'viewport without selected-case coverage',
+    selection: { caseIds: ['AUTH-03'], viewports: ['desktop', 'mobile'] }
+  }
+]
+
+for (const { label, selection } of INVALID_SELECTOR_FIXTURES) {
+  const selectedDefinitions = P0_CASES.filter((definition) => (
+    (!selection.caseIds?.length || selection.caseIds.includes(definition.id))
+    && (!selection.phases?.length || selection.phases.includes(definition.phase))
+  )).filter((definition) => passingSelectedCase(definition, selection).subruns.length > 0)
+  const results = selectedDefinitions.map((definition) => passingSelectedCase(definition, selection))
+
+  test(`invalid selector aggregation fails explicitly: ${label}`, () => {
+    const report = aggregateReport(aggregateState(selection), results)
+
+    assert.equal(report.verdict, 'FAIL')
+    assert.equal(report.scopeComplete, false)
+    assert.ok(report.issues.some((issue) => issue.startsWith('INVALID_SELECTION:')))
+  })
+
+  test(`invalid selector resume planning fails explicitly: ${label}`, () => {
+    const cases = Object.fromEntries(results.map((result) => [result.id, result]))
+
+    assert.throws(
+      () => planResume({ cases }, P0_CASES, selection),
+      /^Error: INVALID_SELECTION:/
+    )
+  })
+}
+
 const CASE_LEVEL_SELECTION_FIXTURES = [
   {
     label: 'caseIds',
@@ -1234,7 +1734,7 @@ for (const fixture of CASE_LEVEL_SELECTION_FIXTURES) {
 
   test(`case-level selection aggregates complete ${fixture.label} evidence`, () => {
     const report = aggregateReport(
-      { definitions: P0_CASES, selection: fixture.selection },
+      aggregateState(fixture.selection),
       fixture.definitions.map(passingCase)
     )
 
@@ -1341,7 +1841,7 @@ test('profile and viewport filters are never resumable as complete scope', () =>
   assert.equal(uiPlan.entries[0].action, 'RUN')
   assert.deepEqual(uiPlan.entries[0].subruns, mobile)
   const uiReport = aggregateReport(
-    { definitions: [ui], selection: { viewports: ['mobile'] } },
+    aggregateState({ caseIds: [ui.id], viewports: ['mobile'] }),
     [falselyCompleteMobile]
   )
   assert.equal(uiReport.verdict, 'FAIL')
@@ -1349,38 +1849,40 @@ test('profile and viewport filters are never resumable as complete scope', () =>
 })
 
 test('aggregate report reaches PASS only with every required case and subrun', () => {
-  const definitions = [
-    P0_CASES.find(({ id }) => id === 'AUTH-01'),
-    P0_CASES.find(({ id }) => id === 'SOURCE-03')
-  ]
-  const state = { definitions, selection: {} }
-  const passed = aggregateReport(state, definitions.map(passingCase))
+  const state = aggregateState()
+  const completeResults = P0_CASES.map(passingCase)
+  const passed = aggregateReport(state, completeResults)
   assert.equal(passed.verdict, 'PASS')
   assert.equal(passed.scopeComplete, true)
   assert.deepEqual(passed.counts, {
-    PASS: 2,
+    PASS: 60,
     FAIL: 0,
     BLOCKED: 0,
     INVALID_TEST: 0,
     MISSING: 0
   })
 
-  const missing = aggregateReport(state, [passingCase(definitions[0])])
+  const missing = aggregateReport(
+    state,
+    completeResults.filter(({ id }) => id !== 'SOURCE-03')
+  )
   assert.equal(missing.verdict, 'FAIL')
   assert.equal(missing.scopeComplete, false)
   assert.ok(missing.issues.includes('MISSING_CASE: SOURCE-03'))
 
-  const partial = passingCase(definitions[1])
+  const partial = passingCase(P0_CASES.find(({ id }) => id === 'SOURCE-03'))
   partial.scopeComplete = false
   partial.subruns = partial.subruns.slice(0, 1)
-  const incomplete = aggregateReport(state, [passingCase(definitions[0]), partial])
+  const incomplete = aggregateReport(state, completeResults.map((result) => (
+    result.id === partial.id ? partial : result
+  )))
   assert.equal(incomplete.verdict, 'FAIL')
   assert.ok(incomplete.issues.includes('INCOMPLETE_MATRIX: SOURCE-03'))
 })
 
 test('valid FAIL and INVALID_TEST outrank BLOCKED in the terminal verdict', () => {
   const definitions = P0_CASES.slice(0, 2)
-  const state = { definitions, selection: {} }
+  const state = aggregateState({ caseIds: definitions.map(({ id }) => id) })
 
   const failed = aggregateReport(state, [
     { id: definitions[0].id, status: 'BLOCKED', subruns: [] },
@@ -1405,7 +1907,7 @@ test('filtered successful evidence is PARTIAL_PASS and never terminal PASS', () 
   const definition = P0_CASES.find(({ id }) => id === 'SOURCE-03')
   const selected = definition.requiredSubruns.filter(({ profile }) => profile === 'FUNDING_ONLY')
   const report = aggregateReport(
-    { definitions: [definition], selection: { profiles: ['FUNDING_ONLY'] } },
+    aggregateState({ caseIds: [definition.id], profiles: ['FUNDING_ONLY'] }),
     [{
       id: definition.id,
       status: 'PASS',
@@ -1421,7 +1923,10 @@ test('filtered successful evidence is PARTIAL_PASS and never terminal PASS', () 
 
 test('cropped scope requires exact false while case selection requires true', () => {
   const croppedDefinition = P0_CASES.find(({ id }) => id === 'SOURCE-03')
-  const croppedSelection = { profiles: ['FUNDING_ONLY'] }
+  const croppedSelection = {
+    caseIds: [croppedDefinition.id],
+    profiles: ['FUNDING_ONLY']
+  }
   const croppedSubruns = croppedDefinition.requiredSubruns.filter(
     ({ profile }) => profile === 'FUNDING_ONLY'
   )
@@ -1440,13 +1945,13 @@ test('cropped scope requires exact false while case selection requires true', ()
     }
     if (Object.hasOwn(variant, 'scopeComplete')) result.scopeComplete = variant.scopeComplete
     const report = aggregateReport(
-      { definitions: [croppedDefinition], selection: croppedSelection },
+      aggregateState(croppedSelection),
       [result]
     )
     return { label: variant.label, verdict: report.verdict, issues: report.issues }
   })
   const falseReport = aggregateReport(
-    { definitions: [croppedDefinition], selection: croppedSelection },
+    aggregateState(croppedSelection),
     [{
       id: croppedDefinition.id,
       status: 'PASS',
@@ -1459,7 +1964,7 @@ test('cropped scope requires exact false while case selection requires true', ()
   const caseSelection = { caseIds: [caseDefinition.id] }
   const completeCase = passingCase(caseDefinition)
   const completeCaseReport = aggregateReport(
-    { definitions: P0_CASES, selection: caseSelection },
+    aggregateState(caseSelection),
     [completeCase]
   )
   const completeCasePlan = planResume(
@@ -1469,7 +1974,7 @@ test('cropped scope requires exact false while case selection requires true', ()
   )
   const incompleteCase = { ...completeCase, scopeComplete: false }
   const incompleteCaseReport = aggregateReport(
-    { definitions: P0_CASES, selection: caseSelection },
+    aggregateState(caseSelection),
     [incompleteCase]
   )
   const incompleteCasePlan = planResume(
@@ -1503,7 +2008,7 @@ test('empty filtered selections fail instead of producing zero-evidence partial 
     }
   ]
   const actual = fixtures.map(({ label, selection }) => {
-    const report = aggregateReport({ definitions: P0_CASES, selection }, [])
+    const report = aggregateReport(aggregateState(selection), [])
     return {
       label,
       verdict: report.verdict,
@@ -1528,7 +2033,7 @@ test('corrupt, duplicate, unexpected or non-terminal evidence cannot pass', () =
   assert.deepEqual(registryless.issues, ['MISSING_REGISTRY'])
 
   const definition = P0_CASES[0]
-  const state = { definitions: [definition], selection: {} }
+  const state = aggregateState({ caseIds: [definition.id] })
   const duplicate = aggregateReport(state, [passingCase(definition), passingCase(definition)])
   assert.equal(duplicate.verdict, 'FAIL')
   assert.ok(duplicate.issues.includes(`DUPLICATE_CASE: ${definition.id}`))
@@ -1549,7 +2054,7 @@ for (const corruptStatus of ['toString', 'constructor', 'ARBITRARY_STATUS']) {
   test(`aggregate rejects evidence status ${corruptStatus}`, () => {
     const definition = P0_CASES[0]
     const report = aggregateReport(
-      { definitions: [definition], selection: {} },
+      aggregateState({ caseIds: [definition.id] }),
       [{ id: definition.id, status: corruptStatus }]
     )
 
@@ -1691,6 +2196,72 @@ for (const [scenario, source] of Object.entries(INVALID_XML_CHARACTER_DATA_REPOR
   })
 }
 
+test('Surefire outcome contract rejects invalid XML code points inside CDATA', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-cdata-codepoint-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const fileName = 'TEST-invalid-cdata-codepoint.xml'
+  writeFileSync(join(directory, fileName), [
+    '<testsuite name="com.fxplatform.CdataCodePointIT" tests="1" skipped="0" failures="0" errors="0">',
+    '<system-out><![CDATA[invalid \u0001 cdata]]></system-out>',
+    '</testsuite>'
+  ].join('\n'))
+
+  assert.throws(
+    () => parseSurefireReports(
+      directory,
+      ['CdataCodePointIT'],
+      new Date(Date.now() - 5_000)
+    ),
+    /^Error: SUREFIRE_MALFORMED_XML: TEST-invalid-cdata-codepoint\.xml$/
+  )
+})
+
+for (const outcome of ['failure', 'error', 'skipped']) {
+  test(`Surefire outcome contract rejects zero counters with a real ${outcome} element`, (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-outcome-element-'))
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    writeFileSync(join(directory, `TEST-${outcome}.xml`), [
+      '<testsuite name="com.fxplatform.OutcomeElementIT" tests="1" skipped="0" failures="0" errors="0">',
+      '<testcase name="contract">',
+      `<${outcome}>actual outcome</${outcome}>`,
+      '</testcase>',
+      '</testsuite>'
+    ].join('\n'))
+
+    assert.throws(
+      () => parseSurefireReports(
+        directory,
+        ['OutcomeElementIT'],
+        new Date(Date.now() - 5_000)
+      ),
+      /^Error: SUREFIRE_INVALID_SUITE: OutcomeElementIT$/
+    )
+  })
+}
+
+test('Surefire outcome contract ignores fake outcome text and accepts a zero-outcome suite', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-outcome-text-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  writeFileSync(join(directory, 'TEST-outcome-text.xml'), [
+    '<testsuite name="com.fxplatform.OutcomeTextIT" tests="1" skipped="0" failures="0" errors="0">',
+    '<!-- <failure>comment-only</failure> -->',
+    '<system-out>',
+    '<![CDATA[<error>cdata-only</error>]]>',
+    '&lt;skipped/&gt; escaped-text-only',
+    '</system-out>',
+    '</testsuite>'
+  ].join('\n'))
+
+  const parsed = parseSurefireReports(
+    directory,
+    ['OutcomeTextIT'],
+    new Date(Date.now() - 5_000)
+  )
+
+  assert.equal(parsed.status, 'PASS')
+  assert.deepEqual(parsed.totals, { tests: 1, skipped: 0, failures: 0, errors: 0 })
+})
+
 test('Surefire parser rejects malformed comments DOCTYPE and declarations', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-surefire-xml-subset-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -1812,6 +2383,38 @@ test('Surefire parser rejects missing, duplicate and stale exact suites', (t) =>
   )
 })
 
+test('Surefire freshness rejects materially future reports but allows timestamp tolerance', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-surefire-future-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const startedAt = new Date(Date.now() - 5_000)
+
+  const futureDir = join(root, 'future')
+  writeSurefireSuite(
+    futureDir,
+    'TEST-future.xml',
+    { name: 'com.fxplatform.FutureIT' },
+    new Date(Date.now() + 60_000)
+  )
+  assert.throws(
+    () => parseSurefireReports(futureDir, ['FutureIT'], startedAt),
+    /^Error: SUREFIRE_FUTURE_REPORT: FutureIT$/
+  )
+
+  const toleranceDir = join(root, 'tolerance')
+  writeSurefireSuite(
+    toleranceDir,
+    'TEST-tolerance.xml',
+    { name: 'com.fxplatform.TimestampToleranceIT' },
+    new Date(Date.now() + 1_000)
+  )
+  const tolerated = parseSurefireReports(
+    toleranceDir,
+    ['TimestampToleranceIT'],
+    startedAt
+  )
+  assert.equal(tolerated.status, 'PASS')
+})
+
 test('Surefire parser rejects empty, skipped, failed or errored suites', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-surefire-counts-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -1929,4 +2532,99 @@ test('verify-surefire CLI exits nonzero and persists parser rejection evidence',
     status: 'FAIL',
     error: 'SUREFIRE_STALE_REPORT: PostgresDatabaseIT'
   })
+})
+
+test('strict artifact CLI rejects a missing command', () => {
+  const execution = spawnSync(process.execPath, [artifactsScript], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 1)
+  assert.match(execution.stderr, /CLI_COMMAND_REQUIRED/)
+})
+
+test('strict artifact CLI rejects an unknown command and replaces a supplied gate', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-cli-unknown-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const output = join(root, 'gate.json')
+  writeFileSync(output, '{"status":"PASS"}\n')
+
+  const execution = spawnSync(process.execPath, [
+    artifactsScript,
+    'typo-command',
+    `--output=${output}`
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 1)
+  assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
+    status: 'FAIL',
+    error: 'CLI_UNKNOWN_COMMAND: typo-command'
+  })
+})
+
+const INVALID_CLI_OPTION_FIXTURES = [
+  {
+    label: 'malformed option',
+    option: '--reports',
+    error: 'CLI_MALFORMED_OPTION: --reports'
+  },
+  {
+    label: 'duplicate option',
+    option: '--classes=StrictCliIT',
+    error: 'CLI_DUPLICATE_OPTION: classes'
+  },
+  {
+    label: 'unknown option',
+    option: '--extra=value',
+    error: 'CLI_UNKNOWN_OPTION: extra'
+  },
+  {
+    label: 'empty option',
+    option: '--classes=',
+    error: 'CLI_OPTION_REQUIRED: classes'
+  }
+]
+
+for (const fixture of INVALID_CLI_OPTION_FIXTURES) {
+  test(`strict artifact CLI rejects ${fixture.label} and replaces stale PASS`, (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'p0-cli-options-'))
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    const reports = join(root, 'reports')
+    const output = join(root, 'gate.json')
+    const startedAt = new Date(Date.now() - 5_000).toISOString()
+    writeSurefireSuite(reports, 'TEST-strict.xml', { name: 'com.fxplatform.StrictCliIT' })
+    writeFileSync(output, '{"status":"PASS"}\n')
+    const options = [
+      `--reports=${reports}`,
+      '--classes=StrictCliIT',
+      `--started-at=${startedAt}`,
+      `--output=${output}`,
+      fixture.option
+    ]
+    if (fixture.option === '--reports') options.shift()
+    if (fixture.option === '--classes=') options.splice(1, 1)
+
+    const execution = spawnSync(process.execPath, [
+      artifactsScript,
+      'verify-surefire',
+      ...options
+    ], { encoding: 'utf8' })
+
+    assert.equal(execution.status, 1)
+    assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
+      status: 'FAIL',
+      error: fixture.error
+    })
+  })
+}
+
+test('strict artifact CLI module remains import-safe', () => {
+  const moduleUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `await import(${JSON.stringify(moduleUrl)})`
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
+  assert.equal(execution.stdout, '')
+  assert.equal(execution.stderr, '')
 })

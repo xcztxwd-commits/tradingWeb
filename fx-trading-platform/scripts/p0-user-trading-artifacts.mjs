@@ -1,6 +1,9 @@
+import { randomUUID } from 'node:crypto'
 import {
+  closeSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -10,6 +13,13 @@ import {
 } from 'node:fs'
 import { dirname } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { types } from 'node:util'
+
+import {
+  P0_CASES,
+  P0_REGISTRY_FINGERPRINT,
+  registryFingerprint
+} from './p0-user-trading-cases.mjs'
 
 const REDACTED = '[REDACTED]'
 const SENSITIVE_KEY = /authorization|cookie|token|password|secret|api[-_]?key/i
@@ -23,7 +33,8 @@ const RAW_REQUEST_CONTAINERS = new Set([
   'originalrequest',
   'capturedrequest',
   'rawrequestbody',
-  'rawpayload'
+  'rawpayload',
+  'payload'
 ])
 const SAFE_REPLAY_FIELDS = new Set([
   'id',
@@ -38,9 +49,16 @@ const SAFE_REPLAY_FIELDS = new Set([
   'errorCode'
 ])
 const SAFE_REPLAY_OUTCOME_FIELDS = new Set(['status', 'errorCode'])
-const SAFE_REQUEST_SCALARS = new Set(['requestid', 'requestfingerprint', 'requestref'])
+const SAFE_REFERENCE_SCALARS = new Set([
+  'fingerprint',
+  'requestid',
+  'requestfingerprint',
+  'requestref'
+])
 const RAW_HTTP_REQUEST_DETAIL_FIELDS = new Set(['headers', 'body', 'postdata', 'payload'])
 const NETWORK_REQUEST_BODY_FIELDS = new Set(['body', 'postdata', 'payload'])
+// Filesystem timestamp rounding can put a freshly written report slightly ahead of wall time.
+const SUREFIRE_FUTURE_MTIME_TOLERANCE_MS = 2_000
 const RUN_STATE_IDENTITY_FIELDS = [
   'commit',
   'worktreeFingerprint',
@@ -61,9 +79,13 @@ function redactUrl(value) {
 }
 
 function isFormBody(value) {
-  return value.length > 0 && value.split('&').every((field) => (
+  if (value.length === 0 || !value.split('&').every((field) => (
     /^[A-Za-z_][A-Za-z\d_.-]*=/.test(field)
-  )) && new URLSearchParams(value).toString() === value
+  ))) return false
+  const params = new URLSearchParams(value)
+  const entries = [...params]
+  return params.toString() === value
+    && !(entries.length === 1 && entries[0][1] === '')
 }
 
 function redactBody(value, dropOpaque = false) {
@@ -113,9 +135,11 @@ function sanitizeHeaderEvidence(value) {
 }
 
 function redactValue(value, key = '') {
+  const semanticKey = normalizedKey(key)
+  if (/headers(?:text|blob)$/.test(semanticKey)) return undefined
   if (SENSITIVE_KEY.test(key)) return REDACTED
   if (typeof value === 'string' && key.toLowerCase() === 'url') return redactUrl(value)
-  if (normalizedKey(key).endsWith('headers')) return sanitizeHeaderEvidence(value)
+  if (semanticKey.endsWith('headers')) return sanitizeHeaderEvidence(value)
   if (typeof value === 'string' && /^(body|postdata)$/i.test(key)) return redactBody(value)
   if (typeof value === 'string' && /^(responsebody|responsepayload)$/i.test(key)) {
     return redactBody(value, true)
@@ -137,7 +161,7 @@ function redactValue(value, key = '') {
 }
 
 export function redactNetworkEntry(entry) {
-  return redactValue(entry)
+  return redactValue(inertJsonValue(entry))
 }
 
 function normalizedKey(key) {
@@ -148,17 +172,26 @@ function persistenceScalar(value) {
   return value === null || ['string', 'number', 'boolean'].includes(typeof value)
 }
 
+function sanitizeReferenceScalar(value) {
+  if (typeof value !== 'string') return persistenceScalar(value) ? value : undefined
+  return /^[A-Za-z\d][A-Za-z\d._:/-]*$/.test(value) && !SENSITIVE_KEY.test(value)
+    ? value
+    : undefined
+}
+
 function sanitizeReplayProbe(probe) {
   if (!probe || typeof probe !== 'object' || Array.isArray(probe)) return {}
   const safe = Object.fromEntries(
-    Object.entries(probe).filter(([field, value]) => (
-      SAFE_REPLAY_FIELDS.has(field) && persistenceScalar(value)
-    ))
+    Object.entries(probe)
+      .filter(([field]) => SAFE_REPLAY_FIELDS.has(field))
+      .map(([field, value]) => [field, sanitizeReferenceScalar(value)])
+      .filter(([, value]) => value !== undefined)
   )
   const outcome = Object.fromEntries(
-    Object.entries(probe.outcome ?? {}).filter(([field, value]) => (
-      SAFE_REPLAY_OUTCOME_FIELDS.has(field) && persistenceScalar(value)
-    ))
+    Object.entries(probe.outcome ?? {})
+      .filter(([field]) => SAFE_REPLAY_OUTCOME_FIELDS.has(field))
+      .map(([field, value]) => [field, sanitizeReferenceScalar(value)])
+      .filter(([, value]) => value !== undefined)
   )
   if (Object.keys(outcome).length > 0) safe.outcome = outcome
   return safe
@@ -175,8 +208,8 @@ function stripRawRequests(value, key = '', inNetworkEvidence = false) {
   const semanticKey = normalizedKey(key)
   if (semanticKey === 'networkevidence') return stripRawRequests(value, '', true)
   if (inNetworkEvidence && NETWORK_REQUEST_BODY_FIELDS.has(semanticKey)) return undefined
-  if (SAFE_REQUEST_SCALARS.has(semanticKey)) {
-    return persistenceScalar(value) ? value : undefined
+  if (SAFE_REFERENCE_SCALARS.has(semanticKey)) {
+    return sanitizeReferenceScalar(value)
   }
   if (RAW_REQUEST_CONTAINERS.has(semanticKey) || semanticKey.includes('request')) return undefined
   if (semanticKey === 'replayprobes') {
@@ -204,32 +237,75 @@ function stripRawRequests(value, key = '', inNetworkEvidence = false) {
 function inertJsonValue(value, key = '') {
   if (key === 'toJSON' || value === undefined
     || typeof value === 'function' || typeof value === 'symbol') return undefined
-  if (Array.isArray(value)) {
-    return value.map((item) => inertJsonValue(item)).filter((item) => item !== undefined)
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new TypeError('UNSAFE_PERSISTENCE_VALUE: non-finite number')
   }
   if (!value || typeof value !== 'object') return value
+  if (types.isProxy(value)) throw new TypeError('UNSAFE_PERSISTENCE_VALUE: Proxy')
 
-  return Object.fromEntries(
-    Object.entries(value)
-      .map(([field, fieldValue]) => [field, inertJsonValue(fieldValue, field)])
-      .filter(([, fieldValue]) => fieldValue !== undefined)
-  )
+  const array = Array.isArray(value)
+  const prototype = Object.getPrototypeOf(value)
+  if ((array && prototype !== Array.prototype)
+    || (!array && prototype !== Object.prototype && prototype !== null)) {
+    throw new TypeError('UNSAFE_PERSISTENCE_VALUE: non-plain object')
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value)
+  for (const property of Reflect.ownKeys(descriptors)) {
+    const descriptor = descriptors[property]
+    if ('get' in descriptor || 'set' in descriptor) {
+      throw new TypeError('UNSAFE_PERSISTENCE_VALUE: accessor')
+    }
+  }
+
+  if (array) {
+    const inert = []
+    for (let index = 0; index < descriptors.length.value; index += 1) {
+      const descriptor = descriptors[index]
+      if (!descriptor) continue
+      const item = inertJsonValue(descriptor.value)
+      if (item !== undefined) inert.push(item)
+    }
+    return inert
+  }
+
+  const inert = {}
+  for (const [field, descriptor] of Object.entries(descriptors)) {
+    if (!descriptor.enumerable) continue
+    const fieldValue = inertJsonValue(descriptor.value, field)
+    if (fieldValue !== undefined) {
+      Object.defineProperty(inert, field, {
+        value: fieldValue,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      })
+    }
+  }
+  return inert
 }
 
 function sanitizeForPersistence(value) {
-  return inertJsonValue(redactValue(stripRawRequests(value)))
+  return redactValue(stripRawRequests(inertJsonValue(value)))
 }
 
 export function writeCaseResultAtomic(path, result) {
   const serialized = `${JSON.stringify(sanitizeForPersistence(result), null, 2)}\n`
-  const temporaryPath = `${path}.tmp`
+  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
   mkdirSync(dirname(path), { recursive: true })
+  let descriptor
+  let owned = false
 
   try {
-    writeFileSync(temporaryPath, serialized, 'utf8')
+    descriptor = openSync(temporaryPath, 'wx')
+    owned = true
+    writeFileSync(descriptor, serialized, 'utf8')
+    closeSync(descriptor)
+    descriptor = undefined
     renameSync(temporaryPath, path)
+    owned = false
   } finally {
-    if (existsSync(temporaryPath)) rmSync(temporaryPath)
+    if (descriptor !== undefined) closeSync(descriptor)
+    if (owned) rmSync(temporaryPath, { force: true })
   }
 }
 
@@ -249,9 +325,34 @@ function assertRunStateIdentity(source, label) {
   }
 }
 
+function registryIssue(definitions, fingerprint) {
+  if (!Array.isArray(definitions)) return 'MISSING_REGISTRY'
+  let inertDefinitions
+  try {
+    inertDefinitions = inertJsonValue(definitions)
+  } catch {
+    return 'INVALID_REGISTRY'
+  }
+  if (inertDefinitions.length === 0) return 'MISSING_REGISTRY'
+  if (inertDefinitions.length !== P0_CASES.length
+    || new Set(inertDefinitions.map((definition) => definition?.id)).size !== P0_CASES.length) {
+    return 'INVALID_REGISTRY'
+  }
+  const computed = registryFingerprint(inertDefinitions)
+  if (computed !== P0_REGISTRY_FINGERPRINT) return 'INVALID_REGISTRY'
+  if (fingerprint !== computed) return 'REGISTRY_FINGERPRINT_MISMATCH'
+  return null
+}
+
+function assertCanonicalRegistry(definitions, fingerprint, label) {
+  const issue = registryIssue(definitions, fingerprint)
+  if (issue) throw new Error(`${issue}: ${label}`)
+}
+
 export function loadOrCreateRunState(options) {
   assertRunStateIdentity(options, 'options')
   if (!existsSync(options.path)) {
+    assertCanonicalRegistry(options.definitions, options.registryFingerprint, 'options')
     const state = {
       schemaVersion: options.schemaVersion,
       runId: options.runId,
@@ -273,11 +374,46 @@ export function loadOrCreateRunState(options) {
   for (const field of RUN_STATE_IDENTITY_FIELDS) {
     if (state[field] !== options[field]) throw new Error(`RESUME_MISMATCH: ${field}`)
   }
+  assertCanonicalRegistry(options.definitions, options.registryFingerprint, 'options')
+  assertCanonicalRegistry(state.definitions, state.registryFingerprint, 'state')
   return state
 }
 
 function hasSelection(selection, key, value) {
   return !selection[key]?.length || selection[key].includes(value)
+}
+
+const SELECTION_FIELDS = ['caseIds', 'phases', 'profiles', 'viewports']
+
+function resolveSelection(definitions, selection) {
+  const filtered = SELECTION_FIELDS.some((key) => selection[key]?.length)
+  const entries = definitions
+    .filter((definition) => (
+      hasSelection(selection, 'caseIds', definition.id)
+      && hasSelection(selection, 'phases', definition.phase)
+    ))
+    .map((definition) => ({
+      definition,
+      subruns: selectedSubruns(definition, selection)
+    }))
+    .filter(({ subruns }) => subruns.length > 0)
+  if (filtered && entries.length === 0) {
+    return { filtered, entries, issues: ['EMPTY_SELECTION'] }
+  }
+
+  const coverage = {
+    caseIds: new Set(entries.map(({ definition }) => definition.id)),
+    phases: new Set(entries.map(({ definition }) => definition.phase)),
+    profiles: new Set(entries.flatMap(({ subruns }) => subruns.map(({ profile }) => profile))),
+    viewports: new Set(entries.flatMap(({ subruns }) => subruns.map(({ viewport }) => viewport)))
+  }
+  const issues = []
+  for (const key of SELECTION_FIELDS) {
+    const missing = [...new Set(selection[key] ?? [])]
+      .filter((value) => !coverage[key].has(value))
+    if (missing.length > 0) issues.push(`INVALID_SELECTION: ${key}=${missing.join(',')}`)
+  }
+  return { filtered, entries, issues }
 }
 
 function coversRequiredSubruns(result, definition) {
@@ -298,21 +434,13 @@ function coversRequiredSubruns(result, definition) {
 }
 
 export function planResume(state, definitions, selection = {}) {
-  const filtered = ['caseIds', 'phases', 'profiles', 'viewports']
-    .some((key) => selection[key]?.length)
+  const resolved = resolveSelection(definitions, selection)
+  if (resolved.issues.length > 0) throw new Error(resolved.issues[0])
+  const { filtered } = resolved
   const subrunsFiltered = ['profiles', 'viewports']
     .some((key) => selection[key]?.length)
-  const entries = definitions
-    .filter((definition) => (
-      hasSelection(selection, 'caseIds', definition.id)
-      && hasSelection(selection, 'phases', definition.phase)
-    ))
-    .map((definition) => {
-      const subruns = definition.requiredSubruns.filter((subrun) => (
-        hasSelection(selection, 'profiles', subrun.profile)
-        && hasSelection(selection, 'viewports', subrun.viewport)
-      ))
-      if (subruns.length === 0) return null
+  const entries = resolved.entries
+    .map(({ definition, subruns }) => {
       const result = state.cases?.[definition.id]
       return {
         id: definition.id,
@@ -322,7 +450,6 @@ export function planResume(state, definitions, selection = {}) {
         complete: !subrunsFiltered && coversRequiredSubruns(result, definition)
       }
     })
-    .filter(Boolean)
 
   const rerunGroups = new Set(
     entries.filter((entry) => !entry.complete).map((entry) => entry.executionGroup)
@@ -375,27 +502,27 @@ function subrunsPass(result, requiredSubruns) {
 
 export function aggregateReport(state, results) {
   const selection = state.selection ?? {}
-  if (!Array.isArray(state.definitions) || state.definitions.length === 0) {
+  const invalidRegistry = registryIssue(state.definitions, state.registryFingerprint)
+  if (invalidRegistry) {
     return {
       verdict: 'FAIL',
       scopeComplete: false,
       counts: { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 },
-      issues: ['MISSING_REGISTRY']
+      issues: [invalidRegistry]
     }
   }
-  const filtered = ['caseIds', 'phases', 'profiles', 'viewports']
-    .some((key) => selection[key]?.length)
+  const resolved = resolveSelection(state.definitions, selection)
+  const { filtered } = resolved
   const subrunsFiltered = ['profiles', 'viewports']
     .some((key) => selection[key]?.length)
-  const definitions = state.definitions.filter((definition) => (
-    hasSelection(selection, 'caseIds', definition.id)
-    && hasSelection(selection, 'phases', definition.phase)
-    && selectedSubruns(definition, selection).length > 0
-  ))
+  const definitions = resolved.entries.map(({ definition }) => definition)
+  const selectedById = new Map(resolved.entries.map(({ definition, subruns }) => (
+    [definition.id, subruns]
+  )))
   const expectedIds = new Set(definitions.map(({ id }) => id))
   const byId = Map.groupBy(results, ({ id }) => id)
   const counts = { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 }
-  const issues = filtered && definitions.length === 0 ? ['EMPTY_SELECTION'] : []
+  const issues = [...resolved.issues]
 
   for (const result of results) {
     if (!expectedIds.has(result.id)) issues.push(`UNEXPECTED_CASE: ${result.id}`)
@@ -417,7 +544,7 @@ export function aggregateReport(state, results) {
     if (result.status === 'INVALID_TEST') issues.push(`INVALID_TEST: ${definition.id}`)
     if (result.status !== 'PASS') continue
 
-    const requiredSubruns = selectedSubruns(definition, selection)
+    const requiredSubruns = selectedById.get(definition.id)
     if (!subrunsPass(result, requiredSubruns)
       || (!subrunsFiltered && result.scopeComplete !== true)
       || (subrunsFiltered && result.scopeComplete !== false)) {
@@ -548,6 +675,7 @@ function surefireRootAttributes(source) {
   let cursor = 0
   let rootAttributes = null
   let declarationSeen = false
+  const outcomeElements = { failure: 0, error: 0, skipped: 0 }
 
   while (cursor < source.length) {
     const start = source.indexOf('<', cursor)
@@ -570,7 +698,7 @@ function surefireRootAttributes(source) {
     if (source.startsWith('<![CDATA[', start)) {
       if (stack.length === 0) return null
       const end = source.indexOf(']]>', start + 9)
-      if (end === -1) return null
+      if (end === -1 || !validXmlCodePoints(source.slice(start + 9, end))) return null
       cursor = end + 3
       continue
     }
@@ -604,11 +732,14 @@ function surefireRootAttributes(source) {
       if (rootAttributes || opening.name !== 'testsuite') return null
       rootAttributes = opening.attributes
     }
+    if (Object.hasOwn(outcomeElements, opening.name)) outcomeElements[opening.name] += 1
     if (!opening.selfClosing) stack.push(opening.name)
     cursor = end + 1
   }
 
-  return stack.length === 0 ? rootAttributes : null
+  return stack.length === 0 && rootAttributes
+    ? { attributes: rootAttributes, outcomeElements }
+    : null
 }
 
 function parseSurefireCounter(value) {
@@ -618,6 +749,7 @@ function parseSurefireCounter(value) {
 }
 
 export function parseSurefireReports(reportDir, expectedClasses, invocationStartedAt) {
+  const verificationTime = new Date()
   if (!Array.isArray(expectedClasses) || expectedClasses.length === 0) {
     throw new Error('SUREFIRE_EXPECTED_CLASSES_REQUIRED')
   }
@@ -631,10 +763,11 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
   for (const name of readdirSync(reportDir).filter((file) => file.endsWith('.xml')).toSorted()) {
     const path = `${reportDir}/${name}`
     const source = readFileSync(path, 'utf8')
-    const attributes = surefireRootAttributes(source)
-    if (!attributes) {
+    const structure = surefireRootAttributes(source)
+    if (!structure) {
       throw new Error(`SUREFIRE_MALFORMED_XML: ${name}`)
     }
+    const { attributes, outcomeElements } = structure
     const className = attributes.name?.split('.').at(-1)
     if (!expected.has(className)) continue
     found.push({
@@ -645,7 +778,8 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
       tests: parseSurefireCounter(attributes.tests),
       skipped: parseSurefireCounter(attributes.skipped),
       failures: parseSurefireCounter(attributes.failures),
-      errors: parseSurefireCounter(attributes.errors)
+      errors: parseSurefireCounter(attributes.errors),
+      outcomeElements
     })
   }
   for (const className of expectedClasses) {
@@ -655,15 +789,20 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
     if (new Date(matches[0].modifiedAt) < startedAt) {
       throw new Error(`SUREFIRE_STALE_REPORT: ${className}`)
     }
+    if (new Date(matches[0].modifiedAt).getTime()
+      > verificationTime.getTime() + SUREFIRE_FUTURE_MTIME_TOLERANCE_MS) {
+      throw new Error(`SUREFIRE_FUTURE_REPORT: ${className}`)
+    }
     const suite = matches[0]
     if (!Number.isSafeInteger(suite.tests) || suite.tests <= 0
-      || suite.skipped !== 0 || suite.failures !== 0 || suite.errors !== 0) {
+      || suite.skipped !== 0 || suite.failures !== 0 || suite.errors !== 0
+      || Object.values(suite.outcomeElements).some((count) => count > 0)) {
       throw new Error(`SUREFIRE_INVALID_SUITE: ${className}`)
     }
   }
   const suites = expectedClasses.map((className) => (
     found.find((suite) => suite.className === className)
-  )).filter(Boolean)
+  )).filter(Boolean).map(({ outcomeElements: _, ...suite }) => suite)
   const totals = suites.reduce((sum, suite) => ({
     tests: sum.tests + suite.tests,
     skipped: sum.skipped + suite.skipped,
@@ -680,24 +819,64 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
   }
 }
 
+const SUREFIRE_CLI_OPTIONS = new Set(['reports', 'classes', 'started-at', 'output'])
+const SUREFIRE_CLI_REQUIRED_OPTIONS = ['reports', 'classes', 'started-at', 'output']
+
+function suppliedCliOutput(rawArguments) {
+  const outputs = rawArguments
+    .filter((argument) => argument.startsWith('--output='))
+    .map((argument) => argument.slice('--output='.length))
+    .filter(Boolean)
+  return outputs.length === 1 ? outputs[0] : undefined
+}
+
+function parseCliArguments(rawArguments) {
+  const [command, ...rawOptions] = rawArguments
+  if (!command || command.startsWith('--')) throw new Error('CLI_COMMAND_REQUIRED')
+  if (command !== 'verify-surefire') throw new Error(`CLI_UNKNOWN_COMMAND: ${command}`)
+
+  const options = {}
+  for (const argument of rawOptions) {
+    const match = argument.match(/^--([a-z][a-z-]*)=(.*)$/)
+    if (!match) throw new Error(`CLI_MALFORMED_OPTION: ${argument}`)
+    const [, name, value] = match
+    if (!SUREFIRE_CLI_OPTIONS.has(name)) throw new Error(`CLI_UNKNOWN_OPTION: ${name}`)
+    if (Object.hasOwn(options, name)) throw new Error(`CLI_DUPLICATE_OPTION: ${name}`)
+    if (!value) throw new Error(`CLI_OPTION_REQUIRED: ${name}`)
+    options[name] = value
+  }
+  for (const name of SUREFIRE_CLI_REQUIRED_OPTIONS) {
+    if (!Object.hasOwn(options, name)) throw new Error(`CLI_OPTION_REQUIRED: ${name}`)
+  }
+
+  const classes = options.classes.split(',')
+  if (classes.some((className) => !/^[A-Za-z_$][\w$]*$/.test(className))) {
+    throw new Error('CLI_INVALID_OPTION: classes')
+  }
+  if (!Number.isFinite(new Date(options['started-at']).getTime())) {
+    throw new Error('CLI_INVALID_OPTION: started-at')
+  }
+  return { options, classes }
+}
+
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  const [command, ...rawOptions] = process.argv.slice(2)
-  if (command === 'verify-surefire') {
-    const options = Object.fromEntries(rawOptions.map((argument) => {
-      const separator = argument.indexOf('=')
-      return [argument.slice(2, separator), argument.slice(separator + 1)]
-    }))
+  const rawArguments = process.argv.slice(2)
+  const output = suppliedCliOutput(rawArguments)
+  try {
+    const { options, classes } = parseCliArguments(rawArguments)
+    const result = parseSurefireReports(
+      options.reports,
+      classes,
+      options['started-at']
+    )
+    writeCaseResultAtomic(options.output, result)
+  } catch (error) {
     try {
-      const result = parseSurefireReports(
-        options.reports,
-        options.classes.split(',').filter(Boolean),
-        options['started-at']
-      )
-      writeCaseResultAtomic(options.output, result)
-    } catch (error) {
-      writeCaseResultAtomic(options.output, { status: 'FAIL', error: error.message })
-      console.error(error.message)
-      process.exitCode = 1
+      if (output) writeCaseResultAtomic(output, { status: 'FAIL', error: error.message })
+    } catch (writeError) {
+      console.error(writeError.message)
     }
+    console.error(error.message)
+    process.exitCode = 1
   }
 }

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 const sequence = (start, end) => Array.from(
   { length: end - start + 1 },
   (_, index) => start + index
@@ -197,6 +199,12 @@ export const P0_CASES = [
   ...cases('RES', sequence(1, 4), 'resilience'),
   ...cases('UI', sequence(1, 2), 'ui')
 ]
+
+export function registryFingerprint(definitions) {
+  return createHash('sha256').update(JSON.stringify(definitions)).digest('hex')
+}
+
+export const P0_REGISTRY_FINGERPRINT = registryFingerprint(P0_CASES)
 
 export function countByPhase(definitions) {
   return definitions.reduce((counts, definition) => {
