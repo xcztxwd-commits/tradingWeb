@@ -12,7 +12,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
@@ -1052,6 +1052,78 @@ test('header evidence rejects control injection and raw aliases', (t) => {
   })
 })
 
+test('persistence routes header and body evidence by positive schema', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-positive-routing-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const markers = {
+    headerLines: 'RAW_HEADER_LINES_2f8a',
+    headersList: 'RAW_HEADERS_LIST_47bd',
+    extraHeaders: 'RAW_EXTRA_HEADERS_6c31',
+    headersDump: 'RAW_HEADERS_DUMP_9a52',
+    responseHeadersRaw: 'RAW_RESPONSE_HEADERS_f1e4',
+    bodyAlias: 'RAW_BODY_ALIAS_b4d7',
+    payloadAlias: 'RAW_PAYLOAD_ALIAS_83ac'
+  }
+  const result = {
+    id: 'AUTH-01',
+    headerLines: `Authorization: Bearer ${markers.headerLines}`,
+    headersList: [['Authorization', `Bearer ${markers.headersList}`]],
+    extraHeaders: { Authorization: `Bearer ${markers.extraHeaders}` },
+    headersDump: { name: 'Set-Cookie', value: `session=${markers.headersDump}` },
+    responseHeadersRaw: `Set-Cookie: session=${markers.responseHeadersRaw}`,
+    bodyDump: `password=${markers.bodyAlias}`,
+    responseBodyLines: JSON.stringify({ token: markers.bodyAlias }),
+    payloadList: [markers.payloadAlias],
+    extraPayload: { password: markers.payloadAlias },
+    headers: { Authorization: 'Bearer request-secret', 'X-Trace-Id': 'safe-trace' },
+    requestHeaders: [['X-Request-Id', 'safe-request']],
+    responseHeaders: [{ name: 'Set-Cookie', value: 'session=response-secret' }],
+    Bo_Dy: JSON.stringify({ password: 'request-json-secret', safe: 'request-safe' }),
+    POST_DATA: 'password=request-form-secret&safe=request-form-safe',
+    response_body: JSON.stringify({ accessToken: 'response-json-secret', safe: 'response-safe' }),
+    'Response-Payload': 'password=response-form-secret&safe=response-form-safe'
+  }
+  const original = structuredClone(result)
+
+  writeCaseResultAtomic(resultPath, result)
+
+  assert.deepEqual(result, original)
+  const source = readFileSync(resultPath, 'utf8')
+  for (const marker of Object.values(markers)) assert.equal(source.includes(marker), false, marker)
+  const persisted = JSON.parse(source)
+  for (const alias of [
+    'headerLines',
+    'headersList',
+    'extraHeaders',
+    'headersDump',
+    'responseHeadersRaw',
+    'bodyDump',
+    'responseBodyLines',
+    'payloadList',
+    'extraPayload'
+  ]) assert.equal(alias in persisted, false, alias)
+  assert.deepEqual(persisted.headers, {
+    Authorization: '[REDACTED]',
+    'X-Trace-Id': 'safe-trace'
+  })
+  assert.deepEqual(persisted.requestHeaders, [['X-Request-Id', 'safe-request']])
+  assert.deepEqual(persisted.responseHeaders, [{ name: 'Set-Cookie', value: '[REDACTED]' }])
+  assert.deepEqual(JSON.parse(persisted.Bo_Dy), {
+    password: '[REDACTED]',
+    safe: 'request-safe'
+  })
+  assert.equal(new URLSearchParams(persisted.POST_DATA).get('password'), '[REDACTED]')
+  assert.deepEqual(JSON.parse(persisted.response_body), {
+    accessToken: '[REDACTED]',
+    safe: 'response-safe'
+  })
+  assert.equal(
+    new URLSearchParams(persisted['Response-Payload']).get('password'),
+    '[REDACTED]'
+  )
+})
+
 test('atomic evidence never persists credentials', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-secret-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -1303,6 +1375,7 @@ test('persistence sanitizes scalar reference and replay fields and drops standal
     payload: 'UNSAFE_STANDALONE_PAYLOAD_9f5c',
     requestPayload: 'UNSAFE_STANDALONE_REQUEST_PAYLOAD_f43b'
   }
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
   const unsafeReplay = {
     id: `Bearer ${markers.replayId}`,
     caseId: `session=${markers.replayCaseId}`,
@@ -1364,12 +1437,18 @@ test('persistence sanitizes scalar reference and replay fields and drops standal
     { action: 'safe-ref', requestRef: 'request-ref-safe-78b1' },
     { action: 'unsafe-id' },
     { action: 'safe-id', requestId: '1234.56' },
-    { action: 'unsafe-request-fingerprint' },
+    {
+      action: 'unsafe-request-fingerprint',
+      requestFingerprint: digest(`password=${markers.requestFingerprint}`)
+    },
     { action: 'safe-request-fingerprint', requestFingerprint: `sha256:${'c'.repeat(64)}` },
-    { action: 'unsafe-fingerprint' },
+    { action: 'unsafe-fingerprint', fingerprint: digest(`token=${markers.fingerprint}`) },
     { action: 'safe-fingerprint', fingerprint: `sha256:${'d'.repeat(64)}` }
   ])
-  assert.deepEqual(persisted.replayProbes, [{}, safeReplay])
+  assert.deepEqual(persisted.replayProbes, [{
+    fingerprint: digest(`token=${markers.replayFingerprint}`),
+    requestFingerprint: digest(`secret=${markers.replayRequestFingerprint}`)
+  }, safeReplay])
   assert.equal('payload' in persisted, false)
   assert.equal('requestPayload' in persisted, false)
 })
@@ -1452,6 +1531,104 @@ test('persistence hashes opaque references with field-specific rules', (t) => {
   ])
   assert.equal(persisted.userActions[2].requestRef, persisted.userActions[3].requestId)
   assert.equal(persisted.userActions[2].requestRef, persisted.replayProbes[0].fingerprint)
+})
+
+test('persistence hashes nonpublic references and allowlists status evidence', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-strict-public-reference-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const clientOpaque = 'client_OpaqueCredentialReview7A9f4'
+  const clientOpaqueLower = 'client_opaquecredentialreview7'
+  const accessKey = 'AKIAIOSFODNN7EXAMPLE'
+  const jwt = 'eyJhbGciOiJub25lIn0.eyJzdWIiOiJSRVZJRVc3X0pXVCJ9.signature'
+  const base64url = 'UmV2aWV3N0Jhc2U2NFVybENyZWRlbnRpYWxNYXJrZXJfMTIzNDU2Nzg5MA'
+  const plusEquals = 'Opaque+Correlation==A7f4'
+  const fingerprintValue = 'Fingerprint+Credential==Review7'
+  const uppercaseFingerprint = `sha256:${'A'.repeat(64)}`
+  const canonicalFingerprint = `sha256:${'a'.repeat(64)}`
+  const uuid = '550e8400-e29b-41d4-a716-446655440000'
+  const digest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
+  const safeReplay = {
+    id: 'replay-1',
+    caseId: 'AUTH-01',
+    subrunId: 'desktop-ui-core',
+    referenceId: 'order/123',
+    requestId: '1234.56',
+    clientOrderId: 'client_order-1',
+    fingerprint: canonicalFingerprint,
+    requestFingerprint: canonicalFingerprint,
+    status: 'REJECTED',
+    errorCode: 'REQUEST_CONFLICT',
+    outcome: { status: 'REJECTED', errorCode: 'REQUEST_CONFLICT' }
+  }
+  const result = {
+    id: 'AUTH-01',
+    userActions: [
+      { action: 'client-opaque', requestRef: clientOpaque },
+      { action: 'client-opaque-lower', requestId: clientOpaqueLower },
+      { action: 'access-key', requestRef: accessKey },
+      { action: 'jwt', requestRef: jwt },
+      { action: 'base64url', requestId: base64url },
+      { action: 'plus-equals', requestRef: plusEquals },
+      { action: 'opaque-fingerprint', requestFingerprint: fingerprintValue },
+      { action: 'canonical-fingerprint', fingerprint: uppercaseFingerprint },
+      { action: 'cdp-id', requestId: '1234.56' },
+      { action: 'uuid-id', requestRef: uuid },
+      { action: 'proven-request-id', requestRef: 'request-ref-safe-78b1' }
+    ],
+    replayProbes: [
+      {
+        id: clientOpaque,
+        referenceId: plusEquals,
+        requestId: accessKey,
+        clientOrderId: clientOpaqueLower,
+        fingerprint: plusEquals,
+        status: accessKey,
+        errorCode: accessKey,
+        outcome: { status: accessKey, errorCode: accessKey }
+      },
+      safeReplay
+    ]
+  }
+  const original = structuredClone(result)
+
+  writeCaseResultAtomic(resultPath, result)
+
+  assert.deepEqual(result, original)
+  const source = readFileSync(resultPath, 'utf8')
+  for (const credential of [
+    clientOpaque,
+    clientOpaqueLower,
+    accessKey,
+    jwt,
+    base64url,
+    plusEquals,
+    fingerprintValue,
+    uppercaseFingerprint
+  ]) assert.equal(source.includes(credential), false, credential)
+  const persisted = JSON.parse(source)
+  assert.deepEqual(persisted.userActions, [
+    { action: 'client-opaque', requestRef: digest(clientOpaque) },
+    { action: 'client-opaque-lower', requestId: digest(clientOpaqueLower) },
+    { action: 'access-key', requestRef: digest(accessKey) },
+    { action: 'jwt', requestRef: digest(jwt) },
+    { action: 'base64url', requestId: digest(base64url) },
+    { action: 'plus-equals', requestRef: digest(plusEquals) },
+    { action: 'opaque-fingerprint', requestFingerprint: digest(fingerprintValue) },
+    { action: 'canonical-fingerprint', fingerprint: canonicalFingerprint },
+    { action: 'cdp-id', requestId: '1234.56' },
+    { action: 'uuid-id', requestRef: uuid },
+    { action: 'proven-request-id', requestRef: 'request-ref-safe-78b1' }
+  ])
+  assert.deepEqual(persisted.replayProbes, [{
+    id: digest(clientOpaque),
+    referenceId: digest(plusEquals),
+    requestId: digest(accessKey),
+    clientOrderId: digest(clientOpaqueLower),
+    fingerprint: digest(plusEquals)
+  }, safeReplay])
+  assert.equal(persisted.userActions[5].requestRef, persisted.replayProbes[0].referenceId)
+  assert.equal(persisted.userActions[5].requestRef, persisted.replayProbes[0].fingerprint)
 })
 
 test('persistence redacts parseable response bodies and drops opaque response payloads without mutation', (t) => {
@@ -1592,6 +1769,80 @@ test('response evidence drops padded base64 but keeps canonical credential form'
   const form = new URLSearchParams(evidence[4].responsePayload)
   assert.equal(form.get('password'), '[REDACTED]')
   assert.equal(form.get('state'), 'active')
+})
+
+test('response evidence drops opaque JSON and empty form leaves', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-response-opaque-leaves-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const jwt = 'eyJhbGciOiJub25lIn0.eyJzdWIiOiJSRVZJRVzdX0pTT05fU0NBTEFSIn0.signature'
+  const base64url = 'QmFzZTY0VXJsUmVzcG9uc2VMZWFmQ3JlZGVudGlhbF9NYXJrZXJfMTIzNDU2Nzg5MA'
+  const opaque = 'OpaqueResponseCredentialA7f4C9e2'
+  const result = {
+    id: 'AUTH-01',
+    networkEvidence: [
+      { method: 'GET', url: '/api/jwt', status: 200, responseBody: JSON.stringify(jwt) },
+      {
+        method: 'GET',
+        url: '/api/base64url',
+        status: 200,
+        responsePayload: JSON.stringify(base64url)
+      },
+      { method: 'GET', url: '/api/opaque', status: 200, responseBody: JSON.stringify(opaque) },
+      {
+        method: 'GET',
+        url: '/api/array',
+        status: 200,
+        responseBody: JSON.stringify([
+          jwt,
+          [base64url, { id: 'nested-safe', accessToken: 'nested-secret' }],
+          opaque,
+          { id: 'safe-observation', status: 'OBSERVED', password: 'object-secret' }
+        ])
+      },
+      { method: 'GET', url: '/api/empty-form', status: 200, responsePayload: 'YWI=&YWI=' },
+      {
+        method: 'GET',
+        url: '/api/form',
+        status: 200,
+        responsePayload: 'password=form-secret&state=active'
+      },
+      {
+        method: 'GET',
+        url: '/api/object',
+        status: 200,
+        responseBody: JSON.stringify({
+          id: 'response-1',
+          accessToken: 'object-token',
+          profile: { displayName: 'safe-name' }
+        })
+      }
+    ]
+  }
+  const original = structuredClone(result)
+
+  writeCaseResultAtomic(resultPath, result)
+
+  assert.deepEqual(result, original)
+  const source = readFileSync(resultPath, 'utf8')
+  for (const marker of [jwt, base64url, opaque]) assert.equal(source.includes(marker), false)
+  const evidence = JSON.parse(source).networkEvidence
+  assert.equal('responseBody' in evidence[0], false)
+  assert.equal('responsePayload' in evidence[1], false)
+  assert.equal('responseBody' in evidence[2], false)
+  assert.deepEqual(JSON.parse(evidence[3].responseBody), [
+    [{ id: 'nested-safe', accessToken: '[REDACTED]' }],
+    { id: 'safe-observation', status: 'OBSERVED', password: '[REDACTED]' }
+  ])
+  assert.equal('responsePayload' in evidence[4], false)
+  const form = new URLSearchParams(evidence[5].responsePayload)
+  assert.equal(form.get('password'), '[REDACTED]')
+  assert.equal(form.get('state'), 'active')
+  assert.deepEqual(JSON.parse(evidence[6].responseBody), {
+    id: 'response-1',
+    accessToken: '[REDACTED]',
+    profile: { displayName: 'safe-name' }
+  })
 })
 
 test('run state is created atomically and resumes only an identical evidence identity', (t) => {
@@ -2883,6 +3134,53 @@ for (const fixture of INVALID_CLI_OPTION_FIXTURES) {
   })
 }
 
+test('strict artifact CLI writes duplicate normalized output failure only to a unique target', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-cli-duplicate-output-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const reports = join(root, 'reports')
+  const output = join(root, 'gate.json')
+  const equivalentOutput = `${join(root, 'nested')}${sep}..${sep}gate.json`
+  const startedAt = new Date(Date.now() - 5_000).toISOString()
+  writeSurefireSuite(reports, 'TEST-output.xml', { name: 'com.fxplatform.OutputCliIT' })
+  writeFileSync(output, '{"status":"PASS"}\n')
+
+  const duplicateExecution = spawnSync(process.execPath, [
+    artifactsScript,
+    'verify-surefire',
+    `--reports=${reports}`,
+    '--classes=OutputCliIT',
+    `--started-at=${startedAt}`,
+    `--output=${output}`,
+    `--output=${equivalentOutput}`
+  ], { encoding: 'utf8' })
+
+  assert.equal(duplicateExecution.status, 1)
+  assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
+    status: 'FAIL',
+    error: 'CLI_DUPLICATE_OPTION: output'
+  })
+
+  const firstOutput = join(root, 'first.json')
+  const secondOutput = join(root, 'second.json')
+  const firstBaseline = '{"status":"PASS","target":"first"}\n'
+  const secondBaseline = '{"status":"PASS","target":"second"}\n'
+  writeFileSync(firstOutput, firstBaseline)
+  writeFileSync(secondOutput, secondBaseline)
+  const conflictingExecution = spawnSync(process.execPath, [
+    artifactsScript,
+    'verify-surefire',
+    `--reports=${reports}`,
+    '--classes=OutputCliIT',
+    `--started-at=${startedAt}`,
+    `--output=${firstOutput}`,
+    `--output=${secondOutput}`
+  ], { encoding: 'utf8' })
+
+  assert.equal(conflictingExecution.status, 1)
+  assert.equal(readFileSync(firstOutput, 'utf8'), firstBaseline)
+  assert.equal(readFileSync(secondOutput, 'utf8'), secondBaseline)
+})
+
 test('strict artifact CLI requires canonical started-at UTC instant', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-cli-started-at-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -2892,6 +3190,8 @@ test('strict artifact CLI requires canonical started-at UTC instant', (t) => {
   })
   const invalidValues = [
     '0',
+    '-000001-01-01T00:00:00.000Z',
+    '+010000-01-01T00:00:00.000Z',
     '2026-07-14',
     '2026-07-14T12:34:56.789',
     '2026-07-14T12:34:56.789+08:00',

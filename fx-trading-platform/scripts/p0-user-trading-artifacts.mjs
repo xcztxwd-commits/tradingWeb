@@ -11,7 +11,7 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { types } from 'node:util'
 
@@ -57,7 +57,22 @@ const SAFE_REFERENCE_SCALARS = new Set([
 ])
 const FINGERPRINT_FIELDS = new Set(['fingerprint', 'requestfingerprint'])
 const STATUS_FIELDS = new Set(['status', 'errorcode'])
+const SIMPLE_EVIDENCE_STATUSES = new Set([
+  'PASS',
+  'FAIL',
+  'BLOCKED',
+  'INVALID_TEST',
+  'REJECTED',
+  'OBSERVED',
+  'RUNNING',
+  'PENDING',
+  'ACCEPTED',
+  'CANCELLED',
+  'SKIPPED'
+])
 const STRUCTURED_HEADER_KEYS = new Set(['headers', 'requestheaders', 'responseheaders'])
+const REQUEST_BODY_KEYS = new Set(['body', 'postdata'])
+const RESPONSE_BODY_KEYS = new Set(['responsebody', 'responsepayload'])
 const HTTP_FIELD_NAME = /^[!#$%&'*+.^_`|~A-Za-z\d-]+$/
 const INVALID_HEADER_VALUE = /[\u0000-\u0008\u000a-\u001f\u007f]/
 const RAW_HTTP_REQUEST_DETAIL_FIELDS = new Set(['headers', 'body', 'postdata', 'payload'])
@@ -92,7 +107,23 @@ function isFormBody(value) {
   const params = new URLSearchParams(value)
   const entries = [...params]
   return params.toString() === value
-    && !(entries.length === 1 && entries[0][1] === '')
+    && entries.some(([, fieldValue]) => fieldValue !== '')
+}
+
+function sanitizeResponseJsonValue(value, keyed = false) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeResponseJsonValue(item))
+      .filter((item) => item !== undefined)
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([field, fieldValue]) => [field, sanitizeResponseJsonValue(fieldValue, true)])
+        .filter(([, fieldValue]) => fieldValue !== undefined)
+    )
+  }
+  return keyed ? value : undefined
 }
 
 function redactBody(value, dropOpaque = false) {
@@ -109,7 +140,8 @@ function redactBody(value, dropOpaque = false) {
     return params.toString()
   }
   try {
-    return JSON.stringify(redactValue(parsed))
+    const redacted = redactValue(parsed)
+    return JSON.stringify(dropOpaque ? sanitizeResponseJsonValue(redacted) : redacted)
   } catch {
     return undefined
   }
@@ -155,15 +187,21 @@ function sanitizeHeaderEvidence(value) {
 
 function redactValue(value, key = '') {
   const semanticKey = normalizedKey(key)
-  if (semanticKey.includes('header') && /(raw|text|blob|string|block)/.test(semanticKey)) {
+  if (semanticKey.includes('header') && !STRUCTURED_HEADER_KEYS.has(semanticKey)) {
+    return undefined
+  }
+  if ((semanticKey.includes('body') || semanticKey.includes('payload'))
+    && !REQUEST_BODY_KEYS.has(semanticKey) && !RESPONSE_BODY_KEYS.has(semanticKey)) {
     return undefined
   }
   if (SENSITIVE_KEY.test(key)) return REDACTED
   if (typeof value === 'string' && key.toLowerCase() === 'url') return redactUrl(value)
   if (STRUCTURED_HEADER_KEYS.has(semanticKey)) return sanitizeHeaderEvidence(value)
-  if (typeof value === 'string' && /^(body|postdata)$/i.test(key)) return redactBody(value)
-  if (typeof value === 'string' && /^(responsebody|responsepayload)$/i.test(key)) {
-    return redactBody(value, true)
+  if (REQUEST_BODY_KEYS.has(semanticKey)) {
+    return typeof value === 'string' ? redactBody(value) : undefined
+  }
+  if (RESPONSE_BODY_KEYS.has(semanticKey)) {
+    return typeof value === 'string' ? redactBody(value, true) : undefined
   }
   if (Array.isArray(value)) {
     return value.map((item) => redactValue(item)).filter((item) => item !== undefined)
@@ -193,23 +231,46 @@ function sha256Representation(value) {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`
 }
 
-function hashableReference(value) {
+function boundedControlFreeString(value) {
   return typeof value === 'string' && value.length > 0 && value.length <= 512
-    && /^[A-Za-z\d._:/-]+$/.test(value) && !SENSITIVE_KEY.test(value)
+    && !/[\u0000-\u001f\u007f]/.test(value)
+}
+
+function hashableReference(value) {
+  return boundedControlFreeString(value)
+    && !SENSITIVE_KEY.test(value)
+    && !/^session=/i.test(value)
+    && !/^(?:Bearer\s|Cookie\s*:)/i.test(value)
 }
 
 function sanitizeFingerprint(value) {
   if (typeof value !== 'string') return undefined
   const canonical = value.match(/^sha256:([a-f\d]{64})$/i)
   if (canonical) return `sha256:${canonical[1].toLowerCase()}`
-  return hashableReference(value) ? sha256Representation(value) : undefined
+  return boundedControlFreeString(value) ? sha256Representation(value) : undefined
 }
 
 function sanitizeStatus(value) {
-  return typeof value === 'string' && value.length <= 64
-    && /^[A-Z][A-Z\d_]*$/.test(value) && !SENSITIVE_KEY.test(value)
+  if (typeof value !== 'string' || value.length > 64) return undefined
+  return SIMPLE_EVIDENCE_STATUSES.has(value)
+    || /^[A-Z][A-Z\d]*(?:_[A-Z\d]+)+$/.test(value)
     ? value
     : undefined
+}
+
+function isPublicReference(field, value) {
+  if (value.length > 64) return false
+  if (/^\d+(?:\.\d+)*$/.test(value)) return true
+  if (/^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(value)) {
+    return true
+  }
+  if (field === 'caseid' && /^[A-Z][A-Z\d]*-\d{2,4}$/.test(value)) return true
+  if (field === 'subrunid' && /^[a-z\d]+(?:[-_][a-z\d]+)+$/.test(value)) return true
+  return /^(?:request|replay|order|client)-safe$/.test(value)
+    || /^request-ref-safe-[a-f\d]+$/.test(value)
+    || /^(?:request|replay|order)-\d+$/.test(value)
+    || /^order\/\d+$/.test(value)
+    || /^client_order-\d+$/.test(value)
 }
 
 function sanitizeReferenceId(field, value) {
@@ -219,14 +280,7 @@ function sanitizeReferenceId(field, value) {
   if (!hashableReference(value)) return undefined
   const canonicalHash = value.match(/^sha256:([a-f\d]{64})$/i)
   if (canonicalHash) return `sha256:${canonicalHash[1].toLowerCase()}`
-  const publicId = value.length <= 64 && (
-    /^\d+(?:\.\d+)*$/.test(value)
-    || /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(value)
-    || /^[A-Z][A-Z\d]*-\d{2,4}$/.test(value)
-    || (/^[a-z\d]+(?:[-_][a-z\d]+)+$/.test(value) && field === 'subrunid')
-    || /^(?:request|replay|order|client)[-_/.:][A-Za-z\d][A-Za-z\d._:/-]*$/i.test(value)
-  )
-  return publicId ? value : sha256Representation(value)
+  return isPublicReference(field, value) ? value : sha256Representation(value)
 }
 
 function sanitizeEvidenceScalar(field, value) {
@@ -893,7 +947,8 @@ function suppliedCliOutput(rawArguments) {
     .filter((argument) => argument.startsWith('--output='))
     .map((argument) => argument.slice('--output='.length))
     .filter(Boolean)
-  return outputs.length === 1 ? outputs[0] : undefined
+  const normalizedOutputs = [...new Set(outputs.map((output) => resolve(output)))]
+  return normalizedOutputs.length === 1 ? normalizedOutputs[0] : undefined
 }
 
 function parseCliArguments(rawArguments) {
@@ -919,9 +974,11 @@ function parseCliArguments(rawArguments) {
   if (classes.some((className) => !/^[A-Za-z_$][\w$]*$/.test(className))) {
     throw new Error('CLI_INVALID_OPTION: classes')
   }
-  const startedAt = new Date(options['started-at'])
-  if (!Number.isFinite(startedAt.getTime())
-    || startedAt.toISOString() !== options['started-at']) {
+  const startedAtValue = options['started-at']
+  const startedAt = new Date(startedAtValue)
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(startedAtValue)
+    || !Number.isFinite(startedAt.getTime())
+    || startedAt.toISOString() !== startedAtValue) {
     throw new Error('CLI_INVALID_OPTION: started-at')
   }
   return { options, classes }
