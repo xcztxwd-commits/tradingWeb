@@ -3642,11 +3642,14 @@ test('run state rejects missing, null, blank or invalid evidence identity', (t) 
 
   for (const [field, values] of Object.entries(invalidValues)) {
     for (const value of values) {
+      const invalidOptionsError = value === undefined
+        ? /^TypeError: UNSAFE_IDENTITY_OBJECT$/
+        : new RegExp(`^Error: INVALID_RUN_STATE_IDENTITY: options\\.${field}$`)
       const createPath = join(directory, `create-${sequence++}.json`)
       const createOptions = { ...valid, path: createPath, [field]: value }
       assert.throws(
         () => loadOrCreateRunState(createOptions),
-        new RegExp(`^Error: INVALID_RUN_STATE_IDENTITY: options\\.${field}$`)
+        invalidOptionsError
       )
       assert.equal(existsSync(createPath), false)
 
@@ -3676,7 +3679,7 @@ test('run state rejects missing, null, blank or invalid evidence identity', (t) 
           path: invalidLoadOptionsPath,
           [field]: value
         }),
-        new RegExp(`^Error: INVALID_RUN_STATE_IDENTITY: options\\.${field}$`)
+        invalidOptionsError
       )
     }
   }
@@ -3888,7 +3891,18 @@ test('run state snapshots inert options before path and registry access', (t) =>
   assert.equal(proxyTrapCalls, 0)
   assert.equal(existsSync(proxyPath), false)
 
-  for (const path of [undefined, null, '', 42, {}]) {
+  assert.throws(
+    () => loadOrCreateRunState(validOptions(undefined)),
+    /^TypeError: UNSAFE_IDENTITY_OBJECT$/
+  )
+  const missingPathOptions = validOptions(undefined)
+  delete missingPathOptions.path
+  assert.throws(
+    () => loadOrCreateRunState(missingPathOptions),
+    /^TypeError: INVALID_RUN_STATE_PATH$/
+  )
+
+  for (const path of [null, '', 42, {}]) {
     assert.throws(
       () => loadOrCreateRunState({ ...validOptions(path) }),
       /^TypeError: INVALID_RUN_STATE_PATH$/
@@ -4152,6 +4166,230 @@ test('registry fingerprint rejects unsupported own JSON values without callbacks
     }
     assert.equal(inheritedCalls, 0)
   }
+})
+
+test('strict identity snapshots reject unsupported own registry and selector data', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-strict-identity-snapshot-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const absent = Symbol('absent-selection')
+  const canonicalResults = P0_CASES.map(passingCase)
+  const allCases = Object.fromEntries(canonicalResults.map((result) => [result.id, result]))
+  const invalidAggregateReport = {
+    verdict: 'FAIL',
+    scopeComplete: false,
+    counts: { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 },
+    issues: ['INVALID_AGGREGATE_INPUT']
+  }
+  const capture = (operation) => {
+    try {
+      return { value: operation() }
+    } catch (error) {
+      return { error }
+    }
+  }
+  const options = (path, definitions = P0_CASES, selection = absent) => {
+    const value = {
+      path,
+      runId: 'strict-identity-contract',
+      mode: 'DISCOVERY',
+      commit: RUN_STATE_COMMIT_A,
+      worktreeFingerprint: RUN_STATE_TREE_A,
+      schemaVersion: 1,
+      registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+      definitions
+    }
+    if (selection !== absent) value.selection = selection
+    return value
+  }
+  const defineData = (target, property, value, enumerable = true) => {
+    Object.defineProperty(target, property, {
+      value,
+      enumerable,
+      configurable: true,
+      writable: true
+    })
+  }
+  const assertIdentityRejected = (outcome, label) => {
+    assert.equal(outcome.value, undefined, label)
+    assert.equal(outcome.error?.name, 'TypeError', label)
+    assert.equal(outcome.error?.message, 'UNSAFE_IDENTITY_OBJECT', label)
+  }
+  const assertPlanRejected = (outcome, label) => {
+    if (outcome.value) {
+      assert.notEqual(outcome.value.scopeComplete, true, label)
+      assert.notEqual(
+        outcome.value.entries.filter((entry) => entry.action === 'SKIP').length,
+        P0_CASES.length,
+        label
+      )
+    }
+    assertIdentityRejected(outcome, label)
+  }
+
+  const registryFixtures = [
+    ['own undefined', (definition) => {
+      defineData(definition, 'review13IdentityField', undefined)
+    }],
+    ['own function', (definition, calls) => {
+      defineData(definition, 'review13IdentityField', () => {
+        calls.callable += 1
+        return 'neutral'
+      })
+    }],
+    ['own symbol value', (definition) => {
+      defineData(definition, 'review13IdentityField', Symbol('review13-value'))
+    }],
+    ['own callable serialization', (definition, calls) => {
+      defineData(definition, 'toJSON', () => {
+        calls.callable += 1
+        return { id: 'neutral' }
+      })
+    }],
+    ['own symbol key', (definition) => {
+      defineData(definition, Symbol('review13-key'), 'neutral')
+    }],
+    ['own non-enumerable field', (definition) => {
+      defineData(definition, 'review13IdentityField', 'neutral', false)
+    }]
+  ]
+  const registryObservations = registryFixtures.map(([label, decorate], index) => {
+    const calls = { callable: 0 }
+    const definition = { ...P0_CASES[0] }
+    decorate(definition, calls)
+    const definitions = [definition, ...P0_CASES.slice(1)]
+    const definitionDescriptors = Object.getOwnPropertyDescriptors(definition)
+    const definitionsDescriptors = Object.getOwnPropertyDescriptors(definitions)
+    const statePath = join(directory, `registry-${index}.json`)
+    return {
+      label,
+      calls,
+      definition,
+      definitions,
+      definitionDescriptors,
+      definitionsDescriptors,
+      statePath,
+      load: capture(() => loadOrCreateRunState(options(statePath, definitions, {}))),
+      callerPlan: capture(() => planResume(resumeState(allCases), definitions, {})),
+      statePlan: capture(() => planResume({
+        ...resumeState(allCases),
+        definitions
+      }, P0_CASES, {})),
+      aggregate: capture(() => aggregateReport({
+        definitions,
+        registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT,
+        selection: {}
+      }, canonicalResults))
+    }
+  })
+
+  for (const observation of registryObservations) {
+    const label = `registry/${observation.label}`
+    assert.deepEqual(observation.calls, { callable: 0 }, label)
+    assert.deepEqual(
+      Object.getOwnPropertyDescriptors(observation.definition),
+      observation.definitionDescriptors,
+      label
+    )
+    assert.deepEqual(
+      Object.getOwnPropertyDescriptors(observation.definitions),
+      observation.definitionsDescriptors,
+      label
+    )
+    assert.equal(existsSync(observation.statePath), false, label)
+    assertIdentityRejected(observation.load, `${label}/load`)
+    assertPlanRejected(observation.callerPlan, `${label}/caller-plan`)
+    assertPlanRejected(observation.statePlan, `${label}/state-plan`)
+    assert.equal(observation.aggregate.error, undefined, `${label}/aggregate`)
+    assert.deepEqual(observation.aggregate.value, invalidAggregateReport, `${label}/aggregate`)
+    assert.notEqual(observation.aggregate.value?.verdict, 'PASS', `${label}/aggregate`)
+  }
+
+  const selectorFixtures = [
+    ['recognized own undefined', (selection) => {
+      defineData(selection, 'caseIds', undefined)
+    }],
+    ['recognized own function', (selection, calls) => {
+      defineData(selection, 'caseIds', () => {
+        calls.callable += 1
+        return []
+      })
+    }],
+    ['recognized own symbol', (selection) => {
+      defineData(selection, 'caseIds', Symbol('review13-selector-value'))
+    }],
+    ['recognized non-enumerable key', (selection) => {
+      defineData(selection, 'caseIds', [P0_CASES[0].id], false)
+    }],
+    ['extra own unsupported value', (selection) => {
+      defineData(selection, 'review13IdentityField', undefined)
+    }],
+    ['own symbol key', (selection) => {
+      defineData(selection, Symbol('review13-selector-key'), 'neutral')
+    }]
+  ]
+  const selectorObservations = selectorFixtures.map(([label, decorate], index) => {
+    const calls = { callable: 0 }
+    const selection = {}
+    decorate(selection, calls)
+    const descriptors = Object.getOwnPropertyDescriptors(selection)
+    const statePath = join(directory, `selector-${index}.json`)
+    return {
+      label,
+      calls,
+      selection,
+      descriptors,
+      statePath,
+      load: capture(() => loadOrCreateRunState(options(statePath, P0_CASES, selection))),
+      plan: capture(() => planResume(resumeState(allCases), P0_CASES, selection)),
+      aggregate: capture(() => aggregateReport(aggregateState(selection), canonicalResults))
+    }
+  })
+
+  for (const observation of selectorObservations) {
+    const label = `selector/${observation.label}`
+    assert.deepEqual(observation.calls, { callable: 0 }, label)
+    assert.deepEqual(
+      Object.getOwnPropertyDescriptors(observation.selection),
+      observation.descriptors,
+      label
+    )
+    assert.equal(existsSync(observation.statePath), false, label)
+    assertIdentityRejected(observation.load, `${label}/load`)
+    assertPlanRejected(observation.plan, `${label}/plan`)
+    assert.equal(observation.aggregate.error, undefined, `${label}/aggregate`)
+    assert.deepEqual(observation.aggregate.value, invalidAggregateReport, `${label}/aggregate`)
+    assert.notEqual(observation.aggregate.value?.verdict, 'PASS', `${label}/aggregate`)
+  }
+
+  assert.equal(canonicalRegistryFingerprint(P0_CASES), P0_REGISTRY_FINGERPRINT)
+
+  const absentState = loadOrCreateRunState(options(join(directory, 'absent-selector.json')))
+  assert.deepEqual(absentState.selection, {})
+  const fullPlan = planResume(resumeState(allCases), P0_CASES)
+  assert.equal(fullPlan.filtered, false)
+  assert.equal(fullPlan.scopeComplete, true)
+  assert.equal(fullPlan.entries.length, P0_CASES.length)
+  assert.equal(fullPlan.entries.filter((entry) => entry.action === 'SKIP').length, P0_CASES.length)
+  const fullReport = aggregateReport({
+    definitions: P0_CASES,
+    registryFingerprint: CANONICAL_REGISTRY_FINGERPRINT
+  }, canonicalResults)
+  assert.equal(fullReport.verdict, 'PASS')
+  assert.equal(fullReport.scopeComplete, true)
+  assert.equal(fullReport.counts.PASS, P0_CASES.length)
+
+  const filteredSelection = { caseIds: [P0_CASES[0].id] }
+  const filteredPlan = planResume(resumeState(allCases), P0_CASES, filteredSelection)
+  assert.equal(filteredPlan.filtered, true)
+  assert.equal(filteredPlan.scopeComplete, false)
+  assert.equal(filteredPlan.entries.length, 1)
+  const filteredReport = aggregateReport(
+    aggregateState(filteredSelection),
+    [passingCase(P0_CASES[0])]
+  )
+  assert.equal(filteredReport.verdict, 'PARTIAL_PASS')
+  assert.equal(filteredReport.scopeComplete, false)
+  assert.equal(filteredReport.counts.PASS, 1)
 })
 
 test('prototype inheritance cannot forge aggregate or resume evidence', () => {

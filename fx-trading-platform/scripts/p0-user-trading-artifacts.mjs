@@ -1152,7 +1152,7 @@ function stripRawRequests(value, key = '', inNetworkEvidence = false) {
   return sanitized
 }
 
-function inertJsonValue(value, key = '', strictArrays = false) {
+function inertJsonValue(value, key = '', strictArrays = false, strictObjects = false) {
   if (key === 'toJSON' || value === undefined
     || typeof value === 'function' || typeof value === 'symbol') return undefined
   if (typeof value === 'bigint') {
@@ -1171,7 +1171,8 @@ function inertJsonValue(value, key = '', strictArrays = false) {
     throw new TypeError('UNSAFE_PERSISTENCE_VALUE: non-plain object')
   }
   const descriptors = Object.getOwnPropertyDescriptors(value)
-  for (const property of Reflect.ownKeys(descriptors)) {
+  const descriptorKeys = Reflect.ownKeys(descriptors)
+  for (const property of descriptorKeys) {
     const descriptor = descriptors[property]
     if ('get' in descriptor || 'set' in descriptor) {
       throw new TypeError('UNSAFE_PERSISTENCE_VALUE: accessor')
@@ -1182,9 +1183,8 @@ function inertJsonValue(value, key = '', strictArrays = false) {
     const exactArray = strictArrays || normalizedKey(key) === 'definitions'
     if (exactArray) {
       const length = descriptors.length.value
-      const keys = Reflect.ownKeys(descriptors)
-      if (keys.length !== length + 1
-        || !keys.every((property) => (
+      if (descriptorKeys.length !== length + 1
+        || !descriptorKeys.every((property) => (
           property === 'length'
           || (typeof property === 'string'
             && Number.isSafeInteger(Number(property))
@@ -1198,7 +1198,7 @@ function inertJsonValue(value, key = '', strictArrays = false) {
       for (let index = 0; index < length; index += 1) {
         const descriptor = descriptors[index]
         if (!descriptor) throw new TypeError('UNSAFE_IDENTITY_ARRAY')
-        const item = inertJsonValue(descriptor.value, '', true)
+        const item = inertJsonValue(descriptor.value, '', true, strictObjects)
         if (item === undefined) throw new TypeError('UNSAFE_IDENTITY_ARRAY')
         inert.push(item)
       }
@@ -1208,30 +1208,38 @@ function inertJsonValue(value, key = '', strictArrays = false) {
     for (let index = 0; index < descriptors.length.value; index += 1) {
       const descriptor = descriptors[index]
       if (!descriptor) continue
-      const item = inertJsonValue(descriptor.value, '', false)
+      const item = inertJsonValue(descriptor.value, '', false, strictObjects)
       if (item !== undefined) inert.push(item)
     }
     return inert
   }
 
+  if (strictObjects && descriptorKeys.some((property) => (
+    typeof property !== 'string' || !descriptors[property].enumerable
+  ))) {
+    throw new TypeError('UNSAFE_IDENTITY_OBJECT')
+  }
+
   const inert = Object.create(null)
   for (const [field, descriptor] of Object.entries(descriptors)) {
     if (!descriptor.enumerable) continue
-    const fieldValue = inertJsonValue(descriptor.value, field, strictArrays)
-    if (fieldValue !== undefined) {
-      Object.defineProperty(inert, field, {
-        value: fieldValue,
-        enumerable: true,
-        configurable: true,
-        writable: true
-      })
+    const fieldValue = inertJsonValue(descriptor.value, field, strictArrays, strictObjects)
+    if (fieldValue === undefined && strictObjects) {
+      throw new TypeError('UNSAFE_IDENTITY_OBJECT')
     }
+    if (fieldValue === undefined) continue
+    Object.defineProperty(inert, field, {
+      value: fieldValue,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    })
   }
   return inert
 }
 
 function inertIdentityValue(value) {
-  return inertJsonValue(value, '', true)
+  return inertJsonValue(value, '', true, true)
 }
 
 function sanitizeForPersistence(value) {
