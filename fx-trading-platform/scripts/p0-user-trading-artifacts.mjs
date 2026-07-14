@@ -34,10 +34,11 @@ const SAFE_REPLAY_FIELDS = new Set([
   'clientOrderId',
   'fingerprint',
   'requestFingerprint',
-  'outcome',
   'status',
   'errorCode'
 ])
+const SAFE_REPLAY_OUTCOME_FIELDS = new Set(['status', 'errorCode'])
+const SAFE_REQUEST_SCALARS = new Set(['requestid', 'requestfingerprint'])
 const RUN_STATE_IDENTITY_FIELDS = [
   'commit',
   'worktreeFingerprint',
@@ -94,16 +95,35 @@ function normalizedKey(key) {
   return key.replaceAll(/[^a-z\d]/gi, '').toLowerCase()
 }
 
-function stripRawRequests(value, key = '') {
-  if (RAW_REQUEST_CONTAINERS.has(normalizedKey(key))) return undefined
-  if (normalizedKey(key) === 'replayprobes') {
-    if (!Array.isArray(value)) return []
-    return value.map((probe) => Object.fromEntries(
-      Object.entries(probe)
-        .filter(([field]) => SAFE_REPLAY_FIELDS.has(field))
-        .map(([field, fieldValue]) => [field, stripRawRequests(fieldValue, field)])
-        .filter(([, fieldValue]) => fieldValue !== undefined)
+function persistenceScalar(value) {
+  return value === null || ['string', 'number', 'boolean'].includes(typeof value)
+}
+
+function sanitizeReplayProbe(probe) {
+  if (!probe || typeof probe !== 'object' || Array.isArray(probe)) return {}
+  const safe = Object.fromEntries(
+    Object.entries(probe).filter(([field, value]) => (
+      SAFE_REPLAY_FIELDS.has(field) && persistenceScalar(value)
     ))
+  )
+  const outcome = Object.fromEntries(
+    Object.entries(probe.outcome ?? {}).filter(([field, value]) => (
+      SAFE_REPLAY_OUTCOME_FIELDS.has(field) && persistenceScalar(value)
+    ))
+  )
+  if (Object.keys(outcome).length > 0) safe.outcome = outcome
+  return safe
+}
+
+function stripRawRequests(value, key = '') {
+  const semanticKey = normalizedKey(key)
+  if (SAFE_REQUEST_SCALARS.has(semanticKey)) {
+    return persistenceScalar(value) ? value : undefined
+  }
+  if (RAW_REQUEST_CONTAINERS.has(semanticKey) || semanticKey.includes('request')) return undefined
+  if (semanticKey === 'replayprobes') {
+    if (!Array.isArray(value)) return []
+    return value.map(sanitizeReplayProbe)
   }
   if (Array.isArray(value)) return value.map((item) => stripRawRequests(item))
   if (!value || typeof value !== 'object') return value
@@ -199,6 +219,8 @@ function coversRequiredSubruns(result, definition) {
 export function planResume(state, definitions, selection = {}) {
   const filtered = ['caseIds', 'phases', 'profiles', 'viewports']
     .some((key) => selection[key]?.length)
+  const subrunsFiltered = ['profiles', 'viewports']
+    .some((key) => selection[key]?.length)
   const entries = definitions
     .filter((definition) => (
       hasSelection(selection, 'caseIds', definition.id)
@@ -216,7 +238,7 @@ export function planResume(state, definitions, selection = {}) {
         executionGroup: definition.executionGroup,
         subruns,
         result,
-        complete: !filtered && coversRequiredSubruns(result, definition)
+        complete: !subrunsFiltered && coversRequiredSubruns(result, definition)
       }
     })
     .filter(Boolean)
@@ -227,7 +249,7 @@ export function planResume(state, definitions, selection = {}) {
   const planned = entries.map((entry) => {
     const groupRerun = rerunGroups.has(entry.executionGroup)
     let reason = 'COMPLETE'
-    if (filtered) reason = 'FILTERED_SCOPE'
+    if (subrunsFiltered) reason = 'FILTERED_SCOPE'
     else if (entry.result?.status === 'RUNNING') reason = 'RUNNING'
     else if (!entry.complete) reason = entry.result ? 'INCOMPLETE_SUBRUNS' : 'NOT_STARTED'
     else if (groupRerun) reason = 'GROUP_RERUN'
@@ -282,6 +304,8 @@ export function aggregateReport(state, results) {
   }
   const filtered = ['caseIds', 'phases', 'profiles', 'viewports']
     .some((key) => selection[key]?.length)
+  const subrunsFiltered = ['profiles', 'viewports']
+    .some((key) => selection[key]?.length)
   const definitions = state.definitions.filter((definition) => (
     hasSelection(selection, 'caseIds', definition.id)
     && hasSelection(selection, 'phases', definition.phase)
@@ -314,8 +338,8 @@ export function aggregateReport(state, results) {
 
     const requiredSubruns = selectedSubruns(definition, selection)
     if (!subrunsPass(result, requiredSubruns)
-      || (!filtered && result.scopeComplete !== true)
-      || (filtered && result.scopeComplete === true)) {
+      || (!subrunsFiltered && result.scopeComplete !== true)
+      || (subrunsFiltered && result.scopeComplete === true)) {
       issues.push(`INCOMPLETE_MATRIX: ${definition.id}`)
     }
   }
@@ -334,10 +358,38 @@ export function aggregateReport(state, results) {
 }
 
 function xmlAttributes(source) {
-  return Object.fromEntries(
-    [...source.matchAll(/([\w:-]+)\s*=\s*["']([^"']*)["']/g)]
-      .map((match) => [match[1], match[2]])
-  )
+  const attributes = new Map()
+  let cursor = 0
+  while (cursor < source.length) {
+    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    if (cursor === source.length) break
+    const name = source.slice(cursor).match(/^[A-Za-z_:][\w:.-]*/)?.[0]
+    if (!name || attributes.has(name)) return null
+    cursor += name.length
+    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    if (source[cursor] !== '=') return null
+    cursor += 1
+    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    const quote = source[cursor]
+    if (quote !== '"' && quote !== "'") return null
+    const end = source.indexOf(quote, cursor + 1)
+    if (end === -1 || source.slice(cursor + 1, end).includes('<')) return null
+    attributes.set(name, source.slice(cursor + 1, end))
+    cursor = end + 1
+    if (cursor < source.length && !/\s/.test(source[cursor])) return null
+  }
+  return Object.fromEntries(attributes)
+}
+
+function xmlOpening(markup) {
+  const selfClosing = markup.endsWith('/>')
+  const inner = markup.slice(1, selfClosing ? -2 : -1)
+  const name = inner.match(/^([A-Za-z_:][\w:.-]*)/)?.[1]
+  if (!name) return null
+  const remainder = inner.slice(name.length)
+  if (remainder && !/^\s/.test(remainder)) return null
+  const attributes = xmlAttributes(remainder)
+  return attributes && { name, attributes, selfClosing }
 }
 
 function xmlMarkupEnd(source, start, trackSubset = false) {
@@ -360,66 +412,66 @@ function xmlMarkupEnd(source, start, trackSubset = false) {
   return -1
 }
 
-function hasWellFormedSurefireRoot(source) {
+function surefireRootAttributes(source) {
   const stack = []
   let cursor = 0
-  let rootSeen = false
+  let rootAttributes = null
   let doctypeSeen = false
 
   while (cursor < source.length) {
     const start = source.indexOf('<', cursor)
     const textEnd = start === -1 ? source.length : start
-    if (stack.length === 0 && source.slice(cursor, textEnd).trim()) return false
+    if (stack.length === 0 && source.slice(cursor, textEnd).trim()) return null
     if (start === -1) break
 
     if (source.startsWith('<!--', start)) {
       const end = source.indexOf('-->', start + 4)
-      if (end === -1) return false
+      if (end === -1) return null
       cursor = end + 3
       continue
     }
     if (source.startsWith('<![CDATA[', start)) {
-      if (stack.length === 0) return false
+      if (stack.length === 0) return null
       const end = source.indexOf(']]>', start + 9)
-      if (end === -1) return false
+      if (end === -1) return null
       cursor = end + 3
       continue
     }
     if (source.startsWith('<?', start)) {
       const end = source.indexOf('?>', start + 2)
-      if (end === -1) return false
+      if (end === -1) return null
       cursor = end + 2
       continue
     }
     if (source.startsWith('<!DOCTYPE', start)) {
-      if (doctypeSeen || rootSeen || stack.length > 0) return false
+      if (doctypeSeen || rootAttributes || stack.length > 0) return null
       const end = xmlMarkupEnd(source, start, true)
-      if (end === -1) return false
+      if (end === -1) return null
       doctypeSeen = true
       cursor = end + 1
       continue
     }
 
     const end = xmlMarkupEnd(source, start)
-    if (end === -1) return false
+    if (end === -1) return null
     const markup = source.slice(start, end + 1)
     const closing = markup.match(/^<\/([A-Za-z_:][\w:.-]*)\s*>$/)
     if (closing) {
-      if (stack.pop() !== closing[1]) return false
+      if (stack.pop() !== closing[1]) return null
       cursor = end + 1
       continue
     }
-    const opening = markup.match(/^<([A-Za-z_:][\w:.-]*)(?:\s[\s\S]*?)?\/?>$/)
-    if (!opening) return false
+    const opening = xmlOpening(markup)
+    if (!opening) return null
     if (stack.length === 0) {
-      if (rootSeen || opening[1] !== 'testsuite') return false
-      rootSeen = true
+      if (rootAttributes || opening.name !== 'testsuite') return null
+      rootAttributes = opening.attributes
     }
-    if (!markup.endsWith('/>')) stack.push(opening[1])
+    if (!opening.selfClosing) stack.push(opening.name)
     cursor = end + 1
   }
 
-  return rootSeen && stack.length === 0
+  return stack.length === 0 ? rootAttributes : null
 }
 
 export function parseSurefireReports(reportDir, expectedClasses, invocationStartedAt) {
@@ -436,24 +488,22 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
   for (const name of readdirSync(reportDir).filter((file) => file.endsWith('.xml')).toSorted()) {
     const path = `${reportDir}/${name}`
     const source = readFileSync(path, 'utf8')
-    if (!hasWellFormedSurefireRoot(source)) {
+    const attributes = surefireRootAttributes(source)
+    if (!attributes) {
       throw new Error(`SUREFIRE_MALFORMED_XML: ${name}`)
     }
-    for (const match of source.matchAll(/<testsuite\b([^>]*)>/g)) {
-      const attributes = xmlAttributes(match[1])
-      const className = attributes.name?.split('.').at(-1)
-      if (!expected.has(className)) continue
-      found.push({
-        className,
-        suiteName: attributes.name,
-        file: name,
-        modifiedAt: statSync(path).mtime.toISOString(),
-        tests: Number(attributes.tests),
-        skipped: Number(attributes.skipped),
-        failures: Number(attributes.failures),
-        errors: Number(attributes.errors)
-      })
-    }
+    const className = attributes.name?.split('.').at(-1)
+    if (!expected.has(className)) continue
+    found.push({
+      className,
+      suiteName: attributes.name,
+      file: name,
+      modifiedAt: statSync(path).mtime.toISOString(),
+      tests: Number(attributes.tests),
+      skipped: Number(attributes.skipped),
+      failures: Number(attributes.failures),
+      errors: Number(attributes.errors)
+    })
   }
   for (const className of expectedClasses) {
     const matches = found.filter((suite) => suite.className === className)

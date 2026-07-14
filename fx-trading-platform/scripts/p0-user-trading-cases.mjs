@@ -151,7 +151,7 @@ function defaultSubruns(profiles, viewports) {
 
 function descriptor(id, phase) {
   const profiles = PROFILE_OVERRIDES[id] ?? PROFILE_BY_PHASE[phase]
-  const viewports = id === 'UI-01' || id === 'UI-02'
+  const viewports = id === 'UI-01' || id === 'UI-02' || id === 'SOURCE-04'
     ? ['desktop', 'mobile']
     : ['desktop']
   const authoritySubruns = AUTHORITY_SUBRUNS[id]

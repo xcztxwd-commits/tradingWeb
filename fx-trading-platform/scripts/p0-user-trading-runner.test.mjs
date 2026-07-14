@@ -303,7 +303,10 @@ const EXPECTED_EXECUTION_MANIFEST = {
   },
   'SOURCE-04': {
     executionGroup: 'source-04',
-    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+    requiredSubruns: [
+      { id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'mobile-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'mobile' }
+    ]
   },
   'RES-01': {
     executionGroup: 'res-01',
@@ -465,6 +468,16 @@ test('cross-profile and responsive cases enumerate every required combination', 
   ])
 })
 
+test('SOURCE-04 requires desktop and mobile source-transition evidence', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'SOURCE-04')
+
+  assert.deepEqual(definition.viewports, ['desktop', 'mobile'])
+  assert.deepEqual(definition.requiredSubruns, [
+    { id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'mobile-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'mobile' }
+  ])
+})
+
 test('phase, profile, viewport and authority assignments match the approved matrix', () => {
   const ids = (prefix, numbers) => numbers.map((number) => (
     `${prefix}-${String(number).padStart(2, '0')}`
@@ -531,7 +544,9 @@ test('phase, profile, viewport and authority assignments match the approved matr
     )
     assert.deepEqual(
       definition.viewports,
-      definition.phase === 'ui' ? ['desktop', 'mobile'] : ['desktop']
+      definition.phase === 'ui' || definition.id === 'SOURCE-04'
+        ? ['desktop', 'mobile']
+        : ['desktop']
     )
   }
 
@@ -718,6 +733,73 @@ test('persistence strips raw replay requests but keeps sanitized replay and netw
   assert.equal(persisted.networkEvidence[0].headers.Authorization, '[REDACTED]')
 })
 
+test('persistence rejects semantic request containers and nested replay tuples', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-request-bypass-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const markers = {
+    l8: 'L8_REQUEST_BYPASS_52d1',
+    rawL8: 'RAW_L8_REQUEST_BYPASS_f80a',
+    body: 'REQUEST_BODY_BYPASS_961c',
+    tuple: 'REQUEST_TUPLE_BYPASS_a74e'
+  }
+
+  writeCaseResultAtomic(resultPath, {
+    id: 'RES-01',
+    l8Request: { method: 'POST', url: `/api/orders/${markers.l8}`, body: markers.l8 },
+    rawL8Request: {
+      method: 'POST',
+      url: `/api/orders/${markers.rawL8}`,
+      body: markers.rawL8
+    },
+    requestBody: { order: markers.body },
+    replayProbes: [{
+      id: 'replay-safe',
+      referenceId: 'order-safe',
+      requestId: 'request-safe',
+      clientOrderId: 'client-safe',
+      fingerprint: 'sha256:safe',
+      requestFingerprint: 'sha256:request-safe',
+      outcome: {
+        status: 'REJECTED',
+        errorCode: 'REQUEST_CONFLICT',
+        requestTuple: {
+          method: 'POST',
+          url: `/api/orders/${markers.tuple}`,
+          body: markers.tuple
+        }
+      }
+    }],
+    networkEvidence: [{
+      method: 'GET',
+      url: '/api/orders?token=ordinary-secret&symbol=BTCUSDT',
+      status: 200
+    }]
+  })
+
+  const serialized = readFileSync(resultPath, 'utf8')
+  for (const marker of Object.values(markers)) assert.equal(serialized.includes(marker), false)
+  for (const container of ['l8Request', 'rawL8Request', 'requestBody', 'requestTuple']) {
+    assert.equal(serialized.includes(`"${container}"`), false)
+  }
+  const persisted = JSON.parse(serialized)
+  assert.deepEqual(persisted.replayProbes, [{
+    id: 'replay-safe',
+    referenceId: 'order-safe',
+    requestId: 'request-safe',
+    clientOrderId: 'client-safe',
+    fingerprint: 'sha256:safe',
+    requestFingerprint: 'sha256:request-safe',
+    outcome: { status: 'REJECTED', errorCode: 'REQUEST_CONFLICT' }
+  }])
+  assert.equal(persisted.networkEvidence[0].method, 'GET')
+  assert.equal(persisted.networkEvidence[0].status, 200)
+  assert.equal(
+    new URL(persisted.networkEvidence[0].url, 'https://contract.invalid').searchParams.get('symbol'),
+    'BTCUSDT'
+  )
+})
+
 test('run state is created atomically and resumes only an identical evidence identity', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-state-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -827,6 +909,57 @@ function passingCase(definition) {
   }
 }
 
+const CASE_LEVEL_SELECTION_FIXTURES = [
+  {
+    label: 'caseIds',
+    selection: { caseIds: ['AUTH-03'] },
+    definitions: P0_CASES.filter(({ id }) => id === 'AUTH-03')
+  },
+  {
+    label: 'phases',
+    selection: { phases: ['funding'] },
+    definitions: P0_CASES.filter(({ phase }) => phase === 'funding')
+  }
+]
+
+for (const fixture of CASE_LEVEL_SELECTION_FIXTURES) {
+  test(`case-level selection resumes complete ${fixture.label} evidence`, () => {
+    const cases = Object.fromEntries(
+      fixture.definitions.map((definition) => [definition.id, passingCase(definition)])
+    )
+    const plan = planResume({ cases }, P0_CASES, fixture.selection)
+
+    assert.equal(plan.filtered, true)
+    assert.equal(plan.scopeComplete, false)
+    assert.deepEqual(
+      plan.entries.map(({ id, action, reason, scopeComplete }) => ({
+        id,
+        action,
+        reason,
+        scopeComplete
+      })),
+      fixture.definitions.map(({ id }) => ({
+        id,
+        action: 'SKIP',
+        reason: 'COMPLETE',
+        scopeComplete: true
+      }))
+    )
+  })
+
+  test(`case-level selection aggregates complete ${fixture.label} evidence`, () => {
+    const report = aggregateReport(
+      { definitions: P0_CASES, selection: fixture.selection },
+      fixture.definitions.map(passingCase)
+    )
+
+    assert.equal(report.verdict, 'PARTIAL_PASS')
+    assert.equal(report.scopeComplete, false)
+    assert.deepEqual(report.issues, [])
+    assert.equal(report.counts.PASS, fixture.definitions.length)
+  })
+}
+
 test('resume reruns an entire RUNNING case and every member of its execution group', () => {
   const definitions = P0_CASES.filter(({ id }) => id === 'AUTH-01' || id === 'AUTH-02')
   const state = {
@@ -908,9 +1041,26 @@ test('profile and viewport filters are never resumable as complete scope', () =>
 
   const ui = P0_CASES.find(({ id }) => id === 'UI-02')
   const mobile = ui.requiredSubruns.filter(({ viewport }) => viewport === 'mobile')
-  const uiPlan = planResume({ cases: {} }, [ui], { viewports: ['mobile'] })
+  const falselyCompleteMobile = {
+    id: ui.id,
+    status: 'PASS',
+    scopeComplete: true,
+    subruns: mobile.map((subrun) => ({ ...subrun, status: 'PASS' }))
+  }
+  const uiPlan = planResume(
+    { cases: { [ui.id]: falselyCompleteMobile } },
+    [ui],
+    { viewports: ['mobile'] }
+  )
   assert.equal(uiPlan.scopeComplete, false)
+  assert.equal(uiPlan.entries[0].action, 'RUN')
   assert.deepEqual(uiPlan.entries[0].subruns, mobile)
+  const uiReport = aggregateReport(
+    { definitions: [ui], selection: { viewports: ['mobile'] } },
+    [falselyCompleteMobile]
+  )
+  assert.equal(uiReport.verdict, 'FAIL')
+  assert.ok(uiReport.issues.includes(`INCOMPLETE_MATRIX: ${ui.id}`))
 })
 
 test('aggregate report reaches PASS only with every required case and subrun', () => {
@@ -1068,6 +1218,51 @@ for (const [scenario, source] of Object.entries(MALFORMED_SUREFIRE_REPORTS)) {
         new Date(Date.now() - 5_000)
       ),
       new RegExp(`^Error: SUREFIRE_MALFORMED_XML: ${fileName}$`)
+    )
+  })
+}
+
+const FAKE_OR_MALFORMED_SUREFIRE_REPORTS = {
+  'comment-fake-suite': {
+    source: [
+      '<testsuite name="com.fxplatform.RealIT" tests="1" skipped="0" failures="0" errors="0">',
+      '<!-- <testsuite name="com.fxplatform.ExpectedIT" tests="1" skipped="0" failures="0" errors="0"></testsuite> -->',
+      '</testsuite>'
+    ].join('\n'),
+    error: /^Error: SUREFIRE_MISSING_CLASS: ExpectedIT$/
+  },
+  'cdata-fake-suite': {
+    source: [
+      '<testsuite name="com.fxplatform.RealIT" tests="1" skipped="0" failures="0" errors="0">',
+      '<![CDATA[<testsuite name="com.fxplatform.ExpectedIT" tests="1" skipped="0" failures="0" errors="0"></testsuite>]]>',
+      '</testsuite>'
+    ].join('\n'),
+    error: /^Error: SUREFIRE_MISSING_CLASS: ExpectedIT$/
+  },
+  'valueless-attribute': {
+    source: '<testsuite name="com.fxplatform.ExpectedIT" tests="1" skipped failures="0" errors="0"></testsuite>',
+    error: /^Error: SUREFIRE_MALFORMED_XML: TEST-valueless-attribute\.xml$/
+  },
+  'duplicate-attribute': {
+    source: '<testsuite name="com.fxplatform.RealIT" name="com.fxplatform.ExpectedIT" tests="1" skipped="0" failures="0" errors="0"></testsuite>',
+    error: /^Error: SUREFIRE_MALFORMED_XML: TEST-duplicate-attribute\.xml$/
+  }
+}
+
+for (const [scenario, fixture] of Object.entries(FAKE_OR_MALFORMED_SUREFIRE_REPORTS)) {
+  test(`Surefire parser rejects fake or malformed suite: ${scenario}`, (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-structural-'))
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    const fileName = `TEST-${scenario}.xml`
+    writeFileSync(join(directory, fileName), fixture.source)
+
+    assert.throws(
+      () => parseSurefireReports(
+        directory,
+        ['ExpectedIT'],
+        new Date(Date.now() - 5_000)
+      ),
+      fixture.error
     )
   })
 }
