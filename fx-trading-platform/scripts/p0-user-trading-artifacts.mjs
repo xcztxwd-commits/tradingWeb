@@ -51,16 +51,19 @@ const RUN_STATE_IDENTITY_FIELDS = [
 function redactUrl(value) {
   const absolute = /^[a-z][a-z\d+.-]*:/i.test(value)
   const parsed = new URL(value, 'https://redaction.invalid')
+  parsed.username = ''
+  parsed.password = ''
   for (const key of parsed.searchParams.keys()) {
     if (SENSITIVE_KEY.test(key)) parsed.searchParams.set(key, REDACTED)
   }
+  parsed.hash = ''
   return absolute ? parsed.toString() : `${parsed.pathname}${parsed.search}${parsed.hash}`
 }
 
 function isFormBody(value) {
   return value.length > 0 && value.split('&').every((field) => (
     /^[A-Za-z_][A-Za-z\d_.-]*=/.test(field)
-  ))
+  )) && new URLSearchParams(value).toString() === value
 }
 
 function redactBody(value, dropOpaque = false) {
@@ -77,9 +80,42 @@ function redactBody(value, dropOpaque = false) {
   }
 }
 
+function sanitizeHeaderValue(name, value) {
+  return SENSITIVE_KEY.test(name) ? REDACTED : value
+}
+
+function sanitizeHeaderRepresentation(value, allowMap = false) {
+  if (typeof value === 'string') {
+    const match = value.match(/^([A-Za-z\d!#$%&'*+.^_`|~-]+):[ \t]*(.*)$/)
+    return match ? `${match[1]}: ${sanitizeHeaderValue(match[1], match[2])}` : undefined
+  }
+  if (Array.isArray(value)) {
+    if (value.length !== 2 || !value.every((item) => typeof item === 'string')) return undefined
+    return [value[0], sanitizeHeaderValue(value[0], value[1])]
+  }
+  if (!value || typeof value !== 'object') return undefined
+  if (typeof value.name === 'string' && typeof value.value === 'string') {
+    return { name: value.name, value: sanitizeHeaderValue(value.name, value.value) }
+  }
+  if (!allowMap) return undefined
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, headerValue]) => typeof headerValue === 'string')
+      .map(([name, headerValue]) => [name, sanitizeHeaderValue(name, headerValue)])
+  )
+}
+
+function sanitizeHeaderEvidence(value) {
+  if (!Array.isArray(value)) return sanitizeHeaderRepresentation(value, true)
+  return value.map((item) => sanitizeHeaderRepresentation(item))
+    .filter((item) => item !== undefined)
+}
+
 function redactValue(value, key = '') {
   if (SENSITIVE_KEY.test(key)) return REDACTED
   if (typeof value === 'string' && key.toLowerCase() === 'url') return redactUrl(value)
+  if (normalizedKey(key).endsWith('headers')) return sanitizeHeaderEvidence(value)
   if (typeof value === 'string' && /^(body|postdata)$/i.test(key)) return redactBody(value)
   if (typeof value === 'string' && /^(responsebody|responsepayload)$/i.test(key)) {
     return redactBody(value, true)
@@ -165,8 +201,23 @@ function stripRawRequests(value, key = '', inNetworkEvidence = false) {
   )
 }
 
+function inertJsonValue(value, key = '') {
+  if (key === 'toJSON' || value === undefined
+    || typeof value === 'function' || typeof value === 'symbol') return undefined
+  if (Array.isArray(value)) {
+    return value.map((item) => inertJsonValue(item)).filter((item) => item !== undefined)
+  }
+  if (!value || typeof value !== 'object') return value
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([field, fieldValue]) => [field, inertJsonValue(fieldValue, field)])
+      .filter(([, fieldValue]) => fieldValue !== undefined)
+  )
+}
+
 function sanitizeForPersistence(value) {
-  return redactValue(stripRawRequests(value))
+  return inertJsonValue(redactValue(stripRawRequests(value)))
 }
 
 export function writeCaseResultAtomic(path, result) {
@@ -344,7 +395,7 @@ export function aggregateReport(state, results) {
   const expectedIds = new Set(definitions.map(({ id }) => id))
   const byId = Map.groupBy(results, ({ id }) => id)
   const counts = { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 }
-  const issues = []
+  const issues = filtered && definitions.length === 0 ? ['EMPTY_SELECTION'] : []
 
   for (const result of results) {
     if (!expectedIds.has(result.id)) issues.push(`UNEXPECTED_CASE: ${result.id}`)
@@ -369,7 +420,7 @@ export function aggregateReport(state, results) {
     const requiredSubruns = selectedSubruns(definition, selection)
     if (!subrunsPass(result, requiredSubruns)
       || (!subrunsFiltered && result.scopeComplete !== true)
-      || (subrunsFiltered && result.scopeComplete === true)) {
+      || (subrunsFiltered && result.scopeComplete !== false)) {
       issues.push(`INCOMPLETE_MATRIX: ${definition.id}`)
     }
   }
@@ -394,10 +445,15 @@ function validXmlCodePoint(codePoint) {
     || (codePoint >= 0x10000 && codePoint <= 0x10ffff)
 }
 
-function validXmlCharacterData(value) {
+function validXmlCodePoints(value) {
   for (const character of value) {
     if (!validXmlCodePoint(character.codePointAt(0))) return false
   }
+  return true
+}
+
+function validXmlCharacterData(value) {
+  if (!validXmlCodePoints(value)) return false
   let cursor = 0
   while (true) {
     const start = value.indexOf('&', cursor)
@@ -442,6 +498,20 @@ function xmlAttributes(source) {
   return Object.fromEntries(attributes)
 }
 
+function validXmlDeclaration(attributes) {
+  if (!attributes || !['1.0', '1.1'].includes(attributes.version)) return false
+  const expectedFields = ['version']
+  if ('encoding' in attributes) {
+    if (!/^[A-Za-z][A-Za-z\d._-]*$/.test(attributes.encoding)) return false
+    expectedFields.push('encoding')
+  }
+  if ('standalone' in attributes) {
+    if (!['yes', 'no'].includes(attributes.standalone)) return false
+    expectedFields.push('standalone')
+  }
+  return Object.keys(attributes).join(',') === expectedFields.join(',')
+}
+
 function xmlOpening(markup) {
   const selfClosing = markup.endsWith('/>')
   const inner = markup.slice(1, selfClosing ? -2 : -1)
@@ -477,7 +547,6 @@ function surefireRootAttributes(source) {
   const stack = []
   let cursor = 0
   let rootAttributes = null
-  let doctypeSeen = false
   let declarationSeen = false
 
   while (cursor < source.length) {
@@ -491,6 +560,10 @@ function surefireRootAttributes(source) {
     if (source.startsWith('<!--', start)) {
       const end = source.indexOf('-->', start + 4)
       if (end === -1) return null
+      const comment = source.slice(start + 4, end)
+      if (comment.includes('--') || comment.endsWith('-') || !validXmlCodePoints(comment)) {
+        return null
+      }
       cursor = end + 3
       continue
     }
@@ -507,18 +580,13 @@ function surefireRootAttributes(source) {
       if (start !== 0 || declarationSeen || rootAttributes || stack.length > 0
         || !source.startsWith('<?xml', start) || !/\s/.test(source[start + 5])) return null
       const declarationAttributes = xmlAttributes(source.slice(start + 5, end))
-      if (!declarationAttributes?.version) return null
+      if (!validXmlDeclaration(declarationAttributes)) return null
       declarationSeen = true
       cursor = end + 2
       continue
     }
     if (source.startsWith('<!DOCTYPE', start)) {
-      if (doctypeSeen || rootAttributes || stack.length > 0) return null
-      const end = xmlMarkupEnd(source, start, true)
-      if (end === -1) return null
-      doctypeSeen = true
-      cursor = end + 1
-      continue
+      return null
     }
 
     const end = xmlMarkupEnd(source, start)

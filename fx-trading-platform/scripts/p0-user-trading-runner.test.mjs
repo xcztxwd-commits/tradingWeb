@@ -613,6 +613,75 @@ test('case evidence replaces atomically without leaving partial files', (t) => {
   assert.equal(existsSync(`${resultPath}.tmp`), false)
 })
 
+test('persistence serialization ignores toJSON hooks and non-JSON values', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-inert-json-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const rootPath = join(directory, 'root.json')
+  const nestedPath = join(directory, 'nested.json')
+  const rootMarker = 'ROOT_TO_JSON_BYPASS_1c42'
+  const nestedMarker = 'NESTED_TO_JSON_BYPASS_7e31'
+  let callbackCalls = 0
+
+  writeCaseResultAtomic(rootPath, {
+    id: 'AUTH-01',
+    safe: 'root-safe',
+    toJSON() {
+      callbackCalls += 1
+      return {
+        rawRequest: { method: 'POST', url: `/api/orders/${rootMarker}`, body: rootMarker },
+        password: rootMarker
+      }
+    }
+  })
+  writeCaseResultAtomic(nestedPath, {
+    id: 'AUTH-02',
+    safe: 'outer-safe',
+    nested: {
+      safe: 'inner-safe',
+      toJSON() {
+        callbackCalls += 1
+        return {
+          rawRequest: {
+            method: 'POST',
+            url: `/api/orders/${nestedMarker}`,
+            body: nestedMarker
+          },
+          accessToken: nestedMarker
+        }
+      },
+      functionValue() {},
+      symbolValue: Symbol('nested-symbol'),
+      undefinedValue: undefined
+    },
+    values: [
+      'kept',
+      () => {},
+      Symbol('array-symbol'),
+      undefined,
+      { safe: 'deep-safe', functionValue() {}, symbolValue: Symbol('deep-symbol') }
+    ],
+    functionValue() {},
+    symbolValue: Symbol('root-symbol'),
+    undefinedValue: undefined
+  })
+
+  const rootSource = readFileSync(rootPath, 'utf8')
+  const nestedSource = readFileSync(nestedPath, 'utf8')
+  assert.equal(callbackCalls, 0)
+  for (const source of [rootSource, nestedSource]) {
+    assert.equal(source.includes(rootMarker), false)
+    assert.equal(source.includes(nestedMarker), false)
+    assert.equal(source.includes('toJSON'), false)
+  }
+  assert.deepEqual(JSON.parse(rootSource), { id: 'AUTH-01', safe: 'root-safe' })
+  assert.deepEqual(JSON.parse(nestedSource), {
+    id: 'AUTH-02',
+    safe: 'outer-safe',
+    nested: { safe: 'inner-safe' },
+    values: ['kept', { safe: 'deep-safe' }]
+  })
+})
+
 test('network evidence redacts secrets recursively without mutating live replay data', () => {
   const entry = {
     url: '/api/orders?access_token=query-secret&symbol=BTCUSDT',
@@ -655,6 +724,54 @@ test('network evidence redacts secrets recursively without mutating live replay 
   assert.equal(new URLSearchParams(form.body).get('password'), '[REDACTED]')
   assert.equal(new URLSearchParams(form.body).get('email'), 'user@example.com')
   assert.equal(form.postData, 'plain evidence')
+})
+
+test('network redaction sanitizes URL userinfo and explicit header representations', () => {
+  const unknownMarker = 'UNKNOWN_HEADER_STRUCTURE_8ad4'
+  const entry = {
+    url: 'https://trader:plain-password@example.invalid/orders?token=query-secret&symbol=BTCUSDT#access_token=fragment-secret&tab=open',
+    headers: {
+      Authorization: 'Bearer object-secret',
+      Cookie: 'session=object-secret',
+      'X-Trace-Id': 'safe-trace'
+    },
+    responseHeaders: [
+      { name: 'Set-Cookie', value: 'session=name-value-secret' },
+      { name: 'Content-Type', value: 'application/json' },
+      ['Authorization', 'Bearer tuple-secret'],
+      ['X-Request-Id', 'safe-request'],
+      'Cookie: string-secret',
+      'X-Region: safe-region',
+      { label: 'Authorization', content: unknownMarker },
+      ['Set-Cookie', unknownMarker, 'unexpected'],
+      42
+    ]
+  }
+  const original = JSON.parse(JSON.stringify(entry))
+
+  const redacted = redactNetworkEntry(entry)
+
+  assert.deepEqual(entry, original)
+  const url = new URL(redacted.url)
+  assert.equal(url.username, '')
+  assert.equal(url.password, '')
+  assert.equal(url.searchParams.get('token'), '[REDACTED]')
+  assert.equal(url.searchParams.get('symbol'), 'BTCUSDT')
+  assert.equal(url.hash, '')
+  assert.deepEqual(redacted.headers, {
+    Authorization: '[REDACTED]',
+    Cookie: '[REDACTED]',
+    'X-Trace-Id': 'safe-trace'
+  })
+  assert.deepEqual(redacted.responseHeaders, [
+    { name: 'Set-Cookie', value: '[REDACTED]' },
+    { name: 'Content-Type', value: 'application/json' },
+    ['Authorization', '[REDACTED]'],
+    ['X-Request-Id', 'safe-request'],
+    'Cookie: [REDACTED]',
+    'X-Region: safe-region'
+  ])
+  assert.equal(JSON.stringify(redacted).includes(unknownMarker), false)
 })
 
 test('atomic evidence never persists credentials', (t) => {
@@ -936,6 +1053,36 @@ test('persistence redacts parseable response bodies and drops opaque response pa
   assert.equal(form.get('password'), '[REDACTED]')
   assert.equal(form.get('state'), 'active')
   assert.equal('responseBody' in persisted.networkEvidence[2], false)
+})
+
+test('response evidence drops padded base64 but keeps canonical credential form', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-response-form-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const paddedBase64 = ['YQ==', 'c2VjcmV0X3Rva2VuPQ==']
+
+  writeCaseResultAtomic(resultPath, {
+    id: 'AUTH-01',
+    networkEvidence: [
+      { method: 'GET', url: '/api/short', status: 200, responseBody: paddedBase64[0] },
+      { method: 'GET', url: '/api/token', status: 200, responsePayload: paddedBase64[1] },
+      {
+        method: 'POST',
+        url: '/api/login',
+        status: 200,
+        responsePayload: 'password=canonical-secret&state=active'
+      }
+    ]
+  })
+
+  const source = readFileSync(resultPath, 'utf8')
+  for (const opaque of paddedBase64) assert.equal(source.includes(opaque), false)
+  const evidence = JSON.parse(source).networkEvidence
+  assert.equal('responseBody' in evidence[0], false)
+  assert.equal('responsePayload' in evidence[1], false)
+  const form = new URLSearchParams(evidence[2].responsePayload)
+  assert.equal(form.get('password'), '[REDACTED]')
+  assert.equal(form.get('state'), 'active')
 })
 
 test('run state is created atomically and resumes only an identical evidence identity', (t) => {
@@ -1272,6 +1419,109 @@ test('filtered successful evidence is PARTIAL_PASS and never terminal PASS', () 
   assert.deepEqual(report.issues, [])
 })
 
+test('cropped scope requires exact false while case selection requires true', () => {
+  const croppedDefinition = P0_CASES.find(({ id }) => id === 'SOURCE-03')
+  const croppedSelection = { profiles: ['FUNDING_ONLY'] }
+  const croppedSubruns = croppedDefinition.requiredSubruns.filter(
+    ({ profile }) => profile === 'FUNDING_ONLY'
+  )
+  const invalidScopes = [
+    { label: 'missing' },
+    { label: 'null', scopeComplete: null },
+    { label: 'string', scopeComplete: 'false' },
+    { label: 'number', scopeComplete: 0 },
+    { label: 'true', scopeComplete: true }
+  ]
+  const invalidReports = invalidScopes.map((variant) => {
+    const result = {
+      id: croppedDefinition.id,
+      status: 'PASS',
+      subruns: croppedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+    }
+    if (Object.hasOwn(variant, 'scopeComplete')) result.scopeComplete = variant.scopeComplete
+    const report = aggregateReport(
+      { definitions: [croppedDefinition], selection: croppedSelection },
+      [result]
+    )
+    return { label: variant.label, verdict: report.verdict, issues: report.issues }
+  })
+  const falseReport = aggregateReport(
+    { definitions: [croppedDefinition], selection: croppedSelection },
+    [{
+      id: croppedDefinition.id,
+      status: 'PASS',
+      scopeComplete: false,
+      subruns: croppedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+    }]
+  )
+
+  const caseDefinition = P0_CASES.find(({ id }) => id === 'AUTH-03')
+  const caseSelection = { caseIds: [caseDefinition.id] }
+  const completeCase = passingCase(caseDefinition)
+  const completeCaseReport = aggregateReport(
+    { definitions: P0_CASES, selection: caseSelection },
+    [completeCase]
+  )
+  const completeCasePlan = planResume(
+    { cases: { [caseDefinition.id]: completeCase } },
+    P0_CASES,
+    caseSelection
+  )
+  const incompleteCase = { ...completeCase, scopeComplete: false }
+  const incompleteCaseReport = aggregateReport(
+    { definitions: P0_CASES, selection: caseSelection },
+    [incompleteCase]
+  )
+  const incompleteCasePlan = planResume(
+    { cases: { [caseDefinition.id]: incompleteCase } },
+    P0_CASES,
+    caseSelection
+  )
+
+  assert.deepEqual(invalidReports, invalidScopes.map(({ label }) => ({
+    label,
+    verdict: 'FAIL',
+    issues: [`INCOMPLETE_MATRIX: ${croppedDefinition.id}`]
+  })))
+  assert.equal(falseReport.verdict, 'PARTIAL_PASS')
+  assert.equal(falseReport.scopeComplete, false)
+  assert.deepEqual(falseReport.issues, [])
+  assert.equal(completeCaseReport.verdict, 'PARTIAL_PASS')
+  assert.deepEqual(completeCaseReport.issues, [])
+  assert.equal(completeCasePlan.entries[0].action, 'SKIP')
+  assert.equal(incompleteCaseReport.verdict, 'FAIL')
+  assert.ok(incompleteCaseReport.issues.includes(`INCOMPLETE_MATRIX: ${caseDefinition.id}`))
+  assert.equal(incompleteCasePlan.entries[0].action, 'RUN')
+})
+
+test('empty filtered selections fail instead of producing zero-evidence partial pass', () => {
+  const fixtures = [
+    { label: 'unknown caseIds', selection: { caseIds: ['UNKNOWN-99'] } },
+    {
+      label: 'profile and viewport with no matching subrun',
+      selection: { profiles: ['FUNDING_ONLY'], viewports: ['mobile'] }
+    }
+  ]
+  const actual = fixtures.map(({ label, selection }) => {
+    const report = aggregateReport({ definitions: P0_CASES, selection }, [])
+    return {
+      label,
+      verdict: report.verdict,
+      scopeComplete: report.scopeComplete,
+      pass: report.counts.PASS,
+      issues: report.issues
+    }
+  })
+
+  assert.deepEqual(actual, fixtures.map(({ label }) => ({
+    label,
+    verdict: 'FAIL',
+    scopeComplete: false,
+    pass: 0,
+    issues: ['EMPTY_SELECTION']
+  })))
+})
+
 test('corrupt, duplicate, unexpected or non-terminal evidence cannot pass', () => {
   const registryless = aggregateReport({ selection: {} }, [])
   assert.equal(registryless.verdict, 'FAIL')
@@ -1440,6 +1690,63 @@ for (const [scenario, source] of Object.entries(INVALID_XML_CHARACTER_DATA_REPOR
     )
   })
 }
+
+test('Surefire parser rejects malformed comments DOCTYPE and declarations', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-surefire-xml-subset-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const startedAt = new Date(Date.now() - 5_000)
+  const suite = (inner = '') => [
+    '<testsuite name="com.fxplatform.XmlSubsetIT" tests="1" skipped="0" failures="0" errors="0">',
+    inner,
+    '</testsuite>'
+  ].filter(Boolean).join('\n')
+  const invalid = {
+    'comment-double-hyphen': suite('<!-- illegal -- comment -->'),
+    'comment-control-codepoint': suite('<!-- illegal \u0001 comment -->'),
+    doctype: `<!DOCTYPE >\n${suite()}`,
+    'unsupported-version': `<?xml version="2.0"?>\n${suite()}`,
+    'unknown-declaration-attribute': `<?xml version="1.0" feature="unsupported"?>\n${suite()}`,
+    'invalid-declaration-encoding': `<?xml version="1.0" encoding="UTF 8"?>\n${suite()}`,
+    'invalid-declaration-standalone': `<?xml version="1.0" standalone="maybe"?>\n${suite()}`
+  }
+  const actual = Object.entries(invalid).map(([scenario, source]) => {
+    const directory = join(root, scenario)
+    mkdirSync(directory, { recursive: true })
+    const fileName = `TEST-${scenario}.xml`
+    writeFileSync(join(directory, fileName), source)
+    try {
+      parseSurefireReports(directory, ['XmlSubsetIT'], startedAt)
+      return { scenario, error: null }
+    } catch (error) {
+      return { scenario, error: error.message }
+    }
+  })
+
+  const validDirectory = join(root, 'valid')
+  mkdirSync(validDirectory, { recursive: true })
+  writeFileSync(join(validDirectory, 'TEST-xml-10.xml'), [
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
+    '<testsuite name="com.fxplatform.ValidXml10IT" tests="1" skipped="0" failures="0" errors="0">',
+    '<!-- valid-comment -->',
+    '<![CDATA[safe <xml> & raw cdata]]>',
+    '</testsuite>'
+  ].join('\n'))
+  writeFileSync(join(validDirectory, 'TEST-xml-11.xml'), [
+    "<?xml version='1.1' encoding='UTF-8' standalone='no'?>",
+    '<testsuite name="com.fxplatform.ValidXml11IT" tests="1" skipped="0" failures="0" errors="0"></testsuite>'
+  ].join('\n'))
+  const valid = parseSurefireReports(
+    validDirectory,
+    ['ValidXml10IT', 'ValidXml11IT'],
+    startedAt
+  )
+
+  assert.deepEqual(actual, Object.keys(invalid).map((scenario) => ({
+    scenario,
+    error: `SUREFIRE_MALFORMED_XML: TEST-${scenario}.xml`
+  })))
+  assert.deepEqual(valid.totals, { tests: 2, skipped: 0, failures: 0, errors: 0 })
+})
 
 test('Surefire parser accepts one fresh exact suite for every requested class', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-'))
