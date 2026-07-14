@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
   existsSync,
@@ -55,8 +55,15 @@ const SAFE_REFERENCE_SCALARS = new Set([
   'requestfingerprint',
   'requestref'
 ])
+const FINGERPRINT_FIELDS = new Set(['fingerprint', 'requestfingerprint'])
+const STATUS_FIELDS = new Set(['status', 'errorcode'])
+const STRUCTURED_HEADER_KEYS = new Set(['headers', 'requestheaders', 'responseheaders'])
+const HTTP_FIELD_NAME = /^[!#$%&'*+.^_`|~A-Za-z\d-]+$/
+const INVALID_HEADER_VALUE = /[\u0000-\u0008\u000a-\u001f\u007f]/
 const RAW_HTTP_REQUEST_DETAIL_FIELDS = new Set(['headers', 'body', 'postdata', 'payload'])
 const NETWORK_REQUEST_BODY_FIELDS = new Set(['body', 'postdata', 'payload'])
+const XML_WHITESPACE = /[ \t\r\n]/
+const XML_WHITESPACE_ONLY = /^[ \t\r\n]*$/
 // Filesystem timestamp rounding can put a freshly written report slightly ahead of wall time.
 const SUREFIRE_FUTURE_MTIME_TOLERANCE_MS = 2_000
 const RUN_STATE_IDENTITY_FIELDS = [
@@ -89,8 +96,9 @@ function isFormBody(value) {
 }
 
 function redactBody(value, dropOpaque = false) {
+  let parsed
   try {
-    return JSON.stringify(redactValue(JSON.parse(value)))
+    parsed = JSON.parse(value)
   } catch {
     if (dropOpaque && !isFormBody(value)) return undefined
     const params = new URLSearchParams(value)
@@ -100,31 +108,42 @@ function redactBody(value, dropOpaque = false) {
     }
     return params.toString()
   }
+  try {
+    return JSON.stringify(redactValue(parsed))
+  } catch {
+    return undefined
+  }
 }
 
 function sanitizeHeaderValue(name, value) {
+  if (typeof name !== 'string' || !HTTP_FIELD_NAME.test(name)
+    || typeof value !== 'string' || INVALID_HEADER_VALUE.test(value)) return undefined
   return SENSITIVE_KEY.test(name) ? REDACTED : value
 }
 
 function sanitizeHeaderRepresentation(value, allowMap = false) {
   if (typeof value === 'string') {
     const match = value.match(/^([A-Za-z\d!#$%&'*+.^_`|~-]+):[ \t]*(.*)$/)
-    return match ? `${match[1]}: ${sanitizeHeaderValue(match[1], match[2])}` : undefined
+    if (!match) return undefined
+    const sanitized = sanitizeHeaderValue(match[1], match[2])
+    return sanitized === undefined ? undefined : `${match[1]}: ${sanitized}`
   }
   if (Array.isArray(value)) {
     if (value.length !== 2 || !value.every((item) => typeof item === 'string')) return undefined
-    return [value[0], sanitizeHeaderValue(value[0], value[1])]
+    const sanitized = sanitizeHeaderValue(value[0], value[1])
+    return sanitized === undefined ? undefined : [value[0], sanitized]
   }
   if (!value || typeof value !== 'object') return undefined
   if (typeof value.name === 'string' && typeof value.value === 'string') {
-    return { name: value.name, value: sanitizeHeaderValue(value.name, value.value) }
+    const sanitized = sanitizeHeaderValue(value.name, value.value)
+    return sanitized === undefined ? undefined : { name: value.name, value: sanitized }
   }
   if (!allowMap) return undefined
 
   return Object.fromEntries(
     Object.entries(value)
-      .filter(([, headerValue]) => typeof headerValue === 'string')
       .map(([name, headerValue]) => [name, sanitizeHeaderValue(name, headerValue)])
+      .filter(([, headerValue]) => headerValue !== undefined)
   )
 }
 
@@ -136,10 +155,12 @@ function sanitizeHeaderEvidence(value) {
 
 function redactValue(value, key = '') {
   const semanticKey = normalizedKey(key)
-  if (/headers(?:text|blob)$/.test(semanticKey)) return undefined
+  if (semanticKey.includes('header') && /(raw|text|blob|string|block)/.test(semanticKey)) {
+    return undefined
+  }
   if (SENSITIVE_KEY.test(key)) return REDACTED
   if (typeof value === 'string' && key.toLowerCase() === 'url') return redactUrl(value)
-  if (semanticKey.endsWith('headers')) return sanitizeHeaderEvidence(value)
+  if (STRUCTURED_HEADER_KEYS.has(semanticKey)) return sanitizeHeaderEvidence(value)
   if (typeof value === 'string' && /^(body|postdata)$/i.test(key)) return redactBody(value)
   if (typeof value === 'string' && /^(responsebody|responsepayload)$/i.test(key)) {
     return redactBody(value, true)
@@ -168,15 +189,51 @@ function normalizedKey(key) {
   return key.replaceAll(/[^a-z\d]/gi, '').toLowerCase()
 }
 
-function persistenceScalar(value) {
-  return value === null || ['string', 'number', 'boolean'].includes(typeof value)
+function sha256Representation(value) {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`
 }
 
-function sanitizeReferenceScalar(value) {
-  if (typeof value !== 'string') return persistenceScalar(value) ? value : undefined
-  return /^[A-Za-z\d][A-Za-z\d._:/-]*$/.test(value) && !SENSITIVE_KEY.test(value)
+function hashableReference(value) {
+  return typeof value === 'string' && value.length > 0 && value.length <= 512
+    && /^[A-Za-z\d._:/-]+$/.test(value) && !SENSITIVE_KEY.test(value)
+}
+
+function sanitizeFingerprint(value) {
+  if (typeof value !== 'string') return undefined
+  const canonical = value.match(/^sha256:([a-f\d]{64})$/i)
+  if (canonical) return `sha256:${canonical[1].toLowerCase()}`
+  return hashableReference(value) ? sha256Representation(value) : undefined
+}
+
+function sanitizeStatus(value) {
+  return typeof value === 'string' && value.length <= 64
+    && /^[A-Z][A-Z\d_]*$/.test(value) && !SENSITIVE_KEY.test(value)
     ? value
     : undefined
+}
+
+function sanitizeReferenceId(field, value) {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? value : undefined
+  }
+  if (!hashableReference(value)) return undefined
+  const canonicalHash = value.match(/^sha256:([a-f\d]{64})$/i)
+  if (canonicalHash) return `sha256:${canonicalHash[1].toLowerCase()}`
+  const publicId = value.length <= 64 && (
+    /^\d+(?:\.\d+)*$/.test(value)
+    || /^[a-f\d]{8}-[a-f\d]{4}-[1-5][a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/i.test(value)
+    || /^[A-Z][A-Z\d]*-\d{2,4}$/.test(value)
+    || (/^[a-z\d]+(?:[-_][a-z\d]+)+$/.test(value) && field === 'subrunid')
+    || /^(?:request|replay|order|client)[-_/.:][A-Za-z\d][A-Za-z\d._:/-]*$/i.test(value)
+  )
+  return publicId ? value : sha256Representation(value)
+}
+
+function sanitizeEvidenceScalar(field, value) {
+  const semanticField = normalizedKey(field)
+  if (FINGERPRINT_FIELDS.has(semanticField)) return sanitizeFingerprint(value)
+  if (STATUS_FIELDS.has(semanticField)) return sanitizeStatus(value)
+  return sanitizeReferenceId(semanticField, value)
 }
 
 function sanitizeReplayProbe(probe) {
@@ -184,13 +241,13 @@ function sanitizeReplayProbe(probe) {
   const safe = Object.fromEntries(
     Object.entries(probe)
       .filter(([field]) => SAFE_REPLAY_FIELDS.has(field))
-      .map(([field, value]) => [field, sanitizeReferenceScalar(value)])
+      .map(([field, value]) => [field, sanitizeEvidenceScalar(field, value)])
       .filter(([, value]) => value !== undefined)
   )
   const outcome = Object.fromEntries(
     Object.entries(probe.outcome ?? {})
       .filter(([field]) => SAFE_REPLAY_OUTCOME_FIELDS.has(field))
-      .map(([field, value]) => [field, sanitizeReferenceScalar(value)])
+      .map(([field, value]) => [field, sanitizeEvidenceScalar(field, value)])
       .filter(([, value]) => value !== undefined)
   )
   if (Object.keys(outcome).length > 0) safe.outcome = outcome
@@ -209,8 +266,9 @@ function stripRawRequests(value, key = '', inNetworkEvidence = false) {
   if (semanticKey === 'networkevidence') return stripRawRequests(value, '', true)
   if (inNetworkEvidence && NETWORK_REQUEST_BODY_FIELDS.has(semanticKey)) return undefined
   if (SAFE_REFERENCE_SCALARS.has(semanticKey)) {
-    return sanitizeReferenceScalar(value)
+    return sanitizeEvidenceScalar(semanticKey, value)
   }
+  if (STRUCTURED_HEADER_KEYS.has(semanticKey)) return value
   if (RAW_REQUEST_CONTAINERS.has(semanticKey) || semanticKey.includes('request')) return undefined
   if (semanticKey === 'replayprobes') {
     if (!Array.isArray(value)) return []
@@ -289,7 +347,13 @@ function sanitizeForPersistence(value) {
 }
 
 export function writeCaseResultAtomic(path, result) {
-  const serialized = `${JSON.stringify(sanitizeForPersistence(result), null, 2)}\n`
+  const sanitized = sanitizeForPersistence(result)
+  if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) {
+    throw new TypeError('UNSAFE_PERSISTENCE_ROOT: expected plain object')
+  }
+  const json = JSON.stringify(sanitized, null, 2)
+  if (typeof json !== 'string') throw new TypeError('UNSAFE_PERSISTENCE_ROOT: not serializable')
+  const serialized = `${json}\n`
   const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
   mkdirSync(dirname(path), { recursive: true })
   let descriptor
@@ -580,7 +644,7 @@ function validXmlCodePoints(value) {
 }
 
 function validXmlCharacterData(value) {
-  if (!validXmlCodePoints(value)) return false
+  if (!validXmlCodePoints(value) || value.includes(']]>')) return false
   let cursor = 0
   while (true) {
     const start = value.indexOf('&', cursor)
@@ -603,15 +667,15 @@ function xmlAttributes(source) {
   const attributes = new Map()
   let cursor = 0
   while (cursor < source.length) {
-    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    while (cursor < source.length && XML_WHITESPACE.test(source[cursor])) cursor += 1
     if (cursor === source.length) break
     const name = source.slice(cursor).match(/^[A-Za-z_:][\w:.-]*/)?.[0]
     if (!name || attributes.has(name)) return null
     cursor += name.length
-    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    while (cursor < source.length && XML_WHITESPACE.test(source[cursor])) cursor += 1
     if (source[cursor] !== '=') return null
     cursor += 1
-    while (cursor < source.length && /\s/.test(source[cursor])) cursor += 1
+    while (cursor < source.length && XML_WHITESPACE.test(source[cursor])) cursor += 1
     const quote = source[cursor]
     if (quote !== '"' && quote !== "'") return null
     const end = source.indexOf(quote, cursor + 1)
@@ -620,7 +684,7 @@ function xmlAttributes(source) {
     if (value.includes('<') || !validXmlCharacterData(value)) return null
     attributes.set(name, value)
     cursor = end + 1
-    if (cursor < source.length && !/\s/.test(source[cursor])) return null
+    if (cursor < source.length && !XML_WHITESPACE.test(source[cursor])) return null
   }
   return Object.fromEntries(attributes)
 }
@@ -645,7 +709,7 @@ function xmlOpening(markup) {
   const name = inner.match(/^([A-Za-z_:][\w:.-]*)/)?.[1]
   if (!name) return null
   const remainder = inner.slice(name.length)
-  if (remainder && !/^\s/.test(remainder)) return null
+  if (remainder && !XML_WHITESPACE.test(remainder[0])) return null
   const attributes = xmlAttributes(remainder)
   return attributes && { name, attributes, selfClosing }
 }
@@ -671,6 +735,7 @@ function xmlMarkupEnd(source, start, trackSubset = false) {
 }
 
 function surefireRootAttributes(source) {
+  if (!validXmlCodePoints(source)) return null
   const stack = []
   let cursor = 0
   let rootAttributes = null
@@ -682,7 +747,7 @@ function surefireRootAttributes(source) {
     const textEnd = start === -1 ? source.length : start
     const characterData = source.slice(cursor, textEnd)
     if (!validXmlCharacterData(characterData)
-      || (stack.length === 0 && characterData.trim())) return null
+      || (stack.length === 0 && !XML_WHITESPACE_ONLY.test(characterData))) return null
     if (start === -1) break
 
     if (source.startsWith('<!--', start)) {
@@ -706,7 +771,8 @@ function surefireRootAttributes(source) {
       const end = source.indexOf('?>', start + 2)
       if (end === -1) return null
       if (start !== 0 || declarationSeen || rootAttributes || stack.length > 0
-        || !source.startsWith('<?xml', start) || !/\s/.test(source[start + 5])) return null
+        || !source.startsWith('<?xml', start)
+        || !XML_WHITESPACE.test(source[start + 5])) return null
       const declarationAttributes = xmlAttributes(source.slice(start + 5, end))
       if (!validXmlDeclaration(declarationAttributes)) return null
       declarationSeen = true
@@ -720,7 +786,7 @@ function surefireRootAttributes(source) {
     const end = xmlMarkupEnd(source, start)
     if (end === -1) return null
     const markup = source.slice(start, end + 1)
-    const closing = markup.match(/^<\/([A-Za-z_:][\w:.-]*)\s*>$/)
+    const closing = markup.match(/^<\/([A-Za-z_:][\w:.-]*)[ \t\r\n]*>$/)
     if (closing) {
       if (stack.pop() !== closing[1]) return null
       cursor = end + 1
@@ -853,7 +919,9 @@ function parseCliArguments(rawArguments) {
   if (classes.some((className) => !/^[A-Za-z_$][\w$]*$/.test(className))) {
     throw new Error('CLI_INVALID_OPTION: classes')
   }
-  if (!Number.isFinite(new Date(options['started-at']).getTime())) {
+  const startedAt = new Date(options['started-at'])
+  if (!Number.isFinite(startedAt.getTime())
+    || startedAt.toISOString() !== options['started-at']) {
     throw new Error('CLI_INVALID_OPTION: started-at')
   }
   return { options, classes }
