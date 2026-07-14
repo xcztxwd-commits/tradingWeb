@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { Worker } from 'node:worker_threads'
 
 import {
   aggregateReport,
@@ -1272,6 +1273,151 @@ test('network evidence redacts secrets recursively without mutating live replay 
   assert.deepEqual(JSON.parse(plainText.postData), {
     symbol: 'SOLUSDT-PERP',
     sourceMode: 'LOCAL_SIMULATED'
+  })
+})
+
+test('public network redaction matches persisted positive network schema', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-public-network-schema-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const markers = {
+    query: 'REVIEW14_QUERY_SECRET_4d1a',
+    authorization: 'REVIEW14_HEADER_SECRET_5e2b',
+    body: 'REVIEW14_BODY_SECRET_6f3c',
+    rawRequest: 'REVIEW14_RAW_REQUEST_SECRET_704d',
+    nestedRaw: 'REVIEW14_NESTED_RAW_SECRET_815e',
+    unknown: 'REVIEW14_UNKNOWN_NETWORK_SECRET_926f',
+    response: 'REVIEW14_RESPONSE_SECRET_a370',
+    responseHeader: 'REVIEW14_RESPONSE_HEADER_SECRET_b481'
+  }
+  const correlation = 'review14-safe-correlation'
+  const requestRef = 'review14-request-reference'
+  let callableCalls = 0
+  const baseEntry = {
+    method: 'POST',
+    url: `https://example.invalid/api/orders?symbol=BTCUSDT&token=${markers.query}`,
+    status: 201,
+    requestRef,
+    mimeType: 'application/json',
+    headers: {
+      Authorization: `Bearer ${markers.authorization}`,
+      'X-Trace-Id': correlation
+    },
+    body: `password=${markers.body}&symbol=BTCUSDT`,
+    rawRequest: {
+      method: 'POST',
+      url: `/api/orders/${markers.rawRequest}`,
+      body: markers.rawRequest
+    },
+    requestData: markers.rawRequest,
+    unknownNetworkField: markers.unknown,
+    response: {
+      status: 202,
+      data: markers.response,
+      rawRequest: { body: markers.nestedRaw }
+    },
+    responseHeaders: [
+      ['Content-Type', 'application/json'],
+      ['Authorization', `Bearer ${markers.responseHeader}`]
+    ]
+  }
+  const entry = structuredClone(baseEntry)
+  const original = structuredClone(baseEntry)
+  const ignoredCallback = () => {
+    callableCalls += 1
+    return markers.unknown
+  }
+  entry.ignoredCallback = ignoredCallback
+  original.ignoredCallback = ignoredCallback
+
+  const direct = redactNetworkEntry(entry)
+  writeCaseResultAtomic(resultPath, {
+    id: 'AUTH-01',
+    status: 'PASS',
+    networkEvidence: [entry]
+  })
+  const persisted = JSON.parse(readFileSync(resultPath, 'utf8')).networkEvidence[0]
+
+  assert.equal(callableCalls, 0)
+  assert.deepEqual(entry, original)
+  assert.deepEqual(direct, persisted)
+  assert.equal(direct.method, 'POST')
+  assert.equal(direct.status, 201)
+  assert.equal(direct.requestRef, persistenceDigest(requestRef))
+  assert.equal(direct.mimeType, 'application/json')
+  const url = new URL(direct.url)
+  assert.equal(url.searchParams.get('symbol'), 'BTCUSDT')
+  assert.equal(url.searchParams.get('token'), '[REDACTED]')
+  assert.deepEqual(direct.headers, {
+    Authorization: '[REDACTED]',
+    'X-Trace-Id': persistenceDigest(correlation)
+  })
+  assert.deepEqual(direct.response, { status: 202 })
+  assert.deepEqual(direct.responseHeaders, [
+    ['Content-Type', 'application/json'],
+    ['Authorization', '[REDACTED]']
+  ])
+  for (const field of [
+    'body',
+    'rawRequest',
+    'requestData',
+    'unknownNetworkField',
+    'ignoredCallback'
+  ]) {
+    assert.equal(Object.hasOwn(direct, field), false, field)
+  }
+  const directSource = JSON.stringify(direct)
+  const persistedSource = JSON.stringify(persisted)
+  for (const marker of Object.values(markers)) {
+    assert.equal(directSource.includes(marker), false, `direct ${marker}`)
+    assert.equal(persistedSource.includes(marker), false, `persisted ${marker}`)
+  }
+
+  let accessorCalls = 0
+  const accessorEntry = structuredClone(baseEntry)
+  Object.defineProperty(accessorEntry, 'unknownEvidence', {
+    enumerable: true,
+    get() {
+      accessorCalls += 1
+      return markers.unknown
+    }
+  })
+  assert.throws(
+    () => redactNetworkEntry(accessorEntry),
+    /^TypeError: UNSAFE_PERSISTENCE_VALUE: accessor$/
+  )
+  assert.throws(
+    () => writeCaseResultAtomic(join(directory, 'accessor.json'), {
+      id: 'AUTH-01',
+      networkEvidence: [accessorEntry]
+    }),
+    /^TypeError: UNSAFE_PERSISTENCE_VALUE: accessor$/
+  )
+  assert.equal(accessorCalls, 0)
+
+  let proxyTrapCalls = 0
+  const proxyEntry = new Proxy(structuredClone(baseEntry), {
+    get(target, field, receiver) {
+      proxyTrapCalls += 1
+      return Reflect.get(target, field, receiver)
+    }
+  })
+  assert.throws(
+    () => redactNetworkEntry(proxyEntry),
+    /^TypeError: UNSAFE_PERSISTENCE_VALUE: Proxy$/
+  )
+  assert.throws(
+    () => writeCaseResultAtomic(join(directory, 'proxy.json'), {
+      id: 'AUTH-01',
+      networkEvidence: [proxyEntry]
+    }),
+    /^TypeError: UNSAFE_PERSISTENCE_VALUE: Proxy$/
+  )
+  assert.equal(proxyTrapCalls, 0)
+
+  assert.deepEqual(redactNetworkEntry({ id: 'AUTH-01', status: 'PASS' }), {
+    id: 'AUTH-01',
+    status: 'PASS'
   })
 })
 
@@ -3575,6 +3721,251 @@ const RUN_STATE_COMMIT_B = 'b'.repeat(40)
 const RUN_STATE_TREE_A = 'c'.repeat(64)
 const RUN_STATE_TREE_B = 'd'.repeat(64)
 const runStateDigest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
+
+test('concurrent run-state create never replaces a different identity', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-state-concurrent-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const statePath = join(directory, 'run-state.json')
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
+  const mainExistsSync = existsSync
+  const barrier = new Int32Array(
+    new SharedArrayBuffer(2 * Int32Array.BYTES_PER_ELEMENT)
+  )
+  const workers = new Set()
+  const workerSource = `
+    const fs = require('node:fs')
+    const { syncBuiltinESMExports } = require('node:module')
+    const { parentPort, workerData } = require('node:worker_threads')
+
+    const barrier = new Int32Array(workerData.barrier)
+    const originalExistsSync = fs.existsSync
+    let capturedAbsence = false
+
+    fs.existsSync = function (input, ...arguments_) {
+      if (!capturedAbsence && String(input) === workerData.statePath) {
+        capturedAbsence = true
+        const absent = !Reflect.apply(originalExistsSync, this, [input, ...arguments_])
+        if (!absent) throw new Error('TEST_EXPECTED_ABSENT_RUN_STATE')
+        Atomics.add(barrier, 0, 1)
+        parentPort.postMessage({ type: 'absence', workerId: workerData.workerId })
+        const waitStatus = Atomics.wait(barrier, 1, 0, workerData.barrierTimeoutMs)
+        if (waitStatus === 'timed-out') throw new Error('TEST_BARRIER_TIMEOUT')
+        return false
+      }
+      return Reflect.apply(originalExistsSync, this, [input, ...arguments_])
+    }
+    syncBuiltinESMExports()
+
+    ;(async () => {
+      let outcome
+      let inputUnchanged = false
+      try {
+        const { loadOrCreateRunState } = await import(workerData.artifactsUrl)
+        const { P0_CASES, P0_REGISTRY_FINGERPRINT } = await import(workerData.casesUrl)
+        const options = {
+          path: workerData.statePath,
+          runId: 'concurrent-create-contract',
+          mode: 'DISCOVERY',
+          commit: workerData.commit,
+          worktreeFingerprint: workerData.worktreeFingerprint,
+          schemaVersion: 1,
+          registryFingerprint: P0_REGISTRY_FINGERPRINT,
+          definitions: P0_CASES,
+          selection: {}
+        }
+        const inputSnapshot = JSON.stringify(options)
+        try {
+          outcome = { ok: true, state: loadOrCreateRunState(options) }
+        } catch (error) {
+          outcome = {
+            ok: false,
+            name: error instanceof Error ? error.name : typeof error,
+            message: error instanceof Error ? error.message : String(error)
+          }
+        }
+        inputUnchanged = JSON.stringify(options) === inputSnapshot
+      } catch (error) {
+        outcome = {
+          ok: false,
+          name: error instanceof Error ? error.name : typeof error,
+          message: error instanceof Error ? error.message : String(error)
+        }
+      } finally {
+        fs.existsSync = originalExistsSync
+        syncBuiltinESMExports()
+      }
+
+      const { existsSync: restoredExistsSync } = await import('node:fs')
+      parentPort.postMessage({
+        type: 'result',
+        workerId: workerData.workerId,
+        ...outcome,
+        inputUnchanged,
+        instrumentationRestored: fs.existsSync === originalExistsSync
+          && restoredExistsSync === originalExistsSync
+      })
+    })().catch((error) => {
+      parentPort.postMessage({
+        type: 'result',
+        workerId: workerData.workerId,
+        ok: false,
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : String(error),
+        inputUnchanged: false,
+        instrumentationRestored: fs.existsSync === originalExistsSync
+      })
+    })
+  `
+
+  const identities = [
+    {
+      workerId: 'identity-a',
+      commit: RUN_STATE_COMMIT_A,
+      worktreeFingerprint: RUN_STATE_TREE_A
+    },
+    {
+      workerId: 'identity-b',
+      commit: RUN_STATE_COMMIT_B,
+      worktreeFingerprint: RUN_STATE_TREE_B
+    }
+  ]
+
+  const launch = (identity) => {
+    const worker = new Worker(workerSource, {
+      eval: true,
+      workerData: {
+        ...identity,
+        artifactsUrl,
+        casesUrl,
+        statePath,
+        barrier: barrier.buffer,
+        barrierTimeoutMs: 4_000
+      }
+    })
+    workers.add(worker)
+    let absenceSeen = false
+    let resultMessage
+    let exited = false
+    let resolveAbsence
+    let rejectAbsence
+    let resolveResult
+    let rejectResult
+    const absence = new Promise((resolvePromise, rejectPromise) => {
+      resolveAbsence = resolvePromise
+      rejectAbsence = rejectPromise
+    })
+    const result = new Promise((resolvePromise, rejectPromise) => {
+      resolveResult = resolvePromise
+      rejectResult = rejectPromise
+    })
+    const fail = (error) => {
+      rejectAbsence(error)
+      rejectResult(error)
+    }
+    const finish = () => {
+      if (exited && resultMessage) resolveResult(resultMessage)
+    }
+
+    worker.on('message', (message) => {
+      if (message?.type === 'absence') {
+        absenceSeen = true
+        resolveAbsence(message)
+        return
+      }
+      if (message?.type === 'result') {
+        resultMessage = message
+        if (!absenceSeen) {
+          rejectAbsence(new Error(`WORKER_RESULT_BEFORE_ABSENCE: ${identity.workerId}`))
+        }
+        finish()
+      }
+    })
+    worker.once('error', fail)
+    worker.once('exit', (code) => {
+      workers.delete(worker)
+      if (code !== 0) {
+        fail(new Error(`WORKER_EXIT: ${identity.workerId}: ${code}`))
+        return
+      }
+      exited = true
+      if (!resultMessage) {
+        fail(new Error(`WORKER_EXIT_WITHOUT_RESULT: ${identity.workerId}`))
+        return
+      }
+      finish()
+    })
+    return { absence, result }
+  }
+
+  const bounded = (promise, label) => new Promise((resolvePromise, rejectPromise) => {
+    const timeout = setTimeout(
+      () => rejectPromise(new Error(`WORKER_TIMEOUT: ${label}`)),
+      5_000
+    )
+    promise.then(
+      (value) => {
+        clearTimeout(timeout)
+        resolvePromise(value)
+      },
+      (error) => {
+        clearTimeout(timeout)
+        rejectPromise(error)
+      }
+    )
+  })
+  const releaseAndTerminate = async () => {
+    Atomics.store(barrier, 1, 1)
+    Atomics.notify(barrier, 1, 2)
+    const activeWorkers = [...workers]
+    workers.clear()
+    await Promise.allSettled(activeWorkers.map((worker) => worker.terminate()))
+  }
+  t.after(releaseAndTerminate)
+
+  const handles = identities.map(launch)
+  let results
+  try {
+    await bounded(Promise.all(handles.map(({ absence }) => absence)), 'absence barrier')
+    assert.equal(Atomics.load(barrier, 0), 2)
+    Atomics.store(barrier, 1, 1)
+    Atomics.notify(barrier, 1, 2)
+    results = await bounded(Promise.all(handles.map(({ result }) => result)), 'worker results')
+  } finally {
+    await releaseAndTerminate()
+  }
+
+  const successes = results.filter(({ ok }) => ok)
+  const failures = results.filter(({ ok }) => !ok)
+  assert.equal(successes.length, 1)
+  assert.equal(failures.length, 1)
+  assert.equal(failures[0].name, 'Error')
+  assert.equal(failures[0].message, 'RESUME_MISMATCH: commit')
+  for (const result of results) {
+    assert.equal(result.inputUnchanged, true, result.workerId)
+    assert.equal(result.instrumentationRestored, true, result.workerId)
+  }
+  assert.equal(existsSync, mainExistsSync)
+  assert.equal(existsSync(statePath), true)
+
+  const source = readFileSync(statePath, 'utf8')
+  const diskState = JSON.parse(source)
+  const winner = successes[0]
+  const winnerIdentity = identities.find(({ workerId }) => workerId === winner.workerId)
+  assert.deepEqual(diskState, winner.state)
+  assert.equal(source, `${JSON.stringify(diskState, null, 2)}\n`)
+  assert.equal(diskState.schemaVersion, 1)
+  assert.equal(diskState.runId, runStateDigest('concurrent-create-contract'))
+  assert.equal(diskState.mode, 'DISCOVERY')
+  assert.equal(diskState.commit, winnerIdentity.commit)
+  assert.equal(diskState.worktreeFingerprint, winnerIdentity.worktreeFingerprint)
+  assert.equal(diskState.registryFingerprint, P0_REGISTRY_FINGERPRINT)
+  assert.deepEqual(diskState.definitions, P0_CASES)
+  assert.deepEqual(diskState.selection, {})
+  assert.deepEqual(diskState.cases, {})
+  assert.equal(new Date(diskState.createdAt).toISOString(), diskState.createdAt)
+  assert.deepEqual(readdirSync(directory).toSorted(), ['run-state.json'])
+})
 
 test('run state is created atomically and resumes only an identical evidence identity', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-state-'))

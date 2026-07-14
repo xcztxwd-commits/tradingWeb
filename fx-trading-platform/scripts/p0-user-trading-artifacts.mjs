@@ -5,6 +5,7 @@ import {
   fstatSync,
   fsyncSync,
   ftruncateSync,
+  linkSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -876,7 +877,11 @@ function redactValue(value, key = '') {
 }
 
 export function redactNetworkEntry(entry) {
-  const sanitized = sanitizeForPersistence(entry)
+  const snapshot = inertJsonValue(entry)
+  const stripped = looksLikeRawHttpRequest(snapshot)
+    ? stripRawRequests([snapshot], 'networkEvidence')[0]
+    : stripRawRequests(snapshot)
+  const sanitized = redactValue(stripped)
   if (sanitized === null || sanitized === undefined) return {}
   return JSON.parse(ownDataJson(sanitized))
 }
@@ -1299,7 +1304,7 @@ function ownDataSerializationSource(value) {
   return `${json}\n`
 }
 
-export function writeCaseResultAtomic(path, result) {
+function writeCaseResultAtomicInternal(path, result, mode) {
   const sanitized = sanitizeForPersistence(result)
   if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) {
     throw new TypeError('UNSAFE_PERSISTENCE_ROOT: expected plain object')
@@ -1316,12 +1321,26 @@ export function writeCaseResultAtomic(path, result) {
     writeFileSync(descriptor, serialized, 'utf8')
     closeSync(descriptor)
     descriptor = undefined
-    renameSync(temporaryPath, path)
-    owned = false
+    if (mode === 'replace') {
+      renameSync(temporaryPath, path)
+      owned = false
+      return true
+    }
+    try {
+      linkSync(temporaryPath, path)
+      return true
+    } catch (error) {
+      if (error?.code === 'EEXIST') return false
+      throw error
+    }
   } finally {
     if (descriptor !== undefined) closeSync(descriptor)
     if (owned) rmSync(temporaryPath, { force: true })
   }
+}
+
+export function writeCaseResultAtomic(path, result) {
+  writeCaseResultAtomicInternal(path, result, 'replace')
 }
 
 function normalizedRunStateIdentity(source, label) {
@@ -1409,8 +1428,9 @@ export function loadOrCreateRunState(options) {
       cases: {},
       createdAt: new Date().toISOString()
     })
-    writeCaseResultAtomic(path, state)
-    return JSON.parse(ownDataJson(state))
+    if (writeCaseResultAtomicInternal(path, state, 'no-clobber')) {
+      return JSON.parse(ownDataJson(state))
+    }
   }
 
   const parsedState = JSON.parse(readFileSync(path, 'utf8'))
