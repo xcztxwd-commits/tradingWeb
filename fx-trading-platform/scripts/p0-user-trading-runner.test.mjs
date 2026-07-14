@@ -27,7 +27,13 @@ import {
   redactNetworkEntry,
   writeCaseResultAtomic
 } from './p0-user-trading-artifacts.mjs'
-import { P0_CASES, countByPhase, runCase } from './p0-user-trading-cases.mjs'
+import {
+  P0_CASES,
+  P0_REGISTRY_FINGERPRINT,
+  countByPhase,
+  registryFingerprint as canonicalRegistryFingerprint,
+  runCase
+} from './p0-user-trading-cases.mjs'
 import './p0-user-trading-advanced-cases.mjs'
 import './p0-user-trading-core-cases.mjs'
 import './p0-user-trading-oracles.mjs'
@@ -924,6 +930,164 @@ test('own-data serialization ignores inherited serialization methods', (t) => {
   }
 })
 
+test('sanitizer intermediates ignore inherited prototype behavior', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-sanitizer-prototype-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+
+  for (const scenario of [
+    'object-toJSON',
+    'array-toJSON',
+    'name-getter-value-setter',
+    'outcome-setter'
+  ]) {
+    const execution = spawnSync(process.execPath, [
+      '--input-type=module',
+      '--eval',
+      `
+        import assert from 'node:assert/strict'
+        import { readFileSync } from 'node:fs'
+
+        const artifacts = await import(${JSON.stringify(artifactsUrl)})
+        const scenario = ${JSON.stringify(scenario)}
+        const marker = 'SANITIZER_PROTOTYPE_SECRET_' + scenario
+        const resultPath = ${JSON.stringify(join(directory, `${scenario}-result.json`))}
+        const rawBody = JSON.stringify({
+          status: 'FAIL',
+          values: [{ status: 'FAIL', password: marker }]
+        })
+        const input = {
+          id: 'AUTH-01',
+          status: 'FAIL',
+          body: rawBody,
+          responseBody: rawBody,
+          replayProbes: [{
+            id: 'AUTH-01',
+            status: 'FAIL',
+            outcome: { status: 'FAIL', errorCode: 'REJECTED' }
+          }]
+        }
+        const original = structuredClone(input)
+        let callbackCalls = 0
+        let publicResult
+        let persistedSource
+
+        if (scenario === 'object-toJSON') {
+          Object.defineProperty(Object.prototype, 'toJSON', {
+            configurable: true,
+            value() {
+              callbackCalls += 1
+              return { status: 'PASS', marker }
+            }
+          })
+        } else if (scenario === 'array-toJSON') {
+          Object.defineProperty(Array.prototype, 'toJSON', {
+            configurable: true,
+            value() {
+              callbackCalls += 1
+              return [{ status: 'PASS', marker }]
+            }
+          })
+        } else if (scenario === 'name-getter-value-setter') {
+          Object.defineProperty(Object.prototype, 'name', {
+            configurable: true,
+            get() {
+              callbackCalls += 1
+              return 'Authorization'
+            }
+          })
+          Object.defineProperty(Object.prototype, 'value', {
+            configurable: true,
+            set() {
+              callbackCalls += 1
+              Object.defineProperties(this, {
+                status: {
+                  value: 'PASS',
+                  enumerable: true,
+                  configurable: true,
+                  writable: true
+                },
+                marker: {
+                  value: marker,
+                  enumerable: true,
+                  configurable: true,
+                  writable: true
+                }
+              })
+            }
+          })
+        } else {
+          Object.defineProperty(Object.prototype, 'outcome', {
+            configurable: true,
+            set() {
+              callbackCalls += 1
+              Object.defineProperties(this, {
+                status: {
+                  value: 'PASS',
+                  enumerable: true,
+                  configurable: true,
+                  writable: true
+                },
+                marker: {
+                  value: marker,
+                  enumerable: true,
+                  configurable: true,
+                  writable: true
+                }
+              })
+            }
+          })
+        }
+
+        try {
+          publicResult = artifacts.redactNetworkEntry(input)
+          artifacts.writeCaseResultAtomic(resultPath, input)
+          persistedSource = readFileSync(resultPath, 'utf8')
+        } finally {
+          delete Object.prototype.toJSON
+          delete Array.prototype.toJSON
+          delete Object.prototype.name
+          delete Object.prototype.value
+          delete Object.prototype.outcome
+        }
+
+        const persistedResult = JSON.parse(persistedSource)
+        const publicSnapshot = JSON.parse(JSON.stringify(publicResult))
+        assert.deepEqual(input, original, 'sanitization must not mutate its input')
+        assert.equal(callbackCalls, 0, 'inherited prototype callback executed')
+        assert.equal(Object.hasOwn(publicResult, 'status'), true)
+        assert.equal(publicResult.status, 'FAIL')
+        assert.equal(Object.hasOwn(persistedResult, 'status'), true)
+        assert.equal(persistedResult.status, 'FAIL')
+        assert.deepEqual(persistedResult, publicSnapshot, 'public and persisted evidence diverged')
+
+        for (const result of [publicSnapshot, persistedResult]) {
+          const requestBody = JSON.parse(result.body)
+          const responseBody = JSON.parse(result.responseBody)
+          assert.equal(requestBody.status, 'FAIL')
+          assert.equal(Array.isArray(requestBody.values), true)
+          assert.equal(requestBody.values[0].status, 'FAIL')
+          assert.equal(responseBody.status, 'FAIL')
+          assert.equal(Array.isArray(responseBody.values), true)
+          assert.equal(responseBody.values[0].status, 'FAIL')
+          assert.equal(Object.hasOwn(result.replayProbes[0], 'status'), true)
+          assert.equal(result.replayProbes[0].status, 'FAIL')
+          assert.equal(Object.hasOwn(result.replayProbes[0], 'outcome'), true)
+          assert.equal(result.replayProbes[0].outcome.status, 'FAIL')
+          assert.equal(JSON.stringify(result).includes(marker), false)
+        }
+        assert.equal(persistedSource.includes(marker), false)
+      `
+    ], { encoding: 'utf8' })
+
+    assert.equal(
+      execution.status,
+      0,
+      `${scenario} child failed\nstdout:\n${execution.stdout}\nstderr:\n${execution.stderr}`
+    )
+  }
+})
+
 for (const scenario of [
   'root-toJSON-getter',
   'nested-toJSON-getter',
@@ -1671,6 +1835,80 @@ test('positive evidence schema preserves Surefire gate counters', (t) => {
       errors: 0
     })
     assert.deepEqual(safe.metadata, {})
+  }
+})
+
+test('typed domain fields reject null while structural null remains safe', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-typed-null-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const startedAt = '2026-07-15T00:00:00.000Z'
+  const finishedAt = '2026-07-15T00:01:00.000Z'
+  const evidence = {
+    id: 'AUTH-01',
+    status: 'FAIL',
+    metadata: {
+      tests: null,
+      skipped: '0',
+      failures: -1,
+      startedAt: null,
+      finishedAt: '2026-07-15',
+      authorityBundleFixture: null,
+      amount: null,
+      enabled: null,
+      empty: null
+    },
+    totals: {
+      tests: 3,
+      skipped: 0,
+      failures: 0,
+      errors: 0,
+      startedAt,
+      finishedAt,
+      authorityBundleFixture: 'PASS',
+      amount: '1.2500',
+      enabled: false
+    },
+    checks: [
+      { authorityBundleFixture: 'FAIL' },
+      { authorityBundleFixture: 'OUTSIDE_CONTRACT' }
+    ]
+  }
+  const original = structuredClone(evidence)
+
+  const publicResult = redactNetworkEntry(evidence)
+  writeCaseResultAtomic(resultPath, evidence)
+  const persistedResult = JSON.parse(readFileSync(resultPath, 'utf8'))
+
+  assert.deepEqual(evidence, original)
+  assert.deepEqual(publicResult, persistedResult)
+  for (const safe of [publicResult, persistedResult]) {
+    for (const field of [
+      'tests',
+      'skipped',
+      'failures',
+      'startedAt',
+      'finishedAt',
+      'authorityBundleFixture',
+      'amount',
+      'enabled'
+    ]) {
+      assert.equal(Object.hasOwn(safe.metadata, field), false, `metadata.${field}`)
+    }
+    assert.equal(Object.hasOwn(safe.metadata, 'empty'), true)
+    assert.equal(safe.metadata.empty, null)
+    assert.deepEqual(safe.totals, {
+      tests: 3,
+      skipped: 0,
+      failures: 0,
+      errors: 0,
+      startedAt,
+      finishedAt,
+      authorityBundleFixture: 'PASS',
+      amount: '1.2500',
+      enabled: false
+    })
+    assert.deepEqual(safe.checks, [{ authorityBundleFixture: 'FAIL' }, {}])
   }
 })
 
@@ -3792,6 +4030,130 @@ test('canonical registry reaches terminal PASS only with all exact results', () 
   assert.deepEqual(report.issues, [])
 })
 
+test('registry fingerprint rejects unsupported own JSON values without callbacks', () => {
+  const invalidError = /^INVALID_REGISTRY:/
+  const captureError = (definitions) => {
+    try {
+      canonicalRegistryFingerprint(definitions)
+      return undefined
+    } catch (error) {
+      return error.message
+    }
+  }
+  const definitionsWithOwnValue = (property, value) => {
+    const definition = { ...P0_CASES[0] }
+    Object.defineProperty(definition, property, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    })
+    return [definition, ...P0_CASES.slice(1)]
+  }
+
+  assert.equal(canonicalRegistryFingerprint(P0_CASES), P0_REGISTRY_FINGERPRINT)
+
+  let serializationCalls = 0
+  const serializationDefinitions = definitionsWithOwnValue('toJSON', () => {
+    serializationCalls += 1
+    return P0_CASES[0]
+  })
+  const serializationError = captureError(serializationDefinitions)
+  assert.equal(serializationCalls, 0)
+  assert.match(serializationError ?? '', invalidError)
+
+  for (const [label, value] of [
+    ['undefined', undefined],
+    ['function', () => 'unsupported'],
+    ['symbol', Symbol('unsupported-registry-value')],
+    ['NaN', Number.NaN],
+    ['positive-infinity', Number.POSITIVE_INFINITY],
+    ['negative-infinity', Number.NEGATIVE_INFINITY],
+    ['bigint', 1n]
+  ]) {
+    assert.match(
+      captureError(definitionsWithOwnValue('review12Extra', value)) ?? '',
+      invalidError,
+      label
+    )
+  }
+
+  const symbolKeyDefinition = { ...P0_CASES[0] }
+  Object.defineProperty(symbolKeyDefinition, Symbol('review12-key'), {
+    value: 'unsupported',
+    enumerable: true
+  })
+  assert.match(
+    captureError([symbolKeyDefinition, ...P0_CASES.slice(1)]) ?? '',
+    invalidError,
+    'own symbol key'
+  )
+
+  let accessorCalls = 0
+  const accessorDefinition = { ...P0_CASES[0] }
+  Object.defineProperty(accessorDefinition, 'review12Extra', {
+    enumerable: true,
+    get() {
+      accessorCalls += 1
+      return 'unsupported'
+    }
+  })
+  assert.match(
+    captureError([accessorDefinition, ...P0_CASES.slice(1)]) ?? '',
+    invalidError,
+    'accessor'
+  )
+  assert.equal(accessorCalls, 0)
+
+  let proxyTrapCalls = 0
+  const proxiedDefinition = new Proxy(P0_CASES[0], {
+    get(target, property, receiver) {
+      proxyTrapCalls += 1
+      return Reflect.get(target, property, receiver)
+    }
+  })
+  assert.match(
+    captureError([proxiedDefinition, ...P0_CASES.slice(1)]) ?? '',
+    invalidError,
+    'Proxy'
+  )
+  assert.equal(proxyTrapCalls, 0)
+
+  assert.match(
+    captureError(definitionsWithOwnValue('review12Extra', new Date(0))) ?? '',
+    invalidError,
+    'non-plain object'
+  )
+  const sparseDefinitions = [...P0_CASES]
+  delete sparseDefinitions[0]
+  assert.match(captureError(sparseDefinitions) ?? '', invalidError, 'sparse array')
+  const extraKeyDefinitions = [...P0_CASES]
+  Object.defineProperty(extraKeyDefinitions, 'review12Extra', {
+    value: 'unsupported',
+    enumerable: true
+  })
+  assert.match(captureError(extraKeyDefinitions) ?? '', invalidError, 'extra-key array')
+
+  for (const prototype of [Object.prototype, Array.prototype]) {
+    const previous = Object.getOwnPropertyDescriptor(prototype, 'toJSON')
+    let inheritedCalls = 0
+    Object.defineProperty(prototype, 'toJSON', {
+      configurable: true,
+      value() {
+        inheritedCalls += 1
+        return { status: 'PASS' }
+      }
+    })
+    try {
+      assert.equal(canonicalRegistryFingerprint(P0_CASES), P0_REGISTRY_FINGERPRINT)
+    } finally {
+      if (previous) Object.defineProperty(prototype, 'toJSON', previous)
+      else delete prototype.toJSON
+    }
+    assert.equal(inheritedCalls, 0)
+  }
+})
+
 test('prototype inheritance cannot forge aggregate or resume evidence', () => {
   const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
   const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
@@ -3956,6 +4318,107 @@ test('malformed aggregate inputs fail closed without throwing', () => {
     }, label)
     assert.deepEqual(report, expected, label)
   }
+})
+
+test('aggregate scalar validation fails closed before grouping and interpolation', () => {
+  const definition = P0_CASES[0]
+  const required = definition.requiredSubruns[0]
+  const state = aggregateState({ caseIds: [definition.id] })
+  const passWithSubrun = (subrun) => ({
+    id: definition.id,
+    status: 'PASS',
+    scopeComplete: true,
+    subruns: [subrun]
+  })
+  const fixtures = [
+    ['missing result id', [{ status: 'FAIL' }]],
+    ['object result id', [{ id: { value: definition.id }, status: 'FAIL' }]],
+    ['array result id', [{ id: [definition.id], status: 'FAIL' }]],
+    ['missing result status', [{ id: definition.id }]],
+    ['object result status', [{ id: definition.id, status: { value: 'FAIL' } }]],
+    ['array result status', [{ id: definition.id, status: ['FAIL'] }]],
+    ['null result status', [{ id: definition.id, status: null }]],
+    ['nonobject PASS subrun', [passWithSubrun(null)]],
+    ['missing PASS subrun id', [passWithSubrun({
+      profile: required.profile,
+      viewport: required.viewport,
+      status: 'PASS'
+    })]],
+    ['object PASS subrun id', [passWithSubrun({
+      ...required,
+      id: { value: required.id },
+      status: 'PASS'
+    })]],
+    ['missing PASS subrun profile', [passWithSubrun({
+      id: required.id,
+      viewport: required.viewport,
+      status: 'PASS'
+    })]],
+    ['array PASS subrun profile', [passWithSubrun({
+      ...required,
+      profile: [required.profile],
+      status: 'PASS'
+    })]],
+    ['missing PASS subrun viewport', [passWithSubrun({
+      id: required.id,
+      profile: required.profile,
+      status: 'PASS'
+    })]],
+    ['object PASS subrun viewport', [passWithSubrun({
+      ...required,
+      viewport: { value: required.viewport },
+      status: 'PASS'
+    })]],
+    ['missing PASS subrun status', [passWithSubrun({ ...required })]],
+    ['array PASS subrun status', [passWithSubrun({
+      ...required,
+      status: ['PASS']
+    })]]
+  ]
+  const invalid = {
+    verdict: 'FAIL',
+    scopeComplete: false,
+    counts: { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 },
+    issues: ['INVALID_AGGREGATE_INPUT']
+  }
+
+  for (const [label, results] of fixtures) {
+    const originalState = structuredClone(state)
+    const originalResults = structuredClone(results)
+    let report
+    assert.doesNotThrow(() => {
+      report = aggregateReport(state, results)
+    }, label)
+    assert.deepEqual(report, invalid, label)
+    assert.deepEqual(state, originalState, `${label}/state`)
+    assert.deepEqual(results, originalResults, `${label}/results`)
+  }
+
+  const unknown = aggregateReport(state, [{ id: 'UNKNOWN-99', status: 'FAIL' }])
+  assert.equal(unknown.issues.includes('INVALID_AGGREGATE_INPUT'), false)
+  assert.ok(unknown.issues.includes('UNEXPECTED_CASE: UNKNOWN-99'))
+
+  const nonterminal = aggregateReport(state, [{ id: definition.id, status: 'RUNNING' }])
+  assert.equal(nonterminal.issues.includes('INVALID_AGGREGATE_INPUT'), false)
+  assert.ok(nonterminal.issues.includes(`INVALID_STATUS: ${definition.id}/RUNNING`))
+
+  const precedenceDefinitions = P0_CASES.slice(0, 2)
+  const precedence = aggregateReport(
+    aggregateState({ caseIds: precedenceDefinitions.map(({ id }) => id) }),
+    [
+      { id: precedenceDefinitions[0].id, status: 'BLOCKED' },
+      { id: precedenceDefinitions[1].id, status: 'FAIL' }
+    ]
+  )
+  assert.equal(precedence.verdict, 'FAIL')
+  assert.equal(precedence.counts.BLOCKED, 1)
+  assert.equal(precedence.counts.FAIL, 1)
+
+  const partial = aggregateReport(state, [passingCase(definition)])
+  assert.equal(partial.verdict, 'PARTIAL_PASS')
+  const full = aggregateReport(aggregateState(), P0_CASES.map(passingCase))
+  assert.equal(full.verdict, 'PASS')
+  assert.equal(full.scopeComplete, true)
 })
 
 test('aggregate snapshots immutable evidence and rejects malformed identity arrays', (t) => {
@@ -5592,6 +6055,81 @@ test('verify-surefire CLI writes the parser gate contract atomically', (t) => {
   assert.equal(gate.status, 'PASS')
   assert.deepEqual(gate.expectedClasses, ['PostgresDatabaseIT', 'Task5PostgresFullFillIT'])
   assert.equal(existsSync(`${output}.tmp`), false)
+})
+
+test('CLI option accumulation ignores inherited allowed-name accessors', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-cli-option-prototype-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const reports = join(root, 'reports')
+  const output = join(root, 'gate.json')
+  const startedAt = new Date(Date.now() - 5_000).toISOString()
+  writeSurefireSuite(reports, 'TEST-postgres.xml', {
+    name: 'com.fxplatform.PostgresDatabaseIT',
+    tests: 2
+  })
+  writeFileSync(output, '{"status":"PASS","stale":true}\n')
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+      import { readFileSync } from 'node:fs'
+
+      let getterCalls = 0
+      let setterCalls = 0
+      for (const name of ['reports', 'classes', 'started-at', 'output']) {
+        Object.defineProperty(Object.prototype, name, {
+          configurable: true,
+          get() {
+            getterCalls += 1
+            return 'INHERITED_CLI_OPTION'
+          },
+          set() {
+            setterCalls += 1
+          }
+        })
+      }
+
+      try {
+        process.argv = [
+          process.execPath,
+          ${JSON.stringify(artifactsScript)},
+          'verify-surefire',
+          '--reports=' + ${JSON.stringify(reports)},
+          '--classes=PostgresDatabaseIT',
+          '--started-at=' + ${JSON.stringify(startedAt)},
+          '--output=' + ${JSON.stringify(output)}
+        ]
+        await import(${JSON.stringify(artifactsUrl)} + '?cli-option-prototype=1')
+      } finally {
+        for (const name of ['reports', 'classes', 'started-at', 'output']) {
+          delete Object.prototype[name]
+        }
+        process.exitCode = 0
+      }
+
+      const gate = JSON.parse(readFileSync(${JSON.stringify(output)}, 'utf8'))
+      assert.equal(getterCalls, 0)
+      assert.equal(setterCalls, 0)
+      assert.equal(gate.status, 'PASS')
+      assert.equal(Object.hasOwn(gate, 'stale'), false)
+      assert.deepEqual(gate.expectedClasses, ['PostgresDatabaseIT'])
+      assert.deepEqual(gate.totals, {
+        tests: 2,
+        skipped: 0,
+        failures: 0,
+        errors: 0
+      })
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(
+    execution.status,
+    0,
+    `child failed\nstdout:\n${execution.stdout}\nstderr:\n${execution.stderr}`
+  )
 })
 
 test('verify-surefire CLI exits nonzero and persists parser rejection evidence', (t) => {

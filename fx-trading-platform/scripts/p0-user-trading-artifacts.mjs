@@ -591,6 +591,28 @@ const CONTRACT_STRUCTURAL_FIELDS = new Set([
 ])
 const STATUS_COUNT_KEYS = new Set(['PASS', 'FAIL', 'BLOCKED', 'INVALID_TEST', 'MISSING'])
 
+function defineOwnData(target, property, value) {
+  Object.defineProperty(target, property, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true
+  })
+  return target
+}
+
+function ownDataDictionary(entries = []) {
+  const dictionary = Object.create(null)
+  for (const [property, value] of entries) defineOwnData(dictionary, property, value)
+  return dictionary
+}
+
+function ownDataDescriptor(source, property) {
+  if (!source || typeof source !== 'object') return undefined
+  const descriptor = Object.getOwnPropertyDescriptor(source, property)
+  return descriptor && 'value' in descriptor ? descriptor : undefined
+}
+
 function redactUrl(value) {
   if (typeof value !== 'string') return undefined
   const absolute = /^[a-z][a-z\d+.-]*:/i.test(value)
@@ -659,14 +681,15 @@ function sanitizeResponseJsonValue(value, keyed = false) {
       .filter((item) => item !== undefined)
   }
   if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .map(([field, fieldValue]) => [
-          sanitizeGenericObjectKey(field),
-          sanitizeResponseJsonValue(fieldValue, true)
-        ])
-        .filter(([field, fieldValue]) => field !== undefined && fieldValue !== undefined)
-    )
+    const sanitized = ownDataDictionary()
+    for (const [field, fieldValue] of Object.entries(value)) {
+      const safeField = sanitizeGenericObjectKey(field)
+      const safeValue = sanitizeResponseJsonValue(fieldValue, true)
+      if (safeField !== undefined && safeValue !== undefined) {
+        defineOwnData(sanitized, safeField, safeValue)
+      }
+    }
+    return sanitized
   }
   return keyed ? value : undefined
 }
@@ -698,7 +721,7 @@ function redactBody(value, dropOpaque = false) {
   }
   try {
     const redacted = sanitizeBodyJsonValue(parsed)
-    return JSON.stringify(dropOpaque ? sanitizeResponseJsonValue(redacted) : redacted)
+    return ownDataJson(dropOpaque ? sanitizeResponseJsonValue(redacted) : redacted)
   } catch {
     return undefined
   }
@@ -717,14 +740,15 @@ function sanitizeBodyJsonValue(value, key = '') {
       .filter((item) => item !== undefined)
   }
   if (value && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .map(([field, fieldValue]) => [
-          sanitizeGenericObjectKey(field),
-          sanitizeBodyJsonValue(fieldValue, field)
-        ])
-        .filter(([field, fieldValue]) => field !== undefined && fieldValue !== undefined)
-    )
+    const sanitized = ownDataDictionary()
+    for (const [field, fieldValue] of Object.entries(value)) {
+      const safeField = sanitizeGenericObjectKey(field)
+      const safeValue = sanitizeBodyJsonValue(fieldValue, field)
+      if (safeField !== undefined && safeValue !== undefined) {
+        defineOwnData(sanitized, safeField, safeValue)
+      }
+    }
+    return sanitized
   }
   return sanitizeBodyScalar(semanticKey, value)
 }
@@ -761,17 +785,22 @@ function sanitizeHeaderRepresentation(value, allowMap = false) {
     return sanitized === undefined ? undefined : [value[0], sanitized]
   }
   if (!value || typeof value !== 'object') return undefined
-  if (typeof value.name === 'string' && typeof value.value === 'string') {
-    const sanitized = sanitizeHeaderValue(value.name, value.value)
-    return sanitized === undefined ? undefined : { name: value.name, value: sanitized }
+  const nameDescriptor = ownDataDescriptor(value, 'name')
+  const valueDescriptor = ownDataDescriptor(value, 'value')
+  if (typeof nameDescriptor?.value === 'string' && typeof valueDescriptor?.value === 'string') {
+    const sanitized = sanitizeHeaderValue(nameDescriptor.value, valueDescriptor.value)
+    return sanitized === undefined
+      ? undefined
+      : ownDataDictionary([['name', nameDescriptor.value], ['value', sanitized]])
   }
   if (!allowMap) return undefined
 
-  return Object.fromEntries(
-    Object.entries(value)
-      .map(([name, headerValue]) => [name, sanitizeHeaderValue(name, headerValue)])
-      .filter(([, headerValue]) => headerValue !== undefined)
-  )
+  const sanitized = ownDataDictionary()
+  for (const [name, headerValue] of Object.entries(value)) {
+    const safeValue = sanitizeHeaderValue(name, headerValue)
+    if (safeValue !== undefined) defineOwnData(sanitized, name, safeValue)
+  }
+  return sanitized
 }
 
 function sanitizeHeaderEvidence(value) {
@@ -830,22 +859,26 @@ function redactValue(value, key = '') {
   if (typeof value === 'string') return sanitizeUnknownString(value)
   if (!value || typeof value !== 'object') return undefined
 
-  const redacted = Object.fromEntries(
-    Object.entries(value)
-      .map(([entryKey, entryValue]) => [
-        sanitizeGenericObjectKey(entryKey),
-        redactValue(entryValue, entryKey)
-      ])
-      .filter(([entryKey, entryValue]) => entryKey !== undefined && entryValue !== undefined)
-  )
-  if (typeof value.name === 'string' && SENSITIVE_KEY.test(value.name) && 'value' in value) {
-    redacted.value = REDACTED
+  const redacted = ownDataDictionary()
+  for (const [entryKey, entryValue] of Object.entries(value)) {
+    const safeKey = sanitizeGenericObjectKey(entryKey)
+    const safeValue = redactValue(entryValue, entryKey)
+    if (safeKey !== undefined && safeValue !== undefined) {
+      defineOwnData(redacted, safeKey, safeValue)
+    }
+  }
+  const nameDescriptor = ownDataDescriptor(value, 'name')
+  if (typeof nameDescriptor?.value === 'string' && SENSITIVE_KEY.test(nameDescriptor.value)
+    && ownDataDescriptor(value, 'value')) {
+    defineOwnData(redacted, 'value', REDACTED)
   }
   return redacted
 }
 
 export function redactNetworkEntry(entry) {
-  return sanitizeForPersistence(entry) ?? {}
+  const sanitized = sanitizeForPersistence(entry)
+  if (sanitized === null || sanitized === undefined) return {}
+  return JSON.parse(ownDataJson(sanitized))
 }
 
 function normalizedKey(key) {
@@ -887,7 +920,6 @@ function isDomainScalarField(field) {
 }
 
 function sanitizeDomainScalar(field, value) {
-  if (value === null) return null
   if (DOMAIN_ENUM_FIELDS.has(field)) {
     return typeof value === 'string' && DOMAIN_ENUM_FIELDS.get(field).has(value)
       ? value
@@ -1053,20 +1085,21 @@ function isEvidenceScalarField(field) {
 }
 
 function sanitizeReplayProbe(probe) {
-  if (!probe || typeof probe !== 'object' || Array.isArray(probe)) return {}
-  const safe = Object.fromEntries(
-    Object.entries(probe)
-      .filter(([field]) => SAFE_REPLAY_FIELDS.has(field))
-      .map(([field, value]) => [field, sanitizeEvidenceScalar(field, value)])
-      .filter(([, value]) => value !== undefined)
-  )
-  const outcome = Object.fromEntries(
-    Object.entries(probe.outcome ?? {})
-      .filter(([field]) => SAFE_REPLAY_OUTCOME_FIELDS.has(field))
-      .map(([field, value]) => [field, sanitizeEvidenceScalar(field, value)])
-      .filter(([, value]) => value !== undefined)
-  )
-  if (Object.keys(outcome).length > 0) safe.outcome = outcome
+  if (!probe || typeof probe !== 'object' || Array.isArray(probe)) return ownDataDictionary()
+  const safe = ownDataDictionary()
+  for (const [field, value] of Object.entries(probe)) {
+    if (!SAFE_REPLAY_FIELDS.has(field)) continue
+    const safeValue = sanitizeEvidenceScalar(field, value)
+    if (safeValue !== undefined) defineOwnData(safe, field, safeValue)
+  }
+  const outcome = ownDataDictionary()
+  const outcomeDescriptor = ownDataDescriptor(probe, 'outcome')
+  for (const [field, value] of Object.entries(outcomeDescriptor?.value ?? ownDataDictionary())) {
+    if (!SAFE_REPLAY_OUTCOME_FIELDS.has(field)) continue
+    const safeValue = sanitizeEvidenceScalar(field, value)
+    if (safeValue !== undefined) defineOwnData(outcome, field, safeValue)
+  }
+  if (Object.keys(outcome).length > 0) defineOwnData(safe, 'outcome', outcome)
   return safe
 }
 
@@ -1111,14 +1144,12 @@ function stripRawRequests(value, key = '', inNetworkEvidence = false) {
   }
   if (!value || typeof value !== 'object') return value
 
-  return Object.fromEntries(
-    Object.entries(value)
-      .map(([field, fieldValue]) => [
-        field,
-        stripRawRequests(fieldValue, field, inNetworkEvidence)
-      ])
-      .filter(([, fieldValue]) => fieldValue !== undefined)
-  )
+  const sanitized = ownDataDictionary()
+  for (const [field, fieldValue] of Object.entries(value)) {
+    const safeValue = stripRawRequests(fieldValue, field, inNetworkEvidence)
+    if (safeValue !== undefined) defineOwnData(sanitized, field, safeValue)
+  }
+  return sanitized
 }
 
 function inertJsonValue(value, key = '', strictArrays = false) {
@@ -1207,61 +1238,55 @@ function sanitizeForPersistence(value) {
   return redactValue(stripRawRequests(inertJsonValue(value)))
 }
 
-function ownDataSerializationSource(value) {
-  function snapshot(source) {
-    if (!source || typeof source !== 'object') return source
-    if (types.isProxy(source)) throw new TypeError('UNSAFE_PERSISTENCE_VALUE: Proxy')
+function ownDataSerializationSnapshot(source) {
+  if (!source || typeof source !== 'object') return source
+  if (types.isProxy(source)) throw new TypeError('UNSAFE_PERSISTENCE_VALUE: Proxy')
 
-    const descriptors = Object.getOwnPropertyDescriptors(source)
-    const ownKeys = Reflect.ownKeys(descriptors)
-    for (const property of ownKeys) {
-      const descriptor = descriptors[property]
-      if ('get' in descriptor || 'set' in descriptor) {
-        throw new TypeError('UNSAFE_PERSISTENCE_VALUE: accessor')
-      }
+  const descriptors = Object.getOwnPropertyDescriptors(source)
+  const ownKeys = Reflect.ownKeys(descriptors)
+  for (const property of ownKeys) {
+    const descriptor = descriptors[property]
+    if ('get' in descriptor || 'set' in descriptor) {
+      throw new TypeError('UNSAFE_PERSISTENCE_VALUE: accessor')
     }
+  }
 
-    if (Array.isArray(source)) {
-      const length = descriptors.length.value
-      if (ownKeys.length !== length + 1 || ownKeys.some((property) => (
-        property !== 'length'
-        && (typeof property !== 'string'
-          || !Number.isSafeInteger(Number(property))
-          || String(Number(property)) !== property
-          || Number(property) < 0
-          || Number(property) >= length)
-      ))) throw new TypeError('UNSAFE_IDENTITY_ARRAY')
+  if (Array.isArray(source)) {
+    const length = descriptors.length.value
+    if (ownKeys.length !== length + 1 || ownKeys.some((property) => (
+      property !== 'length'
+      && (typeof property !== 'string'
+        || !Number.isSafeInteger(Number(property))
+        || String(Number(property)) !== property
+        || Number(property) < 0
+        || Number(property) >= length)
+    ))) throw new TypeError('UNSAFE_IDENTITY_ARRAY')
 
-      const inert = []
-      for (let index = 0; index < length; index += 1) {
-        const descriptor = descriptors[index]
-        if (!descriptor) throw new TypeError('UNSAFE_IDENTITY_ARRAY')
-        Object.defineProperty(inert, index, {
-          value: snapshot(descriptor.value),
-          enumerable: true,
-          configurable: true,
-          writable: true
-        })
-      }
-      Object.setPrototypeOf(inert, null)
-      return inert
+    const inert = []
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = descriptors[index]
+      if (!descriptor) throw new TypeError('UNSAFE_IDENTITY_ARRAY')
+      defineOwnData(inert, index, ownDataSerializationSnapshot(descriptor.value))
     }
-
-    const inert = Object.create(null)
-    for (const property of ownKeys) {
-      const descriptor = descriptors[property]
-      if (typeof property !== 'string' || !descriptor.enumerable) continue
-      Object.defineProperty(inert, property, {
-        value: snapshot(descriptor.value),
-        enumerable: true,
-        configurable: true,
-        writable: true
-      })
-    }
+    Object.setPrototypeOf(inert, null)
     return inert
   }
 
-  const json = JSON.stringify(snapshot(value), null, 2)
+  const inert = Object.create(null)
+  for (const property of ownKeys) {
+    const descriptor = descriptors[property]
+    if (typeof property !== 'string' || !descriptor.enumerable) continue
+    defineOwnData(inert, property, ownDataSerializationSnapshot(descriptor.value))
+  }
+  return inert
+}
+
+function ownDataJson(value, spacing) {
+  return JSON.stringify(ownDataSerializationSnapshot(value), null, spacing)
+}
+
+function ownDataSerializationSource(value) {
+  const json = ownDataJson(value, 2)
   if (typeof json !== 'string') throw new TypeError('UNSAFE_PERSISTENCE_ROOT: not serializable')
   return `${json}\n`
 }
@@ -1377,7 +1402,7 @@ export function loadOrCreateRunState(options) {
       createdAt: new Date().toISOString()
     })
     writeCaseResultAtomic(path, state)
-    return state
+    return JSON.parse(ownDataJson(state))
   }
 
   const parsedState = JSON.parse(readFileSync(path, 'utf8'))
@@ -1540,6 +1565,30 @@ function subrunsPass(result, requiredSubruns) {
   ))
 }
 
+function invalidAggregateInputReport() {
+  return {
+    verdict: 'FAIL',
+    scopeComplete: false,
+    counts: { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 },
+    issues: ['INVALID_AGGREGATE_INPUT']
+  }
+}
+
+function hasOwnString(source, field) {
+  return typeof ownDataDescriptor(source, field)?.value === 'string'
+}
+
+function validAggregateResultScalars(result) {
+  if (!hasOwnString(result, 'id') || !hasOwnString(result, 'status')) return false
+  if (ownDataDescriptor(result, 'status').value !== 'PASS') return true
+  const subruns = ownDataDescriptor(result, 'subruns')?.value
+  if (!Array.isArray(subruns)) return true
+  return subruns.every((subrun) => (
+    Boolean(subrun) && typeof subrun === 'object' && !Array.isArray(subrun)
+    && ['id', 'profile', 'viewport', 'status'].every((field) => hasOwnString(subrun, field))
+  ))
+}
+
 export function aggregateReport(state, results) {
   let stateSnapshot
   let resultsSnapshot
@@ -1551,12 +1600,7 @@ export function aggregateReport(state, results) {
       throw new TypeError('INVALID_AGGREGATE_INPUT')
     }
   } catch {
-    return {
-      verdict: 'FAIL',
-      scopeComplete: false,
-      counts: { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 },
-      issues: ['INVALID_AGGREGATE_INPUT']
-    }
+    return invalidAggregateInputReport()
   }
 
   const selection = Object.hasOwn(stateSnapshot, 'selection')
@@ -1566,12 +1610,7 @@ export function aggregateReport(state, results) {
     || resultsSnapshot.some((result) => (
       !result || typeof result !== 'object' || Array.isArray(result)
     ))) {
-    return {
-      verdict: 'FAIL',
-      scopeComplete: false,
-      counts: { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 },
-      issues: ['INVALID_AGGREGATE_INPUT']
-    }
+    return invalidAggregateInputReport()
   }
   const invalidRegistry = registryIssue(
     stateSnapshot.definitions,
@@ -1584,6 +1623,9 @@ export function aggregateReport(state, results) {
       counts: { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 },
       issues: [invalidRegistry]
     }
+  }
+  if (resultsSnapshot.some((result) => !validAggregateResultScalars(result))) {
+    return invalidAggregateInputReport()
   }
   const resolved = resolveSelection(stateSnapshot.definitions, selection)
   const { filtered } = resolved
@@ -2141,7 +2183,7 @@ function parseCliArguments(rawArguments) {
   if (!command || command.startsWith('--')) throw new Error('CLI_COMMAND_REQUIRED')
   if (command !== 'verify-surefire') throw new Error(`CLI_UNKNOWN_COMMAND: ${command}`)
 
-  const options = {}
+  const options = ownDataDictionary()
   for (const argument of rawOptions) {
     const match = argument.match(/^--([a-z][a-z-]*)=(.*)$/)
     if (!match) throw new Error(`CLI_MALFORMED_OPTION: ${argument}`)
@@ -2149,7 +2191,7 @@ function parseCliArguments(rawArguments) {
     if (!SUREFIRE_CLI_OPTIONS.has(name)) throw new Error(`CLI_UNKNOWN_OPTION: ${name}`)
     if (Object.hasOwn(options, name)) throw new Error(`CLI_DUPLICATE_OPTION: ${name}`)
     if (!value) throw new Error(`CLI_OPTION_REQUIRED: ${name}`)
-    options[name] = value
+    defineOwnData(options, name, value)
   }
   for (const name of SUREFIRE_CLI_REQUIRED_OPTIONS) {
     if (!Object.hasOwn(options, name)) throw new Error(`CLI_OPTION_REQUIRED: ${name}`)

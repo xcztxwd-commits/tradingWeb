@@ -202,7 +202,12 @@ export const P0_CASES = [
 ]
 
 function canonicalOwnData(value) {
-  if (!value || typeof value !== 'object') return value
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+  if (typeof value === 'number') {
+    if (Number.isFinite(value)) return value
+    throw new TypeError('INVALID_REGISTRY: non-finite number')
+  }
+  if (typeof value !== 'object') throw new TypeError('INVALID_REGISTRY: JSON value required')
   if (types.isProxy(value)) throw new TypeError('INVALID_REGISTRY: Proxy')
 
   const array = Array.isArray(value)
