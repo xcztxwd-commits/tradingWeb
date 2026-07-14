@@ -11,7 +11,7 @@ const PROFILE_BY_PHASE = {
 }
 
 const PROFILE_OVERRIDES = {
-  'SOURCE-01': ['UI_CORE', 'ORDER_TRIGGER'],
+  'SOURCE-01': ['UI_CORE'],
   'SOURCE-02': ['UI_CORE', 'ORDER_TRIGGER'],
   'SOURCE-03': ['UI_CORE', 'ORDER_TRIGGER', 'FUNDING_ONLY', 'LIQUIDATION_ONLY'],
   'SOURCE-04': ['ORDER_TRIGGER'],
@@ -24,6 +24,10 @@ const PROFILE_OVERRIDES = {
 }
 
 const REQUIRED_SUBRUN_OVERRIDES = {
+  'SPOT-10': [
+    { id: 'desktop-limit-wins', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'desktop-stop-wins', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+  ],
   'SPOT-11': [
     { id: 'desktop-validation-stale', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
     { id: 'desktop-recovery-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
@@ -36,15 +40,63 @@ const REQUIRED_SUBRUN_OVERRIDES = {
     { id: 'desktop-core', profile: 'UI_CORE', viewport: 'desktop' },
     { id: 'desktop-target-mark', profile: 'UI_CORE', viewport: 'desktop' }
   ],
+  'PERP-04': [
+    { id: 'desktop-base', profile: 'UI_CORE', viewport: 'desktop' },
+    { id: 'desktop-quote', profile: 'UI_CORE', viewport: 'desktop' },
+    { id: 'desktop-contracts', profile: 'UI_CORE', viewport: 'desktop' }
+  ],
+  'PERP-07': [
+    { id: 'desktop-over-reversal-replay', profile: 'UI_CORE', viewport: 'desktop' },
+    { id: 'desktop-empty-reduce-only', profile: 'UI_CORE', viewport: 'desktop' },
+    { id: 'desktop-oversized-reduce-only', profile: 'UI_CORE', viewport: 'desktop' }
+  ],
   'PERP-10': [
     { id: 'desktop-immediate-pending-cancel', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
     { id: 'desktop-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+  ],
+  'PERP-11': [
+    { id: 'desktop-long-stop', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'desktop-short-stop', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+  ],
+  'BATCH-02': [
+    { id: 'desktop-normal', profile: 'UI_CORE', viewport: 'desktop' },
+    { id: 'desktop-partial-failure', profile: 'UI_CORE', viewport: 'desktop' }
+  ],
+  'PROT-02': [
+    { id: 'desktop-long-take-profit', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'desktop-long-stop-loss', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+  ],
+  'PROT-03': [
+    { id: 'desktop-short-take-profit', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'desktop-short-stop-loss', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+  ],
+  'PROT-04': [
+    { id: 'desktop-immediate', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'desktop-two-stage', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'desktop-cancel-resting', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+  ],
+  'WALLET-02': [
+    { id: 'desktop-availability-replay', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'desktop-fingerprint-conflict', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+  ],
+  'LIFE-01': [
+    { id: 'desktop-pending-order', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'desktop-oco', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'desktop-perp-position-protection', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
   ],
   'SOURCE-03': [
     { id: 'desktop-trade-ui-core', profile: 'UI_CORE', viewport: 'desktop' },
     { id: 'desktop-trigger-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
     { id: 'desktop-funding', profile: 'FUNDING_ONLY', viewport: 'desktop' },
     { id: 'desktop-liquidation', profile: 'LIQUIDATION_ONLY', viewport: 'desktop' }
+  ],
+  'RES-01': [
+    { id: 'desktop-market-order', profile: 'UI_CORE', viewport: 'desktop' },
+    { id: 'desktop-pending-cancel', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+    { id: 'desktop-partial-close', profile: 'UI_CORE', viewport: 'desktop' },
+    { id: 'desktop-full-close', profile: 'UI_CORE', viewport: 'desktop' },
+    { id: 'desktop-transfer', profile: 'UI_CORE', viewport: 'desktop' },
+    { id: 'desktop-reset', profile: 'UI_CORE', viewport: 'desktop' }
   ],
   'RES-02': [
     { id: 'desktop-fill-cancel', profile: 'ORDER_TRIGGER', viewport: 'desktop' },

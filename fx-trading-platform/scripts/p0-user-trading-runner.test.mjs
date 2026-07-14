@@ -34,6 +34,328 @@ const specPath = new URL(
 )
 const artifactsScript = fileURLToPath(new URL('./p0-user-trading-artifacts.mjs', import.meta.url))
 
+const EXPECTED_EXECUTION_MANIFEST = {
+  'AUTH-01': {
+    executionGroup: 'auth-session',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'AUTH-02': {
+    executionGroup: 'auth-session',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'AUTH-03': {
+    executionGroup: 'auth-03',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'CAT-01': {
+    executionGroup: 'cat-01',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'CAT-02': {
+    executionGroup: 'cat-02',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'CAT-03': {
+    executionGroup: 'cat-03',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'SPOT-01': {
+    executionGroup: 'spot-01',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'SPOT-02': {
+    executionGroup: 'spot-02',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'SPOT-03': {
+    executionGroup: 'spot-03',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'SPOT-04': {
+    executionGroup: 'spot-04',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'SPOT-05': {
+    executionGroup: 'spot-05',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'SPOT-06': {
+    executionGroup: 'spot-06',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'SPOT-07': {
+    executionGroup: 'spot-07',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'SPOT-08': {
+    executionGroup: 'spot-08',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'SPOT-09': {
+    executionGroup: 'spot-09',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'SPOT-10': {
+    executionGroup: 'spot-10',
+    requiredSubruns: [
+      { id: 'desktop-limit-wins', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-stop-wins', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+    ]
+  },
+  'SPOT-11': {
+    executionGroup: 'spot-11',
+    requiredSubruns: [
+      { id: 'desktop-validation-stale', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-recovery-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+    ]
+  },
+  'PERP-01': {
+    executionGroup: 'perp-01',
+    requiredSubruns: [
+      { id: 'desktop-core', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-target-mark', profile: 'UI_CORE', viewport: 'desktop' }
+    ]
+  },
+  'PERP-02': {
+    executionGroup: 'perp-02',
+    requiredSubruns: [
+      { id: 'desktop-core', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-target-mark', profile: 'UI_CORE', viewport: 'desktop' }
+    ]
+  },
+  'PERP-03': {
+    executionGroup: 'perp-03',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'PERP-04': {
+    executionGroup: 'perp-04',
+    requiredSubruns: [
+      { id: 'desktop-base', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-quote', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-contracts', profile: 'UI_CORE', viewport: 'desktop' }
+    ]
+  },
+  'PERP-05': {
+    executionGroup: 'perp-05',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'PERP-06': {
+    executionGroup: 'perp-06',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'PERP-07': {
+    executionGroup: 'perp-07',
+    requiredSubruns: [
+      { id: 'desktop-over-reversal-replay', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-empty-reduce-only', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-oversized-reduce-only', profile: 'UI_CORE', viewport: 'desktop' }
+    ]
+  },
+  'PERP-08': {
+    executionGroup: 'perp-08',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'PERP-09': {
+    executionGroup: 'perp-09',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'PERP-10': {
+    executionGroup: 'perp-10',
+    requiredSubruns: [
+      { id: 'desktop-immediate-pending-cancel', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+    ]
+  },
+  'PERP-11': {
+    executionGroup: 'perp-11',
+    requiredSubruns: [
+      { id: 'desktop-long-stop', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-short-stop', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+    ]
+  },
+  'PERP-12': {
+    executionGroup: 'perp-12',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'BATCH-01': {
+    executionGroup: 'batch-01',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'BATCH-02': {
+    executionGroup: 'batch-02',
+    requiredSubruns: [
+      { id: 'desktop-normal', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-partial-failure', profile: 'UI_CORE', viewport: 'desktop' }
+    ]
+  },
+  'PROT-01': {
+    executionGroup: 'prot-01',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'PROT-02': {
+    executionGroup: 'prot-02',
+    requiredSubruns: [
+      { id: 'desktop-long-take-profit', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-long-stop-loss', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+    ]
+  },
+  'PROT-03': {
+    executionGroup: 'prot-03',
+    requiredSubruns: [
+      { id: 'desktop-short-take-profit', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-short-stop-loss', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+    ]
+  },
+  'PROT-04': {
+    executionGroup: 'prot-04',
+    requiredSubruns: [
+      { id: 'desktop-immediate', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-two-stage', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-cancel-resting', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+    ]
+  },
+  'PROT-05': {
+    executionGroup: 'prot-05',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'PROT-06': {
+    executionGroup: 'prot-06',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'FUND-01': {
+    executionGroup: 'fund-01',
+    requiredSubruns: [{ id: 'desktop-funding-only', profile: 'FUNDING_ONLY', viewport: 'desktop' }]
+  },
+  'FUND-02': {
+    executionGroup: 'fund-02',
+    requiredSubruns: [{ id: 'desktop-funding-only', profile: 'FUNDING_ONLY', viewport: 'desktop' }]
+  },
+  'FUND-03': {
+    executionGroup: 'fund-03',
+    requiredSubruns: [{ id: 'desktop-funding-only', profile: 'FUNDING_ONLY', viewport: 'desktop' }]
+  },
+  'FUND-04': {
+    executionGroup: 'fund-04',
+    requiredSubruns: [{ id: 'desktop-funding-only', profile: 'FUNDING_ONLY', viewport: 'desktop' }]
+  },
+  'LIQ-01': {
+    executionGroup: 'liq-01',
+    requiredSubruns: [{ id: 'desktop-liquidation-only', profile: 'LIQUIDATION_ONLY', viewport: 'desktop' }]
+  },
+  'LIQ-02': {
+    executionGroup: 'liq-02',
+    requiredSubruns: [{ id: 'desktop-liquidation-only', profile: 'LIQUIDATION_ONLY', viewport: 'desktop' }]
+  },
+  'LIQ-03': {
+    executionGroup: 'liq-03',
+    requiredSubruns: [{ id: 'desktop-liquidation-only', profile: 'LIQUIDATION_ONLY', viewport: 'desktop' }]
+  },
+  'LIQ-04': {
+    executionGroup: 'liq-04',
+    requiredSubruns: [{ id: 'desktop-liquidation-only', profile: 'LIQUIDATION_ONLY', viewport: 'desktop' }]
+  },
+  'WALLET-01': {
+    executionGroup: 'wallet-01',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'WALLET-02': {
+    executionGroup: 'wallet-02',
+    requiredSubruns: [
+      { id: 'desktop-availability-replay', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-fingerprint-conflict', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+    ]
+  },
+  'LIFE-01': {
+    executionGroup: 'life-01',
+    requiredSubruns: [
+      { id: 'desktop-pending-order', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-oco', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-perp-position-protection', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+    ]
+  },
+  'LIFE-02': {
+    executionGroup: 'life-02',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'LIFE-03': {
+    executionGroup: 'life-03',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'SOURCE-01': {
+    executionGroup: 'source-01',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'SOURCE-02': {
+    executionGroup: 'source-02',
+    requiredSubruns: [
+      { id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
+    ]
+  },
+  'SOURCE-03': {
+    executionGroup: 'source-03',
+    requiredSubruns: [
+      { id: 'desktop-trade-ui-core', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-trigger-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-funding', profile: 'FUNDING_ONLY', viewport: 'desktop' },
+      { id: 'desktop-liquidation', profile: 'LIQUIDATION_ONLY', viewport: 'desktop' }
+    ]
+  },
+  'SOURCE-04': {
+    executionGroup: 'source-04',
+    requiredSubruns: [{ id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+  },
+  'RES-01': {
+    executionGroup: 'res-01',
+    requiredSubruns: [
+      { id: 'desktop-market-order', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-pending-cancel', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-partial-close', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-full-close', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-transfer', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-reset', profile: 'UI_CORE', viewport: 'desktop' }
+    ]
+  },
+  'RES-02': {
+    executionGroup: 'res-02',
+    requiredSubruns: [
+      { id: 'desktop-fill-cancel', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-close-protection', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-close-liquidation', profile: 'LIQUIDATION_ONLY', viewport: 'desktop' }
+    ]
+  },
+  'RES-03': {
+    executionGroup: 'res-03',
+    requiredSubruns: [
+      { id: 'desktop-restart-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-restart-funding', profile: 'FUNDING_ONLY', viewport: 'desktop' },
+      { id: 'desktop-restart-liquidation', profile: 'LIQUIDATION_ONLY', viewport: 'desktop' }
+    ]
+  },
+  'RES-04': {
+    executionGroup: 'res-04',
+    requiredSubruns: [{ id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' }]
+  },
+  'UI-01': {
+    executionGroup: 'ui-01',
+    requiredSubruns: [
+      { id: 'desktop-core', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'desktop-target', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'mobile-core', profile: 'ORDER_TRIGGER', viewport: 'mobile' },
+      { id: 'mobile-target', profile: 'ORDER_TRIGGER', viewport: 'mobile' }
+    ]
+  },
+  'UI-02': {
+    executionGroup: 'ui-02',
+    requiredSubruns: [
+      { id: 'desktop-ui-core', profile: 'UI_CORE', viewport: 'desktop' },
+      { id: 'desktop-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
+      { id: 'mobile-ui-core', profile: 'UI_CORE', viewport: 'mobile' },
+      { id: 'mobile-order-trigger', profile: 'ORDER_TRIGGER', viewport: 'mobile' }
+    ]
+  }
+}
+
 test('registry matches every case heading in the approved specification', () => {
   const specSource = readFileSync(specPath, 'utf8')
   const specIds = [...specSource.matchAll(
@@ -51,6 +373,15 @@ test('registry matches every case heading in the approved specification', () => 
     resilience: 4,
     ui: 2
   })
+})
+
+test('literal execution manifest locks every case group and required subrun', () => {
+  const actual = Object.fromEntries(P0_CASES.map((definition) => [definition.id, {
+    executionGroup: definition.executionGroup,
+    requiredSubruns: definition.requiredSubruns
+  }]))
+
+  assert.deepEqual(actual, EXPECTED_EXECUTION_MANIFEST)
 })
 
 test('every descriptor locks its profiles, viewports, authority and required subruns', () => {
@@ -176,7 +507,7 @@ test('phase, profile, viewport and authority assignments match the approved matr
   }
 
   const profileOverrides = {
-    'SOURCE-01': ['UI_CORE', 'ORDER_TRIGGER'],
+    'SOURCE-01': ['UI_CORE'],
     'SOURCE-02': ['UI_CORE', 'ORDER_TRIGGER'],
     'SOURCE-03': ['UI_CORE', 'ORDER_TRIGGER', 'FUNDING_ONLY', 'LIQUIDATION_ONLY'],
     'SOURCE-04': ['ORDER_TRIGGER'],
@@ -326,6 +657,67 @@ test('atomic evidence never persists credentials', (t) => {
   assert.equal(JSON.parse(persisted).networkEvidence[0].headers.authorization, '[REDACTED]')
 })
 
+test('persistence strips raw replay requests but keeps sanitized replay and network evidence', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-raw-replay-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const markers = {
+    raw: 'RAW_REQUEST_ONLY_7af3',
+    payload: 'REQUEST_PAYLOAD_ONLY_4c91',
+    replay: 'REPLAY_PROBE_ONLY_8e62',
+    network: 'NETWORK_SECRET_ONLY_2bd5'
+  }
+
+  writeCaseResultAtomic(resultPath, {
+    id: 'RES-01',
+    rawRequest: {
+      method: `POST-${markers.raw}`,
+      url: `/api/orders/${markers.raw}`,
+      headers: { Authorization: `Bearer ${markers.raw}` },
+      body: { clientSecret: markers.raw },
+      postData: markers.raw
+    },
+    requestPayload: JSON.stringify({ password: markers.payload }),
+    replayProbes: [{
+      id: 'replay-1',
+      referenceId: 'order-1',
+      fingerprint: 'sha256:contract-fingerprint',
+      outcome: { status: 'REJECTED', errorCode: 'REQUEST_CONFLICT' },
+      method: `POST-${markers.replay}`,
+      url: `/api/orders/${markers.replay}`,
+      headers: { Cookie: markers.replay },
+      body: markers.replay,
+      postData: markers.replay,
+      rawRequest: { url: markers.replay }
+    }],
+    networkEvidence: [{
+      method: 'GET',
+      url: `/api/orders?token=${markers.network}&symbol=BTCUSDT`,
+      headers: { Authorization: `Bearer ${markers.network}` },
+      status: 200
+    }]
+  })
+
+  const serialized = readFileSync(resultPath, 'utf8')
+  for (const marker of Object.values(markers)) assert.equal(serialized.includes(marker), false)
+  const persisted = JSON.parse(serialized)
+  assert.equal('rawRequest' in persisted, false)
+  assert.equal('requestPayload' in persisted, false)
+  assert.deepEqual(persisted.replayProbes, [{
+    id: 'replay-1',
+    referenceId: 'order-1',
+    fingerprint: 'sha256:contract-fingerprint',
+    outcome: { status: 'REJECTED', errorCode: 'REQUEST_CONFLICT' }
+  }])
+  assert.equal(persisted.networkEvidence[0].method, 'GET')
+  assert.equal(persisted.networkEvidence[0].status, 200)
+  assert.equal(
+    new URL(persisted.networkEvidence[0].url, 'https://contract.invalid').searchParams.get('symbol'),
+    'BTCUSDT'
+  )
+  assert.equal(persisted.networkEvidence[0].headers.Authorization, '[REDACTED]')
+})
+
 test('run state is created atomically and resumes only an identical evidence identity', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-state-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -360,6 +752,69 @@ test('run state is created atomically and resumes only an identical evidence ide
       () => loadOrCreateRunState({ ...options, [field]: value }),
       new RegExp(`^Error: RESUME_MISMATCH: ${field}$`)
     )
+  }
+})
+
+test('run state rejects missing, null, blank or invalid evidence identity', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-state-identity-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const valid = {
+    runId: 'identity-contract',
+    mode: 'DISCOVERY',
+    commit: 'commit-a',
+    worktreeFingerprint: 'tree-a',
+    schemaVersion: 1,
+    registryFingerprint: 'registry-a',
+    definitions: P0_CASES.slice(0, 1),
+    selection: {}
+  }
+  const invalidValues = {
+    commit: [undefined, null, '', '   ', 42, {}],
+    worktreeFingerprint: [undefined, null, '', '   ', 42, {}],
+    schemaVersion: [undefined, null, '', '   ', 0, -1, 1.5, {}],
+    registryFingerprint: [undefined, null, '', '   ', 42, {}]
+  }
+  let sequence = 0
+
+  for (const [field, values] of Object.entries(invalidValues)) {
+    for (const value of values) {
+      const createPath = join(directory, `create-${sequence++}.json`)
+      const createOptions = { ...valid, path: createPath, [field]: value }
+      assert.throws(
+        () => loadOrCreateRunState(createOptions),
+        new RegExp(`^Error: INVALID_RUN_STATE_IDENTITY: options\\.${field}$`)
+      )
+      assert.equal(existsSync(createPath), false)
+
+      const loadPath = join(directory, `load-${sequence++}.json`)
+      const persistedState = {
+        ...valid,
+        [field]: value,
+        cases: {},
+        createdAt: '2026-07-14T00:00:00.000Z'
+      }
+      if (value === undefined) delete persistedState[field]
+      writeCaseResultAtomic(loadPath, persistedState)
+      assert.throws(
+        () => loadOrCreateRunState({ ...valid, path: loadPath }),
+        new RegExp(`^Error: INVALID_RUN_STATE_IDENTITY: state\\.${field}$`)
+      )
+
+      const invalidLoadOptionsPath = join(directory, `load-options-${sequence++}.json`)
+      writeCaseResultAtomic(invalidLoadOptionsPath, {
+        ...valid,
+        cases: {},
+        createdAt: '2026-07-14T00:00:00.000Z'
+      })
+      assert.throws(
+        () => loadOrCreateRunState({
+          ...valid,
+          path: invalidLoadOptionsPath,
+          [field]: value
+        }),
+        new RegExp(`^Error: INVALID_RUN_STATE_IDENTITY: options\\.${field}$`)
+      )
+    }
   }
 })
 
@@ -413,6 +868,20 @@ test('resume skips only full required-subrun coverage', () => {
   assert.equal(incomplete.entries[0].action, 'RUN')
   assert.equal(incomplete.entries[0].reason, 'INCOMPLETE_SUBRUNS')
   assert.deepEqual(incomplete.entries[0].subruns, definition.requiredSubruns)
+})
+
+test('resume reruns PASS evidence whose result id differs from its case key', () => {
+  const expected = P0_CASES.find(({ id }) => id === 'AUTH-01')
+  const swapped = P0_CASES.find(({ id }) => id === 'AUTH-02')
+  const plan = planResume(
+    { cases: { [expected.id]: passingCase(swapped) } },
+    [expected],
+    {}
+  )
+
+  assert.equal(plan.scopeComplete, false)
+  assert.equal(plan.entries[0].action, 'RUN')
+  assert.equal(plan.entries[0].reason, 'INCOMPLETE_SUBRUNS')
 })
 
 test('profile and viewport filters are never resumable as complete scope', () => {
@@ -538,6 +1007,19 @@ test('corrupt, duplicate, unexpected or non-terminal evidence cannot pass', () =
   assert.ok(running.issues.includes(`INVALID_STATUS: ${definition.id}/RUNNING`))
 })
 
+for (const corruptStatus of ['toString', 'constructor', 'ARBITRARY_STATUS']) {
+  test(`aggregate rejects evidence status ${corruptStatus}`, () => {
+    const definition = P0_CASES[0]
+    const report = aggregateReport(
+      { definitions: [definition], selection: {} },
+      [{ id: definition.id, status: corruptStatus }]
+    )
+
+    assert.equal(report.verdict, 'FAIL')
+    assert.ok(report.issues.includes(`INVALID_STATUS: ${definition.id}/${corruptStatus}`))
+  })
+}
+
 function writeSurefireSuite(directory, fileName, attributes, modifiedAt = new Date()) {
   mkdirSync(directory, { recursive: true })
   const path = join(directory, fileName)
@@ -555,6 +1037,39 @@ function writeSurefireSuite(directory, fileName, attributes, modifiedAt = new Da
   ].join('\n'))
   utimesSync(path, modifiedAt, modifiedAt)
   return path
+}
+
+const MALFORMED_SUREFIRE_REPORTS = {
+  unclosed: [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<testsuite name="com.fxplatform.MalformedIT" tests="1" skipped="0" failures="0" errors="0">'
+  ].join('\n'),
+  'multiple-roots': [
+    '<testsuite name="com.fxplatform.MalformedIT" tests="1" skipped="0" failures="0" errors="0"></testsuite>',
+    '<testsuite name="com.fxplatform.OtherIT" tests="1" skipped="0" failures="0" errors="0"></testsuite>'
+  ].join('\n'),
+  'trailing-truncation': [
+    '<testsuite name="com.fxplatform.MalformedIT" tests="1" skipped="0" failures="0" errors="0"></testsuite>',
+    '<testcase'
+  ].join('\n')
+}
+
+for (const [scenario, source] of Object.entries(MALFORMED_SUREFIRE_REPORTS)) {
+  test(`Surefire parser rejects malformed XML: ${scenario}`, (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-malformed-'))
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    const fileName = `TEST-${scenario}.xml`
+    writeFileSync(join(directory, fileName), source)
+
+    assert.throws(
+      () => parseSurefireReports(
+        directory,
+        ['MalformedIT'],
+        new Date(Date.now() - 5_000)
+      ),
+      new RegExp(`^Error: SUREFIRE_MALFORMED_XML: ${fileName}$`)
+    )
+  })
 }
 
 test('Surefire parser accepts one fresh exact suite for every requested class', (t) => {

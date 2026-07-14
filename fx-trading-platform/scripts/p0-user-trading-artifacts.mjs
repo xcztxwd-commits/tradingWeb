@@ -13,6 +13,37 @@ import { pathToFileURL } from 'node:url'
 
 const REDACTED = '[REDACTED]'
 const SENSITIVE_KEY = /authorization|cookie|token|password|secret|api[-_]?key/i
+const TERMINAL_STATUSES = new Set(['PASS', 'FAIL', 'BLOCKED', 'INVALID_TEST'])
+const RAW_REQUEST_CONTAINERS = new Set([
+  'request',
+  'rawrequest',
+  'requestpayload',
+  'replayrequest',
+  'rawreplayrequest',
+  'originalrequest',
+  'capturedrequest',
+  'rawrequestbody',
+  'rawpayload'
+])
+const SAFE_REPLAY_FIELDS = new Set([
+  'id',
+  'caseId',
+  'subrunId',
+  'referenceId',
+  'requestId',
+  'clientOrderId',
+  'fingerprint',
+  'requestFingerprint',
+  'outcome',
+  'status',
+  'errorCode'
+])
+const RUN_STATE_IDENTITY_FIELDS = [
+  'commit',
+  'worktreeFingerprint',
+  'schemaVersion',
+  'registryFingerprint'
+]
 
 function redactUrl(value) {
   const absolute = /^[a-z][a-z\d+.-]*:/i.test(value)
@@ -59,8 +90,37 @@ export function redactNetworkEntry(entry) {
   return redactValue(entry)
 }
 
+function normalizedKey(key) {
+  return key.replaceAll(/[^a-z\d]/gi, '').toLowerCase()
+}
+
+function stripRawRequests(value, key = '') {
+  if (RAW_REQUEST_CONTAINERS.has(normalizedKey(key))) return undefined
+  if (normalizedKey(key) === 'replayprobes') {
+    if (!Array.isArray(value)) return []
+    return value.map((probe) => Object.fromEntries(
+      Object.entries(probe)
+        .filter(([field]) => SAFE_REPLAY_FIELDS.has(field))
+        .map(([field, fieldValue]) => [field, stripRawRequests(fieldValue, field)])
+        .filter(([, fieldValue]) => fieldValue !== undefined)
+    ))
+  }
+  if (Array.isArray(value)) return value.map((item) => stripRawRequests(item))
+  if (!value || typeof value !== 'object') return value
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([field, fieldValue]) => [field, stripRawRequests(fieldValue, field)])
+      .filter(([, fieldValue]) => fieldValue !== undefined)
+  )
+}
+
+function sanitizeForPersistence(value) {
+  return redactValue(stripRawRequests(value))
+}
+
 export function writeCaseResultAtomic(path, result) {
-  const serialized = `${JSON.stringify(redactValue(result), null, 2)}\n`
+  const serialized = `${JSON.stringify(sanitizeForPersistence(result), null, 2)}\n`
   const temporaryPath = `${path}.tmp`
   mkdirSync(dirname(path), { recursive: true })
 
@@ -72,7 +132,24 @@ export function writeCaseResultAtomic(path, result) {
   }
 }
 
+function validRunStateIdentity(field, value) {
+  if (field === 'schemaVersion') {
+    return (Number.isSafeInteger(value) && value > 0)
+      || (typeof value === 'string' && value.trim().length > 0)
+  }
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function assertRunStateIdentity(source, label) {
+  for (const field of RUN_STATE_IDENTITY_FIELDS) {
+    if (!validRunStateIdentity(field, source[field])) {
+      throw new Error(`INVALID_RUN_STATE_IDENTITY: ${label}.${field}`)
+    }
+  }
+}
+
 export function loadOrCreateRunState(options) {
+  assertRunStateIdentity(options, 'options')
   if (!existsSync(options.path)) {
     const state = {
       schemaVersion: options.schemaVersion,
@@ -91,12 +168,8 @@ export function loadOrCreateRunState(options) {
   }
 
   const state = JSON.parse(readFileSync(options.path, 'utf8'))
-  for (const field of [
-    'commit',
-    'worktreeFingerprint',
-    'schemaVersion',
-    'registryFingerprint'
-  ]) {
+  assertRunStateIdentity(state, 'state')
+  for (const field of RUN_STATE_IDENTITY_FIELDS) {
     if (state[field] !== options[field]) throw new Error(`RESUME_MISMATCH: ${field}`)
   }
   return state
@@ -107,7 +180,9 @@ function hasSelection(selection, key, value) {
 }
 
 function coversRequiredSubruns(result, definition) {
-  if (result?.status !== 'PASS' || result.scopeComplete !== true) return false
+  if (result?.id !== definition.id
+    || result.status !== 'PASS'
+    || result.scopeComplete !== true) return false
   if (!Array.isArray(result.subruns) || result.subruns.length !== definition.requiredSubruns.length) {
     return false
   }
@@ -229,7 +304,7 @@ export function aggregateReport(state, results) {
     }
     if (matches.length > 1) issues.push(`DUPLICATE_CASE: ${definition.id}`)
     const result = matches[0]
-    if (!(result.status in counts) || result.status === 'MISSING') {
+    if (!TERMINAL_STATUSES.has(result.status)) {
       issues.push(`INVALID_STATUS: ${definition.id}/${result.status}`)
       continue
     }
@@ -265,6 +340,88 @@ function xmlAttributes(source) {
   )
 }
 
+function xmlMarkupEnd(source, start, trackSubset = false) {
+  let quote = ''
+  let subsetDepth = 0
+  for (let index = start + 1; index < source.length; index += 1) {
+    const character = source[index]
+    if (quote) {
+      if (character === quote) quote = ''
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+      continue
+    }
+    if (trackSubset && character === '[') subsetDepth += 1
+    else if (trackSubset && character === ']') subsetDepth -= 1
+    else if (character === '>' && subsetDepth === 0) return index
+  }
+  return -1
+}
+
+function hasWellFormedSurefireRoot(source) {
+  const stack = []
+  let cursor = 0
+  let rootSeen = false
+  let doctypeSeen = false
+
+  while (cursor < source.length) {
+    const start = source.indexOf('<', cursor)
+    const textEnd = start === -1 ? source.length : start
+    if (stack.length === 0 && source.slice(cursor, textEnd).trim()) return false
+    if (start === -1) break
+
+    if (source.startsWith('<!--', start)) {
+      const end = source.indexOf('-->', start + 4)
+      if (end === -1) return false
+      cursor = end + 3
+      continue
+    }
+    if (source.startsWith('<![CDATA[', start)) {
+      if (stack.length === 0) return false
+      const end = source.indexOf(']]>', start + 9)
+      if (end === -1) return false
+      cursor = end + 3
+      continue
+    }
+    if (source.startsWith('<?', start)) {
+      const end = source.indexOf('?>', start + 2)
+      if (end === -1) return false
+      cursor = end + 2
+      continue
+    }
+    if (source.startsWith('<!DOCTYPE', start)) {
+      if (doctypeSeen || rootSeen || stack.length > 0) return false
+      const end = xmlMarkupEnd(source, start, true)
+      if (end === -1) return false
+      doctypeSeen = true
+      cursor = end + 1
+      continue
+    }
+
+    const end = xmlMarkupEnd(source, start)
+    if (end === -1) return false
+    const markup = source.slice(start, end + 1)
+    const closing = markup.match(/^<\/([A-Za-z_:][\w:.-]*)\s*>$/)
+    if (closing) {
+      if (stack.pop() !== closing[1]) return false
+      cursor = end + 1
+      continue
+    }
+    const opening = markup.match(/^<([A-Za-z_:][\w:.-]*)(?:\s[\s\S]*?)?\/?>$/)
+    if (!opening) return false
+    if (stack.length === 0) {
+      if (rootSeen || opening[1] !== 'testsuite') return false
+      rootSeen = true
+    }
+    if (!markup.endsWith('/>')) stack.push(opening[1])
+    cursor = end + 1
+  }
+
+  return rootSeen && stack.length === 0
+}
+
 export function parseSurefireReports(reportDir, expectedClasses, invocationStartedAt) {
   if (!Array.isArray(expectedClasses) || expectedClasses.length === 0) {
     throw new Error('SUREFIRE_EXPECTED_CLASSES_REQUIRED')
@@ -279,6 +436,9 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
   for (const name of readdirSync(reportDir).filter((file) => file.endsWith('.xml')).toSorted()) {
     const path = `${reportDir}/${name}`
     const source = readFileSync(path, 'utf8')
+    if (!hasWellFormedSurefireRoot(source)) {
+      throw new Error(`SUREFIRE_MALFORMED_XML: ${name}`)
+    }
     for (const match of source.matchAll(/<testsuite\b([^>]*)>/g)) {
       const attributes = xmlAttributes(match[1])
       const className = attributes.name?.split('.').at(-1)
