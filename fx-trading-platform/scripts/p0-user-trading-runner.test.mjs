@@ -599,6 +599,99 @@ test('dispatch invokes the declared handler and fails fast when it is absent', a
   )
 })
 
+test('dispatch and phase counting ignore inherited values', async () => {
+  const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+
+      const { P0_CASES, countByPhase, runCase } = await import(${JSON.stringify(casesUrl)})
+      const definition = P0_CASES[0]
+      const context = { runId: 'own-handler-contract' }
+      const expected = { status: 'PASS' }
+      let ownCalls = 0
+      const ownHandlers = {
+        [definition.handlerId]: async (received) => {
+          ownCalls += 1
+          assert.equal(received, context)
+          return expected
+        }
+      }
+      assert.equal(await runCase(definition, context, ownHandlers), expected)
+      assert.equal(ownCalls, 1)
+
+      for (const variant of ['value', 'getter']) {
+        let inheritedCalls = 0
+        let error
+        let result
+        const inheritedHandler = async () => {
+          inheritedCalls += 1
+          return { status: 'PASS' }
+        }
+        Object.defineProperty(Object.prototype, definition.handlerId, variant === 'getter'
+          ? {
+              configurable: true,
+              get() {
+                inheritedCalls += 1
+                return inheritedHandler
+              }
+            }
+          : { configurable: true, value: inheritedHandler })
+        try {
+          try {
+            result = await runCase(definition, context, {})
+          } catch (caught) {
+            error = caught.message
+          }
+        } finally {
+          delete Object.prototype[definition.handlerId]
+        }
+        assert.equal(result, undefined, variant)
+        assert.equal(error, 'INCOMPLETE_MATRIX: ' + definition.id, variant)
+        assert.equal(inheritedCalls, 0, variant)
+      }
+
+      const expectedCounts = {
+        'ui-core': 22,
+        'order-trigger': 20,
+        funding: 4,
+        liquidation: 4,
+        source: 4,
+        resilience: 4,
+        ui: 2
+      }
+      let phaseGetterCalls = 0
+      let counts
+      let countError
+      for (const phase of Object.keys(expectedCounts)) {
+        Object.defineProperty(Object.prototype, phase, {
+          configurable: true,
+          get() {
+            phaseGetterCalls += 1
+            return 10_000
+          }
+        })
+      }
+      try {
+        try {
+          counts = countByPhase(P0_CASES)
+        } catch (caught) {
+          countError = caught.message
+        }
+      } finally {
+        for (const phase of Object.keys(expectedCounts)) delete Object.prototype[phase]
+      }
+      assert.equal(countError, undefined)
+      assert.deepEqual(counts, expectedCounts)
+      assert.equal(phaseGetterCalls, 0)
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
+})
+
 const persistenceDigest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`
 
 test('case evidence replaces atomically without leaving partial files', (t) => {
@@ -748,6 +841,87 @@ test('persistence serialization ignores toJSON hooks and non-JSON values', (t) =
       { [persistenceDigest('safe')]: persistenceDigest('deep-safe') }
     ]
   })
+})
+
+test('own-data serialization ignores inherited serialization methods', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-inherited-json-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
+
+  for (const prototypeName of ['object', 'array']) {
+    const execution = spawnSync(process.execPath, [
+      '--input-type=module',
+      '--eval',
+      `
+        import assert from 'node:assert/strict'
+        import { readFileSync, writeFileSync } from 'node:fs'
+
+        const artifacts = await import(${JSON.stringify(artifactsUrl)})
+        const cases = await import(${JSON.stringify(casesUrl)})
+        const prototype = ${JSON.stringify(prototypeName)} === 'array'
+          ? Array.prototype
+          : Object.prototype
+        const marker = 'INHERITED_SERIALIZATION_SECRET_${prototypeName}'
+        const resultPath = ${JSON.stringify(join(directory, `${prototypeName}-result.json`))}
+        const cliPath = ${JSON.stringify(join(directory, `${prototypeName}-cli.json`))}
+        let callbackCalls = 0
+        let result
+        let cliResult
+        let fingerprint
+
+        Object.defineProperty(prototype, 'toJSON', {
+          configurable: true,
+          value() {
+            callbackCalls += 1
+            return { status: 'PASS', marker }
+          }
+        })
+        try {
+          artifacts.writeCaseResultAtomic(resultPath, {
+            id: 'AUTH-01',
+            status: 'FAIL',
+            nested: {
+              status: 'FAIL',
+              values: [{ status: 'FAIL' }]
+            }
+          })
+          result = JSON.parse(readFileSync(resultPath, 'utf8'))
+          fingerprint = cases.registryFingerprint(cases.P0_CASES)
+
+          writeFileSync(cliPath, '{"status":"PASS"}\\n')
+          process.argv = [
+            process.execPath,
+            ${JSON.stringify(artifactsScript)},
+            'verify-surefire',
+            '--output=' + cliPath,
+            '--unknown=token=' + marker
+          ]
+          await import(${JSON.stringify(artifactsUrl)} + '?inherited=' + ${JSON.stringify(prototypeName)})
+          process.exitCode = 0
+          cliResult = JSON.parse(readFileSync(cliPath, 'utf8'))
+        } finally {
+          delete prototype.toJSON
+        }
+
+        assert.deepEqual(result, {
+          id: 'AUTH-01',
+          status: 'FAIL',
+          nested: {
+            status: 'FAIL',
+            values: [{ status: 'FAIL' }]
+          }
+        })
+        assert.deepEqual(cliResult, { status: 'FAIL', error: 'CLI_UNKNOWN_OPTION' })
+        assert.equal(readFileSync(resultPath, 'utf8').includes(marker), false)
+        assert.equal(readFileSync(cliPath, 'utf8').includes(marker), false)
+        assert.equal(fingerprint, cases.P0_REGISTRY_FINGERPRINT)
+        assert.equal(callbackCalls, 0)
+      `
+    ], { encoding: 'utf8' })
+
+    assert.equal(execution.status, 0, `${prototypeName}: ${execution.stderr}`)
+  }
 })
 
 for (const scenario of [
@@ -1444,6 +1618,125 @@ test('typed P0 gate evidence round-trips verdict modes timestamps and backend cl
     assert.deepEqual(safe.suites, suites)
     assert.deepEqual(safe.cases, cases)
   }
+})
+
+test('positive evidence schema preserves Surefire gate counters', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-gate-counter-schema-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const reports = join(root, 'reports')
+  const resultPath = join(root, 'gate.json')
+  const startedAt = new Date(Date.now() - 5_000)
+  writeSurefireSuite(reports, 'TEST-postgres.xml', {
+    name: 'com.fxplatform.PostgresDatabaseIT',
+    tests: 2
+  })
+  writeSurefireSuite(reports, 'TEST-fill.xml', {
+    name: 'com.fxplatform.Task5PostgresFullFillIT',
+    tests: 3
+  })
+  const gate = parseSurefireReports(
+    reports,
+    ['PostgresDatabaseIT', 'Task5PostgresFullFillIT'],
+    startedAt
+  )
+  const evidence = {
+    ...gate,
+    metadata: {
+      tests: -1,
+      skipped: 1.5,
+      failures: '0',
+      errors: -2
+    }
+  }
+  const original = structuredClone(evidence)
+
+  const publicGate = redactNetworkEntry(evidence)
+  writeCaseResultAtomic(resultPath, evidence)
+
+  assert.deepEqual(evidence, original)
+  for (const safe of [publicGate, JSON.parse(readFileSync(resultPath, 'utf8'))]) {
+    assert.deepEqual(safe.suites.map((suite) => ({
+      tests: suite.tests,
+      skipped: suite.skipped,
+      failures: suite.failures,
+      errors: suite.errors
+    })), [
+      { tests: 2, skipped: 0, failures: 0, errors: 0 },
+      { tests: 3, skipped: 0, failures: 0, errors: 0 }
+    ])
+    assert.deepEqual(safe.totals, {
+      tests: 5,
+      skipped: 0,
+      failures: 0,
+      errors: 0
+    })
+    assert.deepEqual(safe.metadata, {})
+  }
+})
+
+test('positive evidence schema preserves unified case records', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-unified-case-schema-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const unknownContainer = 'unknownFixtureContainer'
+  const credentialMarker = 'UNIFIED_CASE_CREDENTIAL_MARKER_31af'
+  const record = {
+    id: 'AUTH-01',
+    status: 'BLOCKED',
+    commit: RUN_STATE_COMMIT_A,
+    database: 'p0-demo-database-01',
+    user: 'p0-user-01',
+    account: 'p0-account-01',
+    profile: 'UI_CORE',
+    viewport: 'desktop',
+    startedAt: '2026-07-15T00:00:00.000Z',
+    finishedAt: '2026-07-15T00:01:00.000Z',
+    preconditions: [{ status: 'PASS' }],
+    userActions: [{ status: 'PASS', note: 'clicked-order-submit' }],
+    fixtureActions: [{ status: 'PASS' }],
+    authorityBundleFixture: 'FAIL',
+    contractProbes: [{ status: 'PASS' }],
+    replayProbes: [{ id: 'AUTH-01', status: 'PASS' }],
+    checkpoints: [{ status: 'PASS' }],
+    financialCalculation: { amount: '1.2500' },
+    uiEvidence: [{ status: 'OBSERVED' }],
+    networkEvidence: [{ id: 'AUTH-01', status: 'OBSERVED' }],
+    apiEvidence: [{ status: 'OBSERVED' }],
+    dbEvidence: [{ status: 'OBSERVED' }],
+    eventEvidence: [{ status: 'OBSERVED' }],
+    consoleErrors: [],
+    cleanup: { status: 'PASS' },
+    failureOrBlocker: { status: 'BLOCKED', reason: 'CLI_INTERNAL_ERROR' },
+    [unknownContainer]: { status: 'PASS' },
+    apiToken: credentialMarker
+  }
+  const expectedFields = [
+    'id', 'status', 'commit', 'database', 'user', 'account', 'profile', 'viewport',
+    'startedAt', 'finishedAt', 'preconditions', 'userActions', 'fixtureActions',
+    'authorityBundleFixture', 'contractProbes', 'replayProbes', 'checkpoints',
+    'financialCalculation', 'uiEvidence', 'networkEvidence', 'apiEvidence',
+    'dbEvidence', 'eventEvidence', 'consoleErrors', 'cleanup', 'failureOrBlocker'
+  ]
+  const original = structuredClone(record)
+
+  const publicRecord = redactNetworkEntry(record)
+  writeCaseResultAtomic(resultPath, record)
+
+  assert.deepEqual(record, original)
+  const persistedSource = readFileSync(resultPath, 'utf8')
+  assert.equal(JSON.stringify(publicRecord).includes(credentialMarker), false)
+  assert.equal(persistedSource.includes(credentialMarker), false)
+  for (const safe of [publicRecord, JSON.parse(persistedSource)]) {
+    for (const field of expectedFields) assert.equal(Object.hasOwn(safe, field), true, field)
+    assert.equal(safe.startedAt, record.startedAt)
+    assert.equal(safe.finishedAt, record.finishedAt)
+    assert.equal(safe.authorityBundleFixture, 'FAIL')
+    assert.deepEqual(safe.financialCalculation, { amount: '1.2500' })
+    assert.equal(Object.hasOwn(safe, unknownContainer), false)
+    assert.deepEqual(safe[persistenceDigest(unknownContainer)], { status: 'PASS' })
+    assert.equal(Object.hasOwn(safe, 'apiToken'), false)
+  }
+  assert.deepEqual(publicRecord, JSON.parse(persistedSource))
 })
 
 test('network redaction sanitizes URL userinfo and explicit header representations', () => {
@@ -3151,6 +3444,123 @@ test('run state rejects missing, null, blank or invalid evidence identity', (t) 
   }
 })
 
+test('run state ignores inherited identity registry and selection fields', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-state-inherited-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+      import { writeFileSync } from 'node:fs'
+
+      const { loadOrCreateRunState, planResume } = await import(${JSON.stringify(artifactsUrl)})
+      const { P0_CASES, P0_REGISTRY_FINGERPRINT } = await import(${JSON.stringify(casesUrl)})
+      const directory = ${JSON.stringify(directory)}
+      const identity = {
+        commit: ${JSON.stringify(RUN_STATE_COMMIT_A)},
+        worktreeFingerprint: ${JSON.stringify(RUN_STATE_TREE_A)},
+        schemaVersion: 1,
+        registryFingerprint: P0_REGISTRY_FINGERPRINT
+      }
+      const cases = Object.fromEntries(P0_CASES.map((definition) => [
+        definition.id,
+        {
+          id: definition.id,
+          status: 'PASS',
+          scopeComplete: true,
+          subruns: definition.requiredSubruns.map((subrun) => ({
+            ...subrun,
+            status: 'PASS'
+          }))
+        }
+      ]))
+      const baseState = {
+        ...identity,
+        runId: 'inherited-state-contract',
+        mode: 'DISCOVERY',
+        definitions: P0_CASES,
+        selection: {},
+        cases,
+        createdAt: '2026-07-14T00:00:00.000Z'
+      }
+      const inheritedValues = {
+        ...identity,
+        definitions: P0_CASES,
+        selection: { caseIds: [P0_CASES[1].id] }
+      }
+      const observations = Object.create(null)
+
+      for (const field of Object.keys(inheritedValues)) {
+        const path = directory + '/' + field + '.json'
+        const state = JSON.parse(JSON.stringify(baseState))
+        delete state[field]
+        writeFileSync(path, JSON.stringify(state) + '\\n')
+        let calls = 0
+        let error
+        let loaded
+        let plan
+        Object.defineProperty(Object.prototype, field, {
+          configurable: true,
+          get() {
+            calls += 1
+            return inheritedValues[field]
+          }
+        })
+        try {
+          try {
+            loaded = loadOrCreateRunState({
+              ...identity,
+              path,
+              runId: 'inherited-state-contract',
+              mode: 'DISCOVERY',
+              definitions: P0_CASES,
+              selection: {}
+            })
+            plan = planResume(
+              loaded,
+              P0_CASES,
+              field === 'selection' ? { caseIds: [P0_CASES[0].id] } : {}
+            )
+          } catch (caught) {
+            error = caught.message
+          }
+        } finally {
+          delete Object.prototype[field]
+        }
+        observations[field] = {
+          calls,
+          error,
+          hasOwn: loaded ? Object.hasOwn(loaded, field) : undefined,
+          skipCount: plan?.entries.filter((entry) => entry.action === 'SKIP').length,
+          scopeComplete: plan?.scopeComplete,
+          filtered: plan?.filtered
+        }
+      }
+
+      for (const field of ['commit', 'worktreeFingerprint', 'schemaVersion', 'registryFingerprint']) {
+        const observation = observations[field]
+        assert.equal(observation.error, 'INVALID_RUN_STATE_IDENTITY: state.' + field, field)
+        assert.equal(observation.calls, 0, field)
+        assert.notEqual(observation.skipCount, 60, field)
+        assert.notEqual(observation.scopeComplete, true, field)
+      }
+      assert.equal(observations.definitions.error, 'MISSING_REGISTRY: state')
+      assert.equal(observations.definitions.calls, 0)
+      assert.equal(observations.selection.error, undefined)
+      assert.equal(observations.selection.calls, 0)
+      assert.equal(observations.selection.hasOwn, false)
+      assert.equal(observations.selection.filtered, true)
+      assert.equal(observations.selection.scopeComplete, false)
+      assert.equal(observations.selection.skipCount, 1)
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
+})
+
 test('run state snapshots inert options before path and registry access', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-state-options-snapshot-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -4408,6 +4818,70 @@ function writeSurefireSuite(directory, fileName, attributes, modifiedAt = new Da
   return path
 }
 
+test('Surefire XML attributes ignore inherited suite identity and counters', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-inherited-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+      import { writeFileSync } from 'node:fs'
+
+      const { parseSurefireReports } = await import(${JSON.stringify(artifactsUrl)})
+      const directory = ${JSON.stringify(directory)}
+      const reportPath = directory + '/TEST-PrototypeSuiteIT.xml'
+      const startedAt = new Date(Date.now() - 5_000)
+      writeFileSync(reportPath, [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<testsuite name="com.fxplatform.PrototypeSuiteIT" tests="1" skipped="0" failures="0" errors="0">',
+        '</testsuite>'
+      ].join('\\n'))
+      assert.equal(
+        parseSurefireReports(directory, ['PrototypeSuiteIT'], startedAt).status,
+        'PASS'
+      )
+
+      writeFileSync(reportPath, '<testsuite></testsuite>')
+      const inherited = {
+        name: 'com.fxplatform.PrototypeSuiteIT',
+        tests: '1',
+        skipped: '0',
+        failures: '0',
+        errors: '0'
+      }
+      let getterCalls = 0
+      let result
+      let error
+      for (const [field, value] of Object.entries(inherited)) {
+        Object.defineProperty(Object.prototype, field, {
+          configurable: true,
+          get() {
+            getterCalls += 1
+            return value
+          }
+        })
+      }
+      try {
+        try {
+          result = parseSurefireReports(directory, ['PrototypeSuiteIT'], startedAt)
+        } catch (caught) {
+          error = caught.message
+        }
+      } finally {
+        for (const field of Object.keys(inherited)) delete Object.prototype[field]
+      }
+
+      assert.equal(result?.status, undefined)
+      assert.equal(error, 'SUREFIRE_MISSING_CLASS: PrototypeSuiteIT')
+      assert.equal(getterCalls, 0)
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
+})
+
 test('Surefire parser binds bytes and freshness to one opened report', () => {
   const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
   const execution = spawnSync(process.execPath, [
@@ -5231,6 +5705,64 @@ test('artifact CLI emits stable secret-free diagnostics for caller-controlled fa
   )
   assertFailure(writeExecution, 'CLI_WRITE_FAILED')
   assert.equal(existsSync(blockedOutput), false)
+})
+
+test('output terminal PASS checks require an own status', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-output-own-status-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const output = join(directory, 'gate.json')
+  const marker = 'INHERITED_OUTPUT_STATUS_SECRET_92e4'
+  writeFileSync(output, '{}\n')
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+      import fs from 'node:fs'
+      import { syncBuiltinESMExports } from 'node:module'
+
+      await import(${JSON.stringify(artifactsUrl)})
+      const output = ${JSON.stringify(output)}
+      const originalReadFileSync = fs.readFileSync
+      fs.readFileSync = function (input, ...arguments_) {
+        if (String(input) === output && arguments_[0] === 'utf8') return '{}'
+        return Reflect.apply(originalReadFileSync, this, [input, ...arguments_])
+      }
+      syncBuiltinESMExports()
+
+      let getterCalls = 0
+      Object.defineProperty(Object.prototype, 'status', {
+        configurable: true,
+        get() {
+          getterCalls += 1
+          return 'PASS'
+        }
+      })
+      try {
+        process.argv = [
+          process.execPath,
+          ${JSON.stringify(artifactsScript)},
+          'verify-surefire',
+          '--output=' + output,
+          '--unknown=token=' + ${JSON.stringify(marker)}
+        ]
+        await import(${JSON.stringify(artifactsUrl)} + '?own-output-status=1')
+        process.exitCode = 0
+      } finally {
+        delete Object.prototype.status
+        fs.readFileSync = originalReadFileSync
+        syncBuiltinESMExports()
+      }
+
+      const source = originalReadFileSync(output, 'utf8')
+      assert.equal(getterCalls, 0)
+      assert.equal(source.includes(${JSON.stringify(marker)}), false)
+      assert.equal(JSON.parse(source).status, 'FAIL')
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
 })
 
 test('strict artifact CLI rejects a missing command', () => {

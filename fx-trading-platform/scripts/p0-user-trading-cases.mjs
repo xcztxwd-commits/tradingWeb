@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { types } from 'node:util'
 
 const sequence = (start, end) => Array.from(
   { length: end - start + 1 },
@@ -200,21 +201,86 @@ export const P0_CASES = [
   ...cases('UI', sequence(1, 2), 'ui')
 ]
 
+function canonicalOwnData(value) {
+  if (!value || typeof value !== 'object') return value
+  if (types.isProxy(value)) throw new TypeError('INVALID_REGISTRY: Proxy')
+
+  const array = Array.isArray(value)
+  const prototype = Object.getPrototypeOf(value)
+  if ((array && prototype !== Array.prototype)
+    || (!array && prototype !== Object.prototype && prototype !== null)) {
+    throw new TypeError('INVALID_REGISTRY: non-plain object')
+  }
+  const descriptors = Object.getOwnPropertyDescriptors(value)
+  const ownKeys = Reflect.ownKeys(descriptors)
+  if (ownKeys.some((property) => (
+    typeof property !== 'string'
+    || ('get' in descriptors[property] || 'set' in descriptors[property])
+    || (property !== 'length' && !descriptors[property].enumerable)
+  ))) throw new TypeError('INVALID_REGISTRY: own data required')
+
+  if (array) {
+    const length = descriptors.length.value
+    if (ownKeys.length !== length + 1 || ownKeys.some((property) => (
+      property !== 'length'
+      && (!Number.isSafeInteger(Number(property))
+        || String(Number(property)) !== property
+        || Number(property) < 0
+        || Number(property) >= length)
+    ))) throw new TypeError('INVALID_REGISTRY: dense array required')
+
+    const snapshot = []
+    for (let index = 0; index < length; index += 1) {
+      Object.defineProperty(snapshot, index, {
+        value: canonicalOwnData(descriptors[index].value),
+        enumerable: true,
+        configurable: true,
+        writable: true
+      })
+    }
+    Object.setPrototypeOf(snapshot, null)
+    return snapshot
+  }
+
+  const snapshot = Object.create(null)
+  for (const property of ownKeys) {
+    Object.defineProperty(snapshot, property, {
+      value: canonicalOwnData(descriptors[property].value),
+      enumerable: true,
+      configurable: true,
+      writable: true
+    })
+  }
+  return snapshot
+}
+
 export function registryFingerprint(definitions) {
-  return createHash('sha256').update(JSON.stringify(definitions)).digest('hex')
+  return createHash('sha256').update(JSON.stringify(canonicalOwnData(definitions))).digest('hex')
 }
 
 export const P0_REGISTRY_FINGERPRINT = registryFingerprint(P0_CASES)
 
 export function countByPhase(definitions) {
   return definitions.reduce((counts, definition) => {
-    counts[definition.phase] = (counts[definition.phase] ?? 0) + 1
+    const current = Object.hasOwn(counts, definition.phase)
+      ? Object.getOwnPropertyDescriptor(counts, definition.phase).value
+      : 0
+    Object.defineProperty(counts, definition.phase, {
+      value: current + 1,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    })
     return counts
   }, {})
 }
 
 export async function runCase(definition, context, handlers) {
-  const handler = handlers[definition.handlerId]
-  if (!handler) throw new Error(`INCOMPLETE_MATRIX: ${definition.id}`)
-  return handler(context)
+  const descriptor = handlers && typeof handlers === 'object'
+    ? Object.getOwnPropertyDescriptor(handlers, definition.handlerId)
+    : undefined
+  if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'function') {
+    throw new Error(`INCOMPLETE_MATRIX: ${definition.id}`)
+  }
+  return descriptor.value(context)
 }

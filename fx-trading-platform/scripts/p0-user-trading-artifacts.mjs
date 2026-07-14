@@ -356,6 +356,7 @@ const DOMAIN_ENUM_FIELDS = new Map([
   ['producttype', new Set(['FX_MARGIN', 'CRYPTO_SPOT', 'LINEAR_PERP', 'INVERSE_PERP'])],
   ['instrumenttype', new Set(['FX_MARGIN', 'CRYPTO_SPOT', 'LINEAR_PERP', 'INVERSE_PERP'])],
   ['accounttype', new Set(['DEMO', 'LIVE'])],
+  ['authoritybundlefixture', new Set(['PASS', 'FAIL'])],
   ['feeasset', ASSET_VALUES],
   ['asset', ASSET_VALUES],
   ['currency', ASSET_VALUES],
@@ -431,7 +432,17 @@ const DECIMAL_FIELDS = new Set([
   'upl',
   'usedmargin'
 ])
-const INTEGER_FIELDS = new Set(['adllevel', 'leverage', 'slot', 'timestamp', 'version'])
+const INTEGER_FIELDS = new Set([
+  'adllevel',
+  'errors',
+  'failures',
+  'leverage',
+  'skipped',
+  'slot',
+  'tests',
+  'timestamp',
+  'version'
+])
 const BOOLEAN_FIELDS = new Set(['enabled', 'reduceonly', 'stale', 'tradable'])
 const UTC_TIMESTAMP_FIELDS = new Set([
   'asof',
@@ -441,11 +452,13 @@ const UTC_TIMESTAMP_FIELDS = new Set([
   'createdat',
   'executedat',
   'expiresat',
+  'finishedat',
   'filledat',
   'invocationstartedat',
   'lastsnapshotat',
   'modifiedat',
   'openedat',
+  'startedat',
   'updatedat'
 ])
 const P0_SUREFIRE_CLASSES = new Set([
@@ -498,28 +511,39 @@ const RUN_STATE_IDENTITY_KEYS = new Set([
 const CONTRACT_STRUCTURAL_FIELDS = new Set([
   'account',
   'action',
+  'apievidence',
   'arbitraryevidence',
   'blocker',
   'cases',
   'catalog',
   'checkpoint',
+  'checkpoints',
   'checks',
+  'cleanup',
   'complete',
+  'consoleerrors',
+  'contractprobes',
   'count',
   'counts',
   'credentialsamples',
   'data',
+  'database',
+  'dbevidence',
   'definitions',
   'empty',
   'entries',
   'enums',
   'evidence',
+  'eventevidence',
   'eventtypes',
   'executiongroup',
   'failure',
+  'failureorblocker',
   'file',
   'filtered',
+  'financialcalculation',
   'flag',
+  'fixtureactions',
   'issues',
   'ledger',
   'ledgerentrytypes',
@@ -540,6 +564,7 @@ const CONTRACT_STRUCTURAL_FIELDS = new Set([
   'outcome',
   'position',
   'positionsides',
+  'preconditions',
   'providers',
   'publicreferences',
   'replayprobes',
@@ -555,8 +580,10 @@ const CONTRACT_STRUCTURAL_FIELDS = new Set([
   'suites',
   'totals',
   'trade',
+  'uievidence',
   'units',
   'url',
+  'user',
   'useractions',
   'values',
   'verdict',
@@ -1180,14 +1207,71 @@ function sanitizeForPersistence(value) {
   return redactValue(stripRawRequests(inertJsonValue(value)))
 }
 
+function ownDataSerializationSource(value) {
+  function snapshot(source) {
+    if (!source || typeof source !== 'object') return source
+    if (types.isProxy(source)) throw new TypeError('UNSAFE_PERSISTENCE_VALUE: Proxy')
+
+    const descriptors = Object.getOwnPropertyDescriptors(source)
+    const ownKeys = Reflect.ownKeys(descriptors)
+    for (const property of ownKeys) {
+      const descriptor = descriptors[property]
+      if ('get' in descriptor || 'set' in descriptor) {
+        throw new TypeError('UNSAFE_PERSISTENCE_VALUE: accessor')
+      }
+    }
+
+    if (Array.isArray(source)) {
+      const length = descriptors.length.value
+      if (ownKeys.length !== length + 1 || ownKeys.some((property) => (
+        property !== 'length'
+        && (typeof property !== 'string'
+          || !Number.isSafeInteger(Number(property))
+          || String(Number(property)) !== property
+          || Number(property) < 0
+          || Number(property) >= length)
+      ))) throw new TypeError('UNSAFE_IDENTITY_ARRAY')
+
+      const inert = []
+      for (let index = 0; index < length; index += 1) {
+        const descriptor = descriptors[index]
+        if (!descriptor) throw new TypeError('UNSAFE_IDENTITY_ARRAY')
+        Object.defineProperty(inert, index, {
+          value: snapshot(descriptor.value),
+          enumerable: true,
+          configurable: true,
+          writable: true
+        })
+      }
+      Object.setPrototypeOf(inert, null)
+      return inert
+    }
+
+    const inert = Object.create(null)
+    for (const property of ownKeys) {
+      const descriptor = descriptors[property]
+      if (typeof property !== 'string' || !descriptor.enumerable) continue
+      Object.defineProperty(inert, property, {
+        value: snapshot(descriptor.value),
+        enumerable: true,
+        configurable: true,
+        writable: true
+      })
+    }
+    return inert
+  }
+
+  const json = JSON.stringify(snapshot(value), null, 2)
+  if (typeof json !== 'string') throw new TypeError('UNSAFE_PERSISTENCE_ROOT: not serializable')
+  return `${json}\n`
+}
+
 export function writeCaseResultAtomic(path, result) {
   const sanitized = sanitizeForPersistence(result)
   if (!sanitized || typeof sanitized !== 'object' || Array.isArray(sanitized)) {
     throw new TypeError('UNSAFE_PERSISTENCE_ROOT: expected plain object')
   }
-  const json = JSON.stringify(sanitized, null, 2)
-  if (typeof json !== 'string') throw new TypeError('UNSAFE_PERSISTENCE_ROOT: not serializable')
-  const serialized = `${json}\n`
+  const serialized = ownDataSerializationSource(sanitized)
   const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
   mkdirSync(dirname(path), { recursive: true })
   let descriptor
@@ -1208,9 +1292,16 @@ export function writeCaseResultAtomic(path, result) {
 }
 
 function normalizedRunStateIdentity(source, label) {
-  const identity = {}
+  const identity = Object.create(null)
   for (const field of RUN_STATE_IDENTITY_FIELDS) {
-    const normalized = sanitizeRunStateIdentity(normalizedKey(field), source[field])
+    if (!source || typeof source !== 'object' || !Object.hasOwn(source, field)) {
+      throw new Error(`INVALID_RUN_STATE_IDENTITY: ${label}.${field}`)
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(source, field)
+    if (!descriptor || !('value' in descriptor)) {
+      throw new Error(`INVALID_RUN_STATE_IDENTITY: ${label}.${field}`)
+    }
+    const normalized = sanitizeRunStateIdentity(normalizedKey(field), descriptor.value)
     if (normalized === undefined) {
       throw new Error(`INVALID_RUN_STATE_IDENTITY: ${label}.${field}`)
     }
@@ -1289,14 +1380,15 @@ export function loadOrCreateRunState(options) {
     return state
   }
 
-  const state = JSON.parse(readFileSync(path, 'utf8'))
+  const parsedState = JSON.parse(readFileSync(path, 'utf8'))
+  const state = inertIdentityValue(parsedState)
   const stateIdentity = normalizedRunStateIdentity(state, 'state')
   for (const field of RUN_STATE_IDENTITY_FIELDS) {
     if (stateIdentity[field] !== identity[field]) throw new Error(`RESUME_MISMATCH: ${field}`)
   }
   assertCanonicalRegistry(definitions, identity.registryFingerprint, 'options')
   assertCanonicalRegistry(state.definitions, stateIdentity.registryFingerprint, 'state')
-  return state
+  return parsedState
 }
 
 const SELECTION_FIELDS = ['caseIds', 'phases', 'profiles', 'viewports']
@@ -1608,18 +1700,31 @@ function xmlAttributes(source) {
     cursor = end + 1
     if (cursor < source.length && !XML_WHITESPACE.test(source[cursor])) return null
   }
-  return Object.fromEntries(attributes)
+  const parsed = Object.create(null)
+  for (const [name, value] of attributes) {
+    Object.defineProperty(parsed, name, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true
+    })
+  }
+  return parsed
+}
+
+function ownXmlAttribute(attributes, name) {
+  return attributes && Object.hasOwn(attributes, name) ? attributes[name] : undefined
 }
 
 function validXmlDeclaration(attributes) {
-  if (!attributes || !['1.0', '1.1'].includes(attributes.version)) return false
+  if (!['1.0', '1.1'].includes(ownXmlAttribute(attributes, 'version'))) return false
   const expectedFields = ['version']
-  if ('encoding' in attributes) {
-    if (!/^utf-8$/i.test(attributes.encoding)) return false
+  if (Object.hasOwn(attributes, 'encoding')) {
+    if (!/^utf-8$/i.test(ownXmlAttribute(attributes, 'encoding'))) return false
     expectedFields.push('encoding')
   }
-  if ('standalone' in attributes) {
-    if (!['yes', 'no'].includes(attributes.standalone)) return false
+  if (Object.hasOwn(attributes, 'standalone')) {
+    if (!['yes', 'no'].includes(ownXmlAttribute(attributes, 'standalone'))) return false
     expectedFields.push('standalone')
   }
   return Object.keys(attributes).join(',') === expectedFields.join(',')
@@ -1848,17 +1953,18 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
       throw new Error(`SUREFIRE_MALFORMED_XML: ${name}`)
     }
     const { attributes, outcomeElements } = structure
-    const className = attributes.name?.split('.').at(-1)
+    const suiteName = ownXmlAttribute(attributes, 'name')
+    const className = suiteName?.split('.').at(-1)
     if (!expected.has(className)) continue
     found.push({
       className,
-      suiteName: attributes.name,
+      suiteName,
       file: name,
       modifiedAt,
-      tests: parseSurefireCounter(attributes.tests),
-      skipped: parseSurefireCounter(attributes.skipped),
-      failures: parseSurefireCounter(attributes.failures),
-      errors: parseSurefireCounter(attributes.errors),
+      tests: parseSurefireCounter(ownXmlAttribute(attributes, 'tests')),
+      skipped: parseSurefireCounter(ownXmlAttribute(attributes, 'skipped')),
+      failures: parseSurefireCounter(ownXmlAttribute(attributes, 'failures')),
+      errors: parseSurefireCounter(ownXmlAttribute(attributes, 'errors')),
       outcomeElements
     })
   }
@@ -2023,7 +2129,8 @@ function invalidateExistingOutputAliases(aliases, source) {
 function outputIsTerminalPass(output) {
   try {
     const evidence = JSON.parse(readFileSync(output, 'utf8'))
-    return Boolean(evidence) && typeof evidence === 'object' && evidence.status === 'PASS'
+    return Boolean(evidence) && typeof evidence === 'object'
+      && Object.hasOwn(evidence, 'status') && evidence.status === 'PASS'
   } catch {
     return false
   }
@@ -2089,7 +2196,7 @@ if (isMainModule()) {
     const diagnostic = cliDiagnosticCode(error)
     const aliases = outputs?.aliases ?? []
     const failure = { status: 'FAIL', error: diagnostic }
-    const failureSource = `${JSON.stringify(failure, null, 2)}\n`
+    const failureSource = ownDataSerializationSource(failure)
     let writeFailed = invalidateExistingOutputAliases(aliases, failureSource)
     for (const output of aliases) {
       try {
