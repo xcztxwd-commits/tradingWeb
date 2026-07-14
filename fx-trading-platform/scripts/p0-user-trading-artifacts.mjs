@@ -38,7 +38,9 @@ const SAFE_REPLAY_FIELDS = new Set([
   'errorCode'
 ])
 const SAFE_REPLAY_OUTCOME_FIELDS = new Set(['status', 'errorCode'])
-const SAFE_REQUEST_SCALARS = new Set(['requestid', 'requestfingerprint'])
+const SAFE_REQUEST_SCALARS = new Set(['requestid', 'requestfingerprint', 'requestref'])
+const RAW_HTTP_REQUEST_DETAIL_FIELDS = new Set(['headers', 'body', 'postdata', 'payload'])
+const NETWORK_REQUEST_BODY_FIELDS = new Set(['body', 'postdata', 'payload'])
 const RUN_STATE_IDENTITY_FIELDS = [
   'commit',
   'worktreeFingerprint',
@@ -55,10 +57,17 @@ function redactUrl(value) {
   return absolute ? parsed.toString() : `${parsed.pathname}${parsed.search}${parsed.hash}`
 }
 
-function redactBody(value) {
+function isFormBody(value) {
+  return value.length > 0 && value.split('&').every((field) => (
+    /^[A-Za-z_][A-Za-z\d_.-]*=/.test(field)
+  ))
+}
+
+function redactBody(value, dropOpaque = false) {
   try {
     return JSON.stringify(redactValue(JSON.parse(value)))
   } catch {
+    if (dropOpaque && !isFormBody(value)) return undefined
     const params = new URLSearchParams(value)
     if (![...params.keys()].some((key) => SENSITIVE_KEY.test(key))) return value
     for (const key of params.keys()) {
@@ -72,14 +81,18 @@ function redactValue(value, key = '') {
   if (SENSITIVE_KEY.test(key)) return REDACTED
   if (typeof value === 'string' && key.toLowerCase() === 'url') return redactUrl(value)
   if (typeof value === 'string' && /^(body|postdata)$/i.test(key)) return redactBody(value)
-  if (Array.isArray(value)) return value.map((item) => redactValue(item))
+  if (typeof value === 'string' && /^(responsebody|responsepayload)$/i.test(key)) {
+    return redactBody(value, true)
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactValue(item)).filter((item) => item !== undefined)
+  }
   if (!value || typeof value !== 'object') return value
 
   const redacted = Object.fromEntries(
-    Object.entries(value).map(([entryKey, entryValue]) => [
-      entryKey,
-      redactValue(entryValue, entryKey)
-    ])
+    Object.entries(value)
+      .map(([entryKey, entryValue]) => [entryKey, redactValue(entryValue, entryKey)])
+      .filter(([, entryValue]) => entryValue !== undefined)
   )
   if (typeof value.name === 'string' && SENSITIVE_KEY.test(value.name) && 'value' in value) {
     redacted.value = REDACTED
@@ -115,8 +128,17 @@ function sanitizeReplayProbe(probe) {
   return safe
 }
 
-function stripRawRequests(value, key = '') {
+function looksLikeRawHttpRequest(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const fields = new Set(Object.keys(value).map(normalizedKey))
+  return fields.has('method') && fields.has('url')
+    && [...RAW_HTTP_REQUEST_DETAIL_FIELDS].some((field) => fields.has(field))
+}
+
+function stripRawRequests(value, key = '', inNetworkEvidence = false) {
   const semanticKey = normalizedKey(key)
+  if (semanticKey === 'networkevidence') return stripRawRequests(value, '', true)
+  if (inNetworkEvidence && NETWORK_REQUEST_BODY_FIELDS.has(semanticKey)) return undefined
   if (SAFE_REQUEST_SCALARS.has(semanticKey)) {
     return persistenceScalar(value) ? value : undefined
   }
@@ -125,12 +147,20 @@ function stripRawRequests(value, key = '') {
     if (!Array.isArray(value)) return []
     return value.map(sanitizeReplayProbe)
   }
-  if (Array.isArray(value)) return value.map((item) => stripRawRequests(item))
+  if (!inNetworkEvidence && looksLikeRawHttpRequest(value)) return undefined
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => stripRawRequests(item, '', inNetworkEvidence))
+      .filter((item) => item !== undefined)
+  }
   if (!value || typeof value !== 'object') return value
 
   return Object.fromEntries(
     Object.entries(value)
-      .map(([field, fieldValue]) => [field, stripRawRequests(fieldValue, field)])
+      .map(([field, fieldValue]) => [
+        field,
+        stripRawRequests(fieldValue, field, inNetworkEvidence)
+      ])
       .filter(([, fieldValue]) => fieldValue !== undefined)
   )
 }
@@ -357,6 +387,35 @@ export function aggregateReport(state, results) {
   }
 }
 
+function validXmlCodePoint(codePoint) {
+  return codePoint === 0x9 || codePoint === 0xa || codePoint === 0xd
+    || (codePoint >= 0x20 && codePoint <= 0xd7ff)
+    || (codePoint >= 0xe000 && codePoint <= 0xfffd)
+    || (codePoint >= 0x10000 && codePoint <= 0x10ffff)
+}
+
+function validXmlCharacterData(value) {
+  for (const character of value) {
+    if (!validXmlCodePoint(character.codePointAt(0))) return false
+  }
+  let cursor = 0
+  while (true) {
+    const start = value.indexOf('&', cursor)
+    if (start === -1) return true
+    const entity = value.slice(start).match(
+      /^&(amp|lt|gt|apos|quot|#\d+|#x[\da-fA-F]+);/
+    )?.[0]
+    if (!entity) return false
+    if (entity.startsWith('&#')) {
+      const hexadecimal = entity.startsWith('&#x')
+      const digits = entity.slice(hexadecimal ? 3 : 2, -1)
+      const codePoint = Number.parseInt(digits, hexadecimal ? 16 : 10)
+      if (!validXmlCodePoint(codePoint)) return false
+    }
+    cursor = start + entity.length
+  }
+}
+
 function xmlAttributes(source) {
   const attributes = new Map()
   let cursor = 0
@@ -373,8 +432,10 @@ function xmlAttributes(source) {
     const quote = source[cursor]
     if (quote !== '"' && quote !== "'") return null
     const end = source.indexOf(quote, cursor + 1)
-    if (end === -1 || source.slice(cursor + 1, end).includes('<')) return null
-    attributes.set(name, source.slice(cursor + 1, end))
+    if (end === -1) return null
+    const value = source.slice(cursor + 1, end)
+    if (value.includes('<') || !validXmlCharacterData(value)) return null
+    attributes.set(name, value)
     cursor = end + 1
     if (cursor < source.length && !/\s/.test(source[cursor])) return null
   }
@@ -417,11 +478,14 @@ function surefireRootAttributes(source) {
   let cursor = 0
   let rootAttributes = null
   let doctypeSeen = false
+  let declarationSeen = false
 
   while (cursor < source.length) {
     const start = source.indexOf('<', cursor)
     const textEnd = start === -1 ? source.length : start
-    if (stack.length === 0 && source.slice(cursor, textEnd).trim()) return null
+    const characterData = source.slice(cursor, textEnd)
+    if (!validXmlCharacterData(characterData)
+      || (stack.length === 0 && characterData.trim())) return null
     if (start === -1) break
 
     if (source.startsWith('<!--', start)) {
@@ -440,6 +504,11 @@ function surefireRootAttributes(source) {
     if (source.startsWith('<?', start)) {
       const end = source.indexOf('?>', start + 2)
       if (end === -1) return null
+      if (start !== 0 || declarationSeen || rootAttributes || stack.length > 0
+        || !source.startsWith('<?xml', start) || !/\s/.test(source[start + 5])) return null
+      const declarationAttributes = xmlAttributes(source.slice(start + 5, end))
+      if (!declarationAttributes?.version) return null
+      declarationSeen = true
       cursor = end + 2
       continue
     }
@@ -474,6 +543,12 @@ function surefireRootAttributes(source) {
   return stack.length === 0 ? rootAttributes : null
 }
 
+function parseSurefireCounter(value) {
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null
+  const counter = Number(value)
+  return Number.isSafeInteger(counter) ? counter : null
+}
+
 export function parseSurefireReports(reportDir, expectedClasses, invocationStartedAt) {
   if (!Array.isArray(expectedClasses) || expectedClasses.length === 0) {
     throw new Error('SUREFIRE_EXPECTED_CLASSES_REQUIRED')
@@ -499,10 +574,10 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
       suiteName: attributes.name,
       file: name,
       modifiedAt: statSync(path).mtime.toISOString(),
-      tests: Number(attributes.tests),
-      skipped: Number(attributes.skipped),
-      failures: Number(attributes.failures),
-      errors: Number(attributes.errors)
+      tests: parseSurefireCounter(attributes.tests),
+      skipped: parseSurefireCounter(attributes.skipped),
+      failures: parseSurefireCounter(attributes.failures),
+      errors: parseSurefireCounter(attributes.errors)
     })
   }
   for (const className of expectedClasses) {

@@ -800,6 +800,144 @@ test('persistence rejects semantic request containers and nested replay tuples',
   )
 })
 
+test('persistence drops structurally raw HTTP requests outside sanitized network evidence', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-structural-request-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const markers = {
+    replay: 'RAW_REPLAY_PAYLOAD_51ad',
+    arbitrary: 'ARBITRARY_HTTP_CONTAINER_18f7',
+    networkBody: 'NETWORK_REQUEST_BODY_a0c2',
+    networkPostData: 'NETWORK_REQUEST_POST_DATA_3e64',
+    networkPayload: 'NETWORK_REQUEST_PAYLOAD_972b'
+  }
+
+  writeCaseResultAtomic(resultPath, {
+    id: 'RES-01',
+    rawReplayPayload: {
+      method: 'POST',
+      url: `/api/orders/${markers.replay}`,
+      body: markers.replay
+    },
+    arbitraryEvidence: [
+      { id: 'safe-observation', status: 'OBSERVED' },
+      {
+        method: 'PUT',
+        url: `/api/orders/${markers.arbitrary}`,
+        headers: { 'X-Marker': markers.arbitrary },
+        payload: markers.arbitrary
+      }
+    ],
+    networkEvidence: [{
+      method: 'POST',
+      url: '/api/orders?token=network-only-secret&symbol=BTCUSDT',
+      status: 201,
+      body: markers.networkBody,
+      postData: markers.networkPostData,
+      payload: markers.networkPayload,
+      response: { status: 201 }
+    }]
+  })
+
+  const serialized = readFileSync(resultPath, 'utf8')
+  for (const marker of Object.values(markers)) assert.equal(serialized.includes(marker), false)
+  assert.equal(serialized.includes('"rawReplayPayload"'), false)
+  const persisted = JSON.parse(serialized)
+  assert.deepEqual(persisted.arbitraryEvidence, [
+    { id: 'safe-observation', status: 'OBSERVED' }
+  ])
+  assert.deepEqual(persisted.networkEvidence, [{
+    method: 'POST',
+    url: '/api/orders?token=%5BREDACTED%5D&symbol=BTCUSDT',
+    status: 201,
+    response: { status: 201 }
+  }])
+})
+
+test('persistence keeps only scalar user action requestRef evidence', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-request-ref-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const requestRef = 'request-ref-safe-78b1'
+  const attackMarker = 'REQUEST_REF_OBJECT_ATTACK_d497'
+
+  writeCaseResultAtomic(resultPath, {
+    id: 'AUTH-01',
+    userActions: [
+      { action: 'submit-order', requestRef },
+      {
+        action: 'non-scalar-attack',
+        requestRef: {
+          method: 'POST',
+          url: `/api/orders/${attackMarker}`,
+          body: attackMarker
+        }
+      }
+    ]
+  })
+
+  const serialized = readFileSync(resultPath, 'utf8')
+  assert.equal(serialized.includes(attackMarker), false)
+  assert.deepEqual(JSON.parse(serialized).userActions, [
+    { action: 'submit-order', requestRef },
+    { action: 'non-scalar-attack' }
+  ])
+})
+
+test('persistence redacts parseable response bodies and drops opaque response payloads without mutation', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-response-redaction-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const markers = {
+    accessToken: 'JSON_RESPONSE_ACCESS_TOKEN_e5c1',
+    password: 'JSON_RESPONSE_PASSWORD_7a3d',
+    formPassword: 'FORM_RESPONSE_PASSWORD_29bf',
+    opaque: 'T1BBUVVFX1JFU1BPTlNFXzYxNmY+/=='
+  }
+  const result = {
+    id: 'AUTH-01',
+    networkEvidence: [
+      {
+        method: 'POST',
+        url: '/api/login',
+        status: 200,
+        responseBody: JSON.stringify({
+          accessToken: markers.accessToken,
+          profile: { password: markers.password, displayName: 'safe-name' }
+        })
+      },
+      {
+        method: 'POST',
+        url: '/api/session',
+        status: 200,
+        responsePayload: `password=${markers.formPassword}&state=active`
+      },
+      {
+        method: 'GET',
+        url: '/api/binary',
+        status: 200,
+        responseBody: markers.opaque
+      }
+    ]
+  }
+  const original = JSON.parse(JSON.stringify(result))
+
+  writeCaseResultAtomic(resultPath, result)
+
+  assert.deepEqual(result, original)
+  const serialized = readFileSync(resultPath, 'utf8')
+  for (const marker of Object.values(markers)) assert.equal(serialized.includes(marker), false)
+  const persisted = JSON.parse(serialized)
+  assert.deepEqual(JSON.parse(persisted.networkEvidence[0].responseBody), {
+    accessToken: '[REDACTED]',
+    profile: { password: '[REDACTED]', displayName: 'safe-name' }
+  })
+  const form = new URLSearchParams(persisted.networkEvidence[1].responsePayload)
+  assert.equal(form.get('password'), '[REDACTED]')
+  assert.equal(form.get('state'), 'active')
+  assert.equal('responseBody' in persisted.networkEvidence[2], false)
+})
+
 test('run state is created atomically and resumes only an identical evidence identity', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-state-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -1267,6 +1405,42 @@ for (const [scenario, fixture] of Object.entries(FAKE_OR_MALFORMED_SUREFIRE_REPO
   })
 }
 
+const INVALID_XML_CHARACTER_DATA_REPORTS = {
+  'bare-ampersand': [
+    '<testsuite name="com.fxplatform.CharacterDataIT" tests="1" skipped="0" failures="0" errors="0">',
+    '<system-out>invalid & text</system-out>',
+    '</testsuite>'
+  ].join('\n'),
+  'invalid-named-entity': [
+    '<testsuite name="com.fxplatform.CharacterDataIT" tests="1" skipped="0" failures="0" errors="0">',
+    '<system-out>invalid &notAnXmlEntity; text</system-out>',
+    '</testsuite>'
+  ].join('\n'),
+  'internal-xml-declaration': [
+    '<testsuite name="com.fxplatform.CharacterDataIT" tests="1" skipped="0" failures="0" errors="0">',
+    '<?xml version="1.0"?>',
+    '</testsuite>'
+  ].join('\n')
+}
+
+for (const [scenario, source] of Object.entries(INVALID_XML_CHARACTER_DATA_REPORTS)) {
+  test(`Surefire parser rejects invalid XML character data or internal declaration: ${scenario}`, (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-character-data-'))
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    const fileName = `TEST-${scenario}.xml`
+    writeFileSync(join(directory, fileName), source)
+
+    assert.throws(
+      () => parseSurefireReports(
+        directory,
+        ['CharacterDataIT'],
+        new Date(Date.now() - 5_000)
+      ),
+      new RegExp(`^Error: SUREFIRE_MALFORMED_XML: ${fileName}$`)
+    )
+  })
+}
+
 test('Surefire parser accepts one fresh exact suite for every requested class', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -1354,6 +1528,31 @@ test('Surefire parser rejects empty, skipped, failed or errored suites', (t) => 
     )
   }
 })
+
+const INVALID_SUREFIRE_COUNTER_LEXEMES = {
+  'empty-zero-counters': { tests: '1', skipped: '', failures: '', errors: '' },
+  'scientific-tests': { tests: '1e0', skipped: '0', failures: '0', errors: '0' }
+}
+
+for (const [scenario, counters] of Object.entries(INVALID_SUREFIRE_COUNTER_LEXEMES)) {
+  test(`Surefire parser rejects non-decimal counter evidence: ${scenario}`, (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-counter-lexeme-'))
+    t.after(() => rmSync(directory, { recursive: true, force: true }))
+    writeSurefireSuite(directory, `TEST-${scenario}.xml`, {
+      name: 'com.fxplatform.CounterLexicalIT',
+      ...counters
+    })
+
+    assert.throws(
+      () => parseSurefireReports(
+        directory,
+        ['CounterLexicalIT'],
+        new Date(Date.now() - 5_000)
+      ),
+      /^Error: SUREFIRE_INVALID_SUITE: CounterLexicalIT$/
+    )
+  })
+}
 
 test('Surefire parser requires a unique non-empty expected class list', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-classes-'))
