@@ -588,6 +588,77 @@ test('phase, profile, viewport and authority assignments match the approved matr
   assert.equal(P0_CASES.find(({ id }) => id === 'AUTH-02').executionGroup, 'auth-session')
 })
 
+test('registry initialization ignores inherited lookup-table values', () => {
+  const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
+  const expected = JSON.stringify({
+    definitions: P0_CASES,
+    fingerprint: P0_REGISTRY_FINGERPRINT
+  })
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+      import { readFileSync } from 'node:fs'
+
+      const expected = JSON.parse(readFileSync(0, 'utf8'))
+      const importUrl = new URL(${JSON.stringify(casesUrl)})
+      importUrl.searchParams.set('review15-registry-inherited', '1')
+      const inheritedCaseId = 'AUTH-01'
+      const inheritedLookup = ['REVIEW15_INHERITED_LOOKUP']
+      const originalDescriptor = Object.getOwnPropertyDescriptor(
+        Object.prototype,
+        inheritedCaseId
+      )
+      let getterCalls = 0
+      let imported
+      let importError
+
+      try {
+        Object.defineProperty(Object.prototype, inheritedCaseId, {
+          configurable: true,
+          get() {
+            getterCalls += 1
+            return inheritedLookup
+          }
+        })
+        imported = await import(importUrl)
+      } catch (error) {
+        importError = error
+      } finally {
+        if (originalDescriptor) {
+          Object.defineProperty(Object.prototype, inheritedCaseId, originalDescriptor)
+        } else {
+          delete Object.prototype[inheritedCaseId]
+        }
+      }
+
+      assert.deepEqual(
+        Object.getOwnPropertyDescriptor(Object.prototype, inheritedCaseId),
+        originalDescriptor
+      )
+      if (importError) throw importError
+      assert.equal(getterCalls, 0)
+      assert.equal(imported.P0_CASES.length, 60)
+      assert.deepEqual(imported.P0_CASES, expected.definitions)
+      assert.equal(imported.P0_REGISTRY_FINGERPRINT, expected.fingerprint)
+      for (let index = 0; index < expected.definitions.length; index += 1) {
+        const actual = imported.P0_CASES[index]
+        const clean = expected.definitions[index]
+        assert.deepEqual(Reflect.ownKeys(actual), Reflect.ownKeys(clean), actual.id)
+        assert.equal(Object.hasOwn(actual, inheritedCaseId), false, actual.id)
+        assert.equal(Object.hasOwn(actual, actual.phase), false, actual.id)
+      }
+    `
+  ], {
+    encoding: 'utf8',
+    input: expected
+  })
+
+  assert.equal(execution.status, 0, execution.stderr)
+  assert.equal(execution.stdout, '')
+})
+
 test('dispatch invokes the declared handler and fails fast when it is absent', async () => {
   const definition = P0_CASES[0]
   const context = { runId: 'contract-run' }
@@ -1418,6 +1489,66 @@ test('public network redaction matches persisted positive network schema', (t) =
   assert.deepEqual(redactNetworkEntry({ id: 'AUTH-01', status: 'PASS' }), {
     id: 'AUTH-01',
     status: 'PASS'
+  })
+})
+
+test('public no-detail network entries use persisted positive schema', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-public-network-no-detail-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const markers = {
+    query: 'REVIEW15_NO_DETAIL_QUERY_SECRET_1a2b',
+    requestRef: 'REVIEW15_NO_DETAIL_REFERENCE_2b3c',
+    response: 'REVIEW15_NO_DETAIL_RESPONSE_SECRET_3c4d',
+    unknown: 'REVIEW15_NO_DETAIL_UNKNOWN_SECRET_4d5e',
+    callback: 'REVIEW15_NO_DETAIL_CALLBACK_SECRET_5e6f'
+  }
+  let callbackCalls = 0
+  const ignoredCallback = () => {
+    callbackCalls += 1
+    return markers.callback
+  }
+  const entry = {
+    method: 'GET',
+    url: `https://example.invalid/api/orders?symbol=ETHUSDT&token=${markers.query}`,
+    status: 204,
+    requestRef: markers.requestRef,
+    response: markers.response,
+    unknownNetworkField: markers.unknown,
+    ignoredCallback
+  }
+  const original = { ...entry }
+
+  const direct = redactNetworkEntry(entry)
+  writeCaseResultAtomic(resultPath, {
+    id: 'AUTH-01',
+    status: 'PASS',
+    networkEvidence: [entry]
+  })
+  const persisted = JSON.parse(readFileSync(resultPath, 'utf8')).networkEvidence[0]
+
+  assert.equal(callbackCalls, 0)
+  assert.deepEqual(entry, original)
+  assert.deepEqual(direct, persisted)
+  assert.equal(direct.method, 'GET')
+  assert.equal(direct.status, 204)
+  assert.equal(direct.requestRef, persistenceDigest(markers.requestRef))
+  const url = new URL(direct.url)
+  assert.equal(url.searchParams.get('symbol'), 'ETHUSDT')
+  assert.equal(url.searchParams.get('token'), '[REDACTED]')
+  for (const field of ['response', 'unknownNetworkField', 'ignoredCallback']) {
+    assert.equal(Object.hasOwn(direct, field), false, `direct ${field}`)
+    assert.equal(Object.hasOwn(persisted, field), false, `persisted ${field}`)
+  }
+  const directSource = JSON.stringify(direct)
+  const persistedSource = JSON.stringify(persisted)
+  for (const marker of Object.values(markers)) {
+    assert.equal(directSource.includes(marker), false, `direct ${marker}`)
+    assert.equal(persistedSource.includes(marker), false, `persisted ${marker}`)
+  }
+  assert.deepEqual(redactNetworkEntry({ id: 'AUTH-02', status: 'FAIL' }), {
+    id: 'AUTH-02',
+    status: 'FAIL'
   })
 })
 
@@ -4781,6 +4912,125 @@ test('strict identity snapshots reject unsupported own registry and selector dat
   assert.equal(filteredReport.verdict, 'PARTIAL_PASS')
   assert.equal(filteredReport.scopeComplete, false)
   assert.equal(filteredReport.counts.PASS, 1)
+})
+
+test('resume ignores inherited case evidence on malformed cases containers', () => {
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+
+      const { planResume } = await import(${JSON.stringify(artifactsUrl)})
+      const { P0_CASES, P0_REGISTRY_FINGERPRINT } = await import(${JSON.stringify(casesUrl)})
+      const first = P0_CASES[0]
+      const complete = {
+        id: first.id,
+        status: 'PASS',
+        scopeComplete: true,
+        subruns: first.requiredSubruns.map((subrun) => ({
+          ...subrun,
+          status: 'PASS'
+        }))
+      }
+      const selection = { caseIds: [first.id] }
+      const state = (cases) => ({
+        definitions: P0_CASES,
+        registryFingerprint: P0_REGISTRY_FINGERPRINT,
+        cases
+      })
+      const arrayCases = []
+      const ownCases = { [first.id]: complete }
+      const arrayState = state(arrayCases)
+      const stringState = state('malformed-cases-container')
+      const ownState = state(ownCases)
+      const snapshots = {
+        arrayState: JSON.stringify(arrayState),
+        stringState: JSON.stringify(stringState),
+        ownState: JSON.stringify(ownState),
+        selection: JSON.stringify(selection)
+      }
+      const arrayDescriptor = Object.getOwnPropertyDescriptor(Array.prototype, first.id)
+      const stringDescriptor = Object.getOwnPropertyDescriptor(String.prototype, first.id)
+      let arrayCalls = 0
+      let stringCalls = 0
+      let arrayPlan
+      let stringPlan
+      let ownPlan
+      let capturedError
+
+      try {
+        Object.defineProperty(Array.prototype, first.id, {
+          configurable: true,
+          get() {
+            arrayCalls += 1
+            return complete
+          }
+        })
+        Object.defineProperty(String.prototype, first.id, {
+          configurable: true,
+          get() {
+            stringCalls += 1
+            return complete
+          }
+        })
+        arrayPlan = planResume(arrayState, P0_CASES, selection)
+        stringPlan = planResume(stringState, P0_CASES, selection)
+        ownPlan = planResume(ownState, P0_CASES, selection)
+      } catch (error) {
+        capturedError = error
+      } finally {
+        if (arrayDescriptor) {
+          Object.defineProperty(Array.prototype, first.id, arrayDescriptor)
+        } else {
+          delete Array.prototype[first.id]
+        }
+        if (stringDescriptor) {
+          Object.defineProperty(String.prototype, first.id, stringDescriptor)
+        } else {
+          delete String.prototype[first.id]
+        }
+      }
+
+      assert.deepEqual(
+        Object.getOwnPropertyDescriptor(Array.prototype, first.id),
+        arrayDescriptor
+      )
+      assert.deepEqual(
+        Object.getOwnPropertyDescriptor(String.prototype, first.id),
+        stringDescriptor
+      )
+      if (capturedError) throw capturedError
+      assert.equal(arrayCalls, 0)
+      assert.equal(stringCalls, 0)
+      for (const [label, plan] of [
+        ['array', arrayPlan],
+        ['string', stringPlan]
+      ]) {
+        assert.equal(plan.filtered, true, label)
+        assert.equal(plan.scopeComplete, false, label)
+        assert.equal(plan.entries.length, 1, label)
+        assert.equal(plan.entries[0].action, 'RUN', label)
+        assert.notEqual(plan.entries[0].action, 'SKIP', label)
+        assert.equal(plan.entries[0].scopeComplete, false, label)
+      }
+      assert.equal(ownPlan.filtered, true)
+      assert.equal(ownPlan.scopeComplete, false)
+      assert.equal(ownPlan.entries.length, 1)
+      assert.equal(ownPlan.entries[0].action, 'SKIP')
+      assert.equal(ownPlan.entries[0].reason, 'COMPLETE')
+      assert.equal(ownPlan.entries[0].scopeComplete, true)
+      assert.equal(JSON.stringify(arrayState), snapshots.arrayState)
+      assert.equal(JSON.stringify(stringState), snapshots.stringState)
+      assert.equal(JSON.stringify(ownState), snapshots.ownState)
+      assert.equal(JSON.stringify(selection), snapshots.selection)
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
+  assert.equal(execution.stdout, '')
 })
 
 test('prototype inheritance cannot forge aggregate or resume evidence', () => {

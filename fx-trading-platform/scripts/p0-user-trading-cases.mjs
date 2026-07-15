@@ -7,6 +7,7 @@ const sequence = (start, end) => Array.from(
 )
 
 const PROFILE_BY_PHASE = {
+  __proto__: null,
   'ui-core': ['UI_CORE'],
   'order-trigger': ['ORDER_TRIGGER'],
   funding: ['FUNDING_ONLY'],
@@ -14,6 +15,7 @@ const PROFILE_BY_PHASE = {
 }
 
 const PROFILE_OVERRIDES = {
+  __proto__: null,
   'SOURCE-01': ['UI_CORE'],
   'SOURCE-02': ['UI_CORE', 'ORDER_TRIGGER'],
   'SOURCE-03': ['UI_CORE', 'ORDER_TRIGGER', 'FUNDING_ONLY', 'LIQUIDATION_ONLY'],
@@ -27,6 +29,7 @@ const PROFILE_OVERRIDES = {
 }
 
 const REQUIRED_SUBRUN_OVERRIDES = {
+  __proto__: null,
   'SPOT-10': [
     { id: 'desktop-limit-wins', profile: 'ORDER_TRIGGER', viewport: 'desktop' },
     { id: 'desktop-stop-wins', profile: 'ORDER_TRIGGER', viewport: 'desktop' }
@@ -135,6 +138,7 @@ const WHOLE_CASE_AUTHORITY = new Set([
 ])
 
 const AUTHORITY_SUBRUNS = {
+  __proto__: null,
   'SPOT-11': ['desktop-recovery-trigger'],
   'PERP-01': ['desktop-target-mark'],
   'PERP-02': ['desktop-target-mark'],

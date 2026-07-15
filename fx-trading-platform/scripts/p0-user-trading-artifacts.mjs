@@ -878,7 +878,7 @@ function redactValue(value, key = '') {
 
 export function redactNetworkEntry(entry) {
   const snapshot = inertJsonValue(entry)
-  const stripped = looksLikeRawHttpRequest(snapshot)
+  const stripped = looksLikeRootNetworkEntry(snapshot)
     ? stripRawRequests([snapshot], 'networkEvidence')[0]
     : stripRawRequests(snapshot)
   const sanitized = redactValue(stripped)
@@ -1106,6 +1106,21 @@ function sanitizeReplayProbe(probe) {
   }
   if (Object.keys(outcome).length > 0) defineOwnData(safe, 'outcome', outcome)
   return safe
+}
+
+function looksLikeRootNetworkEntry(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const fields = Object.keys(value).map((key) => [
+    normalizedKey(key),
+    ownDataDescriptor(value, key)?.value
+  ])
+  return fields.some(([field, fieldValue]) => (
+    field === 'method' && typeof fieldValue === 'string' && HTTP_METHODS.has(fieldValue)
+  )) && fields.some(([field, fieldValue]) => (
+    RAW_HTTP_REQUEST_TARGET_FIELDS.has(field)
+    && typeof fieldValue === 'string'
+    && fieldValue.length > 0
+  ))
 }
 
 function looksLikeRawHttpRequest(value) {
@@ -1514,6 +1529,12 @@ function coversRequiredSubruns(result, definition) {
   ))
 }
 
+function ownResumeCaseResult(state, caseId) {
+  const cases = ownDataDescriptor(state, 'cases')?.value
+  if (!cases || typeof cases !== 'object' || Array.isArray(cases)) return undefined
+  return ownDataDescriptor(cases, caseId)?.value
+}
+
 export function planResume(state, definitions, selection = {}) {
   const stateSnapshot = inertIdentityValue(state)
   const definitionsSnapshot = inertIdentityValue(definitions)
@@ -1534,7 +1555,7 @@ export function planResume(state, definitions, selection = {}) {
     .some((key) => selectionValues(selectionSnapshot, key)?.length)
   const entries = resolved.entries
     .map(({ definition, subruns }) => {
-      const result = stateSnapshot.cases?.[definition.id]
+      const result = ownResumeCaseResult(stateSnapshot, definition.id)
       return {
         id: definition.id,
         executionGroup: definition.executionGroup,
