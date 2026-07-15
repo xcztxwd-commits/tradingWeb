@@ -5388,6 +5388,139 @@ test('resume rejects boxed scalar result and subrun evidence', () => {
   assert.equal(execution.stdout, '')
 })
 
+test('resume rejects scalar root state without prototype callbacks', () => {
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+
+      const { planResume } = await import(${JSON.stringify(artifactsUrl)})
+      const { P0_CASES, P0_REGISTRY_FINGERPRINT } = await import(${JSON.stringify(casesUrl)})
+      const definition = P0_CASES[0]
+      const selection = { caseIds: [definition.id] }
+      const complete = {
+        id: definition.id,
+        status: 'PASS',
+        scopeComplete: true,
+        subruns: definition.requiredSubruns.map((subrun) => ({
+          ...subrun,
+          status: 'PASS'
+        }))
+      }
+      const validState = {
+        definitions: P0_CASES,
+        registryFingerprint: P0_REGISTRY_FINGERPRINT,
+        cases: { [definition.id]: complete }
+      }
+      const arrayRoot = []
+      const roots = [
+        { label: 'string', value: 'review17-scalar-state', prototype: String.prototype },
+        { label: 'number', value: 17, prototype: Number.prototype },
+        { label: 'array', value: arrayRoot, prototype: Array.prototype }
+      ]
+      const fields = ['definitions', 'registryFingerprint']
+      const originals = roots.map(({ label, prototype }) => ({
+        label,
+        prototype,
+        descriptors: new Map(fields.map((field) => [
+          field,
+          Object.getOwnPropertyDescriptor(prototype, field)
+        ]))
+      }))
+      const calls = Object.fromEntries(roots.map(({ label }) => [
+        label,
+        Object.fromEntries(fields.map((field) => [field, 0]))
+      ]))
+      const outcomes = []
+      const snapshots = {
+        definitions: JSON.stringify(P0_CASES),
+        selection: JSON.stringify(selection),
+        validState: JSON.stringify(validState),
+        arrayRoot: JSON.stringify(arrayRoot)
+      }
+      let throwing = false
+      let validPlan
+      let capturedError
+
+      const runRoots = (mode) => {
+        for (const { label, value } of roots) {
+          try {
+            outcomes.push({ label, mode, result: planResume(value, P0_CASES, selection) })
+          } catch (error) {
+            outcomes.push({ label, mode, error: error.message })
+          }
+        }
+      }
+
+      try {
+        for (const { label, prototype } of roots) {
+          for (const field of fields) {
+            Object.defineProperty(prototype, field, {
+              configurable: true,
+              get() {
+                calls[label][field] += 1
+                if (throwing) {
+                  throw new Error('REVIEW17_THROWING_' + label + '_' + field)
+                }
+                return field === 'definitions' ? P0_CASES : P0_REGISTRY_FINGERPRINT
+              }
+            })
+          }
+        }
+        runRoots('returning')
+        throwing = true
+        runRoots('throwing')
+        throwing = false
+        validPlan = planResume(validState, P0_CASES, selection)
+      } catch (error) {
+        capturedError = error
+      } finally {
+        for (const { prototype, descriptors } of originals) {
+          for (const [field, descriptor] of descriptors) {
+            if (descriptor) Object.defineProperty(prototype, field, descriptor)
+            else delete prototype[field]
+          }
+        }
+      }
+
+      for (const { prototype, descriptors } of originals) {
+        for (const [field, descriptor] of descriptors) {
+          assert.deepEqual(Object.getOwnPropertyDescriptor(prototype, field), descriptor)
+        }
+      }
+      if (capturedError) throw capturedError
+      for (const { label } of roots) {
+        for (const field of fields) {
+          assert.equal(calls[label][field], 0, label + '.prototype.' + field)
+        }
+      }
+      assert.deepEqual(outcomes, ['returning', 'throwing'].flatMap((mode) => (
+        roots.map(({ label }) => ({
+          label,
+          mode,
+          error: 'INVALID_RUN_STATE: state'
+        }))
+      )))
+      assert.equal(validPlan.filtered, true)
+      assert.equal(validPlan.scopeComplete, false)
+      assert.equal(validPlan.entries.length, 1)
+      assert.equal(validPlan.entries[0].action, 'SKIP')
+      assert.equal(validPlan.entries[0].reason, 'COMPLETE')
+      assert.equal(validPlan.entries[0].scopeComplete, true)
+      assert.equal(JSON.stringify(P0_CASES), snapshots.definitions)
+      assert.equal(JSON.stringify(selection), snapshots.selection)
+      assert.equal(JSON.stringify(validState), snapshots.validState)
+      assert.equal(JSON.stringify(arrayRoot), snapshots.arrayRoot)
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
+  assert.equal(execution.stdout, '')
+})
+
 test('prototype inheritance cannot forge aggregate or resume evidence', () => {
   const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
   const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
@@ -6506,14 +6639,82 @@ function writeSurefireSuite(directory, fileName, attributes, modifiedAt = new Da
     errors: 0,
     ...attributes
   }
+  const testcaseCount = Number(values.tests)
+  const testcases = Number.isSafeInteger(testcaseCount) && testcaseCount > 0
+    ? Array.from({ length: testcaseCount }, (_, index) => (
+        `<testcase name="contract-${index + 1}"/>`
+      ))
+    : []
   writeFileSync(path, [
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<testsuite name="${values.name}" tests="${values.tests}" skipped="${values.skipped}" failures="${values.failures}" errors="${values.errors}">`,
+    ...testcases,
     '</testsuite>'
   ].join('\n'))
   utimesSync(path, modifiedAt, modifiedAt)
   return path
 }
+
+test('Surefire parser rejects empty and mismatched testcase evidence', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-surefire-testcase-count-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const startedAt = new Date(Date.now() - 5_000)
+  const suite = (name, tests, children = [], selfClosing = false) => {
+    const opening = `<testsuite name="com.fxplatform.${name}" tests="${tests}" skipped="0" failures="0" errors="0"`
+    return selfClosing
+      ? `${opening}/>`
+      : [`${opening}>`, ...children, '</testsuite>'].join('\n')
+  }
+
+  const validDirectory = join(root, 'valid')
+  mkdirSync(validDirectory)
+  writeFileSync(join(validDirectory, 'TEST-valid.xml'), suite('ConcreteIT', 2, [
+    '<testcase name="first"/>',
+    '<testcase name="second"></testcase>'
+  ]))
+  const valid = parseSurefireReports(validDirectory, ['ConcreteIT'], startedAt)
+  assert.equal(valid.status, 'PASS')
+  assert.deepEqual(valid.totals, { tests: 2, skipped: 0, failures: 0, errors: 0 })
+
+  const invalid = [
+    { label: 'empty', name: 'EmptyIT', source: suite('EmptyIT', 1) },
+    {
+      label: 'self-closing',
+      name: 'SelfClosingIT',
+      source: suite('SelfClosingIT', 1, [], true)
+    },
+    {
+      label: 'undercount',
+      name: 'UndercountIT',
+      source: suite('UndercountIT', 2, ['<testcase name="only"/>'])
+    },
+    {
+      label: 'overcount',
+      name: 'OvercountIT',
+      source: suite('OvercountIT', 1, [
+        '<testcase name="first"/>',
+        '<testcase name="second"/>'
+      ])
+    },
+    {
+      label: 'nested-fake',
+      name: 'NestedFakeIT',
+      source: suite('NestedFakeIT', 1, [
+        '<system-out><testcase name="not-a-direct-suite-case"/></system-out>'
+      ])
+    }
+  ]
+  for (const fixture of invalid) {
+    const directory = join(root, fixture.label)
+    mkdirSync(directory)
+    writeFileSync(join(directory, `TEST-${fixture.label}.xml`), fixture.source)
+    assert.throws(
+      () => parseSurefireReports(directory, [fixture.name], startedAt),
+      new RegExp(`^Error: SUREFIRE_INVALID_SUITE: ${fixture.name}$`),
+      fixture.label
+    )
+  }
+})
 
 test('Surefire XML attributes ignore inherited suite identity and counters', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-surefire-inherited-'))
@@ -6533,6 +6734,7 @@ test('Surefire XML attributes ignore inherited suite identity and counters', (t)
       writeFileSync(reportPath, [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<testsuite name="com.fxplatform.PrototypeSuiteIT" tests="1" skipped="0" failures="0" errors="0">',
+        '<testcase name="prototype-control"/>',
         '</testsuite>'
       ].join('\\n'))
       assert.equal(
@@ -6607,6 +6809,7 @@ test('Surefire parser binds bytes and freshness to one opened report', () => {
       const xml = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<testsuite name="com.fxplatform.PathRaceIT" tests="1" skipped="0" failures="0" errors="0">',
+        '<testcase name="path-race-control"/>',
         '</testsuite>'
       ].join('\\n')
       mkdirSync(reports)
@@ -6970,6 +7173,7 @@ test('Surefire scanner rejects illegal CharData and XML whitespace', (t) => {
     '<?xml\tversion="1.0"\r\nencoding="UTF-8"?>',
     '<testsuite \tname = "com.fxplatform.ValidWhitespaceIT"\r tests = "1"\n skipped="0" failures="0" errors="0" >',
     '<!-- valid comment -->',
+    '<testcase name="whitespace-control"/>',
     '<system-out><![CDATA[safe <xml> & cdata]]></system-out>',
     '</testsuite \t\r\n>'
   ].join('\n'))
@@ -7030,6 +7234,7 @@ test('Surefire outcome contract ignores fake outcome text and accepts a zero-out
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   writeFileSync(join(directory, 'TEST-outcome-text.xml'), [
     '<testsuite name="com.fxplatform.OutcomeTextIT" tests="1" skipped="0" failures="0" errors="0">',
+    '<testcase name="outcome-text-control"/>',
     '<!-- <failure>comment-only</failure> -->',
     '<system-out>',
     '<![CDATA[<error>cdata-only</error>]]>',
@@ -7085,12 +7290,15 @@ test('Surefire parser rejects malformed comments DOCTYPE and declarations', (t) 
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
     '<testsuite name="com.fxplatform.ValidXml10IT" tests="1" skipped="0" failures="0" errors="0">',
     '<!-- valid-comment -->',
+    '<testcase name="xml-10-control"/>',
     '<![CDATA[safe <xml> & raw cdata]]>',
     '</testsuite>'
   ].join('\n'))
   writeFileSync(join(validDirectory, 'TEST-xml-11.xml'), [
     "<?xml version='1.1' encoding='UTF-8' standalone='no'?>",
-    '<testsuite name="com.fxplatform.ValidXml11IT" tests="1" skipped="0" failures="0" errors="0"></testsuite>'
+    '<testsuite name="com.fxplatform.ValidXml11IT" tests="1" skipped="0" failures="0" errors="0">',
+    '<testcase name="xml-11-control"/>',
+    '</testsuite>'
   ].join('\n'))
   const valid = parseSurefireReports(
     validDirectory,

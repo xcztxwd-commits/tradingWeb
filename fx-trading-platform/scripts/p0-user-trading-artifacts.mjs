@@ -1556,10 +1556,13 @@ export function planResume(state, definitions, selection = {}) {
   if (!validSelectionSnapshot(selectionSnapshot)) {
     throw new TypeError('INVALID_SELECTION: malformed')
   }
+  if (!stateSnapshot || typeof stateSnapshot !== 'object' || Array.isArray(stateSnapshot)) {
+    throw new TypeError('INVALID_RUN_STATE: state')
+  }
   assertCanonicalRegistry(definitionsSnapshot, P0_REGISTRY_FINGERPRINT, 'definitions')
   assertCanonicalRegistry(
-    stateSnapshot?.definitions,
-    stateSnapshot?.registryFingerprint,
+    ownDataDescriptor(stateSnapshot, 'definitions')?.value,
+    ownDataDescriptor(stateSnapshot, 'registryFingerprint')?.value,
     'state'
   )
   const resolved = resolveSelection(definitionsSnapshot, selectionSnapshot)
@@ -1873,6 +1876,7 @@ function surefireRootAttributes(source) {
   let rootAttributes = null
   let declarationSeen = false
   const outcomeElements = { failure: 0, error: 0, skipped: 0 }
+  let testcaseCount = 0
 
   while (cursor < source.length) {
     const start = source.indexOf('<', cursor)
@@ -1926,6 +1930,8 @@ function surefireRootAttributes(source) {
     }
     const opening = xmlOpening(markup)
     if (!opening) return null
+    if (opening.name === 'testcase'
+      && stack.length === 1 && stack[0] === 'testsuite') testcaseCount += 1
     if (stack.length === 0) {
       if (rootAttributes || opening.name !== 'testsuite') return null
       rootAttributes = opening.attributes
@@ -1936,7 +1942,7 @@ function surefireRootAttributes(source) {
   }
 
   return stack.length === 0 && rootAttributes
-    ? { attributes: rootAttributes, outcomeElements }
+    ? { attributes: rootAttributes, outcomeElements, testcaseCount }
     : null
 }
 
@@ -2057,7 +2063,7 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
     if (!structure) {
       throw new Error(`SUREFIRE_MALFORMED_XML: ${name}`)
     }
-    const { attributes, outcomeElements } = structure
+    const { attributes, outcomeElements, testcaseCount } = structure
     const suiteName = ownXmlAttribute(attributes, 'name')
     const className = suiteName?.split('.').at(-1)
     if (!expected.has(className)) continue
@@ -2070,7 +2076,8 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
       skipped: parseSurefireCounter(ownXmlAttribute(attributes, 'skipped')),
       failures: parseSurefireCounter(ownXmlAttribute(attributes, 'failures')),
       errors: parseSurefireCounter(ownXmlAttribute(attributes, 'errors')),
-      outcomeElements
+      outcomeElements,
+      testcaseCount
     })
   }
   for (const className of classes) {
@@ -2086,6 +2093,7 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
     }
     const suite = matches[0]
     if (!Number.isSafeInteger(suite.tests) || suite.tests <= 0
+      || suite.testcaseCount !== suite.tests
       || suite.skipped !== 0 || suite.failures !== 0 || suite.errors !== 0
       || Object.values(suite.outcomeElements).some((count) => count > 0)) {
       throw new Error(`SUREFIRE_INVALID_SUITE: ${className}`)
@@ -2093,7 +2101,7 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
   }
   const suites = classes.map((className) => (
     found.find((suite) => suite.className === className)
-  )).filter(Boolean).map(({ outcomeElements: _, ...suite }) => suite)
+  )).filter(Boolean).map(({ outcomeElements: _, testcaseCount: __, ...suite }) => suite)
   const totals = suites.reduce((sum, suite) => ({
     tests: sum.tests + suite.tests,
     skipped: sum.skipped + suite.skipped,
