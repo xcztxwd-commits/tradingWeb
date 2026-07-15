@@ -1115,7 +1115,7 @@ function looksLikeRootNetworkEntry(value) {
     ownDataDescriptor(value, key)?.value
   ])
   return fields.some(([field, fieldValue]) => (
-    field === 'method' && typeof fieldValue === 'string' && HTTP_METHODS.has(fieldValue)
+    field === 'method' && typeof fieldValue === 'string' && fieldValue.length > 0
   )) && fields.some(([field, fieldValue]) => (
     RAW_HTTP_REQUEST_TARGET_FIELDS.has(field)
     && typeof fieldValue === 'string'
@@ -1386,8 +1386,17 @@ function registryIssue(definitions, fingerprint) {
     return 'INVALID_REGISTRY'
   }
   if (inertDefinitions.length === 0) return 'MISSING_REGISTRY'
-  if (inertDefinitions.length !== P0_CASES.length
-    || new Set(inertDefinitions.map((definition) => definition?.id)).size !== P0_CASES.length) {
+  if (inertDefinitions.length !== P0_CASES.length) return 'INVALID_REGISTRY'
+  const ids = []
+  for (const definition of inertDefinitions) {
+    if (!definition || typeof definition !== 'object' || Array.isArray(definition)) {
+      return 'INVALID_REGISTRY'
+    }
+    const id = ownDataDescriptor(definition, 'id')?.value
+    if (typeof id !== 'string') return 'INVALID_REGISTRY'
+    ids.push(id)
+  }
+  if (new Set(ids).size !== P0_CASES.length) {
     return 'INVALID_REGISTRY'
   }
   const computed = registryFingerprint(inertDefinitions)
@@ -1513,18 +1522,21 @@ function resolveSelection(definitions, selection) {
 }
 
 function coversRequiredSubruns(result, definition) {
-  if (result?.id !== definition.id
-    || result.status !== 'PASS'
-    || result.scopeComplete !== true) return false
-  if (!Array.isArray(result.subruns) || result.subruns.length !== definition.requiredSubruns.length) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)
+    || ownDataDescriptor(result, 'id')?.value !== definition.id
+    || ownDataDescriptor(result, 'status')?.value !== 'PASS'
+    || ownDataDescriptor(result, 'scopeComplete')?.value !== true) return false
+  const subruns = ownDataDescriptor(result, 'subruns')?.value
+  if (!Array.isArray(subruns) || subruns.length !== definition.requiredSubruns.length) {
     return false
   }
   return definition.requiredSubruns.every((required) => (
-    result.subruns.filter((actual) => (
-      actual.id === required.id
-      && actual.profile === required.profile
-      && actual.viewport === required.viewport
-      && actual.status === 'PASS'
+    subruns.filter((actual) => (
+      actual && typeof actual === 'object' && !Array.isArray(actual)
+      && ownDataDescriptor(actual, 'id')?.value === required.id
+      && ownDataDescriptor(actual, 'profile')?.value === required.profile
+      && ownDataDescriptor(actual, 'viewport')?.value === required.viewport
+      && ownDataDescriptor(actual, 'status')?.value === 'PASS'
     )).length === 1
   ))
 }
@@ -1532,7 +1544,9 @@ function coversRequiredSubruns(result, definition) {
 function ownResumeCaseResult(state, caseId) {
   const cases = ownDataDescriptor(state, 'cases')?.value
   if (!cases || typeof cases !== 'object' || Array.isArray(cases)) return undefined
-  return ownDataDescriptor(cases, caseId)?.value
+  const result = ownDataDescriptor(cases, caseId)?.value
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return undefined
+  return result
 }
 
 export function planResume(state, definitions, selection = {}) {

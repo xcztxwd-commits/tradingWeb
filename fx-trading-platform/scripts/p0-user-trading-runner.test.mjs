@@ -1552,6 +1552,62 @@ test('public no-detail network entries use persisted positive schema', (t) => {
   })
 })
 
+test('public network routing is independent of method output allowlist', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-public-network-method-routing-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const resultPath = join(directory, 'result.json')
+  const markers = {
+    query: 'REVIEW16_METHOD_QUERY_SECRET_1a2b',
+    requestRef: 'REVIEW16_METHOD_REFERENCE_2b3c',
+    response: 'REVIEW16_METHOD_RESPONSE_SECRET_3c4d',
+    unknown: 'REVIEW16_METHOD_UNKNOWN_SECRET_4d5e',
+    callback: 'REVIEW16_METHOD_CALLBACK_SECRET_5e6f'
+  }
+  let callbackCalls = 0
+  const ignoredCallback = () => {
+    callbackCalls += 1
+    return markers.callback
+  }
+  const entry = {
+    method: 'PROPFIND',
+    url: `https://example.invalid/api/orders?symbol=SOLUSDT&token=${markers.query}`,
+    status: 207,
+    requestRef: markers.requestRef,
+    response: markers.response,
+    unknownNetworkField: markers.unknown,
+    ignoredCallback
+  }
+  const original = { ...entry }
+
+  const direct = redactNetworkEntry(entry)
+  writeCaseResultAtomic(resultPath, {
+    id: 'AUTH-01',
+    status: 'PASS',
+    networkEvidence: [entry]
+  })
+  const persisted = JSON.parse(readFileSync(resultPath, 'utf8')).networkEvidence[0]
+
+  assert.equal(callbackCalls, 0)
+  assert.deepEqual(entry, original)
+  assert.deepEqual(direct, persisted)
+  assert.equal(Object.hasOwn(direct, 'method'), false)
+  assert.equal(direct.status, 207)
+  assert.equal(direct.requestRef, persistenceDigest(markers.requestRef))
+  const url = new URL(direct.url)
+  assert.equal(url.searchParams.get('symbol'), 'SOLUSDT')
+  assert.equal(url.searchParams.get('token'), '[REDACTED]')
+  for (const field of ['response', 'unknownNetworkField', 'ignoredCallback']) {
+    assert.equal(Object.hasOwn(direct, field), false, `direct ${field}`)
+    assert.equal(Object.hasOwn(persisted, field), false, `persisted ${field}`)
+  }
+  const directSource = JSON.stringify(direct)
+  const persistedSource = JSON.stringify(persisted)
+  for (const marker of Object.values(markers)) {
+    assert.equal(directSource.includes(marker), false, `direct ${marker}`)
+    assert.equal(persistedSource.includes(marker), false, `persisted ${marker}`)
+  }
+})
+
 test('public and persistence share a context-aware safe evidence boundary', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-context-safe-evidence-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -4690,6 +4746,148 @@ test('registry fingerprint rejects unsupported own JSON values without callbacks
   }
 })
 
+test('registry validation rejects scalar definitions without prototype callbacks', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-scalar-registry-definition-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const statePath = join(directory, 'run-state.json')
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+      import { existsSync } from 'node:fs'
+
+      const {
+        aggregateReport,
+        loadOrCreateRunState,
+        planResume
+      } = await import(${JSON.stringify(artifactsUrl)})
+      const { P0_CASES, P0_REGISTRY_FINGERPRINT } = await import(${JSON.stringify(casesUrl)})
+      const scalarDefinitions = JSON.parse(JSON.stringify(P0_CASES.map(({ id }) => id)))
+      assert.equal(scalarDefinitions.length, 60)
+      assert.equal(scalarDefinitions.every((definition) => typeof definition === 'string'), true)
+      const identity = {
+        runId: 'review16-scalar-registry',
+        mode: 'DISCOVERY',
+        commit: 'a'.repeat(40),
+        worktreeFingerprint: 'c'.repeat(64),
+        schemaVersion: 1,
+        registryFingerprint: P0_REGISTRY_FINGERPRINT
+      }
+      const selection = {}
+      const loadOptions = {
+        ...identity,
+        path: ${JSON.stringify(statePath)},
+        definitions: scalarDefinitions,
+        selection
+      }
+      const resumeInput = {
+        definitions: scalarDefinitions,
+        registryFingerprint: P0_REGISTRY_FINGERPRINT,
+        cases: {}
+      }
+      const aggregateInput = {
+        definitions: scalarDefinitions,
+        registryFingerprint: P0_REGISTRY_FINGERPRINT,
+        selection
+      }
+      const aggregateResults = []
+      const callerSnapshot = JSON.stringify({
+        canonicalDefinitions: P0_CASES,
+        scalarDefinitions,
+        loadOptions,
+        resumeInput,
+        aggregateInput,
+        aggregateResults,
+        selection
+      })
+      const originalDescriptor = Object.getOwnPropertyDescriptor(String.prototype, 'id')
+      let getterCalls = 0
+      let throwing = false
+      let loadError
+      let resumeError
+      let aggregateValue
+      let throwingAggregateValue
+      let capturedError
+
+      try {
+        Object.defineProperty(String.prototype, 'id', {
+          configurable: true,
+          get() {
+            getterCalls += 1
+            if (throwing) throw new Error('REVIEW16_THROWING_STRING_ID')
+            return String(this)
+          }
+        })
+        try {
+          loadOrCreateRunState(loadOptions)
+        } catch (error) {
+          loadError = error
+        }
+        try {
+          planResume(resumeInput, P0_CASES, selection)
+        } catch (error) {
+          resumeError = error
+        }
+        aggregateValue = aggregateReport(aggregateInput, aggregateResults)
+        throwing = true
+        try {
+          throwingAggregateValue = aggregateReport(aggregateInput, aggregateResults)
+        } catch (error) {
+          capturedError = error
+        }
+      } catch (error) {
+        capturedError = capturedError ?? error
+      } finally {
+        if (originalDescriptor) {
+          Object.defineProperty(String.prototype, 'id', originalDescriptor)
+        } else {
+          delete String.prototype.id
+        }
+      }
+
+      assert.deepEqual(
+        Object.getOwnPropertyDescriptor(String.prototype, 'id'),
+        originalDescriptor
+      )
+      if (capturedError) throw capturedError
+      assert.equal(getterCalls, 0)
+      assert.equal(loadError?.message, 'INVALID_REGISTRY: options')
+      assert.equal(resumeError?.message, 'INVALID_REGISTRY: state')
+      for (const [label, report] of [
+        ['aggregate', aggregateValue],
+        ['throwing aggregate', throwingAggregateValue]
+      ]) {
+        assert.equal(report.verdict, 'FAIL', label)
+        assert.equal(report.scopeComplete, false, label)
+        assert.deepEqual(report.counts, {
+          PASS: 0,
+          FAIL: 0,
+          BLOCKED: 0,
+          INVALID_TEST: 0,
+          MISSING: 0
+        }, label)
+        assert.deepEqual(report.issues, ['INVALID_REGISTRY'], label)
+      }
+      assert.equal(existsSync(${JSON.stringify(statePath)}), false)
+      assert.equal(JSON.stringify({
+        canonicalDefinitions: P0_CASES,
+        scalarDefinitions,
+        loadOptions,
+        resumeInput,
+        aggregateInput,
+        aggregateResults,
+        selection
+      }), callerSnapshot)
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
+  assert.equal(execution.stdout, '')
+})
+
 test('strict identity snapshots reject unsupported own registry and selector data', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-strict-identity-snapshot-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
@@ -5026,6 +5224,163 @@ test('resume ignores inherited case evidence on malformed cases containers', () 
       assert.equal(JSON.stringify(stringState), snapshots.stringState)
       assert.equal(JSON.stringify(ownState), snapshots.ownState)
       assert.equal(JSON.stringify(selection), snapshots.selection)
+    `
+  ], { encoding: 'utf8' })
+
+  assert.equal(execution.status, 0, execution.stderr)
+  assert.equal(execution.stdout, '')
+})
+
+test('resume rejects boxed scalar result and subrun evidence', () => {
+  const artifactsUrl = new URL('./p0-user-trading-artifacts.mjs', import.meta.url).href
+  const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
+  const execution = spawnSync(process.execPath, [
+    '--input-type=module',
+    '--eval',
+    `
+      import assert from 'node:assert/strict'
+
+      const { planResume } = await import(${JSON.stringify(artifactsUrl)})
+      const { P0_CASES, P0_REGISTRY_FINGERPRINT } = await import(${JSON.stringify(casesUrl)})
+      const definition = P0_CASES.find(({ requiredSubruns }) => requiredSubruns.length === 1)
+      assert.ok(definition)
+      const required = definition.requiredSubruns[0]
+      const complete = {
+        id: definition.id,
+        status: 'PASS',
+        scopeComplete: true,
+        subruns: [{
+          ...required,
+          status: 'PASS'
+        }]
+      }
+      const selection = { caseIds: [definition.id] }
+      const state = (cases) => ({
+        definitions: P0_CASES,
+        registryFingerprint: P0_REGISTRY_FINGERPRINT,
+        cases
+      })
+      const stringCases = { [definition.id]: JSON.stringify(complete) }
+      const numberCases = {
+        [definition.id]: {
+          ...complete,
+          subruns: [JSON.parse('1')]
+        }
+      }
+      const validCases = { [definition.id]: complete }
+      const stringState = state(stringCases)
+      const numberState = state(numberCases)
+      const validState = state(validCases)
+      const snapshots = {
+        definitions: JSON.stringify(P0_CASES),
+        selection: JSON.stringify(selection),
+        stringState: JSON.stringify(stringState),
+        numberState: JSON.stringify(numberState),
+        validState: JSON.stringify(validState)
+      }
+      const stringValues = {
+        id: definition.id,
+        status: 'PASS',
+        scopeComplete: true,
+        subruns: complete.subruns
+      }
+      const numberValues = {
+        id: required.id,
+        profile: required.profile,
+        viewport: required.viewport,
+        status: 'PASS'
+      }
+      const stringCalls = Object.create(null)
+      const numberCalls = Object.create(null)
+      const originalStringDescriptors = new Map(Object.keys(stringValues).map((field) => [
+        field,
+        Object.getOwnPropertyDescriptor(String.prototype, field)
+      ]))
+      const originalNumberDescriptors = new Map(Object.keys(numberValues).map((field) => [
+        field,
+        Object.getOwnPropertyDescriptor(Number.prototype, field)
+      ]))
+      for (const field of Object.keys(stringValues)) stringCalls[field] = 0
+      for (const field of Object.keys(numberValues)) numberCalls[field] = 0
+      let stringPlan
+      let numberPlan
+      let validPlan
+      let capturedError
+
+      const restoreDescriptors = (prototype, descriptors) => {
+        for (const [field, descriptor] of descriptors) {
+          if (descriptor) Object.defineProperty(prototype, field, descriptor)
+          else delete prototype[field]
+        }
+      }
+
+      try {
+        for (const [field, value] of Object.entries(stringValues)) {
+          Object.defineProperty(String.prototype, field, {
+            configurable: true,
+            get() {
+              stringCalls[field] += 1
+              return value
+            }
+          })
+        }
+        for (const [field, value] of Object.entries(numberValues)) {
+          Object.defineProperty(Number.prototype, field, {
+            configurable: true,
+            get() {
+              numberCalls[field] += 1
+              return value
+            }
+          })
+        }
+        stringPlan = planResume(stringState, P0_CASES, selection)
+        numberPlan = planResume(numberState, P0_CASES, selection)
+        validPlan = planResume(validState, P0_CASES, selection)
+      } catch (error) {
+        capturedError = error
+      } finally {
+        restoreDescriptors(String.prototype, originalStringDescriptors)
+        restoreDescriptors(Number.prototype, originalNumberDescriptors)
+      }
+
+      for (const [field, descriptor] of originalStringDescriptors) {
+        assert.deepEqual(Object.getOwnPropertyDescriptor(String.prototype, field), descriptor)
+      }
+      for (const [field, descriptor] of originalNumberDescriptors) {
+        assert.deepEqual(Object.getOwnPropertyDescriptor(Number.prototype, field), descriptor)
+      }
+      if (capturedError) throw capturedError
+      for (const field of Object.keys(stringValues)) {
+        assert.equal(stringCalls[field], 0, 'String.prototype.' + field)
+      }
+      for (const field of Object.keys(numberValues)) {
+        assert.equal(numberCalls[field], 0, 'Number.prototype.' + field)
+      }
+      for (const [label, plan] of [
+        ['string result', stringPlan],
+        ['number subrun', numberPlan]
+      ]) {
+        assert.equal(plan.filtered, true, label)
+        assert.equal(plan.scopeComplete, false, label)
+        assert.equal(plan.entries.length, 1, label)
+        assert.equal(plan.entries[0].action, 'RUN', label)
+        assert.notEqual(plan.entries[0].action, 'SKIP', label)
+        assert.equal(plan.entries[0].scopeComplete, false, label)
+      }
+      assert.equal(validPlan.filtered, true)
+      assert.equal(validPlan.scopeComplete, false)
+      assert.equal(validPlan.entries.length, 1)
+      assert.equal(validPlan.entries[0].action, 'SKIP')
+      assert.equal(validPlan.entries[0].reason, 'COMPLETE')
+      assert.equal(validPlan.entries[0].scopeComplete, true)
+      assert.equal(JSON.stringify(P0_CASES), snapshots.definitions)
+      assert.equal(JSON.stringify(selection), snapshots.selection)
+      assert.equal(JSON.stringify(stringState), snapshots.stringState)
+      assert.equal(JSON.stringify(numberState), snapshots.numberState)
+      assert.equal(JSON.stringify(validState), snapshots.validState)
+      assert.equal(Object.hasOwn(stringCases, definition.id), true)
+      assert.equal(Object.hasOwn(numberCases, definition.id), true)
+      assert.equal(Object.hasOwn(validCases, definition.id), true)
     `
   ], { encoding: 'utf8' })
 
