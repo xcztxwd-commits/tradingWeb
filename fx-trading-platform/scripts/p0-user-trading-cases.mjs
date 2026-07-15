@@ -1,5 +1,45 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { types } from 'node:util'
+
+export const P0_PHASES = [
+  'preflight',
+  'canonical',
+  'authority',
+  'ui-core',
+  'order-trigger',
+  'funding',
+  'liquidation',
+  'source',
+  'resilience',
+  'ui',
+  'selected',
+  'report',
+  'cleanup',
+  'all'
+]
+
+export const P0_PROFILES = [
+  'UI_CORE',
+  'ORDER_TRIGGER',
+  'FUNDING_ONLY',
+  'LIQUIDATION_ONLY'
+]
+
+const P0_RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/
+const P0_VIEWPORTS = ['desktop', 'mobile', 'all']
+const P0_MODES = ['discovery', 'certification']
+const P0_SUITES = ['canonical', 'p0']
+const P0_CLI_OPTIONS = new Set([
+  'suite',
+  'mode',
+  'phase',
+  'run-id',
+  'resume',
+  'case',
+  'viewport',
+  'profile'
+])
 
 const sequence = (start, end) => Array.from(
   { length: end - start + 1 },
@@ -268,6 +308,226 @@ export function registryFingerprint(definitions) {
 }
 
 export const P0_REGISTRY_FINGERPRINT = registryFingerprint(P0_CASES)
+
+function validRunId(value) {
+  return typeof value === 'string' && P0_RUN_ID_PATTERN.test(value)
+}
+
+function defaultRunId(mode) {
+  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
+  return `p0-${mode}-${stamp}-${randomUUID().replaceAll('-', '').slice(0, 8)}`
+}
+
+export function resolveP0RunRoot(artifactBase, runId) {
+  if (typeof artifactBase !== 'string' || artifactBase.trim().length === 0 || !validRunId(runId)) {
+    throw new Error('P0_RUN_ID_INVALID')
+  }
+  const base = resolve(artifactBase)
+  const target = resolve(base, runId)
+  const pathFromBase = relative(base, target)
+  if (!pathFromBase
+    || pathFromBase === '..'
+    || pathFromBase.startsWith(`..${sep}`)
+    || isAbsolute(pathFromBase)) {
+    throw new Error('P0_RUN_ID_INVALID')
+  }
+  return target
+}
+
+function parseCaseIds(value) {
+  const ids = value.split(',')
+  if (ids.some((id) => id.length === 0)
+    || new Set(ids).size !== ids.length
+    || ids.some((id) => !P0_CASES.some((definition) => definition.id === id))) {
+    throw new Error('P0_CLI_INVALID_CASE')
+  }
+  return ids
+}
+
+export function parseP0Cli(argv, { generateRunId = defaultRunId } = {}) {
+  if (!Array.isArray(argv) || argv.some((argument) => typeof argument !== 'string')) {
+    throw new Error('P0_CLI_INVALID_ARGUMENTS')
+  }
+  const parsed = Object.create(null)
+  let list = false
+  for (const argument of argv) {
+    if (argument === '--list') {
+      if (list) throw new Error('P0_CLI_DUPLICATE_OPTION')
+      list = true
+      continue
+    }
+    if (!argument.startsWith('--') || !argument.includes('=')) {
+      throw new Error('P0_CLI_MALFORMED_OPTION')
+    }
+    const separator = argument.indexOf('=')
+    const name = argument.slice(2, separator)
+    const value = argument.slice(separator + 1)
+    if (!P0_CLI_OPTIONS.has(name)) throw new Error('P0_CLI_UNKNOWN_OPTION')
+    if (Object.hasOwn(parsed, name)) throw new Error('P0_CLI_DUPLICATE_OPTION')
+    if (value.length === 0) throw new Error('P0_CLI_OPTION_REQUIRED')
+    parsed[name] = value
+  }
+
+  const suite = parsed.suite ?? 'canonical'
+  if (!P0_SUITES.includes(suite)) throw new Error('P0_CLI_INVALID_SUITE')
+  if (suite === 'canonical') {
+    if (list || Object.keys(parsed).some((name) => name !== 'suite')) {
+      throw new Error('P0_CLI_CANONICAL_OPTION')
+    }
+    return {
+      suite,
+      mode: 'discovery',
+      phase: 'canonical',
+      runId: null,
+      resume: null,
+      caseIds: [],
+      viewport: 'all',
+      profile: null,
+      list: false
+    }
+  }
+
+  const mode = parsed.mode ?? 'discovery'
+  const phase = parsed.phase ?? 'all'
+  const resume = parsed.resume ?? null
+  const viewport = parsed.viewport ?? 'all'
+  const profile = parsed.profile ?? null
+  const caseIds = parsed.case ? parseCaseIds(parsed.case) : []
+  if (!P0_MODES.includes(mode)) throw new Error('P0_CLI_INVALID_MODE')
+  if (!P0_PHASES.includes(phase)) throw new Error('P0_CLI_INVALID_PHASE')
+  if (!P0_VIEWPORTS.includes(viewport)) throw new Error('P0_CLI_INVALID_VIEWPORT')
+  if (profile !== null && !P0_PROFILES.includes(profile)) {
+    throw new Error('P0_CLI_INVALID_PROFILE')
+  }
+  for (const runId of [parsed['run-id'], resume].filter((value) => value !== undefined && value !== null)) {
+    if (!validRunId(runId)) throw new Error('P0_CLI_INVALID_RUN_ID')
+  }
+  if (resume && parsed['run-id'] && resume !== parsed['run-id']) {
+    throw new Error('P0_CLI_RUN_ID_MISMATCH')
+  }
+  if (resume && mode !== 'discovery') throw new Error('P0_CLI_RESUME_MODE')
+
+  const filtered = caseIds.length > 0 || viewport !== 'all' || profile !== null
+  if (phase === 'all' && filtered) throw new Error('P0_CLI_ALL_FILTER')
+  if (phase === 'selected' && caseIds.length === 0) throw new Error('P0_CLI_SELECTED_CASE_REQUIRED')
+  if (['preflight', 'canonical', 'authority', 'report', 'cleanup'].includes(phase) && filtered) {
+    throw new Error('P0_CLI_PHASE_FILTER')
+  }
+  if (mode === 'certification' && phase !== 'all' && phase !== 'cleanup') {
+    throw new Error('P0_CLI_CERTIFICATION_PHASE')
+  }
+  if (mode === 'certification' && (resume || filtered)) {
+    throw new Error('P0_CLI_CERTIFICATION_FILTER')
+  }
+  if (list && Object.keys(parsed).some((name) => name !== 'suite')) {
+    throw new Error('P0_CLI_LIST_OPTION')
+  }
+
+  let runId = parsed['run-id'] ?? resume
+  if (phase === 'cleanup' && !runId) throw new Error('P0_CLI_CLEANUP_RUN_ID_REQUIRED')
+  if (!list && !runId) {
+    runId = generateRunId(mode)
+    if (!validRunId(runId)) throw new Error('P0_CLI_INVALID_RUN_ID')
+  }
+
+  return {
+    suite,
+    mode,
+    phase,
+    runId: runId ?? null,
+    resume,
+    caseIds,
+    viewport,
+    profile,
+    list
+  }
+}
+
+function selectedDefinitions(options, definitions) {
+  let selected = definitions
+  if (options.phase === 'selected' || options.caseIds.length > 0) {
+    const requested = new Set(options.caseIds)
+    selected = selected.filter(({ id }) => requested.has(id))
+  } else if (['ui-core', 'order-trigger', 'funding', 'liquidation', 'source', 'resilience', 'ui'].includes(options.phase)) {
+    selected = selected.filter(({ phase }) => phase === options.phase)
+  }
+  if (options.profile) {
+    selected = selected.filter(({ requiredSubruns }) => (
+      requiredSubruns.some(({ profile }) => profile === options.profile)
+    ))
+  }
+  if (options.viewport !== 'all') {
+    selected = selected.filter(({ requiredSubruns }) => (
+      requiredSubruns.some(({ viewport }) => viewport === options.viewport)
+    ))
+  }
+  return selected
+}
+
+export function planP0Execution(options, definitions = P0_CASES) {
+  if (options.suite !== 'p0') throw new Error('P0_CLI_P0_SUITE_REQUIRED')
+  if (options.phase === 'cleanup') {
+    return {
+      phases: ['cleanup'],
+      profiles: [],
+      definitions: [],
+      includesCanonical: false,
+      fullMatrix: false,
+      verdict: null,
+      businessMutation: false
+    }
+  }
+
+  const selected = selectedDefinitions(options, definitions)
+  if (selected.length === 0 && !['preflight', 'canonical', 'authority', 'report'].includes(options.phase)) {
+    throw new Error('P0_CLI_EMPTY_SELECTION')
+  }
+  const profiles = P0_PROFILES.filter((profile) => selected.some(({ requiredSubruns }) => (
+    requiredSubruns.some((subrun) => subrun.profile === profile
+      && (options.viewport === 'all' || subrun.viewport === options.viewport))
+  )))
+  const authorityRequired = selected.some(({ authority }) => authority.mode !== 'none')
+  let phases
+  if (options.phase === 'all') {
+    phases = [
+      'preflight',
+      'canonical',
+      'authority',
+      'ui-core',
+      'order-trigger',
+      'funding',
+      'liquidation',
+      'source',
+      'resilience',
+      'ui',
+      'report',
+      'cleanup'
+    ]
+  } else if (options.phase === 'selected') {
+    phases = ['preflight', ...(authorityRequired ? ['authority'] : []), 'selected', 'report', 'cleanup']
+  } else if (['preflight', 'canonical', 'authority', 'report'].includes(options.phase)) {
+    phases = ['preflight']
+    if (options.phase !== 'preflight') phases.push(options.phase)
+    if (options.phase !== 'report') phases.push('report')
+    phases.push('cleanup')
+  } else {
+    phases = ['preflight', ...(authorityRequired ? ['authority'] : []), options.phase, 'report', 'cleanup']
+  }
+  const fullMatrix = options.phase === 'all'
+    && options.caseIds.length === 0
+    && options.viewport === 'all'
+    && options.profile === null
+    && selected.length === P0_CASES.length
+  return {
+    phases,
+    profiles,
+    definitions: selected,
+    includesCanonical: phases.includes('canonical'),
+    fullMatrix,
+    verdict: fullMatrix ? 'PASS' : 'PARTIAL_PASS',
+    businessMutation: selected.length > 0
+  }
+}
 
 export function countByPhase(definitions) {
   return definitions.reduce((counts, definition) => {

@@ -35,6 +35,8 @@ import {
   registryFingerprint as canonicalRegistryFingerprint,
   runCase
 } from './p0-user-trading-cases.mjs'
+import * as p0CaseContracts from './p0-user-trading-cases.mjs'
+import * as smokeContracts from './smoke-usdt-demo-browser.mjs'
 import './p0-user-trading-advanced-cases.mjs'
 import './p0-user-trading-core-cases.mjs'
 import './p0-user-trading-oracles.mjs'
@@ -768,6 +770,1738 @@ test('dispatch and phase counting ignore inherited values', async () => {
   ], { encoding: 'utf8' })
 
   assert.equal(execution.status, 0, execution.stderr)
+})
+
+test('P0 CLI rejects invalid invocation before the first mutation', () => {
+  assert.equal(typeof p0CaseContracts.parseP0Cli, 'function')
+  assert.equal(typeof p0CaseContracts.resolveP0RunRoot, 'function')
+  const parse = p0CaseContracts.parseP0Cli
+  const generatedRunId = 'p0-discovery-20260715-000000-a1b2c3d4'
+  let generationCalls = 0
+  const generateRunId = () => {
+    generationCalls += 1
+    return generatedRunId
+  }
+
+  assert.deepEqual(parse([], { generateRunId }), {
+    suite: 'canonical',
+    mode: 'discovery',
+    phase: 'canonical',
+    runId: null,
+    resume: null,
+    caseIds: [],
+    viewport: 'all',
+    profile: null,
+    list: false
+  })
+  assert.equal(generationCalls, 0)
+
+  assert.deepEqual(parse(['--suite=p0'], { generateRunId }), {
+    suite: 'p0',
+    mode: 'discovery',
+    phase: 'all',
+    runId: generatedRunId,
+    resume: null,
+    caseIds: [],
+    viewport: 'all',
+    profile: null,
+    list: false
+  })
+  assert.equal(generationCalls, 1)
+
+  generationCalls = 0
+  assert.deepEqual(parse([
+    '--suite=p0',
+    '--mode=discovery',
+    '--phase=selected',
+    '--run-id=p0-selected-a1',
+    '--case=SPOT-01,LIQ-01',
+    '--viewport=mobile',
+    '--profile=LIQUIDATION_ONLY'
+  ], { generateRunId }), {
+    suite: 'p0',
+    mode: 'discovery',
+    phase: 'selected',
+    runId: 'p0-selected-a1',
+    resume: null,
+    caseIds: ['SPOT-01', 'LIQ-01'],
+    viewport: 'mobile',
+    profile: 'LIQUIDATION_ONLY',
+    list: false
+  })
+  assert.equal(generationCalls, 0)
+
+  assert.deepEqual(parse([
+    '--suite=p0',
+    '--resume=p0-resume-a1',
+    '--run-id=p0-resume-a1',
+    '--phase=report'
+  ], { generateRunId }), {
+    suite: 'p0',
+    mode: 'discovery',
+    phase: 'report',
+    runId: 'p0-resume-a1',
+    resume: 'p0-resume-a1',
+    caseIds: [],
+    viewport: 'all',
+    profile: null,
+    list: false
+  })
+
+  const invalidInvocations = [
+    ['--unknown=value'],
+    ['--suite=p0', '--suite=p0'],
+    ['--suite'],
+    ['--suite=other'],
+    ['--suite=p0', '--mode=other'],
+    ['--suite=p0', '--phase=other'],
+    ['--suite=p0', '--viewport=tablet'],
+    ['--suite=p0', '--profile=ALL'],
+    ['--suite=p0', '--phase=selected'],
+    ['--suite=p0', '--phase=all', '--case=SPOT-01'],
+    ['--suite=p0', '--phase=all', '--viewport=mobile'],
+    ['--suite=p0', '--phase=all', '--profile=UI_CORE'],
+    ['--suite=p0', '--case=UNKNOWN-01'],
+    ['--suite=p0', '--run-id=../escape'],
+    ['--suite=p0', '--run-id=..\\escape'],
+    ['--suite=p0', '--run-id=C:escape'],
+    ['--suite=p0', '--run-id=C:\\escape'],
+    ['--suite=p0', '--run-id=\\\\server\\share'],
+    ['--suite=p0', '--resume=p0-resume-a1', '--run-id=p0-other-a1'],
+    ['--suite=p0', '--mode=certification', '--resume=p0-resume-a1'],
+    ['--suite=p0', '--mode=certification', '--phase=selected', '--case=SPOT-01'],
+    ['--suite=p0', '--mode=certification', '--phase=ui-core'],
+    ['--suite=p0', '--phase=cleanup']
+  ]
+  for (const arguments_ of invalidInvocations) {
+    generationCalls = 0
+    assert.throws(
+      () => parse(arguments_, { generateRunId }),
+      /^Error: P0_CLI_/,
+      arguments_.join(' ')
+    )
+    assert.equal(generationCalls, 0, arguments_.join(' '))
+  }
+
+  const artifactBase = resolve(tmpdir(), 'p0-contained-runs')
+  assert.equal(
+    p0CaseContracts.resolveP0RunRoot(artifactBase, 'p0-contained-a1'),
+    join(artifactBase, 'p0-contained-a1')
+  )
+  for (const unsafe of ['.', '..', '../escape', '..\\escape', 'C:escape', 'C:\\escape', '\\\\server\\share']) {
+    assert.throws(
+      () => p0CaseContracts.resolveP0RunRoot(artifactBase, unsafe),
+      /^Error: P0_RUN_ID_INVALID/,
+      unsafe
+    )
+  }
+})
+
+test('P0 phase planner distinguishes selected partial all complete and cleanup verdict-free', () => {
+  assert.equal(typeof p0CaseContracts.planP0Execution, 'function')
+  const selectedOptions = p0CaseContracts.parseP0Cli([
+    '--suite=p0',
+    '--phase=selected',
+    '--run-id=p0-selected-plan-a1',
+    '--case=SPOT-01,LIQ-01'
+  ])
+  const selected = p0CaseContracts.planP0Execution(selectedOptions, P0_CASES)
+
+  assert.deepEqual(selected.phases, ['preflight', 'authority', 'selected', 'report', 'cleanup'])
+  assert.deepEqual(selected.profiles, ['UI_CORE', 'LIQUIDATION_ONLY'])
+  assert.deepEqual(selected.definitions.map(({ id }) => id), ['SPOT-01', 'LIQ-01'])
+  assert.equal(selected.includesCanonical, false)
+  assert.equal(selected.fullMatrix, false)
+  assert.equal(selected.verdict, 'PARTIAL_PASS')
+
+  const all = p0CaseContracts.planP0Execution(
+    p0CaseContracts.parseP0Cli(['--suite=p0', '--run-id=p0-all-plan-a1']),
+    P0_CASES
+  )
+  assert.deepEqual(all.phases, [
+    'preflight',
+    'canonical',
+    'authority',
+    'ui-core',
+    'order-trigger',
+    'funding',
+    'liquidation',
+    'source',
+    'resilience',
+    'ui',
+    'report',
+    'cleanup'
+  ])
+  assert.deepEqual(all.profiles, [
+    'UI_CORE',
+    'ORDER_TRIGGER',
+    'FUNDING_ONLY',
+    'LIQUIDATION_ONLY'
+  ])
+  assert.equal(all.definitions.length, 60)
+  assert.equal(all.includesCanonical, true)
+  assert.equal(all.fullMatrix, true)
+  assert.equal(all.verdict, 'PASS')
+
+  const cleanup = p0CaseContracts.planP0Execution(
+    p0CaseContracts.parseP0Cli([
+      '--suite=p0',
+      '--mode=certification',
+      '--phase=cleanup',
+      '--run-id=p0-cleanup-plan-a1'
+    ]),
+    P0_CASES
+  )
+  assert.deepEqual(cleanup.phases, ['cleanup'])
+  assert.deepEqual(cleanup.profiles, [])
+  assert.deepEqual(cleanup.definitions, [])
+  assert.equal(cleanup.includesCanonical, false)
+  assert.equal(cleanup.fullMatrix, false)
+  assert.equal(cleanup.verdict, null)
+  assert.equal(cleanup.businessMutation, false)
+})
+
+test('canonical default and explicit suite dispatch the same import-safe journey', async () => {
+  assert.equal(typeof smokeContracts.createSmokeMain, 'function')
+  const calls = []
+  const dispatch = smokeContracts.createSmokeMain({
+    runCanonicalSmoke: async () => {
+      calls.push('canonical')
+      return { status: 'CANONICAL_SENTINEL' }
+    },
+    runP0Suite: async () => {
+      calls.push('p0')
+      return { status: 'P0_SENTINEL' }
+    }
+  })
+
+  assert.deepEqual(await dispatch([]), {
+    status: 'CANONICAL_SENTINEL'
+  })
+  assert.deepEqual(await dispatch(['--suite=canonical']), {
+    status: 'CANONICAL_SENTINEL'
+  })
+  assert.deepEqual(calls, ['canonical', 'canonical'])
+})
+
+test('P0 list prints only the canonical registry and performs zero side effects', async () => {
+  assert.equal(typeof smokeContracts.createSmokeMain, 'function')
+  let mutationCalls = 0
+  let stdout = ''
+  const dispatch = smokeContracts.createSmokeMain({
+    runCanonicalSmoke: async () => { mutationCalls += 1 },
+    runP0Suite: async () => { mutationCalls += 1 },
+    writeStdout: (value) => { stdout += value }
+  })
+  const result = await dispatch(['--suite=p0', '--list'])
+
+  assert.deepEqual(result, { listed: 60 })
+  assert.deepEqual(JSON.parse(stdout), P0_CASES)
+  assert.equal(stdout, `${JSON.stringify(P0_CASES, null, 2)}\n`)
+  assert.equal(mutationCalls, 0)
+})
+
+test('backend environment scrub is case-insensitive and profile maps are exact', () => {
+  assert.equal(typeof smokeContracts.sanitizedBackendEnvironment, 'function')
+  assert.equal(typeof smokeContracts.buildBackendEnvironment, 'function')
+  const poisoned = {
+    Path: 'safe-path',
+    SAFE_VALUE: 'kept',
+    spring_application_json: '{"unsafe":true}',
+    SprIng_PrOfIlEs_AcTiVe: 'production',
+    spring_datasource_url: 'jdbc:postgresql://external.invalid/real',
+    SpRiNg_DaTa_ReDiS_HoSt: 'external.invalid',
+    rEdIs_PaSsWoRd: 'real-secret',
+    execution_mode: 'live',
+    MARKET_REALTIME_ENABLED: 'true',
+    trading_funding_enabled: 'true',
+    Broker_Endpoint: 'https://broker.invalid',
+    fIx_AcCoUnT: 'real-account',
+    LP_PRIVATE_KEY: 'real-key'
+  }
+
+  assert.deepEqual(smokeContracts.sanitizedBackendEnvironment(poisoned), {
+    Path: 'safe-path',
+    SAFE_VALUE: 'kept'
+  })
+
+  const common = {
+    SPRING_PROFILES_ACTIVE: 'dev',
+    EXECUTION_MODE: 'demo',
+    TZ: 'UTC',
+    JAVA_TOOL_OPTIONS: '-Duser.timezone=UTC',
+    MARKET_TEST_CONTROL_ENABLED: 'true',
+    MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED: 'false',
+    MARKET_REALTIME_ENABLED: 'false',
+    TRADING_FX_FINANCING_ENABLED: 'false',
+    REDIS_HOST: '127.0.0.1',
+    REDIS_PORT: '6379',
+    REDIS_PASSWORD: ''
+  }
+  const scans = {
+    TRADING_PENDING_ORDER_SCAN_MS: '500',
+    TRADING_PROTECTIVE_ORDER_SCAN_MS: '500',
+    TRADING_FUNDING_SCAN_MS: '500',
+    TRADING_LIQUIDATION_SCAN_INTERVAL_MS: '500'
+  }
+  const workerKeys = [
+    'TRADING_PENDING_ORDER_EXECUTION_ENABLED',
+    'TRADING_PROTECTIVE_ORDER_EXECUTION_ENABLED',
+    'TRADING_FUNDING_ENABLED',
+    'TRADING_LIQUIDATION_ENABLED'
+  ]
+  const expectedWorkers = {
+    UI_CORE: ['false', 'false', 'false', 'false'],
+    ORDER_TRIGGER: ['true', 'true', 'false', 'false'],
+    FUNDING_ONLY: ['false', 'false', 'true', 'false'],
+    LIQUIDATION_ONLY: ['false', 'false', 'false', 'true']
+  }
+
+  for (const [profile, workers] of Object.entries(expectedWorkers)) {
+    const environment = smokeContracts.buildBackendEnvironment(profile, {
+      SERVER_PORT: '18086',
+      DATABASE_URL: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_test'
+    }, poisoned)
+    for (const [key, value] of Object.entries({ ...common, ...scans })) {
+      assert.equal(environment[key], value, `${profile} ${key}`)
+    }
+    assert.deepEqual(workerKeys.map((key) => environment[key]), workers, profile)
+    assert.equal(environment.Path, 'safe-path')
+    assert.equal(environment.SAFE_VALUE, 'kept')
+    assert.equal(environment.SERVER_PORT, '18086')
+    assert.equal(environment.DATABASE_URL, 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_test')
+    for (const unsafeKey of [
+      'spring_application_json',
+      'spring_datasource_url',
+      'SpRiNg_DaTa_ReDiS_HoSt',
+      'Broker_Endpoint',
+      'fIx_AcCoUnT',
+      'LP_PRIVATE_KEY'
+    ]) {
+      assert.equal(
+        Object.keys(environment).some((key) => key.toUpperCase() === unsafeKey.toUpperCase()),
+        false,
+        `${profile} inherited ${unsafeKey}`
+      )
+    }
+  }
+  assert.throws(
+    () => smokeContracts.buildBackendEnvironment('UNKNOWN_PROFILE', {}, poisoned),
+    /^Error: P0_UNKNOWN_PROFILE$/
+  )
+})
+
+test('control manifest confines raw ownership and cleanup is exact and idempotent', async (t) => {
+  assert.equal(typeof smokeContracts.createControlManifest, 'function')
+  assert.equal(typeof smokeContracts.completeControlCleanup, 'function')
+  assert.equal(typeof smokeContracts.buildCanonicalChildInvocation, 'function')
+  const root = mkdtempSync(join(tmpdir(), 'p0-control-manifest-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const artifacts = join(root, 'artifacts')
+  const runId = 'p0-control-a1'
+  const rawToken = 'raw-owner-token-never-evidence'
+  const script = join(root, 'canonical-script.mjs')
+  writeFileSync(script, '')
+
+  const created = await smokeContracts.createControlManifest({
+    artifactBase: artifacts,
+    runId,
+    runToken: rawToken,
+    mode: 'discovery',
+    selection: ['SPOT-01'],
+    database: 'fx_p0_user_e2e_control_a1',
+    now: () => '2026-07-15T00:00:00.000Z'
+  })
+  const runRoot = join(artifacts, runId)
+  const ownershipPath = join(runRoot, 'control', 'ownership.json')
+  assert.equal(created.runRoot, runRoot)
+  assert.equal(created.ownershipPath, ownershipPath)
+  assert.match(created.ownerId, /^[a-f0-9]{64}$/)
+  assert.equal(created.ownerId.includes(rawToken), false)
+  const persisted = JSON.parse(readFileSync(ownershipPath, 'utf8'))
+  assert.equal(persisted.ownerToken, rawToken)
+  assert.equal(persisted.ownerId, created.ownerId)
+  assert.equal(persisted.status, 'ACTIVE')
+  assert.deepEqual(persisted.selection, ['SPOT-01'])
+
+  const child = smokeContracts.buildCanonicalChildInvocation({
+    scriptPath: script,
+    ownerToken: rawToken,
+    ownerId: created.ownerId,
+    database: 'fx_p0_user_e2e_control_a1',
+    inheritedEnv: {
+      PATH: 'safe-path',
+      P0_RUN_OWNER_TOKEN: 'foreign-owner-token-a1',
+      BROKER_ENDPOINT: 'https://broker.invalid'
+    }
+  })
+  assert.equal(child.command, process.execPath)
+  assert.deepEqual(child.args, [script])
+  assert.equal(child.env.P0_RUN_OWNER_TOKEN, rawToken)
+  assert.equal(child.env.USDT_DEMO_SMOKE_DATABASE, 'fx_p0_user_e2e_control_a1')
+  assert.equal(child.env.BROKER_ENDPOINT, undefined)
+  assert.equal(JSON.stringify({
+    command: child.command,
+    args: child.args,
+    log: child.log,
+    evidence: child.evidence
+  }).includes(rawToken), false)
+  assert.equal(child.log.ownerId, created.ownerId)
+
+  await assert.rejects(
+    smokeContracts.createControlManifest({
+      artifactBase: artifacts,
+      runId,
+      runToken: 'second-owner-token-a1',
+      mode: 'discovery',
+      selection: [],
+      database: 'fx_p0_user_e2e_control_a1'
+    }),
+    /P0_CONTROL_EXISTS/
+  )
+  assert.equal(JSON.parse(readFileSync(ownershipPath, 'utf8')).ownerToken, rawToken)
+
+  await assert.rejects(
+    smokeContracts.completeControlCleanup({
+      artifactBase: artifacts,
+      runId,
+      runToken: 'wrong-owner-token-a1',
+      resourcesCleaned: true
+    }),
+    /P0_OWNER_MISMATCH/
+  )
+  await assert.rejects(
+    smokeContracts.completeControlCleanup({
+      artifactBase: artifacts,
+      runId,
+      runToken: rawToken,
+      resourcesCleaned: false
+    }),
+    /P0_CLEANUP_INCOMPLETE/
+  )
+  assert.equal(existsSync(ownershipPath), true)
+
+  const completed = await smokeContracts.completeControlCleanup({
+    artifactBase: artifacts,
+    runId,
+    runToken: rawToken,
+    resourcesCleaned: true,
+    now: () => '2026-07-15T01:00:00.000Z'
+  })
+  assert.deepEqual(completed, { status: 'CLEANED', alreadyCleaned: false })
+  assert.equal(existsSync(ownershipPath), false)
+  const cleanedPath = join(runRoot, 'control', 'cleaned.json')
+  const cleanedText = readFileSync(cleanedPath, 'utf8')
+  assert.equal(cleanedText.includes(rawToken), false)
+  assert.deepEqual(JSON.parse(cleanedText), {
+    schemaVersion: 1,
+    status: 'CLEANED',
+    runId,
+    ownerId: created.ownerId,
+    cleanedAt: '2026-07-15T01:00:00.000Z'
+  })
+  assert.deepEqual(await smokeContracts.completeControlCleanup({
+    artifactBase: artifacts,
+    runId,
+    runToken: rawToken,
+    resourcesCleaned: true
+  }), { status: 'CLEANED', alreadyCleaned: true })
+
+  assert.throws(
+    () => p0CaseContracts.resolveP0RunRoot(artifacts, '../escape'),
+    /P0_RUN_ID_INVALID/
+  )
+  const outside = join(root, 'outside')
+  mkdirSync(outside)
+  const escapedRun = join(artifacts, 'p0-junction-a1')
+  symlinkSync(outside, escapedRun, process.platform === 'win32' ? 'junction' : 'dir')
+  await assert.rejects(
+    smokeContracts.createControlManifest({
+      artifactBase: artifacts,
+      runId: 'p0-junction-a1',
+      runToken: 'escape-owner-token-a1',
+      mode: 'discovery',
+      selection: [],
+      database: 'fx_p0_user_e2e_junction_a1'
+    }),
+    /P0_CONTROL_EXISTS/
+  )
+  assert.deepEqual(readdirSync(outside), [])
+})
+
+test('database ownership is strictly quoted read back and required before alter or drop', async () => {
+  assert.equal(typeof smokeContracts.databaseSegmentForAttempt, 'function')
+  assert.equal(typeof smokeContracts.createOwnedDatabase, 'function')
+  assert.equal(typeof smokeContracts.alterOwnedDatabaseTimezone, 'function')
+  assert.equal(typeof smokeContracts.dropOwnedDatabase, 'function')
+  const segmentName = smokeContracts.databaseSegmentForAttempt({
+    phase: 'order-trigger',
+    attempt: 2,
+    randomSuffix: 'abcdef123456'
+  })
+  assert.equal(segmentName, 'fx_p0_user_e2e_order_trigger_2_abcdef123456')
+  assert.match(segmentName, /^fx_p0_user_e2e_[a-z0-9_]+$/)
+  assert.throws(
+    () => smokeContracts.databaseSegmentForAttempt({
+      phase: '../escape',
+      attempt: 1,
+      randomSuffix: 'abcdef123456'
+    }),
+    /P0_DATABASE_PHASE_INVALID/
+  )
+
+  const runToken = "database-owner-token-'quoted'-a1"
+  const ownerMarker = `p0-owner:${runToken}`
+  const actions = []
+  const postgres = {
+    async executeAdminSql(sql, options) {
+      actions.push({ type: 'sql', sql, options })
+    },
+    async readDatabaseOwnership(database) {
+      actions.push({ type: 'read', database })
+      return { segmentName: database, ownerMarker }
+    }
+  }
+  const created = await smokeContracts.createOwnedDatabase({
+    segmentName,
+    runToken,
+    postgres,
+    recordDatabase: async (database) => actions.push({ type: 'record', database })
+  })
+  assert.deepEqual(created, {
+    segmentName,
+    ownerId: createHash('sha256').update(runToken).digest('hex')
+  })
+  assert.deepEqual(actions, [
+    { type: 'record', database: segmentName },
+    {
+      type: 'sql',
+      sql: `CREATE DATABASE "${segmentName}"`,
+      options: { sensitive: false }
+    },
+    {
+      type: 'sql',
+      sql: `COMMENT ON DATABASE "${segmentName}" IS 'p0-owner:database-owner-token-''quoted''-a1'`,
+      options: { sensitive: true }
+    },
+    { type: 'read', database: segmentName }
+  ])
+
+  actions.length = 0
+  await smokeContracts.alterOwnedDatabaseTimezone({
+    segmentName,
+    runToken,
+    postgres
+  })
+  await smokeContracts.dropOwnedDatabase({
+    segmentName,
+    runToken,
+    postgres
+  })
+  assert.deepEqual(actions, [
+    { type: 'read', database: segmentName },
+    {
+      type: 'sql',
+      sql: `ALTER DATABASE "${segmentName}" SET timezone TO 'UTC'`,
+      options: { sensitive: false }
+    },
+    { type: 'read', database: segmentName },
+    {
+      type: 'sql',
+      sql: `DROP DATABASE "${segmentName}"`,
+      options: { sensitive: false }
+    }
+  ])
+
+  for (const unsafeName of [
+    'fx_p0_user_e2e_*',
+    'fx_platform',
+    'fx_p0_user_e2e_safe;DROP_DATABASE',
+    'FX_P0_USER_E2E_UPPER'
+  ]) {
+    const unsafeActions = []
+    await assert.rejects(
+      smokeContracts.dropOwnedDatabase({
+        segmentName: unsafeName,
+        runToken,
+        postgres: {
+          async readDatabaseOwnership() { unsafeActions.push('read') },
+          async executeAdminSql() { unsafeActions.push('sql') }
+        }
+      }),
+      /P0_DATABASE_NAME_INVALID/,
+      unsafeName
+    )
+    assert.deepEqual(unsafeActions, [], unsafeName)
+  }
+
+  const mismatchActions = []
+  const mismatchedPostgres = {
+    async readDatabaseOwnership(database) {
+      mismatchActions.push({ type: 'read', database })
+      return { segmentName: database, ownerMarker: 'p0-owner:foreign-owner-token-a1' }
+    },
+    async executeAdminSql(sql) { mismatchActions.push({ type: 'sql', sql }) }
+  }
+  await assert.rejects(
+    smokeContracts.alterOwnedDatabaseTimezone({ segmentName, runToken, postgres: mismatchedPostgres }),
+    /P0_DATABASE_OWNER_MISMATCH/
+  )
+  await assert.rejects(
+    smokeContracts.dropOwnedDatabase({ segmentName, runToken, postgres: mismatchedPostgres }),
+    /P0_DATABASE_OWNER_MISMATCH/
+  )
+  assert.deepEqual(mismatchActions, [
+    { type: 'read', database: segmentName },
+    { type: 'read', database: segmentName }
+  ])
+})
+
+test('database identity probe pins loopback owned segment marker and UTC', async () => {
+  assert.equal(typeof smokeContracts.verifyDatabaseIdentity, 'function')
+  const segmentName = 'fx_p0_user_e2e_probe_a1'
+  const runToken = 'database-probe-owner-token-a1'
+  const databaseUrl = `jdbc:postgresql://127.0.0.1:5432/${segmentName}`
+  const probes = []
+  const postgres = {
+    async probeDatabase(identity) {
+      probes.push(identity)
+      return {
+        currentDatabase: segmentName,
+        ownerMarker: `p0-owner:${runToken}`,
+        timezone: 'UTC'
+      }
+    }
+  }
+  assert.deepEqual(await smokeContracts.verifyDatabaseIdentity({
+    segmentName,
+    runToken,
+    databaseUrl,
+    postgres
+  }), { segmentName, timezone: 'UTC' })
+  assert.deepEqual(probes, [{ databaseUrl, segmentName }])
+
+  for (const unsafeUrl of [
+    `jdbc:postgresql://localhost:5432/${segmentName}`,
+    'jdbc:postgresql://127.0.0.1:5432/fx_platform',
+    `jdbc:postgresql://127.0.0.1:5433/${segmentName}`,
+    `jdbc:postgresql://external.invalid:5432/${segmentName}`
+  ]) {
+    await assert.rejects(
+      smokeContracts.verifyDatabaseIdentity({ segmentName, runToken, databaseUrl: unsafeUrl, postgres }),
+      /P0_DATABASE_URL_INVALID/,
+      unsafeUrl
+    )
+  }
+
+  for (const [field, value, error] of [
+    ['currentDatabase', 'fx_p0_user_e2e_other_a1', 'P0_DATABASE_IDENTITY_MISMATCH'],
+    ['ownerMarker', 'p0-owner:foreign-owner-token-a1', 'P0_DATABASE_OWNER_MISMATCH'],
+    ['timezone', 'Asia/Shanghai', 'P0_DATABASE_TIMEZONE_MISMATCH']
+  ]) {
+    const response = {
+      currentDatabase: segmentName,
+      ownerMarker: `p0-owner:${runToken}`,
+      timezone: 'UTC',
+      [field]: value
+    }
+    await assert.rejects(
+      smokeContracts.verifyDatabaseIdentity({
+        segmentName,
+        runToken,
+        databaseUrl,
+        postgres: { async probeDatabase() { return response } }
+      }),
+      new RegExp(error),
+      field
+    )
+  }
+})
+
+test('Redis ownership snapshots exact keys restores absolute expiry and compare deletes', async () => {
+  assert.equal(typeof smokeContracts.acquireRedisOwnership, 'function')
+  assert.equal(typeof smokeContracts.snapshotRedisKeys, 'function')
+  assert.equal(typeof smokeContracts.cleanupOwnedRedis, 'function')
+  const runToken = 'redis-parent-owner-token-a1'
+  const ownerKey = 'p0:e2e:owner'
+  const existingKey = 'market:test-control:provider-bindings'
+  const persistentKey = 'trading:test-control:authority-bundle'
+  const missingKey = 'trading:test-control:created-during-run'
+  const state = new Map([
+    [existingKey, { value: 'original-provider-state', expiresAtMs: 1_800_000_000_000 }],
+    [persistentKey, { value: 'original-authority-state', expiresAtMs: null }]
+  ])
+  const operations = []
+  const redis = {
+    async setNx(key, value) {
+      operations.push({ type: 'setNx', key, value })
+      if (state.has(key)) return false
+      state.set(key, { value, expiresAtMs: null })
+      return true
+    },
+    async get(key) {
+      operations.push({ type: 'get', key })
+      return state.get(key)?.value ?? null
+    },
+    async readExact(key) {
+      operations.push({ type: 'readExact', key })
+      const entry = state.get(key)
+      return entry
+        ? { exists: true, value: entry.value, expiresAtMs: entry.expiresAtMs }
+        : { exists: false, value: null, expiresAtMs: null }
+    },
+    async restoreExact(key, value, expiresAtMs) {
+      operations.push({ type: 'restoreExact', key, value, expiresAtMs })
+      state.set(key, { value, expiresAtMs })
+    },
+    async deleteExact(key) {
+      operations.push({ type: 'deleteExact', key })
+      state.delete(key)
+    },
+    async compareDelete(key, value) {
+      operations.push({ type: 'compareDelete', key, value })
+      if (state.get(key)?.value !== value) return false
+      state.delete(key)
+      return true
+    }
+  }
+
+  const acquired = await smokeContracts.acquireRedisOwnership({ redis, runToken, role: 'parent' })
+  assert.deepEqual(acquired, {
+    ownerKey,
+    ownerId: createHash('sha256').update(runToken).digest('hex'),
+    inherited: false
+  })
+  assert.equal(JSON.stringify(acquired).includes(runToken), false)
+  assert.deepEqual(await smokeContracts.acquireRedisOwnership({ redis, runToken, role: 'child' }), {
+    ownerKey,
+    ownerId: acquired.ownerId,
+    inherited: true
+  })
+  await assert.rejects(
+    smokeContracts.acquireRedisOwnership({
+      redis,
+      runToken: 'redis-foreign-owner-token-a1',
+      role: 'parent'
+    }),
+    /P0_REDIS_OWNER_EXISTS/
+  )
+  assert.equal(state.get(ownerKey).value, runToken)
+
+  const snapshot = await smokeContracts.snapshotRedisKeys({
+    redis,
+    keys: [existingKey, persistentKey, missingKey]
+  })
+  assert.deepEqual(snapshot, [
+    { key: existingKey, exists: true, value: 'original-provider-state', expiresAtMs: 1_800_000_000_000 },
+    { key: persistentKey, exists: true, value: 'original-authority-state', expiresAtMs: null },
+    { key: missingKey, exists: false, value: null, expiresAtMs: null }
+  ])
+  state.set(existingKey, { value: 'mutated', expiresAtMs: 1_900_000_000_000 })
+  state.delete(persistentKey)
+  state.set(missingKey, { value: 'new-value', expiresAtMs: null })
+  state.set('trading:test-control:another-new-key', { value: 'new', expiresAtMs: null })
+
+  const cleanup = await smokeContracts.cleanupOwnedRedis({
+    redis,
+    runToken,
+    snapshot,
+    touchedKeys: [missingKey, 'trading:test-control:another-new-key']
+  })
+  assert.deepEqual(cleanup, { restored: 4, ownerReleased: true })
+  assert.deepEqual(state.get(existingKey), {
+    value: 'original-provider-state',
+    expiresAtMs: 1_800_000_000_000
+  })
+  assert.deepEqual(state.get(persistentKey), {
+    value: 'original-authority-state',
+    expiresAtMs: null
+  })
+  assert.equal(state.has(missingKey), false)
+  assert.equal(state.has('trading:test-control:another-new-key'), false)
+  assert.equal(state.has(ownerKey), false)
+  assert.equal(
+    operations.some(({ type }) => /flush/i.test(type)),
+    false
+  )
+
+  for (const invalidKey of ['*', 'prefix:*', 'key?', '[key]', ownerKey, 'line\nbreak']) {
+    await assert.rejects(
+      smokeContracts.snapshotRedisKeys({ redis, keys: [invalidKey] }),
+      /P0_REDIS_KEY_INVALID/,
+      invalidKey
+    )
+  }
+
+  state.set(ownerKey, { value: 'redis-unknown-owner-token-a1', expiresAtMs: null })
+  const operationsBeforeRefusal = operations.length
+  await assert.rejects(
+    smokeContracts.cleanupOwnedRedis({ redis, runToken, snapshot, touchedKeys: [] }),
+    /P0_REDIS_OWNER_MISMATCH/
+  )
+  assert.deepEqual(operations.slice(operationsBeforeRefusal), [{ type: 'get', key: ownerKey }])
+  assert.equal(state.get(ownerKey).value, 'redis-unknown-owner-token-a1')
+})
+
+test('safety preflight requires loopback compose identity free owned ports and no broker secrets', async () => {
+  assert.equal(typeof smokeContracts.runSafetyPreflight, 'function')
+  const ownerId = 'a'.repeat(64)
+  const database = 'fx_p0_user_e2e_safety_a1'
+  const endpoints = {
+    api: 'http://127.0.0.1:18086',
+    web: 'http://127.0.0.1:5199',
+    admin: 'http://127.0.0.1:5200',
+    databaseUrl: `jdbc:postgresql://127.0.0.1:5432/${database}`,
+    redisHost: '127.0.0.1',
+    redisPort: 6379
+  }
+  const calls = []
+  const infrastructure = {
+    async verifyComposePort(expected) {
+      calls.push({ type: 'compose', expected })
+      return true
+    },
+    async inspectListener(expected) {
+      calls.push({ type: 'listener', expected })
+      return expected.port === 5199 ? { ownerId } : null
+    }
+  }
+  assert.deepEqual(await smokeContracts.runSafetyPreflight({
+    ownerId,
+    database,
+    endpoints,
+    inheritedEnv: {
+      PATH: 'safe-path',
+      BROKER_ENDPOINT: '',
+      fix_password: '',
+      Lp_Api_Key: ''
+    },
+    infrastructure
+  }), {
+    status: 'PASS',
+    database,
+    composePorts: [5432, 6379],
+    businessPorts: [18086, 5199, 5200]
+  })
+  assert.deepEqual(calls, [
+    {
+      type: 'compose',
+      expected: {
+        service: 'fx-platform-postgres',
+        host: '127.0.0.1',
+        hostPort: 5432,
+        containerPort: 5432
+      }
+    },
+    {
+      type: 'compose',
+      expected: {
+        service: 'fx-platform-redis',
+        host: '127.0.0.1',
+        hostPort: 6379,
+        containerPort: 6379
+      }
+    },
+    { type: 'listener', expected: { host: '127.0.0.1', port: 18086 } },
+    { type: 'listener', expected: { host: '127.0.0.1', port: 5199 } },
+    { type: 'listener', expected: { host: '127.0.0.1', port: 5200 } }
+  ])
+
+  for (const [label, patch, error] of [
+    ['external api', { endpoints: { ...endpoints, api: 'https://api.example.com' } }, 'P0_ENDPOINT_NOT_LOOPBACK'],
+    ['wrong api port', { endpoints: { ...endpoints, api: 'http://127.0.0.1:8080' } }, 'P0_ENDPOINT_PORT_INVALID'],
+    ['external database', {
+      endpoints: { ...endpoints, databaseUrl: `jdbc:postgresql://db.example.com:5432/${database}` }
+    }, 'P0_DATABASE_URL_INVALID'],
+    ['default database', {
+      database: 'fx_platform',
+      endpoints: { ...endpoints, databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_platform' }
+    }, 'P0_DATABASE_NAME_INVALID'],
+    ['external redis', {
+      endpoints: { ...endpoints, redisHost: 'redis.example.com' }
+    }, 'P0_REDIS_ENDPOINT_INVALID']
+  ]) {
+    let probes = 0
+    await assert.rejects(
+      smokeContracts.runSafetyPreflight({
+        ownerId,
+        database: patch.database ?? database,
+        endpoints: patch.endpoints,
+        inheritedEnv: {},
+        infrastructure: {
+          async verifyComposePort() { probes += 1; return true },
+          async inspectListener() { probes += 1; return null }
+        }
+      }),
+      new RegExp(error),
+      label
+    )
+    assert.equal(probes, 0, label)
+  }
+
+  for (const [key, value] of [
+    ['BROKER_ENDPOINT', 'https://broker.example.com'],
+    ['fix_private_key', 'real-key'],
+    ['LP_ACCOUNT', 'real-account']
+  ]) {
+    let probes = 0
+    await assert.rejects(
+      smokeContracts.runSafetyPreflight({
+        ownerId,
+        database,
+        endpoints,
+        inheritedEnv: { [key]: value },
+        infrastructure: {
+          async verifyComposePort() { probes += 1; return true },
+          async inspectListener() { probes += 1; return null }
+        }
+      }),
+      /P0_EXTERNAL_TRADING_CONFIGURATION/,
+      key
+    )
+    assert.equal(probes, 0, key)
+  }
+
+  await assert.rejects(
+    smokeContracts.runSafetyPreflight({
+      ownerId,
+      database,
+      endpoints,
+      inheritedEnv: {},
+      infrastructure: {
+        async verifyComposePort({ hostPort }) { return hostPort !== 6379 },
+        async inspectListener() { throw new Error('listener must not run') }
+      }
+    }),
+    /P0_COMPOSE_PORT_MISMATCH/
+  )
+  await assert.rejects(
+    smokeContracts.runSafetyPreflight({
+      ownerId,
+      database,
+      endpoints,
+      inheritedEnv: {},
+      infrastructure: {
+        async verifyComposePort() { return true },
+        async inspectListener({ port }) {
+          return port === 18086 ? { ownerId: 'b'.repeat(64) } : null
+        }
+      }
+    }),
+    /P0_PORT_OWNED_BY_UNKNOWN/
+  )
+})
+
+test('P0 resume requires existing state and exact run mode selection and evidence identity', (t) => {
+  assert.equal(typeof smokeContracts.openP0RunState, 'function')
+  const root = mkdtempSync(join(tmpdir(), 'p0-resume-identity-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const statePath = join(root, 'run-state.json')
+  const identity = {
+    commit: 'a'.repeat(40),
+    worktreeFingerprint: 'b'.repeat(64),
+    schemaVersion: 1,
+    registryFingerprint: P0_REGISTRY_FINGERPRINT
+  }
+  const selection = {
+    caseIds: ['SPOT-01'],
+    phases: [],
+    profiles: ['UI_CORE'],
+    viewports: ['desktop']
+  }
+  const options = {
+    path: statePath,
+    resume: false,
+    runId: 'p0-resume-identity-a1',
+    mode: 'discovery',
+    selection,
+    definitions: P0_CASES,
+    ...identity
+  }
+
+  let createCalls = 0
+  assert.throws(
+    () => smokeContracts.openP0RunState({
+      ...options,
+      selection: { ...selection, phases: ['selected'] },
+      createState() { createCalls += 1 }
+    }),
+    /P0_SELECTION_INVALID/
+  )
+  assert.equal(createCalls, 0)
+  assert.throws(
+    () => smokeContracts.openP0RunState({
+      ...options,
+      path: join(root, 'missing-resume.json'),
+      resume: true,
+      createState() { createCalls += 1 }
+    }),
+    /P0_RESUME_STATE_MISSING/
+  )
+  assert.equal(createCalls, 0)
+  assert.equal(existsSync(join(root, 'missing-resume.json')), false)
+
+  const created = smokeContracts.openP0RunState(options)
+  assert.equal(
+    created.runId,
+    `sha256:${createHash('sha256').update(options.runId).digest('hex')}`
+  )
+  assert.equal(created.mode, 'DISCOVERY')
+  assert.deepEqual(created.selection, selection)
+  const baseline = readFileSync(statePath, 'utf8')
+  assert.throws(
+    () => smokeContracts.openP0RunState(options),
+    /P0_RUN_STATE_EXISTS/
+  )
+  assert.equal(readFileSync(statePath, 'utf8'), baseline)
+  assert.deepEqual(smokeContracts.openP0RunState({ ...options, resume: true }), created)
+
+  for (const [label, patch, error] of [
+    ['runId', { runId: 'p0-resume-identity-other' }, 'P0_RESUME_MISMATCH: runId'],
+    ['mode', { mode: 'certification' }, 'P0_RESUME_MISMATCH: mode'],
+    ['selection', {
+      selection: { ...selection, caseIds: ['SPOT-02'] }
+    }, 'P0_RESUME_MISMATCH: selection'],
+    ['commit', { commit: 'c'.repeat(40) }, 'P0_RESUME_MISMATCH: commit'],
+    ['worktree', {
+      worktreeFingerprint: 'd'.repeat(64)
+    }, 'P0_RESUME_MISMATCH: worktreeFingerprint'],
+    ['schema', { schemaVersion: 2 }, 'P0_RESUME_MISMATCH: schemaVersion'],
+    ['registry', {
+      registryFingerprint: 'e'.repeat(64)
+    }, 'P0_RESUME_MISMATCH: registryFingerprint']
+  ]) {
+    assert.throws(
+      () => smokeContracts.openP0RunState({ ...options, ...patch, resume: true }),
+      new RegExp(error),
+      label
+    )
+    assert.equal(readFileSync(statePath, 'utf8'), baseline, label)
+  }
+
+  for (const [field, value] of [
+    ['runId', 'p0-resume-forged-a1'],
+    ['mode', 'certification'],
+    ['selection', { ...selection, profiles: ['ORDER_TRIGGER'] }]
+  ]) {
+    const forged = JSON.parse(baseline)
+    forged[field] = value
+    writeFileSync(statePath, `${JSON.stringify(forged, null, 2)}\n`)
+    assert.throws(
+      () => smokeContracts.openP0RunState({ ...options, resume: true }),
+      new RegExp(`P0_RESUME_MISMATCH: ${field}`),
+      `persisted ${field}`
+    )
+    writeFileSync(statePath, baseline)
+  }
+})
+
+test('canonical child is singular argless and cleaned before authority and matrix', async () => {
+  assert.equal(typeof smokeContracts.executeP0PlanPhases, 'function')
+  const options = p0CaseContracts.parseP0Cli([
+    '--suite=p0',
+    '--run-id=p0-canonical-order-a1'
+  ])
+  const plan = p0CaseContracts.planP0Execution(options)
+  const ownerToken = 'canonical-child-owner-token-a1'
+  const ownerId = createHash('sha256').update(ownerToken).digest('hex')
+  const scriptPath = resolve(tmpdir(), 'canonical-smoke-script.mjs')
+  const sequence = []
+  const childInvocations = []
+  const result = await smokeContracts.executeP0PlanPhases({
+    plan,
+    context: {
+      scriptPath,
+      ownerToken,
+      ownerId,
+      canonicalDatabase: 'fx_p0_user_e2e_canonical_order_a1',
+      inheritedEnv: { PATH: 'safe-path' }
+    },
+    operations: {
+      async runPreflight() { sequence.push('preflight') },
+      async assertRedisOwnership(_context, boundary) { sequence.push(`redis:${boundary}`) },
+      async stopParentBackend() { sequence.push('parent-backend-stop') },
+      async assertBusinessPortsFree(ports) {
+        sequence.push(`ports-free:${ports.join(',')}`)
+      },
+      async runCanonicalChild(invocation) {
+        sequence.push('canonical-child')
+        childInvocations.push(invocation)
+        return { status: 'PASS', cleanup: 'PASS' }
+      },
+      async verifyCanonicalChildCleanup(child) {
+        sequence.push(`canonical-cleanup:${child.cleanup}`)
+      },
+      async runAuthority() { sequence.push('authority') },
+      async runMatrixPhase(phase) { sequence.push(`matrix:${phase}`) },
+      async writeReport() { sequence.push('report') }
+    }
+  })
+
+  assert.deepEqual(result, { canonicalChildren: 1, matrixPhases: 7 })
+  assert.equal(childInvocations.length, 1)
+  assert.equal(childInvocations[0].command, process.execPath)
+  assert.deepEqual(childInvocations[0].args, [scriptPath])
+  assert.equal(childInvocations[0].args.some((argument) => argument.startsWith('--')), false)
+  assert.equal(childInvocations[0].env.P0_RUN_OWNER_TOKEN, ownerToken)
+  assert.equal(
+    JSON.stringify(childInvocations[0].log).includes(ownerToken),
+    false
+  )
+  assert.deepEqual(sequence, [
+    'preflight',
+    'redis:before-canonical',
+    'parent-backend-stop',
+    'ports-free:18086,5199,5200',
+    'canonical-child',
+    'canonical-cleanup:PASS',
+    'redis:after-canonical',
+    'authority',
+    'matrix:ui-core',
+    'matrix:order-trigger',
+    'matrix:funding',
+    'matrix:liquidation',
+    'matrix:source',
+    'matrix:resilience',
+    'matrix:ui',
+    'report'
+  ])
+})
+
+test('managed preflight runs exact gates invocation scoped IT and owned OpenAPI lifecycle', async () => {
+  assert.equal(typeof smokeContracts.runP0Preflight, 'function')
+  const root = resolve(tmpdir(), 'p0-preflight-contract')
+  const gateOutput = join(root, 'artifacts', 'gates', 'surefire.json')
+  const invocationStartedAt = '2026-07-15T02:03:04.567Z'
+  const commands = []
+  const events = []
+  const recorded = []
+  const operations = {
+    async runCommand(command) {
+      commands.push(command)
+      events.push(`command:${command.id}`)
+      return { status: 0, stdout: `${command.id}-ok`, stderr: '' }
+    },
+    async recordGate(id, result) {
+      recorded.push({ id, status: result.status })
+    },
+    async startOwnedBackend(options) {
+      events.push('backend:start')
+      return { pid: 4242, options }
+    },
+    async waitForBackendHealth(backend, url) {
+      events.push(`backend:health:${backend.pid}:${url}`)
+    },
+    async waitForBusinessEndpoint(backend, url) {
+      events.push(`backend:business:${backend.pid}:${url}`)
+    },
+    async stopOwnedBackend(backend) {
+      events.push(`backend:stop:${backend?.pid ?? 'none'}`)
+    },
+    async assertBusinessPortsFree(ports) {
+      events.push(`ports-free:${ports.join(',')}`)
+    }
+  }
+
+  const result = await smokeContracts.runP0Preflight({
+    projectRoot: root,
+    gateOutput,
+    databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_preflight_a1',
+    now: () => invocationStartedAt,
+    operations
+  })
+  assert.deepEqual(result, {
+    status: 'PASS',
+    invocationStartedAt,
+    gates: 12,
+    itClasses: 14,
+    guardClasses: 6
+  })
+  assert.deepEqual(commands.map(({ id }) => id), [
+    'backend-unit',
+    'node-contracts',
+    'web-test',
+    'web-build',
+    'admin-test',
+    'admin-build',
+    'architecture',
+    'security-guards',
+    'database-concurrency-it',
+    'surefire-gate',
+    'contract-export',
+    'contract-check'
+  ])
+  assert.deepEqual(recorded, commands.map(({ id }) => ({ id, status: 0 })))
+  const guardCommand = commands.find(({ id }) => id === 'security-guards')
+  assert.equal(guardCommand.command, process.platform === 'win32' ? 'mvn.cmd' : 'mvn')
+  assert.deepEqual(guardCommand.args, [
+    '-Dtest=DemoExecutionGuardTest,ExecutionAdapterApplicationContextTest,ExecutionModeStartupValidatorTest,ProductionConfigurationSafetyTest,ProviderModeApplicationContextTest,DatabaseItConfigurationContractTest',
+    'test'
+  ])
+  const itClasses = [
+    'PostgresDatabaseIT',
+    'V46V47EmptyDatabaseIT',
+    'V45ToV47DemoResetIT',
+    'Task5PostgresFullFillIT',
+    'Task6PostgresSpotIT',
+    'Task7PostgresDemoLifecycleIT',
+    'Task8PostgresTradingSettingsIT',
+    'Task9PostgresPerpetualOrderIT',
+    'Task10PostgresProtectionIT',
+    'Task11PostgresFundingIT',
+    'DemoTradingConcurrencyIT',
+    'PerpetualPositionConcurrencyIT',
+    'ProtectionOrderConcurrencyIT',
+    'FundingLiquidationConcurrencyIT'
+  ]
+  const itCommand = commands.find(({ id }) => id === 'database-concurrency-it')
+  assert.deepEqual(itCommand.args, [`-Dtest=${itClasses.join(',')}`, 'test'])
+  const surefire = commands.find(({ id }) => id === 'surefire-gate')
+  assert.equal(surefire.command, process.execPath)
+  assert.ok(surefire.args.includes(`--classes=${itClasses.join(',')}`))
+  assert.ok(surefire.args.includes(`--started-at=${invocationStartedAt}`))
+  assert.ok(surefire.args.includes(`--output=${gateOutput}`))
+  for (const contract of commands.filter(({ id }) => id.startsWith('contract-'))) {
+    assert.deepEqual(contract.env, {
+      OPENAPI_SOURCE_URL: 'http://127.0.0.1:18086/v3/api-docs'
+    })
+  }
+  assert.equal(JSON.stringify(commands).includes('localhost:8080'), false)
+  assert.deepEqual(events.slice(-7), [
+    'backend:start',
+    'backend:health:4242:http://127.0.0.1:18086/actuator/health',
+    'backend:business:4242:http://127.0.0.1:18086/api/market/symbols',
+    'command:contract-export',
+    'command:contract-check',
+    'backend:stop:4242',
+    'ports-free:18086'
+  ])
+
+  const failureEvents = []
+  await assert.rejects(
+    smokeContracts.runP0Preflight({
+      projectRoot: root,
+      gateOutput,
+      databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_preflight_a1',
+      now: () => invocationStartedAt,
+      operations: {
+        ...operations,
+        async runCommand(command) {
+          if (command.id === 'contract-check') throw new Error('CONTRACT_CHECK_FAILED')
+          return { status: 0, stdout: '', stderr: '' }
+        },
+        async recordGate() {},
+        async startOwnedBackend() { failureEvents.push('start'); return { pid: 4343 } },
+        async waitForBackendHealth() {},
+        async waitForBusinessEndpoint() {},
+        async stopOwnedBackend() { failureEvents.push('stop') },
+        async assertBusinessPortsFree() { failureEvents.push('ports-free') }
+      }
+    }),
+    /CONTRACT_CHECK_FAILED/
+  )
+  assert.deepEqual(failureEvents, ['start', 'stop', 'ports-free'])
+})
+
+test('P0 lifecycle cleans exactly once on signal gate case and report failures', async () => {
+  assert.equal(typeof smokeContracts.executeP0SuiteLifecycle, 'function')
+  const options = {
+    suite: 'p0',
+    mode: 'discovery',
+    phase: 'all',
+    runId: 'p0-lifecycle-a1'
+  }
+  for (const [scenario, failAt, error] of [
+    ['gate', 'prepare', 'GATE_FAILED'],
+    ['case', 'execute', 'CASE_FAILED'],
+    ['report', 'report', 'REPORT_FAILED'],
+    ['signal', 'signal', 'P0_INTERRUPTED: SIGINT']
+  ]) {
+    const events = []
+    let signalHandler
+    let cleanupCalls = 0
+    await assert.rejects(
+      smokeContracts.executeP0SuiteLifecycle({
+        options,
+        operations: {
+          installSignalHandlers(handler) {
+            signalHandler = handler
+            events.push('signals:install')
+            return () => events.push('signals:remove')
+          },
+          async prepare() {
+            events.push('prepare')
+            if (failAt === 'prepare') throw new Error(error)
+            return { prepared: true }
+          },
+          async execute(_prepared, { signal }) {
+            events.push('execute')
+            assert.equal(signal.aborted, false)
+            if (failAt === 'signal') {
+              signalHandler('SIGINT')
+              signalHandler('SIGINT')
+              return { executed: false }
+            }
+            if (failAt === 'execute') throw new Error(error)
+            return { executed: true }
+          },
+          async writeReport() {
+            events.push('report')
+            if (failAt === 'report') throw new Error(error)
+            return { verdict: 'PASS' }
+          },
+          async cleanup(_prepared, details) {
+            cleanupCalls += 1
+            events.push(`cleanup:${details.interrupted ? 'interrupted' : 'normal'}`)
+            return { status: 'CLEANED' }
+          }
+        }
+      }),
+      new RegExp(error),
+      scenario
+    )
+    assert.equal(cleanupCalls, 1, scenario)
+    assert.equal(events.at(-1), 'signals:remove', scenario)
+    assert.equal(events.filter((event) => event.startsWith('cleanup:')).length, 1, scenario)
+  }
+
+  const successEvents = []
+  const success = await smokeContracts.executeP0SuiteLifecycle({
+    options,
+    operations: {
+      installSignalHandlers() {
+        successEvents.push('signals:install')
+        return () => successEvents.push('signals:remove')
+      },
+      async prepare() { successEvents.push('prepare'); return { prepared: true } },
+      async execute() { successEvents.push('execute'); return { executed: true } },
+      async writeReport() { successEvents.push('report'); return { verdict: 'PASS' } },
+      async cleanup() { successEvents.push('cleanup'); return { status: 'CLEANED' } }
+    }
+  })
+  assert.deepEqual(success, {
+    execution: { executed: true },
+    report: { verdict: 'PASS' },
+    cleanup: { status: 'CLEANED' }
+  })
+  assert.deepEqual(successEvents, [
+    'signals:install',
+    'prepare',
+    'execute',
+    'report',
+    'cleanup',
+    'signals:remove'
+  ])
+
+  const cleanupOnlyEvents = []
+  const cleanupOnly = await smokeContracts.executeP0SuiteLifecycle({
+    options: { ...options, phase: 'cleanup' },
+    operations: {
+      installSignalHandlers() {
+        cleanupOnlyEvents.push('signals:install')
+        return () => cleanupOnlyEvents.push('signals:remove')
+      },
+      async prepare() { cleanupOnlyEvents.push('prepare') },
+      async execute() { cleanupOnlyEvents.push('execute') },
+      async writeReport() { cleanupOnlyEvents.push('report') },
+      async cleanup() {
+        cleanupOnlyEvents.push('cleanup')
+        return { status: 'CLEANED', alreadyCleaned: true }
+      }
+    }
+  })
+  assert.deepEqual(cleanupOnly, {
+    execution: null,
+    report: null,
+    cleanup: { status: 'CLEANED', alreadyCleaned: true }
+  })
+  assert.deepEqual(cleanupOnlyEvents, [
+    'signals:install',
+    'cleanup',
+    'signals:remove'
+  ])
+})
+
+test('P0 entry connects ownership phases dispatch report and exactly once cleanup', async () => {
+  assert.equal(typeof smokeContracts.runP0Suite, 'function')
+  const options = p0CaseContracts.parseP0Cli([
+    '--suite=p0',
+    '--run-id=p0-entry-wiring-a1'
+  ])
+  const ownerToken = 'entry-wiring-owner-token-a1'
+  const ownerId = createHash('sha256').update(ownerToken).digest('hex')
+  const events = []
+  let cleanupCalls = 0
+  const dependencies = {
+    installSignalHandlers() {
+      events.push('signals:install')
+      return () => events.push('signals:remove')
+    },
+    async initializeOwnership(receivedOptions, plan) {
+      events.push(`ownership:${receivedOptions.runId}:${plan.verdict}`)
+      return {
+        scriptPath: resolve(tmpdir(), 'entry-canonical.mjs'),
+        ownerToken,
+        ownerId,
+        canonicalDatabase: 'fx_p0_user_e2e_entry_canonical_a1',
+        inheritedEnv: {},
+        caseResults: []
+      }
+    },
+    phaseOperations: {
+      async runPreflight() { events.push('preflight') },
+      async assertRedisOwnership(_context, boundary) { events.push(`redis:${boundary}`) },
+      async stopParentBackend() { events.push('parent-stop') },
+      async assertBusinessPortsFree() { events.push('ports-free') },
+      async runCanonicalChild() { events.push('canonical-child'); return { cleanup: 'PASS' } },
+      async verifyCanonicalChildCleanup() { events.push('canonical-cleanup') },
+      async runAuthority() { events.push('authority') },
+      async writeReport() { events.push('report-phase') }
+    },
+    async dispatchCase(definition) {
+      events.push(`case:${definition.id}`)
+      return { id: definition.id, status: 'TEST_SENTINEL' }
+    },
+    handlers: Object.create(null),
+    async writeReport(execution, prepared) {
+      events.push(`report:${prepared.caseResults.length}`)
+      return { verdict: execution.plan.verdict }
+    },
+    async cleanup() {
+      cleanupCalls += 1
+      events.push('cleanup')
+      return { status: 'CLEANED' }
+    }
+  }
+
+  const completed = await smokeContracts.runP0Suite(options, dependencies)
+  assert.equal(completed.execution.plan.fullMatrix, true)
+  assert.deepEqual(completed.report, { verdict: 'PASS' })
+  assert.deepEqual(completed.cleanup, { status: 'CLEANED' })
+  assert.equal(cleanupCalls, 1)
+  assert.equal(events.filter((event) => event === 'canonical-child').length, 1)
+  assert.equal(events.filter((event) => event.startsWith('case:')).length, 60)
+  assert.ok(events.indexOf('ownership:p0-entry-wiring-a1:PASS') < events.indexOf('preflight'))
+  assert.ok(events.indexOf('preflight') < events.indexOf('canonical-child'))
+  assert.ok(events.indexOf('canonical-cleanup') < events.indexOf('authority'))
+  assert.ok(events.indexOf('authority') < events.indexOf('case:AUTH-01'))
+  assert.ok(events.indexOf('case:UI-02') < events.indexOf('report-phase'))
+  assert.ok(events.indexOf('report-phase') < events.indexOf('report:60'))
+  assert.ok(events.indexOf('report:60') < events.indexOf('cleanup'))
+  assert.equal(events.at(-1), 'signals:remove')
+
+  let failedCleanupCalls = 0
+  await assert.rejects(
+    smokeContracts.runP0Suite(options, {
+      ...dependencies,
+      installSignalHandlers() { return () => {} },
+      async initializeOwnership() {
+        return {
+          scriptPath: resolve(tmpdir(), 'entry-canonical.mjs'),
+          ownerToken,
+          ownerId,
+          canonicalDatabase: 'fx_p0_user_e2e_entry_canonical_a1',
+          inheritedEnv: {},
+          caseResults: []
+        }
+      },
+      dispatchCase: runCase,
+      handlers: Object.create(null),
+      async cleanup() {
+        failedCleanupCalls += 1
+        return { status: 'CLEANED' }
+      }
+    }),
+    /INCOMPLETE_MATRIX: AUTH-01/
+  )
+  assert.equal(failedCleanupCalls, 1)
+})
+
+test('default P0 dependency factory wires local adapters and main injects it', async (t) => {
+  assert.equal(typeof smokeContracts.createDefaultP0Dependencies, 'function')
+  const smokeSource = readFileSync(
+    fileURLToPath(new URL('./smoke-usdt-demo-browser.mjs', import.meta.url)),
+    'utf8'
+  )
+  assert.doesNotMatch(smokeSource, /P0_LOCAL_ADAPTER_REQUIRED|P0_SUITE_NOT_IMPLEMENTED/)
+  assert.doesNotMatch(smokeSource, /\b(?:FLUSHDB|FLUSHALL)\b|request\(\['KEYS'/)
+
+  const root = mkdtempSync(join(tmpdir(), 'p0-default-factory-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const events = []
+  const runToken = 'default-factory-owner-token-a1'
+  const redisKey = 'market:test-control:factory-a1'
+  const redisState = new Map([
+    [redisKey, { value: 'before', expiresAtMs: 1_900_000_000_000 }]
+  ])
+  const redis = {
+    async setNx(key, value) {
+      events.push(`redis:setNx:${key}`)
+      if (redisState.has(key)) return false
+      redisState.set(key, { value, expiresAtMs: null })
+      return true
+    },
+    async get(key) {
+      events.push(`redis:get:${key}`)
+      return redisState.get(key)?.value ?? null
+    },
+    async readExact(key) {
+      events.push(`redis:read:${key}`)
+      const entry = redisState.get(key)
+      return entry
+        ? { exists: true, value: entry.value, expiresAtMs: entry.expiresAtMs }
+        : { exists: false, value: null, expiresAtMs: null }
+    },
+    async restoreExact(key, value, expiresAtMs) {
+      events.push(`redis:restore:${key}:${expiresAtMs}`)
+      redisState.set(key, { value, expiresAtMs })
+    },
+    async deleteExact(key) {
+      events.push(`redis:delete:${key}`)
+      redisState.delete(key)
+    },
+    async compareDelete(key, value) {
+      events.push(`redis:compareDelete:${key}`)
+      if (redisState.get(key)?.value !== value) return false
+      redisState.delete(key)
+      return true
+    }
+  }
+  const databases = new Map()
+  const postgres = {
+    async executeAdminSql(sql, { sensitive }) {
+      events.push(`postgres:sql:${sensitive ? 'sensitive' : 'public'}`)
+      let match = sql.match(/^CREATE DATABASE "([a-z0-9_]+)"$/)
+      if (match) {
+        databases.set(match[1], { ownerMarker: null, timezone: null })
+        return
+      }
+      match = sql.match(/^COMMENT ON DATABASE "([a-z0-9_]+)" IS '(.+)'$/)
+      if (match) {
+        databases.get(match[1]).ownerMarker = match[2].replaceAll("''", "'")
+        return
+      }
+      match = sql.match(/^ALTER DATABASE "([a-z0-9_]+)" SET timezone TO 'UTC'$/)
+      if (match) {
+        databases.get(match[1]).timezone = 'UTC'
+        return
+      }
+      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)"$/)
+      if (match) {
+        databases.delete(match[1])
+        return
+      }
+      throw new Error(`UNEXPECTED_SQL: ${sql}`)
+    },
+    async readDatabaseOwnership(segmentName) {
+      events.push(`postgres:read:${segmentName}`)
+      const database = databases.get(segmentName)
+      return database
+        ? { segmentName, ownerMarker: database.ownerMarker }
+        : null
+    },
+    async probeDatabase({ segmentName }) {
+      events.push(`postgres:probe:${segmentName}`)
+      const database = databases.get(segmentName)
+      return {
+        currentDatabase: segmentName,
+        ownerMarker: database?.ownerMarker,
+        timezone: database?.timezone
+      }
+    }
+  }
+  const infrastructure = {
+    async verifyComposePort({ hostPort }) {
+      events.push(`safety:compose:${hostPort}`)
+      return true
+    },
+    async inspectListener({ port }) {
+      events.push(`safety:listener:${port}`)
+      return null
+    },
+    async assertPortsFree(ports) {
+      events.push(`ports-free:${ports.join(',')}`)
+    }
+  }
+  const canonicalInvocations = []
+  const processManager = {
+    async startOwnedBackend({ environment }) {
+      events.push(`backend:start:${environment.EXECUTION_MODE}`)
+      return { pid: 5151 }
+    },
+    async waitForBackendHealth() { events.push('backend:health') },
+    async waitForBusinessEndpoint() { events.push('backend:business') },
+    async stopOwnedBackend(backend) { events.push(`backend:stop:${backend?.pid ?? 'none'}`) },
+    async stopParentBackend() { events.push('backend:parent-stop') },
+    async runCanonicalChild(invocation) {
+      events.push('canonical:child')
+      canonicalInvocations.push(invocation)
+      return { status: 0, stdout: '{"status":"PASS"}', stderr: '' }
+    }
+  }
+  const commandDescriptors = []
+  const runCommand = async (descriptor) => {
+    events.push(`command:${descriptor.id}`)
+    commandDescriptors.push(descriptor)
+    return { status: 0, stdout: '', stderr: '' }
+  }
+  const dependencies = smokeContracts.createDefaultP0Dependencies({
+    artifactBase: join(root, 'artifacts'),
+    runToken: () => runToken,
+    randomSuffix: (() => {
+      const suffixes = ['abcdef123456', 'abcdef123457']
+      return () => suffixes.shift()
+    })(),
+    now: () => '2026-07-15T03:04:05.678Z',
+    inheritedEnv: {},
+    redisKeys: [redisKey],
+    redis,
+    postgres,
+    infrastructure,
+    processManager,
+    runCommand,
+    dispatchCase: async (definition) => ({
+      id: definition.id,
+      status: 'PASS',
+      scopeComplete: true,
+      subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+    })
+  })
+  for (const name of [
+    'installSignalHandlers',
+    'initializeOwnership',
+    'dispatchCase',
+    'writeReport',
+    'cleanup'
+  ]) assert.equal(typeof dependencies[name], 'function', name)
+  assert.equal(typeof dependencies.phaseOperations.runPreflight, 'function')
+  assert.equal(typeof dependencies.phaseOperations.runCanonicalChild, 'function')
+
+  const options = p0CaseContracts.parseP0Cli([
+    '--suite=p0',
+    '--run-id=p0-default-factory-a1'
+  ])
+  const completed = await smokeContracts.runP0Suite(options, dependencies)
+  assert.equal(completed.report.verdict, 'PASS')
+  assert.equal(completed.cleanup.status, 'CLEANED')
+  assert.equal(canonicalInvocations.length, 1)
+  assert.deepEqual(canonicalInvocations[0].args, [
+    fileURLToPath(new URL('./smoke-usdt-demo-browser.mjs', import.meta.url))
+  ])
+  assert.equal(canonicalInvocations[0].shell, false)
+  assert.equal(canonicalInvocations[0].env.P0_RUN_OWNER_TOKEN, runToken)
+  assert.equal(JSON.stringify(canonicalInvocations[0].log).includes(runToken), false)
+  assert.equal(commandDescriptors.find(({ id }) => id === 'compose-up').shell, false)
+  assert.equal(commandDescriptors.some(({ args }) => args?.some((value) => value === runToken)), false)
+  assert.equal(commandDescriptors.some(({ stdin }) => String(stdin ?? '').includes(runToken)), false)
+  assert.equal(databases.size, 0)
+  assert.deepEqual(redisState.get(redisKey), {
+    value: 'before',
+    expiresAtMs: 1_900_000_000_000
+  })
+  assert.equal(redisState.has('p0:e2e:owner'), false)
+  const cleaned = JSON.parse(readFileSync(
+    join(root, 'artifacts', options.runId, 'control', 'cleaned.json'),
+    'utf8'
+  ))
+  assert.equal(cleaned.status, 'CLEANED')
+  assert.ok(events.indexOf('safety:compose:5432') < events.indexOf('command:compose-up'))
+  assert.ok(events.indexOf('command:compose-up') < events.indexOf('redis:setNx:p0:e2e:owner'))
+  assert.ok(events.indexOf('redis:setNx:p0:e2e:owner') < events.indexOf('postgres:sql:public'))
+  assert.ok(events.indexOf('command:surefire-gate') < events.indexOf('canonical:child'))
+  assert.ok(events.indexOf('canonical:child') < events.indexOf('redis:compareDelete:p0:e2e:owner'))
+
+  const dependencySentinel = { sentinel: true }
+  let forwarded
+  const dispatch = smokeContracts.createSmokeMain({
+    runCanonicalSmoke: async () => {},
+    createP0Dependencies: () => dependencySentinel,
+    runP0Suite: async (receivedOptions, receivedDependencies) => {
+      forwarded = { receivedOptions, receivedDependencies }
+      return { status: 'WIRED' }
+    }
+  })
+  assert.deepEqual(await dispatch([
+    '--suite=p0',
+    '--run-id=p0-main-factory-a1'
+  ]), { status: 'WIRED' })
+  assert.equal(forwarded.receivedOptions.runId, 'p0-main-factory-a1')
+  assert.equal(forwarded.receivedDependencies, dependencySentinel)
+})
+
+test('canonical child consumes parent database ownership and enforces marker cleanup', async () => {
+  assert.equal(typeof smokeContracts.resolveCanonicalSmokeOwnership, 'function')
+  assert.equal(typeof smokeContracts.prepareCanonicalSmokeDatabase, 'function')
+  assert.equal(typeof smokeContracts.cleanupCanonicalSmokeDatabase, 'function')
+  const runToken = 'canonical-runtime-owner-token-a1'
+  const database = 'fx_p0_user_e2e_canonical_1_abcdef123456'
+  const ownership = smokeContracts.resolveCanonicalSmokeOwnership({
+    P0_RUN_OWNER_TOKEN: runToken,
+    USDT_DEMO_SMOKE_DATABASE: database
+  })
+  assert.deepEqual(ownership, {
+    database,
+    ownerToken: runToken,
+    ownerId: createHash('sha256').update(runToken).digest('hex'),
+    inherited: true
+  })
+  assert.throws(
+    () => smokeContracts.resolveCanonicalSmokeOwnership({ P0_RUN_OWNER_TOKEN: runToken }),
+    /P0_CANONICAL_OWNERSHIP_INCOMPLETE/
+  )
+
+  const databases = new Map()
+  const postgres = {
+    async executeAdminSql(sql) {
+      let match = sql.match(/^CREATE DATABASE "([a-z0-9_]+)"$/)
+      if (match) {
+        databases.set(match[1], { ownerMarker: null, timezone: null })
+        return
+      }
+      match = sql.match(/^COMMENT ON DATABASE "([a-z0-9_]+)" IS '(.+)'$/)
+      if (match) {
+        databases.get(match[1]).ownerMarker = match[2].replaceAll("''", "'")
+        return
+      }
+      match = sql.match(/^ALTER DATABASE "([a-z0-9_]+)" SET timezone TO 'UTC'$/)
+      if (match) {
+        databases.get(match[1]).timezone = 'UTC'
+        return
+      }
+      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)"$/)
+      if (match) {
+        databases.delete(match[1])
+        return
+      }
+      throw new Error(`UNEXPECTED_SQL: ${sql}`)
+    },
+    async readDatabaseOwnership(segmentName) {
+      const state = databases.get(segmentName)
+      return state ? { segmentName, ownerMarker: state.ownerMarker } : null
+    },
+    async probeDatabase({ segmentName }) {
+      const state = databases.get(segmentName)
+      return {
+        currentDatabase: segmentName,
+        ownerMarker: state?.ownerMarker,
+        timezone: state?.timezone
+      }
+    }
+  }
+  await smokeContracts.prepareCanonicalSmokeDatabase({ ownership, postgres })
+  assert.deepEqual(databases.get(database), {
+    ownerMarker: `p0-owner:${runToken}`,
+    timezone: 'UTC'
+  })
+  databases.get(database).ownerMarker = 'p0-owner:foreign-owner-token-a1'
+  await assert.rejects(
+    smokeContracts.cleanupCanonicalSmokeDatabase({ ownership, postgres }),
+    /P0_DATABASE_OWNER_MISMATCH/
+  )
+  assert.equal(databases.has(database), true)
+  databases.get(database).ownerMarker = `p0-owner:${runToken}`
+  await smokeContracts.cleanupCanonicalSmokeDatabase({ ownership, postgres })
+  assert.equal(databases.has(database), false)
 })
 
 const persistenceDigest = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`

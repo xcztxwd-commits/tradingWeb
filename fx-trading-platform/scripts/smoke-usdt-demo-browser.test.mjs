@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
@@ -19,6 +21,10 @@ describe('real USDT demo browser smoke contract', () => {
   it('publishes the new command and retires the destructive legacy fixture', () => {
     assert.equal(packageJson.scripts['smoke:usdt-demo-browser'], 'node scripts/smoke-usdt-demo-browser.mjs')
     assert.equal(packageJson.scripts['smoke:btcusdt-perp-50x'], 'node scripts/smoke-usdt-demo-browser.mjs')
+    assert.equal(
+      packageJson.scripts['acceptance:p0-user-trading'],
+      'node scripts/smoke-usdt-demo-browser.mjs --suite=p0'
+    )
     assert.equal(existsSync(legacyScriptPath), true)
 
     const legacy = readFileSync(legacyScriptPath, 'utf8')
@@ -377,6 +383,34 @@ describe('real USDT demo browser smoke contract', () => {
       browserMarketEvidence < browserLoop.indexOf('const perpStopStartedAt'),
       'browser Perpetual MARKET source evidence must be captured before resolving the STOP quote',
     )
+  })
+
+  it('canonical smoke module import is quiet and side-effect free', (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'p0-smoke-import-safe-'))
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    const artifacts = join(root, 'artifacts')
+    const emptyPath = join(root, 'empty-path')
+    const environment = Object.fromEntries(
+      Object.entries(process.env).filter(([key]) => key.toUpperCase() !== 'PATH')
+    )
+    environment.PATH = emptyPath
+    environment.USDT_DEMO_SMOKE_ARTIFACTS = artifacts
+    const moduleUrl = new URL('./smoke-usdt-demo-browser.mjs', import.meta.url).href
+
+    const execution = spawnSync(process.execPath, [
+      '--input-type=module',
+      '--eval',
+      `await import(${JSON.stringify(moduleUrl)})`
+    ], {
+      encoding: 'utf8',
+      env: environment,
+      timeout: 10_000
+    })
+
+    assert.equal(execution.status, 0, execution.stderr)
+    assert.equal(execution.stdout, '')
+    assert.equal(execution.stderr, '')
+    assert.deepEqual(readdirSync(root), [])
   })
 })
 
