@@ -445,32 +445,28 @@ export function parseP0Cli(argv, { generateRunId = defaultRunId } = {}) {
 
 function selectedDefinitions(options, definitions) {
   let selected = definitions
-  if (options.phase === 'selected' || options.caseIds.length > 0) {
-    const requested = new Set(options.caseIds)
-    selected = selected.filter(({ id }) => requested.has(id))
-  } else if (['ui-core', 'order-trigger', 'funding', 'liquidation', 'source', 'resilience', 'ui'].includes(options.phase)) {
+  if (['ui-core', 'order-trigger', 'funding', 'liquidation', 'source', 'resilience', 'ui'].includes(options.phase)) {
     selected = selected.filter(({ phase }) => phase === options.phase)
   }
-  if (options.profile) {
-    selected = selected.filter(({ requiredSubruns }) => (
-      requiredSubruns.some(({ profile }) => profile === options.profile)
-    ))
+  if (options.caseIds.length > 0) {
+    const requested = new Set(options.caseIds)
+    selected = selected.filter(({ id }) => requested.has(id))
   }
-  if (options.viewport !== 'all') {
-    selected = selected.filter(({ requiredSubruns }) => (
-      requiredSubruns.some(({ viewport }) => viewport === options.viewport)
-    ))
-  }
-  return selected
+  return selected.filter(({ requiredSubruns }) => requiredSubruns.some((subrun) => (
+    (options.profile === null || subrun.profile === options.profile)
+      && (options.viewport === 'all' || subrun.viewport === options.viewport)
+  )))
 }
 
 export function planP0Execution(options, definitions = P0_CASES) {
   if (options.suite !== 'p0') throw new Error('P0_CLI_P0_SUITE_REQUIRED')
   if (options.phase === 'cleanup') {
     return {
+      scope: 'CONTROL',
       phases: ['cleanup'],
       profiles: [],
       definitions: [],
+      executionEntries: [],
       includesCanonical: false,
       fullMatrix: false,
       verdict: null,
@@ -478,15 +474,30 @@ export function planP0Execution(options, definitions = P0_CASES) {
     }
   }
 
-  const selected = selectedDefinitions(options, definitions)
-  if (selected.length === 0 && !['preflight', 'canonical', 'authority', 'report'].includes(options.phase)) {
+  const controlOnly = ['preflight', 'canonical', 'authority', 'report'].includes(options.phase)
+  const selected = controlOnly ? [] : selectedDefinitions(options, definitions)
+  if (selected.length === 0 && !controlOnly) {
     throw new Error('P0_CLI_EMPTY_SELECTION')
   }
-  const profiles = P0_PROFILES.filter((profile) => selected.some(({ requiredSubruns }) => (
-    requiredSubruns.some((subrun) => subrun.profile === profile
-      && (options.viewport === 'all' || subrun.viewport === options.viewport))
+  const cropped = options.profile !== null || options.viewport !== 'all'
+  const executionEntries = selected.map((definition) => ({
+    id: definition.id,
+    phase: definition.phase,
+    definition,
+    selectedSubruns: definition.requiredSubruns.filter((subrun) => (
+      (options.profile === null || subrun.profile === options.profile)
+        && (options.viewport === 'all' || subrun.viewport === options.viewport)
+    )),
+    cropped
+  }))
+  const profiles = P0_PROFILES.filter((profile) => executionEntries.some(({ selectedSubruns }) => (
+    selectedSubruns.some((subrun) => subrun.profile === profile)
   )))
-  const authorityRequired = selected.some(({ authority }) => authority.mode !== 'none')
+  const authorityRequired = executionEntries.some(({ definition, selectedSubruns }) => (
+    definition.authority.mode === 'whole-case'
+      || (definition.authority.mode === 'subruns'
+        && selectedSubruns.some(({ id }) => definition.authority.subruns.includes(id)))
+  ))
   let phases
   if (options.phase === 'all') {
     phases = [
@@ -519,13 +530,15 @@ export function planP0Execution(options, definitions = P0_CASES) {
     && options.profile === null
     && selected.length === P0_CASES.length
   return {
+    scope: controlOnly ? 'CONTROL' : 'MATRIX',
     phases,
     profiles,
     definitions: selected,
+    executionEntries,
     includesCanonical: phases.includes('canonical'),
     fullMatrix,
     verdict: fullMatrix ? 'PASS' : 'PARTIAL_PASS',
-    businessMutation: selected.length > 0
+    businessMutation: !controlOnly && selected.length > 0
   }
 }
 
@@ -544,12 +557,12 @@ export function countByPhase(definitions) {
   }, {})
 }
 
-export async function runCase(definition, context, handlers) {
+export async function runCase(definition, context, handlers, details = {}) {
   const descriptor = handlers && typeof handlers === 'object'
     ? Object.getOwnPropertyDescriptor(handlers, definition.handlerId)
     : undefined
   if (!descriptor || !('value' in descriptor) || typeof descriptor.value !== 'function') {
     throw new Error(`INCOMPLETE_MATRIX: ${definition.id}`)
   }
-  return descriptor.value(context)
+  return descriptor.value(context, definition, details)
 }

@@ -1,13 +1,31 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { mkdir, mkdtemp, open, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  linkSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  rmSync
+} from 'node:fs'
+import { link, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { loadOrCreateRunState, writeCaseResultAtomic } from './p0-user-trading-artifacts.mjs'
+import {
+  aggregateReport,
+  loadOrCreateRunState,
+  planResume,
+  redactNetworkEntry,
+  writeCaseResultAtomic
+} from './p0-user-trading-artifacts.mjs'
 import {
   P0_CASES,
   P0_REGISTRY_FINGERPRINT,
@@ -19,15 +37,44 @@ import {
 } from './p0-user-trading-cases.mjs'
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
+const P0_COMPOSE_PROJECT = 'infra'
+const P0_COMPOSE_OVERRIDE_TEXT = [
+  'services:',
+  '  postgres:',
+  '    ports: !override',
+  '      - "127.0.0.1:5432:5432"',
+  '  redis:',
+  '    ports: !override',
+  '      - "127.0.0.1:6379:6379"',
+  ''
+].join('\n')
 const P0_DATABASE_PATTERN = /^fx_p0_user_e2e_[a-z0-9_]+$/
-const apiBaseUrl = process.env.API_BASE_URL ?? 'http://127.0.0.1:18086'
-const webBaseUrl = process.env.WEB_BASE_URL ?? 'http://127.0.0.1:5199'
-const adminBaseUrl = process.env.ADMIN_BASE_URL ?? 'http://127.0.0.1:5200'
-const runId = process.env.USDT_DEMO_SMOKE_RUN_ID ?? new Date().toISOString().replace(/[:.]/g, '-')
-const userEmail = process.env.USDT_DEMO_SMOKE_EMAIL ?? `usdt-demo-browser+${runId}@example.com`
-const userPassword = process.env.USDT_DEMO_SMOKE_PASSWORD ?? 'Password123!'
-const adminEmail = process.env.ADMIN_SMOKE_EMAIL ?? 'admin-smoke@example.com'
-const adminPassword = process.env.ADMIN_SMOKE_PASSWORD ?? 'Password123!'
+const P0_WINDOWS_JOB_OBJECT_CAPABILITY = 'WINDOWS_JOB_OBJECT_V1'
+const P0_HOST_PLATFORM = process.platform
+const defaultP0DependencyInstances = new WeakSet()
+let apiBaseUrl
+let webBaseUrl
+let adminBaseUrl
+let runId
+let userEmail
+let userPassword
+let adminEmail
+let adminPassword
+
+export function assertP0ProcessTreeCapability() {
+  if (P0_HOST_PLATFORM !== 'win32') return null
+  throw new Error('P0_WINDOWS_JOB_OBJECT_REQUIRED')
+}
+
+function requireP0CleanupProcessTreeProvider(processTreeProvider) {
+  if (processTreeProvider?.capability !== P0_WINDOWS_JOB_OBJECT_CAPABILITY
+    || processTreeProvider.platform !== 'win32'
+    || processTreeProvider.verification !== 'INDEPENDENTLY_VERIFIED'
+    || typeof processTreeProvider.acquireNativeProcessHandle !== 'function') {
+    throw new Error('P0_WINDOWS_JOB_OBJECT_REQUIRED')
+  }
+  return processTreeProvider
+}
 
 export function resolveCanonicalSmokeOwnership(inheritedEnv = process.env) {
   const inheritedToken = inheritedEnv.P0_RUN_OWNER_TOKEN
@@ -46,18 +93,23 @@ export function resolveCanonicalSmokeOwnership(inheritedEnv = process.env) {
   }
   const ownerToken = `${randomUUID()}${randomUUID()}`
   return {
-    database: `fx_platform_smoke_${randomUUID().replaceAll('-', '')}`,
+    database: `fx_p0_user_e2e_canonical_1_${randomUUID().replaceAll('-', '').slice(0, 12)}`,
     ownerToken,
     ownerId: ownerIdForToken(ownerToken),
     inherited: false
   }
 }
 
-const canonicalSmokeOwnership = resolveCanonicalSmokeOwnership()
-const smokeDatabase = canonicalSmokeOwnership.database
-const artifactRoot = resolve(process.env.USDT_DEMO_SMOKE_ARTIFACTS ?? join(projectRoot, 'artifacts', 'smoke-usdt-demo-browser', runId))
-const screenshotsDir = join(artifactRoot, 'screenshots')
-const logsDir = join(artifactRoot, 'logs')
+let canonicalSmokeOwnership
+let canonicalExpectedComposeIdentity
+let canonicalComposeTarget
+let canonicalComposeIdentity
+let canonicalPostgres
+let canonicalRedis
+let smokeDatabase
+let artifactRoot
+let screenshotsDir
+let logsDir
 
 const INITIAL_SPOT_USDT = 50000
 const INITIAL_PERP_USDT = 50000
@@ -68,6 +120,8 @@ const LIQUIDATION_SYMBOL = 'SOLUSDT-PERP'
 const FALLBACK_FUNDING_SYMBOL = 'BNBUSDT-PERP'
 const P0_SPOT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT']
 const P0_PERP_SYMBOLS = ['BTCUSDT-PERP', 'ETHUSDT-PERP', 'BNBUSDT-PERP', 'SOLUSDT-PERP', 'XRPUSDT-PERP']
+const P0_DEFAULT_REDIS_KEYS = [...P0_SPOT_SYMBOLS, ...P0_PERP_SYMBOLS]
+  .map((symbol) => `quote:${symbol}`)
 const FORBIDDEN_PRODUCTS = ['FOREX', 'INVERSE_PERP', 'OPTION']
 const SOURCE_METADATA_FIELDS = ['providerCode', 'providerSymbol', 'sourceMode', 'asOf', 'expiresAt', 'stale']
 const TERMINAL_ORDER_STATUSES = new Set(['FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED'])
@@ -118,13 +172,14 @@ const VIEWPORTS = [
   { name: 'admin-mobile', width: 390, height: 844, surface: 'admin', mobile: true }
 ]
 
-const results = []
-const screenshots = []
-const sourceEvidence = []
-const processLogs = []
-const managedProcesses = []
-const bindingRestores = []
-const fundingConfigRestores = new Map()
+let results = []
+let screenshots = []
+let sourceEvidence = []
+let processLogs = []
+let managedProcesses = []
+let localNativeProcessHandles = new Map()
+let bindingRestores = []
+let fundingConfigRestores = new Map()
 let userToken
 let adminToken
 let adminRefreshToken
@@ -134,11 +189,100 @@ let accountId
 let browser
 let accountEventObserver
 let smokeDatabaseCreated = false
+let standaloneCanonicalRedisOwnership
 let interruptionError
 let sourceModeStartedAtMs = 0
 const shutdownController = new AbortController()
 
+function initializeCanonicalRuntime(inheritedEnv = process.env) {
+  apiBaseUrl = inheritedEnv.API_BASE_URL ?? 'http://127.0.0.1:18086'
+  webBaseUrl = inheritedEnv.WEB_BASE_URL ?? 'http://127.0.0.1:5199'
+  adminBaseUrl = inheritedEnv.ADMIN_BASE_URL ?? 'http://127.0.0.1:5200'
+  runId = inheritedEnv.USDT_DEMO_SMOKE_RUN_ID ?? new Date().toISOString().replace(/[:.]/g, '-')
+  userEmail = inheritedEnv.USDT_DEMO_SMOKE_EMAIL ?? `usdt-demo-browser+${runId}@example.com`
+  userPassword = inheritedEnv.USDT_DEMO_SMOKE_PASSWORD ?? 'Password123!'
+  adminEmail = inheritedEnv.ADMIN_SMOKE_EMAIL ?? 'admin-smoke@example.com'
+  adminPassword = inheritedEnv.ADMIN_SMOKE_PASSWORD ?? 'Password123!'
+  canonicalSmokeOwnership = resolveCanonicalSmokeOwnership(inheritedEnv)
+  canonicalExpectedComposeIdentity = canonicalSmokeOwnership.inherited
+    ? safeP0ComposeIdentity({
+        project: inheritedEnv.P0_COMPOSE_PROJECT,
+        postgres: {
+          id: inheritedEnv.P0_POSTGRES_CONTAINER_ID,
+          image: 'postgres:16',
+          host: '127.0.0.1',
+          hostPort: 5432
+        },
+        redis: {
+          id: inheritedEnv.P0_REDIS_CONTAINER_ID,
+          image: 'redis:7',
+          host: '127.0.0.1',
+          hostPort: 6379
+        }
+      })
+    : undefined
+  canonicalComposeIdentity = undefined
+  canonicalPostgres = undefined
+  canonicalRedis = undefined
+  smokeDatabase = canonicalSmokeOwnership.database
+  artifactRoot = resolve(
+    inheritedEnv.USDT_DEMO_SMOKE_ARTIFACTS
+      ?? join(projectRoot, 'artifacts', 'smoke-usdt-demo-browser', runId)
+  )
+  const composeArtifactBase = canonicalSmokeOwnership.inherited
+    ? resolve(artifactRoot, '..', '..')
+    : resolve(artifactRoot, '..')
+  canonicalComposeTarget = createP0ComposeTarget({ artifactBase: composeArtifactBase })
+  if (canonicalSmokeOwnership.inherited
+    && (inheritedEnv.P0_COMPOSE_BASE_FILE !== canonicalComposeTarget.composeFiles[0]
+      || inheritedEnv.P0_COMPOSE_OVERRIDE_FILE !== canonicalComposeTarget.composeFiles[1])) {
+    throw new Error('P0_CANONICAL_COMPOSE_TARGET_MISMATCH')
+  }
+  screenshotsDir = join(artifactRoot, 'screenshots')
+  logsDir = join(artifactRoot, 'logs')
+  results = []
+  screenshots = []
+  sourceEvidence = []
+  processLogs = []
+  managedProcesses = []
+  localNativeProcessHandles = new Map()
+  bindingRestores = []
+  fundingConfigRestores = new Map()
+  userToken = undefined
+  adminToken = undefined
+  adminRefreshToken = undefined
+  adminAuthorities = []
+  userId = undefined
+  accountId = undefined
+  browser = undefined
+  accountEventObserver = undefined
+  smokeDatabaseCreated = false
+  interruptionError = undefined
+  sourceModeStartedAtMs = 0
+  standaloneCanonicalRedisOwnership = undefined
+}
+
+export async function cleanupCanonicalOwnershipBarrier({
+  stopManagedProcesses,
+  assertOwnedPortsFree,
+  dropOwnedDatabase,
+  cleanupRedisOwnership
+}) {
+  if (typeof stopManagedProcesses !== 'function'
+    || typeof assertOwnedPortsFree !== 'function'
+    || typeof dropOwnedDatabase !== 'function'
+    || typeof cleanupRedisOwnership !== 'function') {
+    throw new Error('P0_CANONICAL_CLEANUP_BARRIER_INVALID')
+  }
+  await stopManagedProcesses()
+  await assertOwnedPortsFree()
+  await dropOwnedDatabase()
+  return cleanupRedisOwnership()
+}
+
 export async function runCanonicalSmoke() {
+  assertP0ProcessTreeCapability()
+  initializeCanonicalRuntime()
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.once(signal, () => {
       interruptionError ??= new Error(`Smoke interrupted by ${signal}; cleanup is required before exit`)
@@ -197,15 +341,34 @@ export async function runCanonicalSmoke() {
     ['funding configuration restore', restoreFundingConfigs],
     ['provider binding restore', restoreProviderBindings],
     ['account-event observer shutdown', async () => { if (accountEventObserver) await accountEventObserver.close() }],
-    ['browser shutdown', async () => { if (browser) await browser.close() }],
-    ['managed process shutdown', stopManagedProcesses],
-    ['dedicated PostgreSQL database cleanup', dropSmokeDatabase]
+    ['browser shutdown', async () => { if (browser) await browser.close() }]
   ]) {
     try {
       await cleanup()
     } catch (error) {
       failure = appendFailure(failure, error, label)
     }
+  }
+  try {
+    await cleanupCanonicalOwnershipBarrier({
+      stopManagedProcesses,
+      async assertOwnedPortsFree() {
+        const signal = AbortSignal.timeout(30000)
+        for (const port of [18086, 5199, 5200]) {
+          if (await isPortOpen(port, signal)) {
+            throw new Error(`P0_PORT_STILL_IN_USE: ${port}`)
+          }
+        }
+      },
+      dropOwnedDatabase: dropSmokeDatabase,
+      async cleanupRedisOwnership() {
+        if (standaloneCanonicalRedisOwnership) {
+          return standaloneCanonicalRedisOwnership.cleanup()
+        }
+      }
+    })
+  } catch (error) {
+    failure = appendFailure(failure, error, 'canonical ownership cleanup')
   }
 
   if (interruptionError && !failure) failure = interruptionError
@@ -232,47 +395,188 @@ async function startRealServices() {
   return { startupCommands: STARTUP_COMMANDS, apiBaseUrl, webBaseUrl, adminBaseUrl }
 }
 
-async function startDockerInfrastructure() {
-  const composeFile = join(projectRoot, 'infra', 'docker-compose.yml')
-  const result = spawnSync('docker', ['compose', '-f', composeFile, 'up', '-d', '--pull', 'never'], {
-    cwd: projectRoot,
-    encoding: 'utf8',
-    windowsHide: true
-  })
-  if (result.status !== 0) {
-    throw new Error(`Real PostgreSQL/Redis prerequisite failed. ${STARTUP_COMMANDS[0]}\n${result.error?.message ?? result.stderr ?? result.stdout}`)
+export async function startCanonicalInfrastructureBoundary({
+  ownership,
+  startCompose,
+  waitForPostgres,
+  prepareInherited
+}) {
+  if (typeof startCompose !== 'function'
+    || typeof waitForPostgres !== 'function'
+    || typeof prepareInherited !== 'function') {
+    throw new Error('P0_CANONICAL_INFRASTRUCTURE_DEPENDENCY_INVALID')
   }
-  await waitFor(() => {
-    const ready = spawnSync('docker', ['exec', 'fx-platform-postgres', 'pg_isready', '-U', 'postgres', '-d', 'postgres'], {
-      encoding: 'utf8',
-      windowsHide: true
+  let composeStarted = false
+  if (ownership?.inherited !== true) {
+    await startCompose()
+    composeStarted = true
+  }
+  await waitForPostgres()
+  if (ownership?.inherited === true) await prepareInherited()
+  return { inherited: ownership?.inherited === true, composeStarted }
+}
+
+export async function startCanonicalDockerInfrastructure({
+  ownership,
+  inheritedEnv,
+  composeFiles,
+  expectedComposeIdentity,
+  operations
+}) {
+  if (!Array.isArray(composeFiles) || composeFiles.length < 2
+    || composeFiles.some((file) => typeof file !== 'string' || file.length === 0)
+    || typeof operations?.inspectDockerDaemon !== 'function'
+    || typeof operations.startCompose !== 'function'
+    || typeof operations.verifyComposeContainers !== 'function'
+    || typeof operations.waitForPostgres !== 'function') {
+    throw new Error('P0_CANONICAL_INFRASTRUCTURE_DEPENDENCY_INVALID')
+  }
+  assertNoInheritedDockerTarget(inheritedEnv)
+  const daemon = await operations.inspectDockerDaemon()
+  assertLocalDockerEndpoint(daemon?.endpoint)
+  let composeStarted = false
+  if (ownership?.inherited !== true) {
+    await operations.startCompose({ composeFiles, project: P0_COMPOSE_PROJECT })
+    composeStarted = true
+  }
+  const composeIdentity = await operations.verifyComposeContainers({
+    composeFiles,
+    expectedProject: P0_COMPOSE_PROJECT
+  })
+  const verifiedIdentity = safeP0ComposeIdentity(composeIdentity)
+  if (expectedComposeIdentity !== undefined
+    && JSON.stringify(verifiedIdentity) !== JSON.stringify(
+      safeP0ComposeIdentity(expectedComposeIdentity)
+    )) {
+    throw new Error('P0_CANONICAL_COMPOSE_IDENTITY_MISMATCH')
+  }
+  await operations.waitForPostgres(composeIdentity)
+  if (ownership?.inherited === true) {
+    if (typeof operations.prepareInherited !== 'function') {
+      throw new Error('P0_CANONICAL_INFRASTRUCTURE_DEPENDENCY_INVALID')
+    }
+    await operations.prepareInherited(composeIdentity)
+  }
+  return {
+    inherited: ownership?.inherited === true,
+    composeStarted,
+    composeIdentity
+  }
+}
+
+async function startDockerInfrastructure() {
+  const composeFile = canonicalComposeTarget.composeFiles[0]
+  assertNoInheritedDockerTarget(process.env)
+  const composeTarget = await ensureP0ComposeTarget({
+    artifactBase: dirname(dirname(canonicalComposeTarget.composeFiles[1]))
+  })
+  if (JSON.stringify(composeTarget) !== JSON.stringify(canonicalComposeTarget)) {
+    throw new Error('P0_CANONICAL_COMPOSE_TARGET_MISMATCH')
+  }
+  const composeFiles = composeTarget.composeFiles
+  const commandEnvironment = scrubLocalLauncherEnvironment(process.env)
+  const runCommand = (descriptor) => runLocalCommand({
+    ...descriptor,
+    env: { ...commandEnvironment, ...descriptor.env },
+    shell: false,
+    signal: shutdownController.signal
+  })
+  const infrastructure = createLocalInfrastructureAdapter(composeFile, runCommand)
+  const verifyCanonicalRedisTransactionBinding = async (
+    _expectedBinding,
+    { signal = shutdownController.signal } = {}
+  ) => {
+    if (!canonicalComposeIdentity) throw new Error('P0_REDIS_TRANSACTION_VERIFIER_REQUIRED')
+    const observedIdentity = await revalidateP0CleanupComposeIdentity({
+      artifactBase: dirname(dirname(composeFiles[1])),
+      manifest: {
+        composeTarget: safeP0ComposeTarget(composeTarget),
+        composeIdentity: safeP0ComposeIdentity(canonicalComposeIdentity)
+      },
+      infrastructure,
+      signal
     })
-    return ready.status === 0
-  }, 'PostgreSQL container readiness', 30000)
-  if (canonicalSmokeOwnership.inherited) {
-    const redis = createLoopbackRedisAdapter()
-    await redis.waitUntilReady()
-    await acquireRedisOwnership({
-      redis,
+    return observedIdentity.redis
+  }
+  const boundary = await startCanonicalDockerInfrastructure({
+    ownership: canonicalSmokeOwnership,
+    inheritedEnv: process.env,
+    composeFiles,
+    expectedComposeIdentity: canonicalExpectedComposeIdentity,
+    operations: {
+      inspectDockerDaemon: () => infrastructure.inspectDockerDaemon({
+        signal: shutdownController.signal
+      }),
+      async startCompose() {
+        const composeArguments = composeFiles.flatMap((file) => ['-f', file])
+        const result = await runCommand({
+          id: 'canonical-compose-up',
+          command: 'docker',
+          args: [
+            'compose', '--project-name', P0_COMPOSE_PROJECT,
+            ...composeArguments, 'up', '-d', '--pull', 'never'
+          ],
+          cwd: projectRoot
+        })
+        if (result?.status !== 0 || result.signal) {
+          throw new Error('P0_CANONICAL_COMPOSE_START_FAILED')
+        }
+      },
+      verifyComposeContainers: ({ composeFiles: files }) => (
+        infrastructure.verifyComposeContainers({
+          composeFiles: files,
+          expectedProject: P0_COMPOSE_PROJECT,
+          signal: shutdownController.signal
+        })
+      ),
+      async waitForPostgres(identity) {
+        canonicalComposeIdentity = identity
+        canonicalPostgres = createDockerPostgresAdapter(
+          runCommand,
+          () => canonicalComposeIdentity?.postgres?.id
+        )
+        await canonicalPostgres.waitUntilReady({ signal: shutdownController.signal })
+      },
+      async prepareInherited(identity) {
+        canonicalRedis = createLoopbackRedisAdapter(
+          undefined,
+          () => identity.redis,
+          verifyCanonicalRedisTransactionBinding
+        )
+        await canonicalRedis.waitUntilReady({ signal: shutdownController.signal })
+        await acquireRedisOwnership({
+          redis: canonicalRedis,
+          runToken: canonicalSmokeOwnership.ownerToken,
+          role: 'child',
+          signal: shutdownController.signal
+        })
+        await prepareCanonicalSmokeDatabase({
+          ownership: canonicalSmokeOwnership,
+          postgres: canonicalPostgres
+        })
+      }
+    }
+  })
+  canonicalComposeIdentity = boundary.composeIdentity
+  canonicalRedis ??= createLoopbackRedisAdapter(
+    undefined,
+    () => canonicalComposeIdentity?.redis,
+    verifyCanonicalRedisTransactionBinding
+  )
+  if (!boundary.inherited) {
+    await canonicalRedis.waitUntilReady({ signal: shutdownController.signal })
+    standaloneCanonicalRedisOwnership = await createStandaloneCanonicalRedisOwnership({
+      redis: canonicalRedis,
       runToken: canonicalSmokeOwnership.ownerToken,
-      role: 'child'
+      artifactRoot,
+      recoveryPath: join(artifactRoot, 'control', 'canonical-redis.json'),
+      runId,
+      signal: shutdownController.signal
     })
     await prepareCanonicalSmokeDatabase({
-      ownership: canonicalSmokeOwnership,
-      postgres: createDockerPostgresAdapter()
+      ownership: { ...canonicalSmokeOwnership, inherited: true },
+      postgres: canonicalPostgres
     })
-    smokeDatabaseCreated = true
-    return
-  }
-  const created = spawnSync('docker', [
-    'exec', 'fx-platform-postgres', 'psql', '-U', 'postgres', '-d', 'postgres',
-    '-v', 'ON_ERROR_STOP=1', '-c', `CREATE DATABASE "${smokeDatabase}"`
-  ], {
-    encoding: 'utf8',
-    windowsHide: true
-  })
-  if (created.status !== 0) {
-    throw new Error(`Dedicated PostgreSQL database creation failed:\n${created.error?.message ?? created.stderr ?? created.stdout}`)
   }
   smokeDatabaseCreated = true
 }
@@ -282,30 +586,15 @@ async function ensureBackendServer() {
     throw new Error(`The smoke must own ${apiBaseUrl}; an existing backend cannot prove demo execution and required schedulers are enabled`)
   }
   const backendDir = join(projectRoot, 'backend')
-  const maven = process.env.MAVEN_CMD ?? (process.platform === 'win32' ? 'mvn.cmd' : 'mvn')
+  const maven = process.platform === 'win32' ? 'mvn.cmd' : 'mvn'
   const databaseUrl = `jdbc:postgresql://127.0.0.1:5432/${smokeDatabase}`
   const child = startManagedProcess('backend', maven, [
     'spring-boot:run',
     '-Dspring-boot.run.profiles=dev'
-  ], backendDir, {
-    SERVER_PORT: new URL(apiBaseUrl).port || '18086',
-    DATABASE_URL: databaseUrl,
-    DATABASE_USERNAME: 'postgres',
-    DATABASE_PASSWORD: 'password',
-    SPRING_DATASOURCE_URL: databaseUrl,
-    SPRING_DATASOURCE_USERNAME: 'postgres',
-    SPRING_DATASOURCE_PASSWORD: 'password',
-    SPRING_PROFILES_ACTIVE: 'dev',
-    EXECUTION_MODE: 'demo',
-    MARKET_TEST_CONTROL_ENABLED: 'true',
-    TRADING_PENDING_ORDER_EXECUTION_ENABLED: 'true',
-    TRADING_PROTECTIVE_ORDER_EXECUTION_ENABLED: 'true',
-    TRADING_FUNDING_ENABLED: 'true',
-    TRADING_FUNDING_SCAN_MS: '500',
-    TRADING_LIQUIDATION_ENABLED: 'true',
-    TRADING_LIQUIDATION_SCAN_INTERVAL_MS: '500',
-    PROVIDER_INSTRUMENT_SYNC_ENABLED: 'false'
-  }, sanitizedBackendEnvironment())
+  ], backendDir, buildCanonicalBackendEnvironment({
+    databaseUrl,
+    serverPort: new URL(apiBaseUrl).port || '18086'
+  }))
   await waitFor(async () => {
     assertProcessRunning(child)
     const response = await rawJson('/actuator/health').catch(() => null)
@@ -338,14 +627,25 @@ async function ensureFrontendServer(surface, baseUrl, fallbackPort) {
 }
 
 function startManagedProcess(label, command, args, cwd, extraEnv = {}, inheritedEnv = process.env) {
-  const child = spawn(command, args, {
+  const descriptor = normalizeLocalCommandDescriptor({
+    command,
+    args,
     cwd,
-    env: { ...inheritedEnv, ...extraEnv },
+    env: { ...inheritedEnv, ...extraEnv }
+  })
+  const child = spawn(descriptor.command, descriptor.args, {
+    cwd: descriptor.cwd,
+    env: descriptor.env,
     stdio: ['ignore', 'pipe', 'pipe'],
-    shell: process.platform === 'win32',
+    shell: false,
     windowsHide: true
   })
-  const log = { label, command: [command, ...args].join(' '), output: '' }
+  observeLocalChildSpawn(child, { descriptor, label, registerIdentity: true })
+  const log = {
+    label,
+    command: [descriptor.command, ...descriptor.args].join(' '),
+    output: ''
+  }
   processLogs.push(log)
   child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
   child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
@@ -371,6 +671,7 @@ export function sanitizedBackendEnvironment(inheritedEnv = process.env) {
       || normalized.startsWith('MARKET_')
       || normalized.startsWith('TRADING_')
       || /(^|_)(BROKER|FIX|LP)(_|$)/.test(normalized)
+      || /(^|_)(KEY|ACCOUNT|ENDPOINT)(_|$)/.test(normalized)
       || normalized === 'P0_RUN_OWNER_TOKEN'
       || normalized === 'USDT_DEMO_SMOKE_DATABASE'
     ) {
@@ -378,6 +679,37 @@ export function sanitizedBackendEnvironment(inheritedEnv = process.env) {
     }
   }
   return env
+}
+
+export function buildCanonicalBackendEnvironment({
+  databaseUrl,
+  serverPort = '18086',
+  inheritedEnv = process.env
+}) {
+  const environment = sanitizedBackendEnvironment(inheritedEnv)
+  for (const key of Object.keys(environment)) {
+    if (key.toUpperCase() === 'PROVIDER_INSTRUMENT_SYNC_ENABLED') delete environment[key]
+  }
+  return {
+    ...environment,
+    SERVER_PORT: String(serverPort),
+    DATABASE_URL: databaseUrl,
+    DATABASE_USERNAME: 'postgres',
+    DATABASE_PASSWORD: 'password',
+    SPRING_DATASOURCE_URL: databaseUrl,
+    SPRING_DATASOURCE_USERNAME: 'postgres',
+    SPRING_DATASOURCE_PASSWORD: 'password',
+    SPRING_PROFILES_ACTIVE: 'dev',
+    EXECUTION_MODE: 'demo',
+    MARKET_TEST_CONTROL_ENABLED: 'true',
+    MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED: 'false',
+    TRADING_PENDING_ORDER_EXECUTION_ENABLED: 'true',
+    TRADING_PROTECTIVE_ORDER_EXECUTION_ENABLED: 'true',
+    TRADING_FUNDING_ENABLED: 'true',
+    TRADING_FUNDING_SCAN_MS: '500',
+    TRADING_LIQUIDATION_ENABLED: 'true',
+    TRADING_LIQUIDATION_SCAN_INTERVAL_MS: '500'
+  }
 }
 
 const P0_COMMON_BACKEND_ENVIRONMENT = Object.freeze({
@@ -437,6 +769,278 @@ function assertContainedPath(base, target, error = 'P0_CONTROL_ESCAPE') {
   }
 }
 
+export function createP0ComposeTarget({ artifactBase }) {
+  const resolvedArtifactBase = resolve(artifactBase)
+  const runtimeRoot = resolve(resolvedArtifactBase, '.runtime')
+  const overridePath = resolve(runtimeRoot, 'compose.loopback.yml')
+  assertContainedPath(resolvedArtifactBase, runtimeRoot, 'P0_COMPOSE_RUNTIME_ESCAPE')
+  assertContainedPath(runtimeRoot, overridePath, 'P0_COMPOSE_RUNTIME_ESCAPE')
+  return Object.freeze({
+    expectedProject: P0_COMPOSE_PROJECT,
+    composeFiles: Object.freeze([
+      resolve(projectRoot, 'infra', 'docker-compose.yml'),
+      overridePath
+    ])
+  })
+}
+
+async function inspectP0ComposeDirectory(path, { missingError, unsafeError }) {
+  let metadata
+  try {
+    metadata = await lstat(path)
+  } catch (error) {
+    if (error?.code === 'ENOENT') throw new Error(missingError, { cause: error })
+    throw new Error(unsafeError, { cause: error })
+  }
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error(unsafeError)
+  }
+  let actual
+  try {
+    actual = await realpath(path)
+  } catch (error) {
+    throw new Error(unsafeError, { cause: error })
+  }
+  if (resolve(actual) !== resolve(path)) throw new Error(unsafeError)
+  return metadata
+}
+
+function sameP0ComposeDirectoryIdentity(before, after) {
+  return after.isDirectory()
+    && !after.isSymbolicLink()
+    && after.dev === before.dev
+    && after.ino === before.ino
+    && after.size === before.size
+    && after.mtimeMs === before.mtimeMs
+    && after.ctimeMs === before.ctimeMs
+}
+
+function sameP0ComposeFileIdentity(before, after) {
+  return after.isFile()
+    && after.nlink === 1
+    && after.dev === before.dev
+    && after.ino === before.ino
+    && after.size === before.size
+    && after.mtimeMs === before.mtimeMs
+    && after.ctimeMs === before.ctimeMs
+}
+
+async function readStableP0ComposeOverride(path) {
+  let before
+  try {
+    before = await lstat(path)
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error('P0_COMPOSE_OVERRIDE_MISSING', { cause: error })
+    }
+    throw new Error('P0_CONTROL_FILE_UNSAFE', { cause: error })
+  }
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
+    throw new Error('P0_CONTROL_FILE_UNSAFE')
+  }
+  let initialRealpath
+  try {
+    initialRealpath = await realpath(path)
+  } catch (error) {
+    throw new Error('P0_CONTROL_FILE_UNSAFE', { cause: error })
+  }
+  if (resolve(initialRealpath) !== resolve(path)) throw new Error('P0_CONTROL_FILE_UNSAFE')
+
+  let handle
+  try {
+    handle = await open(path, 'r')
+  } catch (error) {
+    throw new Error('P0_CONTROL_FILE_UNSAFE', { cause: error })
+  }
+  try {
+    const opened = await handle.stat()
+    if (!sameP0ComposeFileIdentity(before, opened)) {
+      throw new Error('P0_CONTROL_FILE_UNSAFE')
+    }
+    const text = await handle.readFile('utf8')
+    const openedAfterRead = await handle.stat()
+    let after
+    let finalRealpath
+    let final
+    try {
+      after = await lstat(path)
+      finalRealpath = await realpath(path)
+      final = await lstat(path)
+    } catch (error) {
+      throw new Error('P0_CONTROL_FILE_UNSAFE', { cause: error })
+    }
+    if (!sameP0ComposeFileIdentity(opened, openedAfterRead)
+      || !sameP0ComposeFileIdentity(opened, after)
+      || after.isSymbolicLink()
+      || !sameP0ComposeFileIdentity(opened, final)
+      || final.isSymbolicLink()
+      || resolve(finalRealpath) !== resolve(path)) {
+      throw new Error('P0_CONTROL_FILE_UNSAFE')
+    }
+    return text
+  } finally {
+    await handle.close()
+  }
+}
+
+export async function verifyP0ComposeTarget({ artifactBase }) {
+  const target = createP0ComposeTarget({ artifactBase })
+  const resolvedArtifactBase = resolve(artifactBase)
+  const runtimeRoot = dirname(target.composeFiles[1])
+  const overridePath = target.composeFiles[1]
+  assertContainedPath(resolvedArtifactBase, runtimeRoot, 'P0_COMPOSE_RUNTIME_ESCAPE')
+  assertContainedPath(runtimeRoot, overridePath, 'P0_COMPOSE_RUNTIME_ESCAPE')
+  const artifactBefore = await inspectP0ComposeDirectory(resolvedArtifactBase, {
+    missingError: 'P0_COMPOSE_RUNTIME_MISSING',
+    unsafeError: 'P0_COMPOSE_RUNTIME_UNSAFE'
+  })
+  const runtimeBefore = await inspectP0ComposeDirectory(runtimeRoot, {
+    missingError: 'P0_COMPOSE_RUNTIME_MISSING',
+    unsafeError: 'P0_COMPOSE_RUNTIME_UNSAFE'
+  })
+  const text = await readStableP0ComposeOverride(overridePath)
+  const artifactAfter = await inspectP0ComposeDirectory(resolvedArtifactBase, {
+    missingError: 'P0_COMPOSE_RUNTIME_MISSING',
+    unsafeError: 'P0_COMPOSE_RUNTIME_UNSAFE'
+  })
+  const runtimeAfter = await inspectP0ComposeDirectory(runtimeRoot, {
+    missingError: 'P0_COMPOSE_RUNTIME_MISSING',
+    unsafeError: 'P0_COMPOSE_RUNTIME_UNSAFE'
+  })
+  if (!sameP0ComposeDirectoryIdentity(artifactBefore, artifactAfter)
+    || !sameP0ComposeDirectoryIdentity(runtimeBefore, runtimeAfter)) {
+    throw new Error('P0_COMPOSE_RUNTIME_UNSAFE')
+  }
+  if (text !== P0_COMPOSE_OVERRIDE_TEXT) throw new Error('P0_COMPOSE_OVERRIDE_INVALID')
+  return target
+}
+
+export async function ensureP0ComposeTarget({ artifactBase }) {
+  const target = createP0ComposeTarget({ artifactBase })
+  const resolvedArtifactBase = resolve(artifactBase)
+  const runtimeRoot = dirname(target.composeFiles[1])
+  await mkdir(resolvedArtifactBase, { recursive: true })
+  await mkdir(runtimeRoot, { recursive: true })
+  const actualArtifactBase = await realpath(resolvedArtifactBase)
+  const actualRuntimeRoot = await realpath(runtimeRoot)
+  if (resolve(actualArtifactBase) !== resolvedArtifactBase
+    || resolve(actualRuntimeRoot) !== runtimeRoot) {
+    throw new Error('P0_COMPOSE_RUNTIME_UNSAFE')
+  }
+  assertContainedPath(actualArtifactBase, actualRuntimeRoot, 'P0_COMPOSE_RUNTIME_ESCAPE')
+  const overridePath = target.composeFiles[1]
+  const existing = await inspectSafeControlFile(overridePath, { allowMissing: true })
+  if (!existing) {
+    try {
+      await writeControlTextNoClobber(
+        overridePath,
+        P0_COMPOSE_OVERRIDE_TEXT,
+        'P0_COMPOSE_OVERRIDE_EXISTS'
+      )
+    } catch (error) {
+      if (error?.message !== 'P0_COMPOSE_OVERRIDE_EXISTS') throw error
+    }
+  }
+  return verifyP0ComposeTarget({ artifactBase: resolvedArtifactBase })
+}
+
+async function inspectSafeControlFile(path, { allowMissing = false } = {}) {
+  let metadata
+  try {
+    metadata = await lstat(path)
+  } catch (error) {
+    if (allowMissing && error?.code === 'ENOENT') return null
+    throw error
+  }
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
+    throw new Error('P0_CONTROL_FILE_UNSAFE')
+  }
+  const actual = await realpath(path)
+  if (resolve(actual) !== resolve(path)) throw new Error('P0_CONTROL_FILE_UNSAFE')
+  return metadata
+}
+
+async function syncControlDirectory(path) {
+  let handle
+  try {
+    handle = await open(dirname(path), 'r')
+    await handle.sync()
+  } catch (error) {
+    if (!['EBADF', 'EINVAL', 'EISDIR', 'ENOTSUP', 'EPERM'].includes(error?.code)) throw error
+  } finally {
+    await handle?.close()
+  }
+}
+
+async function writeDurableControlTemp(path, text) {
+  const tempPath = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`)
+  let handle
+  try {
+    handle = await open(tempPath, 'wx', 0o600)
+    await handle.writeFile(text, 'utf8')
+    await handle.sync()
+    await handle.close()
+    handle = null
+    return tempPath
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => {})
+    throw error
+  } finally {
+    await handle?.close()
+  }
+}
+
+async function writeControlTextNoClobber(path, text, existsError = 'P0_CONTROL_EXISTS') {
+  await inspectSafeControlFile(path, { allowMissing: true })
+  const tempPath = await writeDurableControlTemp(path, text)
+  try {
+    await link(tempPath, path)
+    await syncControlDirectory(path)
+  } catch (error) {
+    if (error?.code === 'EEXIST') throw new Error(existsError, { cause: error })
+    throw error
+  } finally {
+    await rm(tempPath, { force: true })
+  }
+}
+
+async function writeControlJsonNoClobber(path, value, existsError) {
+  const text = `${JSON.stringify(value, null, 2)}\n`
+  await writeControlTextNoClobber(path, text, existsError)
+}
+
+async function replaceControlJsonAtomic(path, value) {
+  const text = `${JSON.stringify(value, null, 2)}\n`
+  await inspectSafeControlFile(path)
+  const tempPath = await writeDurableControlTemp(path, text)
+  try {
+    await rename(tempPath, path)
+    await syncControlDirectory(path)
+  } finally {
+    await rm(tempPath, { force: true })
+  }
+}
+
+async function readControlJson(path) {
+  const before = await inspectSafeControlFile(path)
+  const handle = await open(path, 'r')
+  try {
+    const opened = await handle.stat()
+    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino) {
+      throw new Error('P0_CONTROL_FILE_UNSAFE')
+    }
+    const value = JSON.parse(await handle.readFile('utf8'))
+    const after = await lstat(path)
+    if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1
+      || after.dev !== opened.dev || after.ino !== opened.ino) {
+      throw new Error('P0_CONTROL_FILE_UNSAFE')
+    }
+    return value
+  } finally {
+    await handle.close()
+  }
+}
+
 async function existingControlPaths(artifactBase, runId) {
   let base
   let runRoot
@@ -455,9 +1059,18 @@ async function existingControlPaths(artifactBase, runId) {
   return {
     runRoot,
     ownershipPath: join(controlDirectory, 'ownership.json'),
-    cleanedPath: join(controlDirectory, 'cleaned.json')
+    cleanedPath: join(controlDirectory, 'cleaned.json'),
+    redisPath: join(controlDirectory, 'redis.json')
   }
 }
+
+const P0_REDIS_CONTROL_STATES = new Set([
+  'NOT_ACQUIRED',
+  'ACQUIRE_ARMED',
+  'OWNED',
+  'SNAPSHOT_READY',
+  'REDIS_RELEASE_ARMED'
+])
 
 export async function createControlManifest({
   artifactBase,
@@ -466,6 +1079,8 @@ export async function createControlManifest({
   mode,
   selection,
   database,
+  identity,
+  profileWorkerMap,
   now = () => new Date().toISOString()
 }) {
   const ownerId = ownerIdForToken(runToken)
@@ -491,21 +1106,135 @@ export async function createControlManifest({
     mode,
     selection,
     database,
+    identity,
+    profileWorkerMap,
     ownerId,
     ownerToken: runToken,
+    redisState: 'NOT_ACQUIRED',
+    journal: {
+      schemaVersion: 1,
+      sequence: 0,
+      resources: []
+    },
     createdAt: now()
   }
-  let handle
   try {
-    handle = await open(ownershipPath, 'wx', 0o600)
-    await handle.writeFile(`${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
+    await writeControlJsonNoClobber(ownershipPath, manifest, 'P0_CONTROL_EXISTS')
   } catch (error) {
-    if (error?.code === 'EEXIST') throw new Error('P0_CONTROL_EXISTS', { cause: error })
+    if (error?.code === 'EEXIST' || error?.message === 'P0_CONTROL_EXISTS') {
+      throw new Error('P0_CONTROL_EXISTS', { cause: error })
+    }
     throw error
-  } finally {
-    await handle?.close()
   }
   return { runRoot, ownershipPath, ownerId }
+}
+
+function validateCleanedControlMarker(marker, runId, runToken) {
+  const notRequiredKeys = [
+    'cleanedAt',
+    'ownerId',
+    'receipt',
+    'runId',
+    'schemaVersion',
+    'status'
+  ]
+  const acquiredKeys = [
+    'cleanedAt',
+    'composeIdentity',
+    'composeTarget',
+    'ownerId',
+    'receipt',
+    'runId',
+    'schemaVersion',
+    'status'
+  ]
+  const receiptKeys = ['completedAt', 'key', 'state']
+  const actualKeys = Object.keys(marker ?? {}).sort()
+  const ownerMatches = runToken === undefined
+    ? typeof marker?.ownerId === 'string' && /^[a-f0-9]{64}$/.test(marker.ownerId)
+    : marker?.ownerId === ownerIdForToken(runToken)
+  if (!marker || marker.schemaVersion !== 2 || marker.status !== 'CLEANED'
+    || marker.runId !== runId || !ownerMatches
+    || typeof marker.cleanedAt !== 'string'
+    || Number.isNaN(Date.parse(marker.cleanedAt))) {
+    throw new Error('P0_CLEANED_MARKER_INVALID')
+  }
+  const receipt = marker.receipt
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)
+    || JSON.stringify(Object.keys(receipt).sort()) !== JSON.stringify(receiptKeys)) {
+    throw new Error('P0_CLEANED_MARKER_INVALID')
+  }
+  if (receipt.state === 'NOT_REQUIRED') {
+    if (JSON.stringify(actualKeys) !== JSON.stringify(notRequiredKeys)
+      || receipt.key !== null
+      || receipt.completedAt !== marker.cleanedAt) {
+      throw new Error('P0_CLEANED_MARKER_INVALID')
+    }
+    return marker
+  }
+  let composeTarget
+  let composeIdentity
+  try {
+    composeTarget = safeP0ComposeTarget(marker.composeTarget)
+    composeIdentity = safeP0ComposeIdentity(marker.composeIdentity)
+  } catch (error) {
+    throw new Error('P0_CLEANED_MARKER_INVALID', { cause: error })
+  }
+  const pending = receipt?.state === 'PENDING' && receipt.completedAt === null
+  const completed = receipt?.state === 'COMPLETED'
+    && typeof receipt.completedAt === 'string'
+    && !Number.isNaN(Date.parse(receipt.completedAt))
+  if (JSON.stringify(actualKeys) !== JSON.stringify(acquiredKeys)
+    || JSON.stringify(marker.composeTarget) !== JSON.stringify(composeTarget)
+    || JSON.stringify(marker.composeIdentity) !== JSON.stringify(composeIdentity)
+    || receipt.key !== redisCleanupReceiptKey(marker.ownerId)
+    || (!pending && !completed)) {
+    throw new Error('P0_CLEANED_MARKER_INVALID')
+  }
+  return marker
+}
+
+async function assertPersistedCleanedControlMarker({
+  ownershipPath,
+  expected,
+  runId,
+  runToken
+}) {
+  let persisted
+  try {
+    persisted = validateCleanedControlMarker(
+      await readControlJson(ownershipPath),
+      runId,
+      runToken
+    )
+  } catch (error) {
+    if (error?.message === 'P0_CONTROL_FILE_UNSAFE') throw error
+    throw new Error('P0_CLEANED_MARKER_PERSISTENCE_MISMATCH', { cause: error })
+  }
+  if (JSON.stringify(persisted) !== JSON.stringify(expected)) {
+    throw new Error('P0_CLEANED_MARKER_PERSISTENCE_MISMATCH')
+  }
+  return persisted
+}
+
+function validateActiveControlManifest(manifest, runId, runToken) {
+  if (!manifest || manifest.schemaVersion !== 1 || manifest.status !== 'ACTIVE'
+    || manifest.runId !== runId
+    || typeof manifest.ownerToken !== 'string'
+    || manifest.ownerToken.length === 0
+    || typeof manifest.ownerId !== 'string'
+    || !/^[a-f0-9]{64}$/.test(manifest.ownerId)
+    || manifest.ownerId !== ownerIdForToken(manifest.ownerToken)
+    || !P0_REDIS_CONTROL_STATES.has(manifest.redisState)
+    || typeof manifest.createdAt !== 'string'
+    || Number.isNaN(Date.parse(manifest.createdAt))) {
+    throw new Error('P0_CONTROL_INVALID')
+  }
+  if (runToken !== undefined
+    && (manifest.ownerToken !== runToken || manifest.ownerId !== ownerIdForToken(runToken))) {
+    throw new Error('P0_OWNER_MISMATCH')
+  }
+  return manifest
 }
 
 export async function completeControlCleanup({
@@ -513,40 +1242,537 @@ export async function completeControlCleanup({
   runId,
   runToken,
   resourcesCleaned,
+  redisReleaseReceipt,
+  redisNotAcquired = false,
+  replaceOwnership = replaceControlJsonAtomic,
   now = () => new Date().toISOString()
 }) {
-  const { ownershipPath, cleanedPath } = await existingControlPaths(artifactBase, runId)
-  if (existsSync(cleanedPath) && !existsSync(ownershipPath)) {
-    return { status: 'CLEANED', alreadyCleaned: true }
-  }
+  const { ownershipPath } = await existingControlPaths(artifactBase, runId)
+  const ownershipFile = await inspectSafeControlFile(ownershipPath, { allowMissing: true })
+  if (!ownershipFile) throw new Error('P0_CONTROL_MISSING')
   let manifest
   try {
-    manifest = JSON.parse(await readFile(ownershipPath, 'utf8'))
+    manifest = await readControlJson(ownershipPath)
   } catch (error) {
+    if (error?.message === 'P0_CONTROL_FILE_UNSAFE') throw error
     throw new Error('P0_CONTROL_MISSING', { cause: error })
   }
-  if (manifest.ownerToken !== runToken || manifest.ownerId !== ownerIdForToken(runToken)) {
-    throw new Error('P0_OWNER_MISMATCH')
+  if (manifest?.status === 'CLEANED') {
+    validateCleanedControlMarker(manifest, runId, runToken)
+    return { status: 'CLEANED', alreadyCleaned: true }
   }
+  validateActiveControlManifest(manifest, runId, runToken)
   if (resourcesCleaned !== true) throw new Error('P0_CLEANUP_INCOMPLETE')
-  const cleaned = {
-    schemaVersion: 1,
-    status: 'CLEANED',
-    runId,
-    ownerId: manifest.ownerId,
-    cleanedAt: now()
+  if (redisNotAcquired
+    ? manifest.redisState !== 'NOT_ACQUIRED'
+    : (manifest.redisState !== 'REDIS_RELEASE_ARMED'
+      || redisReleaseReceipt !== manifest.ownerId)) {
+    throw new Error('P0_REDIS_RELEASE_UNPROVEN')
   }
-  if (!existsSync(cleanedPath)) {
-    let handle
+  const cleanedAt = now()
+  let cleaned
+  if (redisNotAcquired) {
+    cleaned = {
+      schemaVersion: 2,
+      status: 'CLEANED',
+      runId,
+      ownerId: manifest.ownerId,
+      cleanedAt,
+      receipt: {
+        key: null,
+        state: 'NOT_REQUIRED',
+        completedAt: cleanedAt
+      }
+    }
+  } else {
+    let composeTarget
+    let composeIdentity
     try {
-      handle = await open(cleanedPath, 'wx', 0o600)
-      await handle.writeFile(`${JSON.stringify(cleaned, null, 2)}\n`, 'utf8')
-    } finally {
-      await handle?.close()
+      composeTarget = safeP0ComposeTarget(manifest.composeTarget)
+      composeIdentity = safeP0ComposeIdentity(manifest.composeIdentity)
+    } catch (error) {
+      throw new Error('P0_CLEANUP_COMPOSE_IDENTITY_INVALID', { cause: error })
+    }
+    cleaned = {
+      schemaVersion: 2,
+      status: 'CLEANED',
+      runId,
+      ownerId: manifest.ownerId,
+      cleanedAt,
+      composeTarget,
+      composeIdentity,
+      receipt: {
+        key: redisCleanupReceiptKey(manifest.ownerId),
+        state: 'PENDING',
+        completedAt: null
+      }
     }
   }
-  await rm(ownershipPath)
+  validateCleanedControlMarker(cleaned, runId, runToken)
+  await replaceOwnership(ownershipPath, cleaned)
+  await assertPersistedCleanedControlMarker({
+    ownershipPath,
+    expected: cleaned,
+    runId,
+    runToken
+  })
   return { status: 'CLEANED', alreadyCleaned: false }
+}
+
+const P0_RECOVERY_RESOURCE_TYPES = new Set([
+  'process',
+  'override',
+  'database',
+  'canonical-child'
+])
+const P0_PROCESS_FINGERPRINT_PATTERN = /^sha256:[a-f0-9]{64}$/
+
+function normalizeP0RecoveryResource(resource, runToken) {
+  if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
+    throw new Error('P0_JOURNAL_RESOURCE_INVALID')
+  }
+  const serialized = JSON.stringify(resource)
+  if (serialized.includes(runToken)) throw new Error('P0_JOURNAL_TOKEN_FORBIDDEN')
+  const normalized = JSON.parse(serialized)
+  if (!P0_RECOVERY_RESOURCE_TYPES.has(normalized.type)
+    || typeof normalized.id !== 'string' || normalized.id.length === 0
+    || normalized.id.length > 240) {
+    throw new Error('P0_JOURNAL_RESOURCE_INVALID')
+  }
+  if (normalized.type === 'database') assertP0DatabaseName(normalized.id)
+  if (normalized.live !== undefined && typeof normalized.live !== 'boolean') {
+    throw new Error('P0_JOURNAL_RESOURCE_INVALID')
+  }
+  if (normalized.type === 'override') {
+    const relativePath = relative('.', normalized.path ?? '')
+    if (!normalized.path || isAbsolute(normalized.path)
+      || relativePath === '..' || relativePath.startsWith(`..${sep}`)) {
+      throw new Error('P0_JOURNAL_RESOURCE_INVALID')
+    }
+  }
+  delete normalized.state
+  delete normalized.sequence
+  delete normalized.recordedAt
+  delete normalized.startedAt
+  delete normalized.pid
+  delete normalized.processStartedAt
+  delete normalized.processFingerprint
+  return normalized
+}
+
+async function activeControlManifestForUpdate(artifactBase, runId, runToken) {
+  const paths = await existingControlPaths(artifactBase, runId)
+  const manifest = await readControlJson(paths.ownershipPath)
+  if (manifest?.status === 'CLEANED') throw new Error('P0_CONTROL_NOT_ACTIVE')
+  validateActiveControlManifest(manifest, runId, runToken)
+  if (manifest.journal === undefined) {
+    manifest.journal = { schemaVersion: 1, sequence: 0, resources: [] }
+  }
+  if (manifest.journal?.schemaVersion !== 1
+    || !Number.isSafeInteger(manifest.journal.sequence)
+    || manifest.journal.sequence < 0
+    || !Array.isArray(manifest.journal.resources)) {
+    throw new Error('P0_JOURNAL_INVALID')
+  }
+  return { paths, manifest }
+}
+
+async function transitionP0RedisControlState({
+  artifactBase,
+  runId,
+  runToken,
+  from,
+  to,
+  signal
+}) {
+  throwIfP0Aborted(signal)
+  if (!P0_REDIS_CONTROL_STATES.has(from) || !P0_REDIS_CONTROL_STATES.has(to)) {
+    throw new Error('P0_REDIS_STATE_INVALID')
+  }
+  const active = await activeControlManifestForUpdate(artifactBase, runId, runToken)
+  throwIfP0Aborted(signal)
+  if (active.manifest.redisState !== from) throw new Error('P0_REDIS_STATE_INVALID')
+  active.manifest.redisState = to
+  throwIfP0Aborted(signal)
+  await replaceControlJsonAtomic(active.paths.ownershipPath, active.manifest)
+  throwIfP0Aborted(signal)
+  return active.manifest
+}
+
+export async function runP0JournaledMutation({
+  artifactBase,
+  runId,
+  runToken,
+  resource,
+  start,
+  stopLiveProcess,
+  signal,
+  now = () => new Date().toISOString()
+}) {
+  throwIfP0Aborted(signal)
+  if (typeof start !== 'function') throw new Error('P0_JOURNAL_START_INVALID')
+  const normalized = normalizeP0RecoveryResource(resource, runToken)
+  const planned = await activeControlManifestForUpdate(artifactBase, runId, runToken)
+  throwIfP0Aborted(signal)
+  if (planned.manifest.journal.resources.some(({ type, id }) => (
+    type === normalized.type && id === normalized.id
+  ))) {
+    throw new Error('P0_JOURNAL_RESOURCE_DUPLICATE')
+  }
+  const sequence = planned.manifest.journal.sequence + 1
+  planned.manifest.journal.sequence = sequence
+  planned.manifest.journal.resources.push({
+    ...normalized,
+    sequence,
+    state: 'PLANNED',
+    recordedAt: now()
+  })
+  throwIfP0Aborted(signal)
+  await replaceControlJsonAtomic(planned.paths.ownershipPath, planned.manifest)
+  throwIfP0Aborted(signal)
+
+  let transition
+  const markStarted = (startedResult) => {
+    transition ??= (async () => {
+      throwIfP0Aborted(signal)
+      const processIdentity = startedResult?.processIdentity
+      const processFingerprint = processIdentity?.processFingerprint
+        ?? processIdentity?.commandFingerprint
+      if (normalized.live === true
+        && (!Number.isSafeInteger(startedResult?.pid)
+          || startedResult.pid < 1
+          || processIdentity?.pid !== startedResult.pid
+          || typeof processIdentity.startedAt !== 'string'
+          || processIdentity.startedAt.length === 0
+          || !P0_PROCESS_FINGERPRINT_PATTERN.test(processFingerprint ?? ''))) {
+        throw new Error('P0_PROCESS_IDENTITY_MISSING')
+      }
+      const started = await activeControlManifestForUpdate(artifactBase, runId, runToken)
+      throwIfP0Aborted(signal)
+      const entry = started.manifest.journal.resources.find((candidate) => (
+        candidate.sequence === sequence
+          && candidate.type === normalized.type
+          && candidate.id === normalized.id
+      ))
+      if (entry?.state !== 'PLANNED') throw new Error('P0_JOURNAL_TRANSITION_INVALID')
+      entry.state = 'STARTED'
+      entry.startedAt = now()
+      if (Number.isSafeInteger(startedResult?.pid) && startedResult.pid > 0
+        && processIdentity?.pid === startedResult.pid
+        && typeof processIdentity.startedAt === 'string'
+        && processIdentity.startedAt.length > 0
+        && P0_PROCESS_FINGERPRINT_PATTERN.test(processFingerprint ?? '')) {
+        entry.pid = startedResult.pid
+        entry.processStartedAt = processIdentity.startedAt
+        entry.processFingerprint = processFingerprint
+      }
+      throwIfP0Aborted(signal)
+      await replaceControlJsonAtomic(started.paths.ownershipPath, started.manifest)
+      throwIfP0Aborted(signal)
+    })()
+    return transition
+  }
+  let result
+  try {
+    throwIfP0Aborted(signal)
+    result = await start(markStarted, { signal })
+    throwIfP0Aborted(signal)
+  } catch (error) {
+    if (transition) await transition
+    throw error
+  }
+  if (normalized.live === true && !transition) {
+    const processIdentity = result?.processIdentity
+    const processFingerprint = processIdentity?.processFingerprint
+      ?? processIdentity?.commandFingerprint
+    if (!Number.isSafeInteger(result?.pid)
+      || result.pid < 1
+      || processIdentity?.pid !== result.pid
+      || typeof processIdentity.startedAt !== 'string'
+      || processIdentity.startedAt.length === 0
+      || !P0_PROCESS_FINGERPRINT_PATTERN.test(processFingerprint ?? '')) {
+      await stopLiveProcess?.(result, { signal })
+      throw new Error('P0_PROCESS_IDENTITY_MISSING')
+    }
+  }
+  await markStarted(result)
+  throwIfP0Aborted(signal)
+  if (normalized.live === true && Object.hasOwn(result ?? {}, 'status')) {
+    const completed = await activeControlManifestForUpdate(artifactBase, runId, runToken)
+    throwIfP0Aborted(signal)
+    const entry = completed.manifest.journal.resources.find((candidate) => (
+      candidate.sequence === sequence
+        && candidate.type === normalized.type
+        && candidate.id === normalized.id
+    ))
+    if (entry?.state !== 'STARTED') throw new Error('P0_JOURNAL_TRANSITION_INVALID')
+    entry.state = 'COMPLETED'
+    entry.completedAt = now()
+    throwIfP0Aborted(signal)
+    await replaceControlJsonAtomic(completed.paths.ownershipPath, completed.manifest)
+    throwIfP0Aborted(signal)
+  }
+  return result
+}
+
+export function runP0JournaledCommand({
+  artifactBase,
+  runId,
+  runToken,
+  resourceId,
+  commandFingerprint,
+  descriptor,
+  runCommand,
+  inspectProcess,
+  signal,
+  now
+}) {
+  if (typeof runCommand !== 'function'
+    || !descriptor || typeof descriptor !== 'object'
+    || typeof resourceId !== 'string' || resourceId.length === 0
+    || !P0_PROCESS_FINGERPRINT_PATTERN.test(commandFingerprint ?? '')) {
+    throw new Error('P0_JOURNALED_COMMAND_INVALID')
+  }
+  return runP0JournaledMutation({
+    artifactBase,
+    runId,
+    runToken,
+    resource: {
+      type: 'process',
+      id: resourceId,
+      live: true,
+      commandFingerprint
+    },
+    start: (markStarted) => runCommand({
+      ...descriptor,
+      signal,
+      async onSpawn(child) {
+        throwIfP0Aborted(signal)
+        const processIdentity = child?.processIdentity
+          ?? await inspectProcess?.(child?.pid, { signal })
+        throwIfP0Aborted(signal)
+        await markStarted({
+          pid: child?.pid,
+          processIdentity
+        })
+      }
+    }),
+    signal,
+    now
+  })
+}
+
+export async function terminateJournaledOwnedProcesses({
+  resources,
+  acquireNativeProcessHandle,
+  requireTreeProof = false,
+  signal
+}) {
+  throwIfP0Aborted(signal)
+  if (!Array.isArray(resources)
+    || typeof acquireNativeProcessHandle !== 'function') {
+    throw new Error('P0_PROCESS_RECOVERY_DEPENDENCY_INVALID')
+  }
+  let terminated = 0
+  for (const resource of resources.toReversed()) {
+    throwIfP0Aborted(signal)
+    if (!['process', 'canonical-child'].includes(resource?.type)) continue
+    if (resource.live === true && resource.state === 'COMPLETED') continue
+    if (resource.live === true
+      && (resource.state !== 'STARTED'
+        || !Number.isSafeInteger(resource.pid)
+        || resource.pid < 1
+        || typeof resource.processStartedAt !== 'string'
+        || resource.processStartedAt.length === 0
+        || !P0_PROCESS_FINGERPRINT_PATTERN.test(resource.processFingerprint ?? ''))) {
+      throw new Error('P0_PROCESS_IDENTITY_MISSING')
+    }
+    if (resource.state !== 'STARTED'
+      || !Number.isSafeInteger(resource.pid)
+      || resource.pid < 1) continue
+    const expectedFingerprint = resource.processFingerprint ?? resource.commandFingerprint
+    if (typeof resource.processStartedAt !== 'string'
+      || resource.processStartedAt.length === 0
+      || typeof expectedFingerprint !== 'string'
+      || !P0_PROCESS_FINGERPRINT_PATTERN.test(expectedFingerprint)) {
+      throw new Error('P0_PROCESS_IDENTITY_UNKNOWN')
+    }
+    const handle = await acquireNativeProcessHandle(resource.pid, { signal })
+    throwIfP0Aborted(signal)
+    if (!handle
+      || typeof handle.inspectIdentity !== 'function'
+      || typeof handle.terminateTree !== 'function') {
+      throw new Error('P0_PROCESS_NATIVE_HANDLE_REQUIRED')
+    }
+    try {
+      const observed = await handle.inspectIdentity({ signal })
+      throwIfP0Aborted(signal)
+      if (observed === null) {
+        if (requireTreeProof) throw new Error('P0_PROCESS_TREE_TERMINATION_UNVERIFIED')
+        continue
+      }
+      const observedFingerprint = observed?.processFingerprint ?? observed?.commandFingerprint
+      if (!Number.isSafeInteger(observed?.pid)
+        || observed.pid !== resource.pid
+        || typeof observed.startedAt !== 'string'
+        || observed.startedAt.length === 0
+        || typeof observedFingerprint !== 'string'
+        || !P0_PROCESS_FINGERPRINT_PATTERN.test(observedFingerprint)) {
+        throw new Error('P0_PROCESS_IDENTITY_UNKNOWN')
+      }
+      if (observed.startedAt !== resource.processStartedAt
+        || observedFingerprint !== expectedFingerprint) {
+        throw new Error('P0_PROCESS_IDENTITY_MISMATCH')
+      }
+      const proof = await handle.terminateTree(resource, { signal })
+      throwIfP0Aborted(signal)
+      if (requireTreeProof
+        && (proof?.provider !== P0_WINDOWS_JOB_OBJECT_CAPABILITY
+          || proof.treeTerminated !== true
+          || proof.pid !== resource.pid
+          || proof.startedAt !== resource.processStartedAt
+          || proof.processFingerprint !== expectedFingerprint)) {
+        throw new Error('P0_PROCESS_TREE_TERMINATION_UNVERIFIED')
+      }
+      terminated += 1
+    } finally {
+      await handle.close?.({ signal })
+    }
+  }
+  return { terminated }
+}
+
+const CANONICAL_CHILD_INHERITED_ENVIRONMENT = new Set([
+  'APPDATA',
+  'COMSPEC',
+  'HOME',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'LANG',
+  'LC_ALL',
+  'LOCALAPPDATA',
+  'NUMBER_OF_PROCESSORS',
+  'OS',
+  'PATH',
+  'PATHEXT',
+  'PROCESSOR_ARCHITECTURE',
+  'PROCESSOR_IDENTIFIER',
+  'PROGRAMDATA',
+  'PROGRAMFILES',
+  'PROGRAMFILES(X86)',
+  'SYSTEMDRIVE',
+  'SYSTEMROOT',
+  'TEMP',
+  'TMP',
+  'USERPROFILE',
+  'WINDIR'
+])
+
+const CANONICAL_CHILD_FORCED_ENVIRONMENT = new Set([
+  'ADMIN_BASE_URL',
+  'ADMIN_SMOKE_EMAIL',
+  'ADMIN_SMOKE_PASSWORD',
+  'API_BASE_URL',
+  'P0_COMPOSE_BASE_FILE',
+  'P0_COMPOSE_OVERRIDE_FILE',
+  'P0_COMPOSE_PROJECT',
+  'P0_POSTGRES_CONTAINER_ID',
+  'P0_REDIS_CONTAINER_ID',
+  'P0_RUN_OWNER_TOKEN',
+  'TZ',
+  'USDT_DEMO_SMOKE_ARTIFACTS',
+  'USDT_DEMO_SMOKE_DATABASE',
+  'USDT_DEMO_SMOKE_EMAIL',
+  'USDT_DEMO_SMOKE_PASSWORD',
+  'USDT_DEMO_SMOKE_RUN_ID',
+  'WEB_BASE_URL'
+])
+
+function explicitCanonicalProcessEnvironment(inheritedEnv) {
+  const environment = {}
+  for (const [key, value] of Object.entries(sanitizedBackendEnvironment(inheritedEnv))) {
+    if (CANONICAL_CHILD_INHERITED_ENVIRONMENT.has(key.toUpperCase()) && value !== undefined) {
+      environment[key] = String(value)
+    }
+  }
+  return environment
+}
+
+export function validateCanonicalChildEnvironment(invocation) {
+  const environment = invocation?.env
+  const expected = invocation?.expected
+  if (!environment || typeof environment !== 'object' || Array.isArray(environment)
+    || !expected || typeof expected !== 'object' || Array.isArray(expected)) {
+    throw new Error('P0_CANONICAL_ENVIRONMENT_INVALID')
+  }
+  for (const key of Object.keys(environment)) {
+    const normalized = key.toUpperCase()
+    if (!CANONICAL_CHILD_INHERITED_ENVIRONMENT.has(normalized)
+      && !CANONICAL_CHILD_FORCED_ENVIRONMENT.has(normalized)) {
+      throw new Error(`P0_CANONICAL_ENVIRONMENT_FORBIDDEN: ${key}`)
+    }
+  }
+  if (ownerIdForToken(environment.P0_RUN_OWNER_TOKEN) !== expected.ownerId) {
+    throw new Error('P0_OWNER_MISMATCH')
+  }
+  assertP0DatabaseName(environment.USDT_DEMO_SMOKE_DATABASE)
+  if (environment.USDT_DEMO_SMOKE_DATABASE !== expected.database) {
+    throw new Error('P0_DATABASE_IDENTITY_MISMATCH')
+  }
+  const expectedRunId = `${expected.runId}-canonical`
+  if (environment.USDT_DEMO_SMOKE_RUN_ID !== expectedRunId
+    || environment.API_BASE_URL !== 'http://127.0.0.1:18086'
+    || environment.WEB_BASE_URL !== 'http://127.0.0.1:5199'
+    || environment.ADMIN_BASE_URL !== 'http://127.0.0.1:5200') {
+    throw new Error('P0_CANONICAL_ENVIRONMENT_INVALID')
+  }
+  const resolvedRunRoot = resolve(expected.runRoot)
+  const expectedArtifacts = resolve(resolvedRunRoot, 'canonical')
+  assertContainedPath(resolvedRunRoot, expectedArtifacts, 'P0_CANONICAL_ARTIFACT_ESCAPE')
+  if (resolve(environment.USDT_DEMO_SMOKE_ARTIFACTS) !== expectedArtifacts) {
+    throw new Error('P0_CANONICAL_ARTIFACT_ESCAPE')
+  }
+  if (expected.composeIdentity !== undefined) {
+    const environmentIdentity = safeP0ComposeIdentity({
+      project: environment.P0_COMPOSE_PROJECT,
+      postgres: {
+        id: environment.P0_POSTGRES_CONTAINER_ID,
+        image: 'postgres:16',
+        host: '127.0.0.1',
+        hostPort: 5432
+      },
+      redis: {
+        id: environment.P0_REDIS_CONTAINER_ID,
+        image: 'redis:7',
+        host: '127.0.0.1',
+        hostPort: 6379
+      }
+    })
+    if (JSON.stringify(environmentIdentity)
+      !== JSON.stringify(safeP0ComposeIdentity(expected.composeIdentity))) {
+      throw new Error('P0_CANONICAL_COMPOSE_IDENTITY_MISMATCH')
+    }
+  }
+  if (expected.composeTarget !== undefined) {
+    const environmentTarget = safeP0ComposeTarget({
+      expectedProject: environment.P0_COMPOSE_PROJECT,
+      composeFiles: [
+        environment.P0_COMPOSE_BASE_FILE,
+        environment.P0_COMPOSE_OVERRIDE_FILE
+      ]
+    })
+    if (JSON.stringify(environmentTarget)
+      !== JSON.stringify(safeP0ComposeTarget(expected.composeTarget))) {
+      throw new Error('P0_CANONICAL_COMPOSE_TARGET_MISMATCH')
+    }
+  }
+  if (environment.USDT_DEMO_SMOKE_EMAIL !== `p0-canonical+${expected.ownerId.slice(0, 16)}@example.invalid`
+    || environment.ADMIN_SMOKE_EMAIL !== `p0-admin+${expected.ownerId.slice(0, 16)}@example.invalid`
+    || environment.USDT_DEMO_SMOKE_PASSWORD !== `P0-${expected.ownerId.slice(0, 24)}!aA1`
+    || environment.ADMIN_SMOKE_PASSWORD !== `P0-${expected.ownerId.slice(0, 24)}!aA2`) {
+    throw new Error('P0_CANONICAL_CREDENTIAL_INVALID')
+  }
+  return true
 }
 
 export function buildCanonicalChildInvocation({
@@ -554,23 +1780,110 @@ export function buildCanonicalChildInvocation({
   ownerToken,
   ownerId,
   database,
+  composeIdentity,
+  composeTarget,
+  runId = `p0-canonical-${ownerId.slice(0, 12)}`,
+  runRoot = join(projectRoot, 'artifacts', 'p0-user-trading', runId),
   inheritedEnv = process.env
 }) {
   if (ownerId !== ownerIdForToken(ownerToken)) throw new Error('P0_OWNER_MISMATCH')
   if (!/^fx_p0_user_e2e_[a-z0-9_]+$/.test(database)) throw new Error('P0_DATABASE_NAME_INVALID')
+  if (typeof runId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(runId)) {
+    throw new Error('P0_RUN_ID_INVALID')
+  }
   const canonicalScript = resolve(scriptPath)
   const args = [canonicalScript]
-  return {
+  const resolvedRunRoot = resolve(runRoot)
+  const verifiedComposeIdentity = composeIdentity === undefined
+    ? undefined
+    : safeP0ComposeIdentity(composeIdentity)
+  const verifiedComposeTarget = composeTarget === undefined
+    ? undefined
+    : safeP0ComposeTarget(composeTarget)
+  const invocation = {
     command: process.execPath,
     args,
     shell: false,
     env: {
-      ...sanitizedBackendEnvironment(inheritedEnv),
+      ...explicitCanonicalProcessEnvironment(inheritedEnv),
+      API_BASE_URL: 'http://127.0.0.1:18086',
+      WEB_BASE_URL: 'http://127.0.0.1:5199',
+      ADMIN_BASE_URL: 'http://127.0.0.1:5200',
+      TZ: 'UTC',
+      USDT_DEMO_SMOKE_RUN_ID: `${runId}-canonical`,
+      USDT_DEMO_SMOKE_EMAIL: `p0-canonical+${ownerId.slice(0, 16)}@example.invalid`,
+      USDT_DEMO_SMOKE_PASSWORD: `P0-${ownerId.slice(0, 24)}!aA1`,
+      ADMIN_SMOKE_EMAIL: `p0-admin+${ownerId.slice(0, 16)}@example.invalid`,
+      ADMIN_SMOKE_PASSWORD: `P0-${ownerId.slice(0, 24)}!aA2`,
+      USDT_DEMO_SMOKE_ARTIFACTS: resolve(resolvedRunRoot, 'canonical'),
       P0_RUN_OWNER_TOKEN: ownerToken,
-      USDT_DEMO_SMOKE_DATABASE: database
+      USDT_DEMO_SMOKE_DATABASE: database,
+      ...(verifiedComposeIdentity
+        ? {
+            P0_COMPOSE_PROJECT: verifiedComposeIdentity.project,
+            P0_POSTGRES_CONTAINER_ID: verifiedComposeIdentity.postgres.id,
+            P0_REDIS_CONTAINER_ID: verifiedComposeIdentity.redis.id
+          }
+        : {}),
+      ...(verifiedComposeTarget
+        ? {
+            P0_COMPOSE_BASE_FILE: verifiedComposeTarget.composeFiles[0],
+            P0_COMPOSE_OVERRIDE_FILE: verifiedComposeTarget.composeFiles[1]
+          }
+        : {})
     },
     log: { command: process.execPath, args, ownerId },
-    evidence: { ownerId, database }
+    evidence: { ownerId, database },
+    expected: {
+      ownerId,
+      database,
+      runId,
+      runRoot: resolvedRunRoot,
+      composeIdentity: verifiedComposeIdentity,
+      composeTarget: verifiedComposeTarget
+    }
+  }
+  validateCanonicalChildEnvironment(invocation)
+  return invocation
+}
+
+export async function verifyCanonicalChildResult({ child, context, redis, postgres, signal }) {
+  throwIfP0Aborted(signal)
+  if (child?.status !== 0 || child.signal) throw new Error('P0_CANONICAL_CHILD_FAILED')
+  const reportPath = resolve(context?.runRoot ?? '', 'canonical', 'report.json')
+  assertContainedPath(resolve(context?.runRoot ?? ''), reportPath, 'P0_CANONICAL_ARTIFACT_ESCAPE')
+  const report = await readControlJson(reportPath)
+  throwIfP0Aborted(signal)
+  if (report?.status !== 'PASS'
+    || report.runId !== `${context.options?.runId}-canonical`
+    || report.smokeDatabase !== context.canonicalDatabase
+    || report.error !== null
+    || !Array.isArray(report.results)
+    || report.results.length === 0
+    || report.results.some((result) => result?.status !== 'PASS')) {
+    throw new Error('P0_CANONICAL_REPORT_INVALID')
+  }
+  if (!Array.isArray(report.sourceEvidence) || report.sourceEvidence.length === 0) {
+    throw new Error('P0_CANONICAL_SOURCE_EVIDENCE_MISSING')
+  }
+  assertP0DatabaseName(context.canonicalDatabase)
+  if (await postgres.readDatabaseOwnership(context.canonicalDatabase, { signal }) !== null) {
+    throw new Error('P0_CANONICAL_DATABASE_NOT_CLEAN')
+  }
+  throwIfP0Aborted(signal)
+  const redisOwner = await runRedisOwnershipTransaction(
+    redis,
+    () => redis.get(P0_REDIS_OWNER_KEY, { signal }),
+    { signal }
+  )
+  if (redisOwner !== context.ownerToken) {
+    throw new Error('P0_REDIS_OWNER_MISMATCH')
+  }
+  throwIfP0Aborted(signal)
+  return {
+    status: 'PASS',
+    reportPath,
+    sourceEvidence: report.sourceEvidence.length
   }
 }
 
@@ -606,9 +1919,13 @@ export function databaseSegmentForAttempt({ phase, attempt, randomSuffix }) {
   return segmentName
 }
 
-async function requireOwnedDatabase({ segmentName, runToken, postgres }) {
+async function requireOwnedDatabase({ segmentName, runToken, postgres, signal }) {
+  throwIfP0Aborted(signal)
   assertP0DatabaseName(segmentName)
-  const identity = await postgres.readDatabaseOwnership(segmentName)
+  const identity = signal === undefined
+    ? await postgres.readDatabaseOwnership(segmentName)
+    : await postgres.readDatabaseOwnership(segmentName, { signal })
+  throwIfP0Aborted(signal)
   if (identity?.segmentName !== segmentName) throw new Error('P0_DATABASE_IDENTITY_MISMATCH')
   if (identity.ownerMarker !== `p0-owner:${runToken}`) throw new Error('P0_DATABASE_OWNER_MISMATCH')
   return identity
@@ -618,53 +1935,91 @@ export async function createOwnedDatabase({
   segmentName,
   runToken,
   postgres,
-  recordDatabase = async () => {}
+  recordDatabase = async () => {},
+  signal
 }) {
+  throwIfP0Aborted(signal)
   assertP0DatabaseName(segmentName)
   const ownerId = ownerIdForToken(runToken)
-  await recordDatabase(segmentName)
+  if (signal === undefined) {
+    await recordDatabase(segmentName)
+  } else {
+    await recordDatabase(segmentName, { signal })
+  }
+  throwIfP0Aborted(signal)
   await postgres.executeAdminSql(
     `CREATE DATABASE ${quotedDatabaseIdentifier(segmentName)}`,
-    { sensitive: false }
+    { sensitive: false, ...(signal === undefined ? {} : { signal }) }
   )
+  throwIfP0Aborted(signal)
   await postgres.executeAdminSql(
     `COMMENT ON DATABASE ${quotedDatabaseIdentifier(segmentName)} IS ${quotedPostgresLiteral(`p0-owner:${runToken}`)}`,
-    { sensitive: true }
+    { sensitive: true, ...(signal === undefined ? {} : { signal }) }
   )
-  await requireOwnedDatabase({ segmentName, runToken, postgres })
+  throwIfP0Aborted(signal)
+  await requireOwnedDatabase({ segmentName, runToken, postgres, signal })
+  throwIfP0Aborted(signal)
   return { segmentName, ownerId }
 }
 
-export async function alterOwnedDatabaseTimezone({ segmentName, runToken, postgres }) {
-  await requireOwnedDatabase({ segmentName, runToken, postgres })
+export async function alterOwnedDatabaseTimezone({ segmentName, runToken, postgres, signal }) {
+  throwIfP0Aborted(signal)
+  await requireOwnedDatabase({ segmentName, runToken, postgres, signal })
+  throwIfP0Aborted(signal)
   await postgres.executeAdminSql(
     `ALTER DATABASE ${quotedDatabaseIdentifier(segmentName)} SET timezone TO 'UTC'`,
-    { sensitive: false }
+    { sensitive: false, ...(signal === undefined ? {} : { signal }) }
   )
+  throwIfP0Aborted(signal)
 }
 
-export async function dropOwnedDatabase({ segmentName, runToken, postgres }) {
-  await requireOwnedDatabase({ segmentName, runToken, postgres })
+export async function dropOwnedDatabase({ segmentName, runToken, postgres, signal }) {
+  throwIfP0Aborted(signal)
+  await requireOwnedDatabase({ segmentName, runToken, postgres, signal })
+  throwIfP0Aborted(signal)
   await postgres.executeAdminSql(
     `DROP DATABASE ${quotedDatabaseIdentifier(segmentName)}`,
-    { sensitive: false }
+    { sensitive: false, ...(signal === undefined ? {} : { signal }) }
   )
+  throwIfP0Aborted(signal)
 }
 
 export async function verifyDatabaseIdentity({
   segmentName,
   runToken,
   databaseUrl,
-  postgres
+  postgres,
+  signal
 }) {
+  throwIfP0Aborted(signal)
   assertP0DatabaseName(segmentName)
   const expectedUrl = `jdbc:postgresql://127.0.0.1:5432/${segmentName}`
   if (databaseUrl !== expectedUrl) throw new Error('P0_DATABASE_URL_INVALID')
-  const identity = await postgres.probeDatabase({ databaseUrl, segmentName })
+  const identity = await postgres.probeDatabase({
+    databaseUrl,
+    segmentName,
+    ...(signal === undefined ? {} : { signal })
+  })
+  throwIfP0Aborted(signal)
   if (identity?.currentDatabase !== segmentName) throw new Error('P0_DATABASE_IDENTITY_MISMATCH')
   if (identity.ownerMarker !== `p0-owner:${runToken}`) throw new Error('P0_DATABASE_OWNER_MISMATCH')
   if (identity.timezone !== 'UTC') throw new Error('P0_DATABASE_TIMEZONE_MISMATCH')
   return { segmentName, timezone: 'UTC' }
+}
+
+export async function verifyLiveBackendDatabaseIdentity(input) {
+  const identity = await verifyDatabaseIdentity(input)
+  if (typeof input.postgres.probeBackendConnection === 'function') {
+    const activityCount = await input.postgres.probeBackendConnection({
+      segmentName: input.segmentName,
+      signal: input.signal
+    })
+    throwIfP0Aborted(input.signal)
+    if (!Number.isSafeInteger(activityCount) || activityCount < 1) {
+      throw new Error('P0_BACKEND_DATABASE_ACTIVITY_MISSING')
+    }
+  }
+  return identity
 }
 
 export async function prepareCanonicalSmokeDatabase({ ownership, postgres }) {
@@ -721,6 +2076,14 @@ export async function cleanupCanonicalSmokeDatabase({ ownership, postgres }) {
 }
 
 const P0_REDIS_OWNER_KEY = 'p0:e2e:owner'
+const P0_REDIS_CLEANUP_RECEIPT_PREFIX = 'p0:e2e:cleanup:'
+
+function redisCleanupReceiptKey(ownerId) {
+  if (typeof ownerId !== 'string' || !/^[a-f0-9]{64}$/.test(ownerId)) {
+    throw new Error('P0_OWNER_ID_INVALID')
+  }
+  return `${P0_REDIS_CLEANUP_RECEIPT_PREFIX}${ownerId}`
+}
 
 function assertExactRedisKey(key) {
   if (typeof key !== 'string'
@@ -732,45 +2095,609 @@ function assertExactRedisKey(key) {
   }
 }
 
-export async function acquireRedisOwnership({ redis, runToken, role }) {
-  const ownerId = ownerIdForToken(runToken)
-  if (role === 'child') {
-    if (await redis.get(P0_REDIS_OWNER_KEY) !== runToken) throw new Error('P0_REDIS_OWNER_MISMATCH')
-    return { ownerKey: P0_REDIS_OWNER_KEY, ownerId, inherited: true }
-  }
-  if (role !== 'parent' && role !== 'standalone') throw new Error('P0_REDIS_ROLE_INVALID')
-  if (!await redis.setNx(P0_REDIS_OWNER_KEY, runToken)) {
-    await redis.get(P0_REDIS_OWNER_KEY)
-    throw new Error('P0_REDIS_OWNER_EXISTS')
-  }
-  return { ownerKey: P0_REDIS_OWNER_KEY, ownerId, inherited: false }
+function runRedisOwnershipTransaction(redis, operation, { signal } = {}) {
+  if (typeof redis?.runVerifiedTransaction !== 'function') return operation()
+  return redis.runVerifiedTransaction(operation, { signal })
 }
 
-export async function snapshotRedisKeys({ redis, keys }) {
-  if (!Array.isArray(keys) || new Set(keys).size !== keys.length) throw new Error('P0_REDIS_KEY_INVALID')
-  const snapshot = []
-  for (const key of keys) {
-    assertExactRedisKey(key)
-    const current = await redis.readExact(key)
-    const exists = current?.exists === true
-    const expiresAtMs = exists ? current.expiresAtMs : null
-    if (exists && expiresAtMs !== null
-      && (!Number.isSafeInteger(expiresAtMs) || expiresAtMs < 0)) {
-      throw new Error('P0_REDIS_EXPIRY_INVALID')
+export async function acquireRedisOwnership({ redis, runToken, role, signal }) {
+  return runRedisOwnershipTransaction(redis, async () => {
+    throwIfP0Aborted(signal)
+    const ownerId = ownerIdForToken(runToken)
+    if (role === 'child') {
+      if (await redis.get(P0_REDIS_OWNER_KEY, { signal }) !== runToken) {
+        throw new Error('P0_REDIS_OWNER_MISMATCH')
+      }
+      throwIfP0Aborted(signal)
+      return { ownerKey: P0_REDIS_OWNER_KEY, ownerId, inherited: true }
     }
-    snapshot.push({
-      key,
-      exists,
-      value: exists ? current.value : null,
-      expiresAtMs
+    if (role !== 'parent' && role !== 'standalone') throw new Error('P0_REDIS_ROLE_INVALID')
+    if (!await redis.setNx(P0_REDIS_OWNER_KEY, runToken, { signal })) {
+      throwIfP0Aborted(signal)
+      await redis.get(P0_REDIS_OWNER_KEY, { signal })
+      throwIfP0Aborted(signal)
+      throw new Error('P0_REDIS_OWNER_EXISTS')
+    }
+    throwIfP0Aborted(signal)
+    return { ownerKey: P0_REDIS_OWNER_KEY, ownerId, inherited: false }
+  }, { signal })
+}
+
+const P0_STANDALONE_REDIS_ACTIVE_KEYS = Object.freeze([
+  'inventory',
+  'inventoryCount',
+  'inventoryFingerprint',
+  'ownerId',
+  'ownerToken',
+  'runId',
+  'schemaVersion',
+  'state'
+])
+const P0_STANDALONE_REDIS_SNAPSHOT_KEYS = Object.freeze([
+  ...P0_STANDALONE_REDIS_ACTIVE_KEYS,
+  'snapshot',
+  'touchedKeys'
+].sort())
+const P0_STANDALONE_REDIS_RELEASE_KEYS = Object.freeze([
+  'ownerId',
+  'receipt',
+  'runId',
+  'schemaVersion',
+  'state'
+])
+const P0_STANDALONE_REDIS_RECEIPT_KEYS = Object.freeze([
+  'completedAt',
+  'key',
+  'state'
+])
+
+function requireStandaloneRedisTransaction(redis) {
+  if (typeof redis?.runVerifiedTransaction !== 'function') {
+    throw new Error('P0_STANDALONE_REDIS_TRANSACTION_REQUIRED')
+  }
+}
+
+function exactStandaloneRedisObject(value, expectedKeys) {
+  return value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && JSON.stringify(Object.keys(value).sort()) === JSON.stringify(expectedKeys)
+}
+
+function standaloneRedisInventory(keys) {
+  if (!Array.isArray(keys) || keys.length === 0) throw new Error('P0_REDIS_KEY_INVALID')
+  const inventory = []
+  for (let index = 0; index < keys.length; index += 1) {
+    if (!Object.hasOwn(keys, index)) throw new Error('P0_REDIS_KEY_INVALID')
+    assertExactRedisKey(keys[index])
+    inventory.push(keys[index])
+  }
+  if (new Set(inventory).size !== inventory.length) throw new Error('P0_REDIS_KEY_INVALID')
+  return inventory
+}
+
+function standaloneRedisInventoryFingerprint(inventory) {
+  return createHash('sha256').update(JSON.stringify(inventory)).digest('hex')
+}
+
+function validateStandaloneRedisSnapshot(snapshot, inventory) {
+  if (!Array.isArray(snapshot) || snapshot.length !== inventory.length) {
+    throw new Error('P0_STANDALONE_REDIS_RECOVERY_INVALID')
+  }
+  for (let index = 0; index < inventory.length; index += 1) {
+    const entry = snapshot[index]
+    if (!exactStandaloneRedisObject(entry, ['exists', 'expiresAtMs', 'key', 'value'])
+      || entry.key !== inventory[index]
+      || (entry.exists !== true && entry.exists !== false)) {
+      throw new Error('P0_STANDALONE_REDIS_RECOVERY_INVALID')
+    }
+    if (entry.exists) {
+      if (typeof entry.value !== 'string'
+        || (entry.expiresAtMs !== null
+          && (!Number.isSafeInteger(entry.expiresAtMs) || entry.expiresAtMs < 0))) {
+        throw new Error('P0_STANDALONE_REDIS_RECOVERY_INVALID')
+      }
+    } else if (entry.value !== null || entry.expiresAtMs !== null) {
+      throw new Error('P0_STANDALONE_REDIS_RECOVERY_INVALID')
+    }
+  }
+}
+
+function validateStandaloneCanonicalRedisManifest(manifest, runId) {
+  try {
+    if (manifest?.schemaVersion !== 1 || manifest.runId !== runId) {
+      throw new Error('invalid standalone manifest identity')
+    }
+    if (['ACQUIRE_ARMED', 'SNAPSHOT_READY'].includes(manifest.state)) {
+      const expectedKeys = manifest.state === 'ACQUIRE_ARMED'
+        ? P0_STANDALONE_REDIS_ACTIVE_KEYS
+        : P0_STANDALONE_REDIS_SNAPSHOT_KEYS
+      if (!exactStandaloneRedisObject(manifest, expectedKeys)) {
+        throw new Error('invalid standalone active schema')
+      }
+      const ownerId = ownerIdForToken(manifest.ownerToken)
+      const inventory = standaloneRedisInventory(manifest.inventory)
+      if (manifest.ownerId !== ownerId
+        || manifest.inventoryCount !== inventory.length
+        || manifest.inventoryFingerprint !== standaloneRedisInventoryFingerprint(inventory)) {
+        throw new Error('invalid standalone active identity')
+      }
+      if (manifest.state === 'SNAPSHOT_READY') {
+        validateStandaloneRedisSnapshot(manifest.snapshot, inventory)
+        if (!Array.isArray(manifest.touchedKeys)
+          || JSON.stringify(manifest.touchedKeys) !== JSON.stringify(inventory)) {
+          throw new Error('invalid standalone touched keys')
+        }
+      }
+      return structuredClone(manifest)
+    }
+    if (!['RELEASE_PENDING', 'COMPLETED'].includes(manifest.state)
+      || !exactStandaloneRedisObject(manifest, P0_STANDALONE_REDIS_RELEASE_KEYS)
+      || typeof manifest.ownerId !== 'string'
+      || !/^[a-f0-9]{64}$/.test(manifest.ownerId)
+      || !exactStandaloneRedisObject(
+        manifest.receipt,
+        P0_STANDALONE_REDIS_RECEIPT_KEYS
+      )
+      || manifest.receipt.key !== redisCleanupReceiptKey(manifest.ownerId)) {
+      throw new Error('invalid standalone release schema')
+    }
+    const receiptValid = manifest.state === 'RELEASE_PENDING'
+      ? manifest.receipt.state === 'PENDING' && manifest.receipt.completedAt === null
+      : manifest.receipt.state === 'COMPLETED'
+        && typeof manifest.receipt.completedAt === 'string'
+        && !Number.isNaN(Date.parse(manifest.receipt.completedAt))
+    if (!receiptValid) throw new Error('invalid standalone receipt')
+    return structuredClone(manifest)
+  } catch (error) {
+    if (error?.message === 'P0_STANDALONE_REDIS_RECOVERY_INVALID') throw error
+    throw new Error('P0_STANDALONE_REDIS_RECOVERY_INVALID', { cause: error })
+  }
+}
+
+async function resolveStandaloneCanonicalRedisRecoveryTarget({
+  recoveryPath,
+  runId,
+  artifactRoot: requestedArtifactRoot,
+  createControlDirectory = false
+}) {
+  if (typeof recoveryPath !== 'string'
+    || !isAbsolute(recoveryPath)
+    || resolve(recoveryPath) !== recoveryPath) {
+    throw new Error('P0_STANDALONE_REDIS_RECOVERY_PATH_INVALID')
+  }
+  const rootInput = requestedArtifactRoot ?? dirname(dirname(recoveryPath))
+  if (typeof rootInput !== 'string' || !isAbsolute(rootInput)) {
+    throw new Error('P0_STANDALONE_REDIS_ARTIFACT_ROOT_INVALID')
+  }
+  const resolvedArtifactRoot = resolve(rootInput)
+  resolveP0RunRoot(dirname(resolvedArtifactRoot), runId)
+  const expectedPath = join(resolvedArtifactRoot, 'control', 'canonical-redis.json')
+  if (recoveryPath !== expectedPath) {
+    throw new Error('P0_STANDALONE_REDIS_RECOVERY_PATH_INVALID')
+  }
+  assertContainedPath(
+    resolvedArtifactRoot,
+    expectedPath,
+    'P0_STANDALONE_REDIS_RECOVERY_PATH_INVALID'
+  )
+  const rootMetadata = await lstat(resolvedArtifactRoot)
+  const actualArtifactRoot = await realpath(resolvedArtifactRoot)
+  if (!rootMetadata.isDirectory()
+    || rootMetadata.isSymbolicLink()
+    || resolve(actualArtifactRoot) !== resolvedArtifactRoot) {
+    throw new Error('P0_STANDALONE_REDIS_ARTIFACT_ROOT_UNSAFE')
+  }
+  const controlDirectory = dirname(expectedPath)
+  if (createControlDirectory) {
+    try {
+      await mkdir(controlDirectory)
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error
+    }
+  }
+  const controlMetadata = await lstat(controlDirectory)
+  const actualControlDirectory = await realpath(controlDirectory)
+  if (!controlMetadata.isDirectory()
+    || controlMetadata.isSymbolicLink()
+    || resolve(actualControlDirectory) !== controlDirectory) {
+    throw new Error('P0_STANDALONE_REDIS_CONTROL_DIRECTORY_UNSAFE')
+  }
+  assertContainedPath(
+    actualArtifactRoot,
+    actualControlDirectory,
+    'P0_STANDALONE_REDIS_RECOVERY_PATH_INVALID'
+  )
+  return { artifactRoot: resolvedArtifactRoot, recoveryPath: expectedPath }
+}
+
+async function persistStandaloneCanonicalRedisManifest({
+  recoveryPath,
+  manifest,
+  runId,
+  create = false
+}) {
+  const expected = validateStandaloneCanonicalRedisManifest(manifest, runId)
+  if (create) {
+    await writeControlJsonNoClobber(
+      recoveryPath,
+      expected,
+      'P0_STANDALONE_REDIS_RECOVERY_EXISTS'
+    )
+  } else {
+    await replaceControlJsonAtomic(recoveryPath, expected)
+  }
+  let persisted
+  try {
+    persisted = validateStandaloneCanonicalRedisManifest(
+      await readControlJson(recoveryPath),
+      runId
+    )
+  } catch (error) {
+    if (error?.message === 'P0_CONTROL_FILE_UNSAFE') throw error
+    throw new Error('P0_STANDALONE_REDIS_RECOVERY_PERSISTENCE_MISMATCH', {
+      cause: error
     })
   }
-  return snapshot
+  if (JSON.stringify(persisted) !== JSON.stringify(expected)) {
+    throw new Error('P0_STANDALONE_REDIS_RECOVERY_PERSISTENCE_MISMATCH')
+  }
+  return persisted
+}
+
+function standaloneCanonicalRedisReleaseMarker({ state, runId, ownerId, completedAt }) {
+  return {
+    schemaVersion: 1,
+    state,
+    runId,
+    ownerId,
+    receipt: {
+      key: redisCleanupReceiptKey(ownerId),
+      state: state === 'COMPLETED' ? 'COMPLETED' : 'PENDING',
+      completedAt: state === 'COMPLETED' ? completedAt : null
+    }
+  }
+}
+
+export async function recoverStandaloneCanonicalRedisOwnership({
+  redis,
+  recoveryPath,
+  runId,
+  signal,
+  now = () => new Date().toISOString(),
+  artifactRoot
+}) {
+  await resolveStandaloneCanonicalRedisRecoveryTarget({
+    recoveryPath,
+    runId,
+    artifactRoot
+  })
+  const manifest = validateStandaloneCanonicalRedisManifest(
+    await readControlJson(recoveryPath),
+    runId
+  )
+  if (manifest.state === 'COMPLETED') {
+    return { status: 'COMPLETED', alreadyCompleted: true }
+  }
+  requireStandaloneRedisTransaction(redis)
+  let restored = 0
+  let ownerReleased = true
+  let releaseStatus = 'ALREADY_RELEASED'
+  if (manifest.state === 'ACQUIRE_ARMED') {
+    const release = await redis.runVerifiedTransaction(async () => {
+      throwIfP0Aborted(signal)
+      const owner = await redis.get(P0_REDIS_OWNER_KEY, { signal })
+      throwIfP0Aborted(signal)
+      if (owner === manifest.ownerToken) {
+        return releaseP0RedisOwnershipWithReceipt({
+          redis,
+          runToken: manifest.ownerToken,
+          ownerId: manifest.ownerId,
+          signal
+        })
+      }
+      if (owner !== null) throw new Error('P0_STANDALONE_REDIS_OWNER_MISMATCH')
+      const receipt = await redis.get(manifest.receipt?.key
+        ?? redisCleanupReceiptKey(manifest.ownerId), { signal })
+      throwIfP0Aborted(signal)
+      if (receipt === null) return { status: 'NOT_ACQUIRED' }
+      if (receipt !== manifest.ownerId) {
+        throw new Error('P0_STANDALONE_REDIS_CLEANUP_RECEIPT_MISMATCH')
+      }
+      return releaseP0RedisOwnershipWithReceipt({
+        redis,
+        runToken: manifest.ownerToken,
+        ownerId: manifest.ownerId,
+        signal
+      })
+    }, { signal })
+    releaseStatus = release.status
+    ownerReleased = release.status !== 'NOT_ACQUIRED'
+  } else if (manifest.state === 'SNAPSHOT_READY') {
+    const release = await redis.runVerifiedTransaction(async () => {
+      throwIfP0Aborted(signal)
+      const owner = await redis.get(P0_REDIS_OWNER_KEY, { signal })
+      throwIfP0Aborted(signal)
+      let restoredInSession = 0
+      if (owner === manifest.ownerToken) {
+        restoredInSession = await restoreP0RedisSnapshot({
+          redis,
+          snapshot: manifest.snapshot,
+          touchedKeys: manifest.touchedKeys,
+          signal
+        })
+      } else if (owner !== null) {
+        throw new Error('P0_STANDALONE_REDIS_OWNER_MISMATCH')
+      }
+      const released = await releaseP0RedisOwnershipWithReceipt({
+        redis,
+        runToken: manifest.ownerToken,
+        ownerId: manifest.ownerId,
+        signal
+      })
+      if (owner === null && released.status !== 'ALREADY_RELEASED') {
+        throw new Error('P0_STANDALONE_REDIS_RELEASE_PROOF_INVALID')
+      }
+      return { ...released, restored: restoredInSession }
+    }, { signal })
+    restored = release.restored
+    releaseStatus = release.status
+  }
+
+  let pending = manifest
+  if (manifest.state !== 'RELEASE_PENDING') {
+    pending = standaloneCanonicalRedisReleaseMarker({
+      state: 'RELEASE_PENDING',
+      runId,
+      ownerId: manifest.ownerId
+    })
+    pending = await persistStandaloneCanonicalRedisManifest({
+      recoveryPath,
+      manifest: pending,
+      runId
+    })
+  }
+  const receiptRemovalStatus = await removeP0CleanupReceipt({
+    redis,
+    marker: pending,
+    signal
+  })
+  const completed = standaloneCanonicalRedisReleaseMarker({
+    state: 'COMPLETED',
+    runId,
+    ownerId: pending.ownerId,
+    completedAt: now()
+  })
+  await persistStandaloneCanonicalRedisManifest({
+    recoveryPath,
+    manifest: completed,
+    runId
+  })
+  return {
+    status: 'COMPLETED',
+    restored,
+    ownerReleased,
+    releaseStatus,
+    receiptRemovalStatus
+  }
+}
+
+export async function createStandaloneCanonicalRedisOwnership({
+  redis,
+  runToken,
+  keys = P0_DEFAULT_REDIS_KEYS,
+  recoveryPath,
+  runId,
+  signal,
+  artifactRoot
+}) {
+  requireStandaloneRedisTransaction(redis)
+  const inventory = standaloneRedisInventory(keys)
+  const ownerId = ownerIdForToken(runToken)
+  await resolveStandaloneCanonicalRedisRecoveryTarget({
+    recoveryPath,
+    runId,
+    artifactRoot,
+    createControlDirectory: true
+  })
+  const existing = await inspectSafeControlFile(recoveryPath, { allowMissing: true })
+  if (existing) {
+    await recoverStandaloneCanonicalRedisOwnership({
+      redis,
+      recoveryPath,
+      runId,
+      signal,
+      artifactRoot
+    })
+  }
+  const armed = {
+    schemaVersion: 1,
+    state: 'ACQUIRE_ARMED',
+    runId,
+    ownerId,
+    ownerToken: runToken,
+    inventoryCount: inventory.length,
+    inventoryFingerprint: standaloneRedisInventoryFingerprint(inventory),
+    inventory
+  }
+  await persistStandaloneCanonicalRedisManifest({
+    recoveryPath,
+    manifest: armed,
+    runId,
+    create: !existing
+  })
+  const snapshot = await redis.runVerifiedTransaction(async () => {
+    await acquireRedisOwnership({
+      redis,
+      runToken,
+      role: 'standalone',
+      signal
+    })
+    return snapshotRedisKeys({ redis, keys: inventory, signal })
+  }, { signal })
+  await persistStandaloneCanonicalRedisManifest({
+    recoveryPath,
+    manifest: {
+      ...armed,
+      state: 'SNAPSHOT_READY',
+      snapshot,
+      touchedKeys: [...inventory]
+    },
+    runId
+  })
+  let cleanupResult
+  let cleanupPromise
+  return {
+    async cleanup() {
+      if (cleanupResult) return { ...cleanupResult, alreadyCleaned: true }
+      const cleanupSignal = AbortSignal.timeout(30000)
+      cleanupPromise ??= recoverStandaloneCanonicalRedisOwnership({
+        redis,
+        recoveryPath,
+        runId,
+        signal: cleanupSignal,
+        artifactRoot
+      }).then((result) => {
+        cleanupResult = {
+          restored: result.restored,
+          ownerReleased: result.ownerReleased
+        }
+        return cleanupResult
+      }).finally(() => {
+        cleanupPromise = undefined
+      })
+      return cleanupPromise
+    }
+  }
+}
+
+export async function snapshotRedisKeys({ redis, keys, signal }) {
+  return runRedisOwnershipTransaction(redis, async () => {
+    throwIfP0Aborted(signal)
+    if (!Array.isArray(keys) || new Set(keys).size !== keys.length) {
+      throw new Error('P0_REDIS_KEY_INVALID')
+    }
+    const snapshot = []
+    for (const key of keys) {
+      throwIfP0Aborted(signal)
+      assertExactRedisKey(key)
+      const current = await redis.readExact(key, { signal })
+      throwIfP0Aborted(signal)
+      const exists = current?.exists === true
+      const expiresAtMs = exists ? current.expiresAtMs : null
+      if (exists && expiresAtMs !== null
+        && (!Number.isSafeInteger(expiresAtMs) || expiresAtMs < 0)) {
+        throw new Error('P0_REDIS_EXPIRY_INVALID')
+      }
+      snapshot.push({
+        key,
+        exists,
+        value: exists ? current.value : null,
+        expiresAtMs
+      })
+    }
+    return snapshot
+  }, { signal })
+}
+
+export function validateP0RedisRecoveryState(state, {
+  runId,
+  ownerId,
+  inventory = P0_DEFAULT_REDIS_KEYS
+}) {
+  try {
+    const expectedKeys = [
+      'inventoryCount',
+      'inventoryFingerprint',
+      'ownerId',
+      'runId',
+      'schemaVersion',
+      'snapshot',
+      'touchedKeys'
+    ]
+    if (!state || typeof state !== 'object' || Array.isArray(state)
+      || JSON.stringify(Object.keys(state).sort()) !== JSON.stringify(expectedKeys)
+      || state.schemaVersion !== 1
+      || state.runId !== runId
+      || state.ownerId !== ownerId
+      || !/^[a-f0-9]{64}$/.test(ownerId ?? '')
+      || !Array.isArray(inventory)
+      || JSON.stringify(inventory) !== JSON.stringify(P0_DEFAULT_REDIS_KEYS)
+      || state.inventoryCount !== inventory.length
+      || state.inventoryFingerprint !== sha256Text(JSON.stringify(inventory))
+      || !Array.isArray(state.snapshot)
+      || state.snapshot.length !== inventory.length
+      || !Array.isArray(state.touchedKeys)
+      || new Set(state.touchedKeys).size !== state.touchedKeys.length) {
+      throw new Error('invalid recovery envelope')
+    }
+    const inventorySet = new Set(inventory)
+    for (let index = 0; index < inventory.length; index += 1) {
+      const entry = state.snapshot[index]
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+        || JSON.stringify(Object.keys(entry).sort())
+          !== JSON.stringify(['exists', 'expiresAtMs', 'key', 'value'])
+        || entry.key !== inventory[index]
+        || (entry.exists !== true && entry.exists !== false)) {
+        throw new Error('invalid recovery snapshot')
+      }
+      assertExactRedisKey(entry.key)
+      if (entry.exists === true) {
+        if (typeof entry.value !== 'string'
+          || (entry.expiresAtMs !== null
+            && (!Number.isSafeInteger(entry.expiresAtMs) || entry.expiresAtMs < 0))) {
+          throw new Error('invalid recovery value')
+        }
+      } else if (entry.value !== null || entry.expiresAtMs !== null) {
+        throw new Error('invalid missing recovery value')
+      }
+    }
+    for (const key of state.touchedKeys) {
+      assertExactRedisKey(key)
+      if (!inventorySet.has(key)) throw new Error('invalid touched key')
+    }
+    return structuredClone(state)
+  } catch (error) {
+    if (error?.message === 'P0_REDIS_RECOVERY_INVALID') throw error
+    throw new Error('P0_REDIS_RECOVERY_INVALID', { cause: error })
+  }
+}
+
+export function createP0RedisRecoveryState({
+  runId,
+  ownerId,
+  inventory = P0_DEFAULT_REDIS_KEYS,
+  snapshot,
+  touchedKeys
+}) {
+  return validateP0RedisRecoveryState({
+    schemaVersion: 1,
+    runId,
+    ownerId,
+    inventoryCount: inventory.length,
+    inventoryFingerprint: sha256Text(JSON.stringify(inventory)),
+    snapshot: structuredClone(snapshot),
+    touchedKeys: [...touchedKeys]
+  }, { runId, ownerId, inventory })
 }
 
 export async function cleanupOwnedRedis({ redis, runToken, snapshot, touchedKeys }) {
   ownerIdForToken(runToken)
-  if (await redis.get(P0_REDIS_OWNER_KEY) !== runToken) throw new Error('P0_REDIS_OWNER_MISMATCH')
+  return runRedisOwnershipTransaction(redis, async () => {
+    if (await redis.get(P0_REDIS_OWNER_KEY) !== runToken) {
+      throw new Error('P0_REDIS_OWNER_MISMATCH')
+    }
+    const restored = await restoreP0RedisSnapshot({ redis, snapshot, touchedKeys })
+    const released = await redis.compareDelete(P0_REDIS_OWNER_KEY, runToken)
+    if (!released) {
+      throw new Error('P0_REDIS_RELEASE_FAILED')
+    }
+    return { restored, ownerReleased: true }
+  })
+}
+
+async function restoreP0RedisSnapshot({ redis, snapshot, touchedKeys, signal }) {
+  throwIfP0Aborted(signal)
   if (!Array.isArray(snapshot) || !Array.isArray(touchedKeys)) throw new Error('P0_REDIS_SNAPSHOT_INVALID')
   const byKey = new Map()
   for (const entry of snapshot) {
@@ -782,17 +2709,66 @@ export async function cleanupOwnedRedis({ redis, runToken, snapshot, touchedKeys
     assertExactRedisKey(key)
     if (!byKey.has(key)) byKey.set(key, { key, exists: false, value: null, expiresAtMs: null })
   }
-  for (const [key, entry] of byKey) {
+  for (const key of touchedKeys) {
+    const entry = byKey.get(key)
+    throwIfP0Aborted(signal)
     if (entry.exists === true) {
-      await redis.restoreExact(key, entry.value, entry.expiresAtMs)
+      await redis.restoreExact(key, entry.value, entry.expiresAtMs, { signal })
     } else {
-      await redis.deleteExact(key)
+      await redis.deleteExact(key, { signal })
     }
+    throwIfP0Aborted(signal)
   }
-  if (!await redis.compareDelete(P0_REDIS_OWNER_KEY, runToken)) {
+  return touchedKeys.length
+}
+
+async function releaseP0RedisOwnershipWithReceipt({ redis, runToken, ownerId, signal }) {
+  throwIfP0Aborted(signal)
+  if (ownerId !== ownerIdForToken(runToken)
+    || typeof redis?.releaseOwnershipWithReceipt !== 'function') {
+    throw new Error('P0_REDIS_ATOMIC_RELEASE_REQUIRED')
+  }
+  const receiptKey = redisCleanupReceiptKey(ownerId)
+  const status = await runRedisOwnershipTransaction(
+    redis,
+    () => redis.releaseOwnershipWithReceipt({
+      ownerKey: P0_REDIS_OWNER_KEY,
+      receiptKey,
+      runToken,
+      ownerId,
+      signal
+    }),
+    { signal }
+  )
+  throwIfP0Aborted(signal)
+  if (!['RELEASED', 'ALREADY_RELEASED'].includes(status)) {
     throw new Error('P0_REDIS_RELEASE_FAILED')
   }
-  return { restored: byKey.size, ownerReleased: true }
+  return { status, receiptKey, receipt: ownerId }
+}
+
+async function removeP0CleanupReceipt({ redis, marker, signal }) {
+  throwIfP0Aborted(signal)
+  if (typeof redis?.removeCleanupReceipt !== 'function') {
+    throw new Error('P0_REDIS_CLEANUP_RECEIPT_REMOVER_REQUIRED')
+  }
+  const status = await runRedisOwnershipTransaction(
+    redis,
+    () => redis.removeCleanupReceipt({
+      receiptKey: marker.receipt.key,
+      ownerId: marker.ownerId,
+      signal
+    }),
+    { signal }
+  )
+  throwIfP0Aborted(signal)
+  if (status === 'MISMATCH') {
+    throw new Error('P0_REDIS_CLEANUP_RECEIPT_MISMATCH')
+  }
+  if (!['REMOVED', 'ALREADY_ABSENT'].includes(status)) {
+    throw new Error('P0_REDIS_CLEANUP_RECEIPT_RESULT_INVALID')
+  }
+  return status
 }
 
 function assertLoopbackHttpEndpoint(value, expectedPort) {
@@ -820,6 +2796,30 @@ function assertNoExternalTradingConfiguration(inheritedEnv) {
   }
 }
 
+function assertNoInheritedDockerTarget(inheritedEnv) {
+  for (const [key, value] of Object.entries(inheritedEnv ?? {})) {
+    const normalized = key.toUpperCase()
+    if (['DOCKER_HOST', 'DOCKER_CONTEXT'].includes(normalized)
+      && String(value).trim().length > 0) {
+      throw new Error('P0_DOCKER_TARGET_INHERITED')
+    }
+    if (['COMPOSE_PROJECT_NAME', 'COMPOSE_FILE', 'COMPOSE_PROFILES'].includes(normalized)
+      && String(value).trim().length > 0) {
+      throw new Error('P0_COMPOSE_TARGET_INHERITED')
+    }
+  }
+}
+
+function assertLocalDockerEndpoint(endpoint) {
+  if (typeof endpoint !== 'string'
+    || ![
+      'npipe:////./pipe/docker_engine',
+      'unix:///var/run/docker.sock'
+    ].includes(endpoint)) {
+    throw new Error('P0_DOCKER_DAEMON_NOT_LOCAL')
+  }
+}
+
 export function validateP0SafetyConfiguration({
   ownerId,
   database,
@@ -830,6 +2830,7 @@ export function validateP0SafetyConfiguration({
     throw new Error('P0_OWNER_ID_INVALID')
   }
   assertP0DatabaseName(database)
+  assertNoInheritedDockerTarget(inheritedEnv)
   assertNoExternalTradingConfiguration(inheritedEnv)
   assertLoopbackHttpEndpoint(endpoints?.api, 18086)
   assertLoopbackHttpEndpoint(endpoints?.web, 5199)
@@ -847,29 +2848,54 @@ export async function runSafetyPreflight({
   database,
   endpoints,
   inheritedEnv,
-  infrastructure
+  infrastructure,
+  composeFiles,
+  signal
 }) {
+  throwIfP0Aborted(signal)
   validateP0SafetyConfiguration({ ownerId, database, endpoints, inheritedEnv })
+  if (typeof infrastructure.inspectDockerDaemon === 'function') {
+    const daemon = await infrastructure.inspectDockerDaemon({ signal })
+    throwIfP0Aborted(signal)
+    assertLocalDockerEndpoint(daemon?.endpoint)
+  }
 
   const compose = [
     {
-      service: 'fx-platform-postgres',
+      service: 'postgres',
+      containerName: 'fx-platform-postgres',
+      image: 'postgres:16',
       host: '127.0.0.1',
       hostPort: 5432,
-      containerPort: 5432
+      containerPort: 5432,
+      composeFiles,
+      expectedProject: P0_COMPOSE_PROJECT
     },
     {
-      service: 'fx-platform-redis',
+      service: 'redis',
+      containerName: 'fx-platform-redis',
+      image: 'redis:7',
       host: '127.0.0.1',
       hostPort: 6379,
-      containerPort: 6379
+      containerPort: 6379,
+      composeFiles,
+      expectedProject: P0_COMPOSE_PROJECT
     }
   ]
   for (const expected of compose) {
-    if (!await infrastructure.verifyComposePort(expected)) throw new Error('P0_COMPOSE_PORT_MISMATCH')
+    throwIfP0Aborted(signal)
+    if (!await infrastructure.verifyComposePort(expected, { signal })) {
+      throw new Error('P0_COMPOSE_PORT_MISMATCH')
+    }
+    throwIfP0Aborted(signal)
   }
   for (const port of [18086, 5199, 5200]) {
-    const listener = await infrastructure.inspectListener({ host: '127.0.0.1', port })
+    throwIfP0Aborted(signal)
+    const listener = await infrastructure.inspectListener(
+      { host: '127.0.0.1', port },
+      { signal }
+    )
+    throwIfP0Aborted(signal)
     if (listener && listener.ownerId !== ownerId) throw new Error('P0_PORT_OWNED_BY_UNKNOWN')
   }
   return {
@@ -880,28 +2906,99 @@ export async function runSafetyPreflight({
   }
 }
 
-const P0_SELECTION_FIELDS = ['caseIds', 'phases', 'profiles', 'viewports']
+const P0_SELECTION_LIST_FIELDS = ['caseIds', 'phases', 'profiles', 'viewports']
+const P0_SELECTION_FIELDS = [
+  ...P0_SELECTION_LIST_FIELDS,
+  'metadata'
+]
+const P0_CONTROL_REQUESTED_PHASES = new Set([
+  'preflight',
+  'canonical',
+  'authority',
+  'report'
+])
+const P0_MATRIX_REQUESTED_PHASES = new Set(P0_CASES.map(({ phase }) => phase))
+const P0_SELECTION_PHASE_BY_HASH = new Map([
+  ...new Set([
+    ...P0_CONTROL_REQUESTED_PHASES,
+    ...P0_MATRIX_REQUESTED_PHASES,
+    'selected',
+    'all',
+    'cleanup'
+  ])
+].map((phase) => [p0SelectionMetadataHash('P0_SELECTION_PHASE', phase), phase]))
+
+function p0SelectionMetadataHash(domain, value) {
+  return sha256Text(`${domain}\0${value}`)
+}
+
+function p0RequestedScope(phase) {
+  if (P0_CONTROL_REQUESTED_PHASES.has(phase)) return 'CONTROL'
+  if (P0_MATRIX_REQUESTED_PHASES.has(phase)) return 'MATRIX'
+  if (phase === 'selected') return 'SELECTED'
+  if (phase === 'all') return 'ALL'
+  if (phase === 'cleanup') return 'CLEANUP'
+  throw new Error('P0_SELECTION_INVALID')
+}
 
 function normalizedP0Selection(selection) {
   if (!selection || typeof selection !== 'object' || Array.isArray(selection)
-    || Object.keys(selection).some((key) => !P0_SELECTION_FIELDS.includes(key))) {
+    || JSON.stringify(Object.keys(selection).toSorted())
+      !== JSON.stringify([...P0_SELECTION_FIELDS].toSorted())) {
     throw new Error('P0_SELECTION_INVALID')
   }
   const normalized = {}
-  const registryPhases = new Set(P0_CASES.map(({ phase }) => phase))
-  for (const field of P0_SELECTION_FIELDS) {
-    const values = selection[field] ?? []
+  for (const field of P0_SELECTION_LIST_FIELDS) {
+    const values = selection[field]
     if (!Array.isArray(values)
       || new Set(values).size !== values.length
       || values.some((value) => typeof value !== 'string' || value.length === 0)) {
       throw new Error('P0_SELECTION_INVALID')
     }
-    if (field === 'phases' && values.some((value) => !registryPhases.has(value))) {
+    if (field === 'phases' && values.some((value) => !P0_MATRIX_REQUESTED_PHASES.has(value))) {
       throw new Error('P0_SELECTION_INVALID')
     }
     normalized[field] = [...values]
   }
+  const metadata = selection.metadata
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)
+    || JSON.stringify(Object.keys(metadata)) !== JSON.stringify(['values'])
+    || !Array.isArray(metadata.values)
+    || metadata.values.length !== 2) {
+    throw new Error('P0_SELECTION_INVALID')
+  }
+  const [phaseHash, scopeHash] = metadata.values
+  const requestedPhase = typeof phaseHash === 'string'
+    ? P0_SELECTION_PHASE_BY_HASH.get(phaseHash)
+    : null
+  if (!requestedPhase || typeof scopeHash !== 'string') {
+    throw new Error('P0_SELECTION_INVALID')
+  }
+  const requestedScope = p0RequestedScope(requestedPhase)
+  const expectedScopeHash = p0SelectionMetadataHash('P0_SELECTION_SCOPE', requestedScope)
+  if (scopeHash !== expectedScopeHash) {
+    throw new Error('P0_SELECTION_INVALID')
+  }
+  const expectedPhases = P0_MATRIX_REQUESTED_PHASES.has(requestedPhase)
+    ? [requestedPhase]
+    : []
+  if (JSON.stringify(normalized.phases) !== JSON.stringify(expectedPhases)) {
+    throw new Error('P0_SELECTION_INVALID')
+  }
+  normalized.metadata = {
+    values: [
+      p0SelectionMetadataHash('P0_SELECTION_PHASE', requestedPhase),
+      expectedScopeHash
+    ]
+  }
   return normalized
+}
+
+function artifactP0Selection(selection) {
+  const normalized = normalizedP0Selection(selection)
+  return Object.fromEntries(P0_SELECTION_LIST_FIELDS.map((field) => (
+    [field, normalized[field]]
+  )))
 }
 
 function sameP0Selection(first, second) {
@@ -914,8 +3011,45 @@ function persistedP0Mode(mode) {
   throw new Error('P0_MODE_INVALID')
 }
 
+function readSafeP0RunState(path, root) {
+  const resolvedPath = resolve(path)
+  const resolvedRoot = resolve(root ?? dirname(resolvedPath))
+  assertContainedPath(resolvedRoot, resolvedPath, 'P0_RUN_STATE_FILE_UNSAFE')
+  let descriptor
+  try {
+    const actualRoot = realpathSync(resolvedRoot)
+    const before = lstatSync(resolvedPath)
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
+      throw new Error('P0_RUN_STATE_FILE_UNSAFE')
+    }
+    const actualPath = realpathSync(resolvedPath)
+    if (resolve(actualRoot) !== resolvedRoot || resolve(actualPath) !== resolvedPath) {
+      throw new Error('P0_RUN_STATE_FILE_UNSAFE')
+    }
+    assertContainedPath(actualRoot, actualPath, 'P0_RUN_STATE_FILE_UNSAFE')
+    descriptor = openSync(resolvedPath, 'r')
+    const opened = fstatSync(descriptor)
+    if (!opened.isFile() || opened.nlink !== 1
+      || opened.dev !== before.dev || opened.ino !== before.ino) {
+      throw new Error('P0_RUN_STATE_FILE_UNSAFE')
+    }
+    const text = readFileSync(descriptor, 'utf8')
+    const after = lstatSync(resolvedPath)
+    const afterPath = realpathSync(resolvedPath)
+    if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1
+      || after.dev !== opened.dev || after.ino !== opened.ino
+      || resolve(afterPath) !== actualPath) {
+      throw new Error('P0_RUN_STATE_FILE_UNSAFE')
+    }
+    return JSON.parse(text)
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor)
+  }
+}
+
 export function openP0RunState({
   path,
+  root = dirname(resolve(path)),
   resume,
   runId,
   mode,
@@ -927,6 +3061,10 @@ export function openP0RunState({
   selection,
   createState = loadOrCreateRunState
 }) {
+  const normalizedSelection = normalizedP0Selection(selection)
+  const resolvedPath = resolve(path)
+  const resolvedRoot = resolve(root)
+  assertContainedPath(resolvedRoot, resolvedPath, 'P0_RUN_STATE_FILE_UNSAFE')
   const expected = {
     path,
     runId,
@@ -936,24 +3074,54 @@ export function openP0RunState({
     schemaVersion,
     registryFingerprint,
     definitions,
-    selection
+    selection: normalizedSelection
   }
-  normalizedP0Selection(selection)
   if (resume !== true) {
     if (existsSync(path)) throw new Error('P0_RUN_STATE_EXISTS')
-    return createState(expected)
+    const stagingPath = `${resolvedPath}.${process.pid}.${randomUUID()}.create`
+    try {
+      const created = createState({
+        ...expected,
+        path: stagingPath,
+        selection: artifactP0Selection(normalizedSelection)
+      })
+      if (!created || typeof created !== 'object' || Array.isArray(created)) {
+        throw new Error('P0_RUN_STATE_CREATE_INVALID')
+      }
+      writeCaseResultAtomic(stagingPath, {
+        ...created,
+        selection: normalizedSelection
+      })
+      try {
+        linkSync(stagingPath, resolvedPath)
+      } catch (error) {
+        if (error?.code === 'EEXIST') throw new Error('P0_RUN_STATE_EXISTS', { cause: error })
+        throw error
+      }
+    } finally {
+      rmSync(stagingPath, { force: true })
+    }
+    return readSafeP0RunState(resolvedPath, resolvedRoot)
   }
   if (!existsSync(path)) throw new Error('P0_RESUME_STATE_MISSING')
   let state
   try {
-    state = JSON.parse(readFileSync(path, 'utf8'))
+    state = readSafeP0RunState(resolvedPath, resolvedRoot)
   } catch (error) {
+    if (error?.message === 'P0_RUN_STATE_FILE_UNSAFE') throw error
     throw new Error('P0_RESUME_STATE_INVALID', { cause: error })
   }
   const persistedRunId = `sha256:${createHash('sha256').update(runId).digest('hex')}`
   if (state.runId !== persistedRunId) throw new Error('P0_RESUME_MISMATCH: runId')
   if (state.mode !== expected.mode) throw new Error('P0_RESUME_MISMATCH: mode')
-  if (!sameP0Selection(state.selection, selection)) throw new Error('P0_RESUME_MISMATCH: selection')
+  try {
+    if (!sameP0Selection(state.selection, normalizedSelection)) {
+      throw new Error('P0_RESUME_MISMATCH: selection')
+    }
+  } catch (error) {
+    if (error?.message === 'P0_RESUME_MISMATCH: selection') throw error
+    throw new Error('P0_RESUME_STATE_INVALID', { cause: error })
+  }
   for (const field of ['commit', 'worktreeFingerprint', 'schemaVersion', 'registryFingerprint']) {
     if (state[field] !== expected[field]) throw new Error(`P0_RESUME_MISMATCH: ${field}`)
   }
@@ -973,6 +3141,378 @@ export function openP0RunState({
   return state
 }
 
+function p0ProfileWorkerMap() {
+  return Object.fromEntries(Object.entries(P0_PROFILE_WORKERS).map(([profile, workers]) => (
+    [profile, [...workers]]
+  )))
+}
+
+function sha256Text(value) {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`
+}
+
+function runLocalGit(args, cwd = projectRoot) {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    shell: false,
+    windowsHide: true,
+    maxBuffer: 10 * 1024 * 1024
+  })
+  if (result.status !== 0 || result.error) {
+    throw new Error(`P0_GIT_IDENTITY_FAILED: ${args.join(' ')}`, {
+      cause: result.error ?? new Error(result.stderr)
+    })
+  }
+  return result.stdout
+}
+
+export function captureLocalGitIdentity(cwd = projectRoot) {
+  const branch = runLocalGit(['branch', '--show-current'], cwd).trim()
+  const commit = runLocalGit(['rev-parse', 'HEAD'], cwd).trim().toLowerCase()
+  const status = runLocalGit(['status', '--porcelain=v1', '--untracked-files=all'], cwd)
+  const diff = runLocalGit(['diff', '--binary', 'HEAD'], cwd)
+  if (!branch || !/^[a-f0-9]{40}$/.test(commit)) throw new Error('P0_GIT_IDENTITY_INVALID')
+  return {
+    branch,
+    commit,
+    clean: status.trim().length === 0,
+    dirtyDiffHash: sha256Text(diff),
+    worktreeFingerprint: sha256Text(`${commit}\0${status}\0${diff}`),
+    schemaVersion: 1,
+    registryFingerprint: P0_REGISTRY_FINGERPRINT,
+    profileWorkerMap: p0ProfileWorkerMap()
+  }
+}
+
+function normalizedP0RunIdentity(identity) {
+  const profileWorkerMap = p0ProfileWorkerMap()
+  if (!identity || typeof identity !== 'object' || Array.isArray(identity)
+    || typeof identity.branch !== 'string' || identity.branch.length === 0
+    || !/^[a-f0-9]{40}$/.test(identity.commit)
+    || typeof identity.clean !== 'boolean'
+    || !/^sha256:[a-f0-9]{64}$/.test(identity.dirtyDiffHash)
+    || !/^sha256:[a-f0-9]{64}$/.test(identity.worktreeFingerprint)
+    || identity.schemaVersion !== 1
+    || identity.registryFingerprint !== P0_REGISTRY_FINGERPRINT
+    || JSON.stringify(identity.profileWorkerMap) !== JSON.stringify(profileWorkerMap)) {
+    throw new Error('P0_RUN_IDENTITY_INVALID')
+  }
+  return {
+    branch: identity.branch,
+    commit: identity.commit,
+    clean: identity.clean,
+    dirtyDiffHash: identity.dirtyDiffHash,
+    worktreeFingerprint: identity.worktreeFingerprint,
+    schemaVersion: identity.schemaVersion,
+    registryFingerprint: identity.registryFingerprint,
+    profileWorkerMap
+  }
+}
+
+export function assertP0RunIdentityUnchanged(expectedIdentity, currentIdentity, { runRoot } = {}) {
+  const expected = normalizedP0RunIdentity(expectedIdentity)
+  const current = normalizedP0RunIdentity(currentIdentity)
+  for (const field of [
+    'branch',
+    'commit',
+    'clean',
+    'dirtyDiffHash',
+    'worktreeFingerprint',
+    'schemaVersion',
+    'registryFingerprint',
+    'profileWorkerMap'
+  ]) {
+    if (JSON.stringify(current[field]) === JSON.stringify(expected[field])) continue
+    const reason = `P0_IDENTITY_DRIFT: ${field}`
+    if (runRoot) {
+      writeCaseResultAtomic(join(runRoot, 'identity-invalid.json'), {
+        schemaVersion: 1,
+        status: 'INVALID_TEST',
+        reasonCode: 'P0_IDENTITY_DRIFT',
+        expected: {
+          branch: expected.branch,
+          commit: expected.commit,
+          clean: expected.clean,
+          dirtyDiffHash: expected.dirtyDiffHash,
+          worktreeFingerprint: expected.worktreeFingerprint
+        },
+        actual: {
+          branch: current.branch,
+          commit: current.commit,
+          clean: current.clean,
+          dirtyDiffHash: current.dirtyDiffHash,
+          worktreeFingerprint: current.worktreeFingerprint
+        }
+      })
+    }
+    throw new Error(reason)
+  }
+  return current
+}
+
+function p0RunSelection(options) {
+  const requestedScope = p0RequestedScope(options.phase)
+  return {
+    caseIds: [...options.caseIds],
+    phases: P0_MATRIX_REQUESTED_PHASES.has(options.phase) ? [options.phase] : [],
+    profiles: options.profile ? [options.profile] : [],
+    viewports: options.viewport === 'all' ? [] : [options.viewport],
+    metadata: {
+      values: [
+        p0SelectionMetadataHash('P0_SELECTION_PHASE', options.phase),
+        p0SelectionMetadataHash('P0_SELECTION_SCOPE', requestedScope)
+      ]
+    }
+  }
+}
+
+function p0OwnedEndpoints(matrixDatabase) {
+  return {
+    api: 'http://127.0.0.1:18086',
+    web: 'http://127.0.0.1:5199',
+    admin: 'http://127.0.0.1:5200',
+    databaseUrl: `jdbc:postgresql://127.0.0.1:5432/${matrixDatabase}`,
+    redisHost: '127.0.0.1',
+    redisPort: 6379
+  }
+}
+
+async function readActiveP0Control(artifactBase, runId) {
+  const paths = await existingControlPaths(artifactBase, runId)
+  if (existsSync(paths.cleanedPath) && !existsSync(paths.ownershipPath)) {
+    throw new Error('P0_RESUME_CONTROL_CLEANED')
+  }
+  let manifest
+  try {
+    manifest = await readControlJson(paths.ownershipPath)
+  } catch (error) {
+    if (error?.message === 'P0_CONTROL_FILE_UNSAFE') throw error
+    throw new Error('P0_RESUME_CONTROL_MISSING', { cause: error })
+  }
+  const ownerId = ownerIdForToken(manifest.ownerToken)
+  if (manifest.schemaVersion !== 1 || manifest.status !== 'ACTIVE'
+    || manifest.runId !== runId || manifest.ownerId !== ownerId) {
+    throw new Error('P0_RESUME_CONTROL_INVALID')
+  }
+  const canonicalDatabase = manifest.database?.canonical
+  const matrixDatabase = manifest.database?.matrix
+  assertP0DatabaseName(canonicalDatabase)
+  assertP0DatabaseName(matrixDatabase)
+  return {
+    ...paths,
+    manifest,
+    ownerToken: manifest.ownerToken,
+    ownerId,
+    canonicalDatabase,
+    matrixDatabase
+  }
+}
+
+export async function prepareP0RunReservation({
+  options,
+  plan,
+  artifactBase,
+  inheritedEnv,
+  captureIdentity,
+  databaseExists,
+  nextRunToken,
+  nextRandomSuffix,
+  infrastructure,
+  signal,
+  now = () => new Date().toISOString()
+}) {
+  if (typeof captureIdentity !== 'function' || typeof databaseExists !== 'function'
+    || typeof nextRunToken !== 'function' || typeof nextRandomSuffix !== 'function') {
+    throw new Error('P0_RESERVATION_DEPENDENCY_INVALID')
+  }
+  throwIfP0Aborted(signal)
+  const basePath = resolve(artifactBase)
+  const runRoot = resolveP0RunRoot(basePath, options.runId)
+  const composeTarget = createP0ComposeTarget({ artifactBase: basePath })
+  const { composeFiles, expectedProject } = composeTarget
+  const selection = p0RunSelection(options)
+  const resume = typeof options.resume === 'string'
+  let active
+
+  if (resume) {
+    active = await readActiveP0Control(basePath, options.runId)
+    throwIfP0Aborted(signal)
+    let controlSelection
+    try {
+      controlSelection = normalizedP0Selection(active.manifest.selection)
+    } catch (error) {
+      throw new Error('P0_RESUME_CONTROL_SELECTION_INVALID', { cause: error })
+    }
+    const runStatePath = join(active.runRoot, 'run-state.json')
+    if (!existsSync(runStatePath)) throw new Error('P0_RESUME_STATE_MISSING')
+    let persistedState
+    try {
+      persistedState = readSafeP0RunState(runStatePath, active.runRoot)
+    } catch (error) {
+      if (error?.message === 'P0_RUN_STATE_FILE_UNSAFE') throw error
+      throw new Error('P0_RESUME_STATE_INVALID', { cause: error })
+    }
+    let stateSelection
+    try {
+      stateSelection = normalizedP0Selection(persistedState.selection)
+    } catch (error) {
+      throw new Error('P0_RESUME_STATE_INVALID', { cause: error })
+    }
+    if (JSON.stringify(controlSelection) !== JSON.stringify(stateSelection)
+      || JSON.stringify(controlSelection) !== JSON.stringify(selection)) {
+      throw new Error('P0_RESUME_SELECTION_MISMATCH')
+    }
+  }
+
+  if (resume) {
+    await verifyP0ComposeTarget({ artifactBase: basePath })
+    throwIfP0Aborted(signal)
+  }
+
+  const identity = normalizedP0RunIdentity(await captureIdentity({ signal }))
+  throwIfP0Aborted(signal)
+  if (options.mode === 'certification' && identity.clean !== true) {
+    throw new Error('P0_CERTIFICATION_DIRTY_TREE')
+  }
+
+  if (resume) {
+    if (active.manifest.mode !== options.mode
+      || JSON.stringify(active.manifest.profileWorkerMap) !== JSON.stringify(identity.profileWorkerMap)) {
+      throw new Error('P0_RESUME_CONTROL_MISMATCH')
+    }
+    assertP0RunIdentityUnchanged(active.manifest.identity, identity, { runRoot: active.runRoot })
+    const runStatePath = join(active.runRoot, 'run-state.json')
+    throwIfP0Aborted(signal)
+    const runState = openP0RunState({
+      path: runStatePath,
+      root: active.runRoot,
+      resume: true,
+      runId: options.runId,
+      mode: options.mode,
+      commit: identity.commit,
+      worktreeFingerprint: identity.worktreeFingerprint,
+      schemaVersion: identity.schemaVersion,
+      registryFingerprint: identity.registryFingerprint,
+      definitions: P0_CASES,
+      selection
+    })
+    let controlSelection
+    try {
+      controlSelection = normalizedP0Selection(active.manifest.selection)
+    } catch (error) {
+      throw new Error('P0_RESUME_CONTROL_SELECTION_INVALID', { cause: error })
+    }
+    if (JSON.stringify(controlSelection) !== JSON.stringify(normalizedP0Selection(runState.selection))
+      || JSON.stringify(controlSelection) !== JSON.stringify(normalizedP0Selection(selection))) {
+      throw new Error('P0_RESUME_SELECTION_MISMATCH')
+    }
+    const endpoints = p0OwnedEndpoints(active.matrixDatabase)
+    await runSafetyPreflight({
+      ownerId: active.ownerId,
+      database: active.matrixDatabase,
+      endpoints,
+      inheritedEnv,
+      infrastructure,
+      composeFiles,
+      signal
+    })
+    throwIfP0Aborted(signal)
+    return {
+      ...active,
+      identity,
+      profileWorkerMap: identity.profileWorkerMap,
+      endpoints,
+      databaseUrl: endpoints.databaseUrl,
+      runStatePath,
+      runState,
+      resumePlan: planResume(runState, P0_CASES, artifactP0Selection(selection)),
+      composeTarget,
+      resumed: true
+    }
+  }
+
+  if (existsSync(runRoot)) throw new Error('P0_RUN_COLLISION')
+  throwIfP0Aborted(signal)
+  await ensureP0ComposeTarget({ artifactBase: basePath })
+  throwIfP0Aborted(signal)
+  const ownerToken = nextRunToken()
+  const ownerId = ownerIdForToken(ownerToken)
+  const canonicalDatabase = databaseSegmentForAttempt({
+    phase: 'canonical',
+    attempt: 1,
+    randomSuffix: nextRandomSuffix()
+  })
+  const matrixDatabase = databaseSegmentForAttempt({
+    phase: 'preflight',
+    attempt: 1,
+    randomSuffix: nextRandomSuffix()
+  })
+  const endpoints = p0OwnedEndpoints(matrixDatabase)
+  await runSafetyPreflight({
+    ownerId,
+    database: matrixDatabase,
+    endpoints,
+    inheritedEnv,
+    infrastructure,
+    composeFiles,
+    signal
+  })
+  throwIfP0Aborted(signal)
+  for (const segmentName of [canonicalDatabase, matrixDatabase]) {
+    throwIfP0Aborted(signal)
+    if (await databaseExists(segmentName, {
+      composeFiles,
+      expectedProject,
+      signal
+    })) throw new Error('P0_DATABASE_COLLISION')
+    throwIfP0Aborted(signal)
+  }
+  throwIfP0Aborted(signal)
+  const control = await createControlManifest({
+    artifactBase: basePath,
+    runId: options.runId,
+    runToken: ownerToken,
+    mode: options.mode,
+    selection,
+    database: { canonical: canonicalDatabase, matrix: matrixDatabase },
+    identity,
+    profileWorkerMap: identity.profileWorkerMap,
+    now
+  })
+  throwIfP0Aborted(signal)
+  const runStatePath = join(control.runRoot, 'run-state.json')
+  throwIfP0Aborted(signal)
+  const runState = openP0RunState({
+    path: runStatePath,
+    resume: false,
+    runId: options.runId,
+    mode: options.mode,
+    commit: identity.commit,
+    worktreeFingerprint: identity.worktreeFingerprint,
+    schemaVersion: identity.schemaVersion,
+    registryFingerprint: identity.registryFingerprint,
+    definitions: P0_CASES,
+    selection
+  })
+  return {
+    ...control,
+    ownerToken,
+    ownerId,
+    canonicalDatabase,
+    matrixDatabase,
+    identity,
+    profileWorkerMap: identity.profileWorkerMap,
+    endpoints,
+    databaseUrl: endpoints.databaseUrl,
+    runStatePath,
+    runState,
+    resumePlan: planResume(runState, P0_CASES, artifactP0Selection(selection)),
+    composeTarget,
+    resumed: false
+  }
+}
+
 const P0_MATRIX_PHASES = new Set([
   'ui-core',
   'order-trigger',
@@ -984,44 +3524,266 @@ const P0_MATRIX_PHASES = new Set([
   'selected'
 ])
 
-export async function executeP0PlanPhases({ plan, context, operations }) {
+const P0_CONTROL_PHASES = new Set([
+  'preflight',
+  'canonical',
+  'authority',
+  'report'
+])
+
+const P0_PROFILE_LIFECYCLE_OPERATIONS = [
+  'stopProfileBackend',
+  'assertProfilePortFree',
+  'startProfileBackend',
+  'waitForProfileHealth',
+  'waitForProfileBusinessEndpoint',
+  'verifyProfileDatabaseIdentity'
+]
+
+function supportsP0ProfileLifecycle(operations) {
+  const available = P0_PROFILE_LIFECYCLE_OPERATIONS.filter(
+    (name) => typeof operations?.[name] === 'function'
+  )
+  if (available.length === 0) return false
+  if (available.length !== P0_PROFILE_LIFECYCLE_OPERATIONS.length) {
+    throw new Error('P0_PROFILE_LIFECYCLE_INCOMPLETE')
+  }
+  return true
+}
+
+async function activateP0Profile({ phase, profile, attempt, context, operations, signal }) {
+  throwIfP0Aborted(signal)
+  await operations.stopProfileBackend(context, profile, { signal })
+  throwIfP0Aborted(signal)
+  await operations.assertProfilePortFree(18086, context, profile, { signal })
+  throwIfP0Aborted(signal)
+  const phaseDatabase = typeof operations.prepareProfileDatabase === 'function'
+    ? await operations.prepareProfileDatabase({ phase, attempt, signal }, context)
+    : {
+        segmentName: context.matrixDatabase,
+        databaseUrl: context.databaseUrl
+      }
+  throwIfP0Aborted(signal)
+  const databaseUrl = phaseDatabase?.databaseUrl
+  if (typeof databaseUrl !== 'string') throw new Error('P0_PROFILE_DATABASE_URL_REQUIRED')
+  context.activeDatabaseSegment = phaseDatabase.segmentName
+  context.activeDatabaseUrl = databaseUrl
+  const environment = buildBackendEnvironment(profile, {
+    DATABASE_URL: databaseUrl,
+    SPRING_DATASOURCE_URL: databaseUrl,
+    SERVER_PORT: '18086'
+  }, context.inheritedEnv ?? {})
+  const backend = await operations.startProfileBackend({
+    phase,
+    profile,
+    attempt,
+    databaseUrl,
+    environment,
+    signal
+  }, context, { signal })
+  throwIfP0Aborted(signal)
+  await operations.waitForProfileHealth(backend, context, profile, { signal })
+  throwIfP0Aborted(signal)
+  await operations.waitForProfileBusinessEndpoint(backend, context, profile, { signal })
+  throwIfP0Aborted(signal)
+  await operations.verifyProfileDatabaseIdentity(
+    backend,
+    context,
+    profile,
+    phaseDatabase,
+    { signal }
+  )
+  throwIfP0Aborted(signal)
+  return backend
+}
+
+function isPlainP0ControlOutcome(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+function validateP0ControlOutcome(
+  phase,
+  outcome,
+  errorCode = 'P0_CONTROL_RESULT_INVALID'
+) {
+  const invalid = () => { throw new Error(errorCode) }
+  if (!isPlainP0ControlOutcome(outcome)
+    || outcome.status !== 'PASS'
+    || Object.keys(outcome).every((key) => key === 'status')) {
+    invalid()
+  }
+  if (phase === 'report') {
+    const identity = outcome.identity
+    if (outcome.kind !== 'P0_REPORT_BOUNDARY'
+      || !['CONTROL', 'MATRIX'].includes(outcome.scope)
+      || outcome.finalWriter !== 'PENDING'
+      || !isPlainP0ControlOutcome(identity)
+      || typeof identity.runId !== 'string'
+      || identity.runId.length === 0
+      || typeof identity.ownerId !== 'string'
+      || !/^[a-f0-9]{64}$/.test(identity.ownerId)
+      || typeof identity.reportPath !== 'string'
+      || !isAbsolute(identity.reportPath)
+      || identity.reportPath !== resolve(identity.reportPath)) {
+      invalid()
+    }
+  }
+  return outcome
+}
+
+export async function executeP0ReportPhaseBoundary({
+  context,
+  plan,
+  writePhaseReport,
+  signal
+} = {}) {
+  throwIfP0Aborted(signal)
+  if (!isPlainP0ControlOutcome(context)
+    || typeof context.runRoot !== 'string'
+    || context.runRoot.length === 0
+    || !isAbsolute(context.runRoot)
+    || context.runRoot !== resolve(context.runRoot)
+    || !isPlainP0ControlOutcome(plan)
+    || !['CONTROL', 'MATRIX'].includes(plan.scope)) {
+    throw new Error('P0_REPORT_PHASE_CONTEXT_INVALID')
+  }
+  const runId = context.options?.runId ?? context.runId
+  if (typeof runId !== 'string'
+    || runId.length === 0
+    || typeof context.ownerId !== 'string'
+    || !/^[a-f0-9]{64}$/.test(context.ownerId)) {
+    throw new Error('P0_REPORT_PHASE_CONTEXT_INVALID')
+  }
+  const reportPath = resolve(context.runRoot, 'report.json')
+  assertContainedPath(context.runRoot, reportPath, 'P0_REPORT_ARTIFACT_ESCAPE')
+  if (typeof writePhaseReport !== 'function') {
+    throw new Error('P0_REPORT_PHASE_WRITER_REQUIRED')
+  }
+  const expected = {
+    status: 'PASS',
+    kind: 'P0_REPORT_BOUNDARY',
+    scope: plan.scope,
+    finalWriter: 'PENDING',
+    identity: {
+      runId,
+      ownerId: context.ownerId,
+      reportPath
+    }
+  }
+  const result = await writePhaseReport(context, plan, { signal })
+  throwIfP0Aborted(signal)
+  const expectedKeys = ['status', 'kind', 'scope', 'finalWriter', 'identity']
+  const expectedIdentityKeys = ['runId', 'ownerId', 'reportPath']
+  const exactKeys = (value, keys) => {
+    const actual = Reflect.ownKeys(value)
+    return actual.length === keys.length && keys.every((key) => Object.hasOwn(value, key))
+  }
+  if (!isPlainP0ControlOutcome(result)
+    || !exactKeys(result, expectedKeys)
+    || !isPlainP0ControlOutcome(result.identity)
+    || !exactKeys(result.identity, expectedIdentityKeys)
+    || result.status !== expected.status
+    || result.kind !== expected.kind
+    || result.scope !== expected.scope
+    || result.finalWriter !== expected.finalWriter
+    || result.identity.runId !== expected.identity.runId
+    || result.identity.ownerId !== expected.identity.ownerId
+    || result.identity.reportPath !== expected.identity.reportPath) {
+    throw new Error('P0_REPORT_PHASE_RESULT_INVALID')
+  }
+  return result
+}
+
+export async function executeP0PlanPhases({
+  plan,
+  context,
+  operations,
+  signal,
+  controlResults = []
+}) {
   if (!plan || !Array.isArray(plan.phases)) throw new Error('P0_PLAN_INVALID')
+  if (!Array.isArray(controlResults)) throw new Error('P0_CONTROL_RESULTS_INVALID')
+  const recordControlResult = (phase, outcome, evidence = outcome) => {
+    const validated = validateP0ControlOutcome(phase, outcome)
+    controlResults.push({
+      phase,
+      status: validated.status,
+      evidence
+    })
+  }
   let canonicalChildren = 0
   let matrixPhases = 0
   for (const phase of plan.phases) {
+    throwIfP0Aborted(signal)
     if (phase === 'cleanup') continue
+    await context.assertIdentity?.({ signal })
+    throwIfP0Aborted(signal)
     if (phase === 'preflight') {
-      await operations.runPreflight(context, plan)
+      const evidence = await operations.runPreflight(context, plan, { signal })
+      throwIfP0Aborted(signal)
+      recordControlResult(phase, evidence)
       continue
     }
     if (phase === 'canonical') {
-      await operations.assertRedisOwnership(context, 'before-canonical')
-      await operations.stopParentBackend(context)
-      await operations.assertBusinessPortsFree([18086, 5199, 5200], context)
+      await operations.assertRedisOwnership(context, 'before-canonical', { signal })
+      throwIfP0Aborted(signal)
+      await operations.stopParentBackend(context, { signal })
+      throwIfP0Aborted(signal)
+      await operations.assertBusinessPortsFree([18086, 5199, 5200], context, { signal })
+      throwIfP0Aborted(signal)
       const invocation = buildCanonicalChildInvocation({
         scriptPath: context.scriptPath,
         ownerToken: context.ownerToken,
         ownerId: context.ownerId,
         database: context.canonicalDatabase,
+        composeIdentity: context.composeIdentity,
+        composeTarget: context.composeTarget,
+        runId: context.options?.runId ?? context.runId,
+        runRoot: context.runRoot,
         inheritedEnv: context.inheritedEnv
       })
-      const child = await operations.runCanonicalChild(invocation, context)
+      const child = await operations.runCanonicalChild(invocation, context, { signal })
+      throwIfP0Aborted(signal)
+      if (!isPlainP0ControlOutcome(child)
+        || child.status !== 0
+        || child.signal !== null) {
+        throw new Error('P0_CANONICAL_CHILD_FAILED')
+      }
       canonicalChildren += 1
-      await operations.verifyCanonicalChildCleanup(child, context)
-      await operations.assertRedisOwnership(context, 'after-canonical')
+      const verification = await operations.verifyCanonicalChildCleanup(
+        child,
+        context,
+        { signal }
+      )
+      throwIfP0Aborted(signal)
+      await operations.assertRedisOwnership(context, 'after-canonical', { signal })
+      throwIfP0Aborted(signal)
+      await operations.assertBusinessPortsFree([18086, 5199, 5200], context, { signal })
+      throwIfP0Aborted(signal)
+      recordControlResult(phase, verification, {
+        child: child === undefined ? null : child,
+        verification: verification === undefined ? null : verification
+      })
       continue
     }
     if (phase === 'authority') {
-      await operations.runAuthority(context, plan)
+      const evidence = await operations.runAuthority(context, plan, { signal })
+      throwIfP0Aborted(signal)
+      recordControlResult(phase, evidence)
       continue
     }
     if (P0_MATRIX_PHASES.has(phase)) {
-      await operations.runMatrixPhase(phase, context, plan)
+      await operations.runMatrixPhase(phase, context, plan, { signal })
+      throwIfP0Aborted(signal)
       matrixPhases += 1
       continue
     }
     if (phase === 'report') {
-      await operations.writeReport(context, plan)
+      const evidence = await operations.writeReport(context, plan, { signal })
+      throwIfP0Aborted(signal)
+      recordControlResult(phase, evidence)
       continue
     }
     throw new Error(`P0_PHASE_NOT_IMPLEMENTED: ${phase}`)
@@ -1060,8 +3822,10 @@ export async function runP0Preflight({
   gateOutput,
   databaseUrl,
   now = () => new Date().toISOString(),
+  signal,
   operations
 }) {
+  throwIfP0Aborted(signal)
   const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
   const maven = process.platform === 'win32' ? 'mvn.cmd' : 'mvn'
   const backendDirectory = join(p0ProjectRoot, 'backend')
@@ -1096,8 +3860,10 @@ export async function runP0Preflight({
     }
   ]
   const runGate = async (command) => {
-    const result = await operations.runCommand(command)
+    throwIfP0Aborted(signal)
+    const result = await operations.runCommand({ ...command, signal })
     await operations.recordGate(command.id, result)
+    throwIfP0Aborted(signal)
     if (result?.status !== 0) throw new Error(`P0_PREFLIGHT_GATE_FAILED: ${command.id}`)
     return result
   }
@@ -1132,10 +3898,13 @@ export async function runP0Preflight({
   await runGate(surefireCommand)
 
   let backend
+  let executionFailure
+  let executionFailed = false
   try {
     backend = await operations.startOwnedBackend({
       profile: 'UI_CORE',
       databaseUrl,
+      signal,
       environment: buildBackendEnvironment('UI_CORE', {
         DATABASE_URL: databaseUrl,
         SPRING_DATASOURCE_URL: databaseUrl,
@@ -1144,12 +3913,18 @@ export async function runP0Preflight({
     })
     await operations.waitForBackendHealth(
       backend,
-      'http://127.0.0.1:18086/actuator/health'
+      'http://127.0.0.1:18086/actuator/health',
+      signal
     )
+    throwIfP0Aborted(signal)
     await operations.waitForBusinessEndpoint(
       backend,
-      'http://127.0.0.1:18086/api/market/symbols'
+      'http://127.0.0.1:18086/api/market/symbols',
+      signal
     )
+    throwIfP0Aborted(signal)
+    await operations.verifyBackendDatabaseIdentity?.(backend, { databaseUrl, signal })
+    throwIfP0Aborted(signal)
     const contractEnvironment = {
       OPENAPI_SOURCE_URL: 'http://127.0.0.1:18086/v3/api-docs'
     }
@@ -1167,12 +3942,25 @@ export async function runP0Preflight({
       cwd: p0ProjectRoot,
       env: contractEnvironment
     })
-  } finally {
-    try {
-      await operations.stopOwnedBackend(backend)
-    } finally {
-      await operations.assertBusinessPortsFree([18086])
-    }
+  } catch (error) {
+    executionFailure = error
+    executionFailed = true
+  }
+  const cleanupSignal = AbortSignal.timeout(30000)
+  const failures = executionFailed ? [executionFailure] : []
+  try {
+    await operations.stopOwnedBackend(backend, { signal: cleanupSignal })
+  } catch (error) {
+    failures.push(error)
+  }
+  try {
+    await operations.assertBusinessPortsFree([18086], { signal: cleanupSignal })
+  } catch (error) {
+    failures.push(error)
+  }
+  if (failures.length === 1) throw failures[0]
+  if (failures.length > 1) {
+    throw new AggregateError(failures, 'P0_PREFLIGHT_AND_CLEANUP_FAILED')
   }
   return {
     status: 'PASS',
@@ -1186,11 +3974,13 @@ export async function runP0Preflight({
 export async function executeP0SuiteLifecycle({ options, operations }) {
   const controller = new AbortController()
   let interruptionError
-  const removeSignalHandlers = operations.installSignalHandlers((signal) => {
-    if (interruptionError) return
-    interruptionError = new Error(`P0_INTERRUPTED: ${signal}`)
-    controller.abort(interruptionError)
-  })
+  const removeSignalHandlers = options.phase === 'cleanup'
+    ? async () => {}
+    : operations.installSignalHandlers((signal) => {
+        if (interruptionError) return
+        interruptionError = new Error(`P0_INTERRUPTED: ${signal}`)
+        controller.abort(interruptionError)
+      })
   let prepared
   let execution = null
   let report = null
@@ -1209,10 +3999,11 @@ export async function executeP0SuiteLifecycle({ options, operations }) {
     failure = interruptionError ?? error
   } finally {
     try {
+      const cleanupSignal = AbortSignal.timeout(30000)
       cleanup = await operations.cleanup(prepared, {
         error: failure,
         interrupted: Boolean(interruptionError),
-        signal: controller.signal
+        signal: cleanupSignal
       })
     } catch (error) {
       failure = failure
@@ -3144,10 +5935,12 @@ async function launchBrowser() {
     '--window-size=1440,900',
     'about:blank'
   ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+  observeLocalChildSpawn(child, { label: 'browser' })
   const log = { label: 'browser', command: executable, output: '' }
   processLogs.push(log)
   child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
   child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
+  await child.p0SpawnReady
   await waitFor(async () => {
     assertProcessRunning(child)
     return canFetch(`http://127.0.0.1:${port}/json/version`)
@@ -3563,7 +6356,11 @@ async function assertDatabaseState() {
 }
 
 function runDbSql(sql) {
-  const result = spawnSync('docker', ['exec', 'fx-platform-postgres', 'psql', '-U', 'postgres', '-d', smokeDatabase, '-tA', '-v', 'ON_ERROR_STOP=1', '-c', sql], {
+  const postgresContainerId = canonicalComposeIdentity?.postgres?.id
+  if (typeof postgresContainerId !== 'string' || !/^[a-f0-9]{64}$/.test(postgresContainerId)) {
+    throw new Error('P0_VERIFIED_POSTGRES_CONTAINER_REQUIRED')
+  }
+  const result = spawnSync('docker', ['exec', postgresContainerId, 'psql', '-U', 'postgres', '-d', smokeDatabase, '-tA', '-v', 'ON_ERROR_STOP=1', '-c', sql], {
     encoding: 'utf8',
     windowsHide: true
   })
@@ -3573,23 +6370,11 @@ function runDbSql(sql) {
 
 async function dropSmokeDatabase() {
   if (!smokeDatabaseCreated) return
-  if (canonicalSmokeOwnership.inherited) {
-    await cleanupCanonicalSmokeDatabase({
-      ownership: canonicalSmokeOwnership,
-      postgres: createDockerPostgresAdapter()
-    })
-    smokeDatabaseCreated = false
-    return
-  }
-  const result = spawnSync('docker', [
-    'exec', 'fx-platform-postgres', 'dropdb', '-U', 'postgres', '--force', '--if-exists', smokeDatabase
-  ], {
-    encoding: 'utf8',
-    windowsHide: true
+  if (!canonicalPostgres) throw new Error('P0_VERIFIED_POSTGRES_CONTAINER_REQUIRED')
+  await cleanupCanonicalSmokeDatabase({
+    ownership: { ...canonicalSmokeOwnership, inherited: true },
+    postgres: canonicalPostgres
   })
-  if (result.status !== 0) {
-    throw new Error(`Dedicated PostgreSQL database cleanup failed:\n${result.error?.message ?? result.stderr ?? result.stdout}`)
-  }
   smokeDatabaseCreated = false
 }
 
@@ -3677,19 +6462,23 @@ async function writeReport(status, error) {
   return reportPath
 }
 
-async function waitFor(check, label, timeoutMs = 10000) {
+async function waitFor(check, label, timeoutMs = 10000, signal) {
   const deadline = Date.now() + timeoutMs
   let lastError
   while (Date.now() < deadline) {
     throwIfInterrupted()
+    throwIfP0Aborted(signal)
     try {
       const value = await check()
+      throwIfP0Aborted(signal)
       if (value) return value
     } catch (error) {
+      throwIfP0Aborted(signal)
       lastError = error
     }
-    await sleep(200)
+    await sleep(200, signal)
   }
+  throwIfP0Aborted(signal)
   throw new Error(`Timed out waiting for ${label}${lastError ? `: ${lastError.message}` : ''}`)
 }
 
@@ -3708,12 +6497,44 @@ function abortError(signal, label) {
   return signal.reason instanceof Error ? signal.reason : new Error(`${label} aborted`)
 }
 
-async function canFetch(url) {
+function throwIfP0Aborted(signal) {
+  if (!signal?.aborted) return
+  throw signal.reason instanceof Error ? signal.reason : new Error('P0_ABORTED')
+}
+
+export async function fetchP0Local(
+  url,
+  { signal, timeoutMs = 2000, fetchImpl = fetch, request = {} } = {}
+) {
+  const endpoint = new URL(url)
+  if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1') {
+    throw new Error('P0_LOCAL_FETCH_ENDPOINT_INVALID')
+  }
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
+    throw new Error('P0_LOCAL_FETCH_TIMEOUT_INVALID')
+  }
+  throwIfP0Aborted(signal)
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, timeoutSignal])
+    : timeoutSignal
   try {
-    const response = await fetch(url, { signal: operationSignal(1500) })
+    const response = await fetchImpl(url, { ...request, signal: combinedSignal })
+    throwIfP0Aborted(signal)
+    return response
+  } catch (error) {
+    if (signal?.aborted) throw abortError(signal, `local fetch ${endpoint.pathname}`)
+    throw error
+  }
+}
+
+async function canFetch(url, signal) {
+  try {
+    const response = await fetchP0Local(url, { signal, timeoutMs: 1500 })
     return response.ok || response.status < 500
-  } catch {
+  } catch (error) {
     throwIfInterrupted()
+    throwIfP0Aborted(signal)
     return false
   }
 }
@@ -3732,14 +6553,21 @@ async function freePort() {
 }
 
 function assertProcessRunning(child) {
+  if (child?.p0SpawnError) throw child.p0SpawnError
   if (hasProcessExited(child)) throw new Error(`managed process exited early with code ${child.exitCode ?? child.signalCode}`)
 }
 
-async function stopManagedProcesses() {
+async function stopManagedProcesses({
+  signal,
+  processes = managedProcesses,
+  terminate = terminateProcessTree
+} = {}) {
   const failures = []
-  for (const child of managedProcesses.toReversed()) {
+  for (const child of processes.toReversed()) {
+    throwIfP0Aborted(signal)
     try {
-      await terminateProcessTree(child, `managed process ${child.pid ?? 'unknown'}`)
+      await terminate(child, `managed process ${child.pid ?? 'unknown'}`, signal)
+      throwIfP0Aborted(signal)
     } catch (error) {
       failures.push(error)
     }
@@ -3749,23 +6577,16 @@ async function stopManagedProcesses() {
   }
 }
 
-async function terminateProcessTree(child, label) {
+async function terminateProcessTree(child, label, signal) {
+  throwIfP0Aborted(signal)
   if (!child || hasProcessExited(child)) return
   let terminationError = ''
-  if (process.platform === 'win32') {
-    const result = spawnSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
-      encoding: 'utf8',
-      windowsHide: true
-    })
-    if (result.status !== 0) terminationError = result.error?.message ?? result.stderr ?? result.stdout
-  } else {
-    if (!child.kill('SIGTERM')) terminationError = 'SIGTERM was not delivered'
-  }
-  if (await waitForProcessExit(child, 5000)) return
-  if (process.platform !== 'win32') {
-    if (!child.kill('SIGKILL')) terminationError = `${terminationError}; SIGKILL was not delivered`
-    if (await waitForProcessExit(child, 3000)) return
-  }
+  if (!child.kill('SIGTERM')) terminationError = 'SIGTERM was not delivered'
+  if (await waitForProcessExit(child, 5000, signal)) return
+  throwIfP0Aborted(signal)
+  if (!child.kill('SIGKILL')) terminationError = `${terminationError}; SIGKILL was not delivered`
+  if (await waitForProcessExit(child, 3000, signal)) return
+  throwIfP0Aborted(signal)
   throw new Error(`${label} did not exit after termination${terminationError ? `: ${terminationError.trim()}` : ''}`)
 }
 
@@ -3773,21 +6594,115 @@ function hasProcessExited(child) {
   return child.exitCode !== null || child.signalCode !== null
 }
 
-function waitForProcessExit(child, timeoutMs) {
+function waitForProcessExit(child, timeoutMs, signal) {
+  throwIfP0Aborted(signal)
   if (hasProcessExited(child)) return Promise.resolve(true)
-  return new Promise((resolvePromise) => {
-    const timeout = setTimeout(() => {
-      child.removeListener('exit', onExit)
-      resolvePromise(hasProcessExited(child))
-    }, timeoutMs)
-    const onExit = () => {
+  return new Promise((resolvePromise, rejectPromise) => {
+    let settled = false
+    const finish = (exited, error) => {
+      if (settled) return
+      settled = true
       clearTimeout(timeout)
       child.removeListener('exit', onExit)
-      resolvePromise(true)
+      signal?.removeEventListener('abort', onAbort)
+      if (error) rejectPromise(error)
+      else resolvePromise(exited)
     }
+    const onExit = () => finish(true)
+    const onAbort = () => finish(false, abortError(signal, 'managed process termination'))
+    const timeout = setTimeout(() => finish(hasProcessExited(child)), timeoutMs)
     child.once('exit', onExit)
+    signal?.addEventListener('abort', onAbort, { once: true })
     if (hasProcessExited(child)) onExit()
+    if (signal?.aborted) onAbort()
   })
+}
+
+function registerLocalNativeProcess(child, descriptor, label) {
+  if (!Number.isSafeInteger(child?.pid) || child.pid < 1) {
+    throw new Error('P0_PROCESS_PID_INVALID')
+  }
+  child.processIdentity ??= {
+    pid: child.pid,
+    startedAt: `spawn:${randomUUID()}`,
+    processFingerprint: sha256Text(JSON.stringify([
+      descriptor.command,
+      descriptor.args ?? [],
+      descriptor.cwd ?? null,
+      label
+    ]))
+  }
+  localNativeProcessHandles.set(child.pid, child)
+  return child.processIdentity
+}
+
+function observeLocalChildSpawn(child, {
+  descriptor,
+  label = 'local process',
+  registerIdentity = false
+} = {}) {
+  let settled = false
+  let resolveReady
+  let rejectReady
+  const ready = new Promise((resolvePromise, rejectPromise) => {
+    resolveReady = resolvePromise
+    rejectReady = rejectPromise
+  })
+  void ready.catch(() => {})
+  const finish = (error) => {
+    if (settled) return
+    settled = true
+    if (error) {
+      child.p0SpawnError ??= error
+      rejectReady(error)
+    } else {
+      resolveReady(child)
+    }
+  }
+  child.once('error', (error) => {
+    child.p0SpawnError ??= error
+    finish(error)
+  })
+  child.once('spawn', () => {
+    try {
+      if (registerIdentity) registerLocalNativeProcess(child, descriptor, label)
+      finish()
+    } catch (error) {
+      finish(error)
+    }
+  })
+  child.once('exit', (status, childSignal) => {
+    if (!settled) {
+      finish(new Error(
+        `P0_PROCESS_EXITED_BEFORE_SPAWN: ${label}/${status ?? childSignal ?? 'unknown'}`
+      ))
+    }
+  })
+  child.p0SpawnReady = ready
+  return ready
+}
+
+export function acquireLocalNativeProcessHandle(pid) {
+  const child = localNativeProcessHandles.get(pid)
+  if (!child) return null
+  return {
+    async inspectIdentity({ signal } = {}) {
+      throwIfP0Aborted(signal)
+      return hasProcessExited(child) ? null : child.processIdentity
+    },
+    async terminateTree(resource, { signal } = {}) {
+      await terminateProcessTree(child, `journaled process ${resource.id}`, signal)
+      return {
+        provider: 'DIRECT_CHILD',
+        rootTerminated: true,
+        treeTerminated: false
+      }
+    },
+    async close({ signal } = {}) {
+      throwIfP0Aborted(signal)
+      if (hasProcessExited(child)) localNativeProcessHandles.delete(pid)
+    }
+  }
 }
 
 function appendTail(current, chunk, maxLength = 4000) {
@@ -3802,8 +6717,21 @@ function safeName(value) {
   return String(value).replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'artifact'
 }
 
-function sleep(timeoutMs) {
-  return new Promise((resolvePromise) => setTimeout(resolvePromise, timeoutMs))
+function sleep(timeoutMs, signal) {
+  if (!signal) return new Promise((resolvePromise) => setTimeout(resolvePromise, timeoutMs))
+  throwIfP0Aborted(signal)
+  return new Promise((resolvePromise, rejectPromise) => {
+    const timeout = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolvePromise()
+    }, timeoutMs)
+    const onAbort = () => {
+      clearTimeout(timeout)
+      signal.removeEventListener('abort', onAbort)
+      rejectPromise(signal.reason instanceof Error ? signal.reason : new Error('P0_ABORTED'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 function assert(condition, message) {
@@ -3817,31 +6745,266 @@ function installP0SignalHandlers(handler) {
   }
 }
 
-function runLocalCommand(descriptor) {
+const WINDOWS_COMMAND_SHIMS = new Set(['npm.cmd', 'mvn.cmd'])
+const LOCAL_LAUNCHER_ENVIRONMENT_KEYS = new Set([
+  'COMSPEC',
+  'COMPOSE_FILE',
+  'COMPOSE_PROFILES',
+  'COMPOSE_PROJECT_NAME',
+  'DOCKER_CONTEXT',
+  'DOCKER_HOST',
+  'MAVEN_HOME',
+  'MAVEN_CMD',
+  'NPM_CMD',
+  'PATH',
+  'SYSTEMROOT',
+  'WINDIR'
+])
+
+function scrubLocalLauncherEnvironment(environment = process.env) {
+  const scrubbed = { ...environment }
+  for (const key of Object.keys(scrubbed)) {
+    if (LOCAL_LAUNCHER_ENVIRONMENT_KEYS.has(key.toUpperCase())) delete scrubbed[key]
+  }
+  return scrubbed
+}
+
+function trustedContainedRegularFile(candidate, root, errorCode) {
+  if (!isAbsolute(candidate) || !existsSync(candidate)) throw new Error(errorCode)
+  const metadata = lstatSync(candidate)
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
+    throw new Error(errorCode)
+  }
+  const actual = realpathSync(candidate)
+  const relativePath = relative(root, actual)
+  const actualMetadata = lstatSync(actual)
+  if (!isAbsolute(actual)
+    || relativePath === '..'
+    || relativePath.startsWith(`..${sep}`)
+    || isAbsolute(relativePath)
+    || !actualMetadata.isFile()
+    || actualMetadata.isSymbolicLink()
+    || actualMetadata.nlink !== 1) {
+    throw new Error(errorCode)
+  }
+  return actual
+}
+
+function containedSiblingDirectories(toolRoot) {
+  return readdirSync(toolRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => realpathSync(join(toolRoot, entry.name)))
+    .filter((path) => {
+      const relativePath = relative(toolRoot, path)
+      return relativePath !== '..'
+        && !relativePath.startsWith(`..${sep}`)
+        && !isAbsolute(relativePath)
+    })
+}
+
+export function resolveTrustedLocalToolchain() {
+  const nodePath = realpathSync(process.execPath)
+  const nodeRoot = realpathSync(dirname(nodePath))
+  const toolRoot = realpathSync(dirname(nodeRoot))
+  trustedContainedRegularFile(nodePath, nodeRoot, 'P0_TRUSTED_NODE_REQUIRED')
+
+  let npmCli
+  try {
+    npmCli = trustedContainedRegularFile(
+      join(nodeRoot, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      nodeRoot,
+      'P0_TRUSTED_NPM_REQUIRED'
+    )
+  } catch (error) {
+    throw new Error('P0_TRUSTED_NPM_REQUIRED', { cause: error })
+  }
+
+  const mavenCandidates = []
+  for (const directory of containedSiblingDirectories(toolRoot)) {
+    if (directory === nodeRoot || !basename(directory).startsWith('apache-maven-')) continue
+    try {
+      const mavenShim = trustedContainedRegularFile(
+        join(directory, 'bin', 'mvn.cmd'),
+        directory,
+        'P0_TRUSTED_MAVEN_REQUIRED'
+      )
+      const mavenConfig = trustedContainedRegularFile(
+        join(directory, 'bin', 'm2.conf'),
+        directory,
+        'P0_TRUSTED_MAVEN_REQUIRED'
+      )
+      const launchers = readdirSync(join(directory, 'boot'), { withFileTypes: true })
+        .filter((entry) => entry.isFile() && /^plexus-classworlds-[0-9.]+\.jar$/.test(entry.name))
+        .map((entry) => trustedContainedRegularFile(
+          join(directory, 'boot', entry.name),
+          directory,
+          'P0_TRUSTED_MAVEN_REQUIRED'
+        ))
+      if (launchers.length !== 1) continue
+      mavenCandidates.push({
+        mavenHome: directory,
+        mavenShim,
+        mavenConfig,
+        plexusLauncher: launchers[0]
+      })
+    } catch {}
+  }
+  if (mavenCandidates.length !== 1) throw new Error('P0_TRUSTED_MAVEN_REQUIRED')
+
+  const javaCandidates = []
+  for (const directory of containedSiblingDirectories(toolRoot)) {
+    const roots = [directory]
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isDirectory()) roots.push(join(directory, entry.name))
+    }
+    for (const root of roots) {
+      const candidate = join(root, 'bin', 'java.exe')
+      if (!existsSync(candidate)) continue
+      try {
+        javaCandidates.push(trustedContainedRegularFile(
+          candidate,
+          toolRoot,
+          'P0_TRUSTED_MAVEN_REQUIRED'
+        ))
+      } catch {}
+    }
+  }
+  const uniqueJava = [...new Set(javaCandidates)]
+  if (uniqueJava.length !== 1) throw new Error('P0_TRUSTED_MAVEN_REQUIRED')
+
+  return {
+    nodePath,
+    nodeRoot,
+    toolRoot,
+    npmCli,
+    ...mavenCandidates[0],
+    javaPath: uniqueJava[0]
+  }
+}
+
+function assertSafeWindowsCommandArgument(argument) {
+  if (typeof argument !== 'string'
+    || argument.length === 0
+    || /[\0\r\n"&|<>^%!]/.test(argument)) {
+    throw new Error('P0_LOCAL_COMMAND_ARGUMENT_UNSAFE')
+  }
+}
+
+export function normalizeLocalCommandDescriptor(
+  descriptor,
+  { platform = process.platform, resolveToolchain = resolveTrustedLocalToolchain } = {}
+) {
+  if (!descriptor || typeof descriptor !== 'object' || Array.isArray(descriptor)
+    || typeof descriptor.command !== 'string'
+    || !Array.isArray(descriptor.args ?? [])) {
+    throw new Error('P0_LOCAL_COMMAND_DESCRIPTOR_INVALID')
+  }
+  const args = [...(descriptor.args ?? [])]
+  const normalized = {
+    ...descriptor,
+    args,
+    env: scrubLocalLauncherEnvironment(descriptor.env),
+    shell: false
+  }
+  if (platform !== 'win32') return normalized
+  const command = descriptor.command.toLowerCase()
+  if (!WINDOWS_COMMAND_SHIMS.has(command)) return normalized
+  for (const argument of args) assertSafeWindowsCommandArgument(argument)
+  const toolchain = resolveToolchain()
+  if (command === 'npm.cmd') {
+    return {
+      ...normalized,
+      command: toolchain.nodePath,
+      args: [toolchain.npmCli, ...args]
+    }
+  }
+  if (!toolchain?.javaPath || !toolchain?.mavenHome
+    || !toolchain?.mavenConfig || !toolchain?.plexusLauncher) {
+    throw new Error('P0_TRUSTED_MAVEN_REQUIRED')
+  }
+  return {
+    ...normalized,
+    command: toolchain.javaPath,
+    args: [
+      '-classpath',
+      toolchain.plexusLauncher,
+      `-Dclassworlds.conf=${toolchain.mavenConfig}`,
+      `-Dmaven.home=${toolchain.mavenHome}`,
+      `-Dmaven.multiModuleProjectDirectory=${resolve(descriptor.cwd ?? process.cwd())}`,
+      'org.codehaus.plexus.classworlds.launcher.Launcher',
+      ...args
+    ]
+  }
+}
+
+export function runLocalCommand(descriptor) {
+  const normalized = normalizeLocalCommandDescriptor(descriptor)
+  throwIfP0Aborted(normalized.signal)
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(descriptor.command, descriptor.args ?? [], {
-      cwd: descriptor.cwd,
-      env: descriptor.env ?? process.env,
+    const child = spawn(normalized.command, normalized.args, {
+      cwd: normalized.cwd,
+      env: normalized.env,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
       windowsHide: true
     })
+    observeLocalChildSpawn(child, {
+      descriptor: normalized,
+      label: normalized.id ?? normalized.command,
+      registerIdentity: true
+    })
     let stdout = ''
     let stderr = ''
-    child.stdout.on('data', (chunk) => { stdout = appendTail(stdout, chunk, 200000) })
-    child.stderr.on('data', (chunk) => { stderr = appendTail(stderr, chunk, 200000) })
-    child.once('error', rejectPromise)
-    child.once('exit', (status, signal) => resolvePromise({
-      status,
-      signal,
-      stdout,
-      stderr
-    }))
-    child.stdin.end(descriptor.stdin ?? '')
+    let settled = false
+    let abortTermination
+    const removeAbortListener = () => normalized.signal?.removeEventListener('abort', onAbort)
+    const finish = (error, result) => {
+      if (settled) return
+      settled = true
+      removeAbortListener()
+      if (error) rejectPromise(error)
+      else resolvePromise(result)
+    }
+    const onAbort = () => {
+      abortTermination ??= terminateProcessTree(
+        child,
+        `P0 command ${normalized.id ?? normalized.command}`
+      )
+    }
+    const spawnRegistration = child.p0SpawnReady
+      .then(() => normalized.onSpawn?.(child))
+      .catch(async (error) => {
+        if (child.processIdentity) {
+          await terminateProcessTree(
+            child,
+            `unregistered P0 command ${normalized.id ?? normalized.command}`
+          )
+        }
+        throw error
+      })
+    void spawnRegistration.catch((error) => finish(error))
+    child.stdout?.on('data', (chunk) => { stdout = appendTail(stdout, chunk, 200000) })
+    child.stderr?.on('data', (chunk) => { stderr = appendTail(stderr, chunk, 200000) })
+    child.once('error', (error) => finish(error))
+    child.once('exit', (status, childSignal) => {
+      Promise.all([Promise.resolve(abortTermination), spawnRegistration]).then(() => {
+        if (normalized.signal?.aborted) {
+          finish(normalized.signal.reason instanceof Error
+            ? normalized.signal.reason
+            : new Error('P0_ABORTED'))
+          return
+        }
+        finish(null, { status, signal: childSignal, stdout, stderr })
+      }, (error) => finish(error))
+    })
+    normalized.signal?.addEventListener('abort', onAbort, { once: true })
+    if (normalized.signal?.aborted) onAbort()
+    child.stdin?.end(normalized.stdin ?? '')
   })
 }
 
-function redisRequest(args, { host = '127.0.0.1', port = 6379 } = {}) {
+function redisRequest(args, { host = '127.0.0.1', port = 6379, signal } = {}) {
+  throwIfP0Aborted(signal)
   const payload = Buffer.concat([
     Buffer.from(`*${args.length}\r\n`),
     ...args.flatMap((argument) => {
@@ -3853,16 +7016,21 @@ function redisRequest(args, { host = '127.0.0.1', port = 6379 } = {}) {
     const socket = createConnection({ host, port })
     let settled = false
     let response = Buffer.alloc(0)
+    const onAbort = () => finish(abortError(signal, 'local Redis request'))
     const finish = (error, value) => {
       if (settled) return
       settled = true
+      signal?.removeEventListener('abort', onAbort)
       socket.destroy()
       if (error) rejectPromise(error)
       else resolvePromise(value)
     }
     socket.setTimeout(5000, () => finish(new Error('P0_REDIS_TIMEOUT')))
     socket.once('error', (error) => finish(error))
-    socket.once('connect', () => socket.write(payload))
+    socket.once('connect', () => {
+      if (signal?.aborted) return onAbort()
+      socket.write(payload)
+    })
     socket.on('data', (chunk) => {
       response = Buffer.concat([response, chunk])
       const lineEnd = response.indexOf('\r\n')
@@ -3879,267 +7047,1257 @@ function redisRequest(args, { host = '127.0.0.1', port = 6379 } = {}) {
       if (!Number.isSafeInteger(length) || length < 0 || response.length < start + length + 2) return
       finish(null, response.subarray(start, start + length).toString('utf8'))
     })
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
   })
 }
 
-function createLoopbackRedisAdapter(request = redisRequest) {
-  return {
-    async waitUntilReady() {
-      await waitFor(async () => await request(['PING']) === 'PONG', 'local Redis', 30000)
-    },
-    async setNx(key, value) {
-      return await request(['SET', key, value, 'NX']) === 'OK'
-    },
-    get(key) {
-      return request(['GET', key])
-    },
-    async readExact(key) {
-      const value = await request(['GET', key])
-      if (value === null) return { exists: false, value: null, expiresAtMs: null }
-      const expiry = await request(['PEXPIRETIME', key])
-      return {
-        exists: true,
+function encodeRedisRespCommand(args) {
+  if (!Array.isArray(args) || args.length === 0) {
+    throw new Error('P0_REDIS_COMMAND_INVALID')
+  }
+  return Buffer.concat([
+    Buffer.from('*' + args.length + '\r\n'),
+    ...args.flatMap((argument) => {
+      const value = Buffer.from(String(argument))
+      return [
+        Buffer.from('$' + value.length + '\r\n'),
         value,
-        expiresAtMs: expiry === -1 ? null : expiry
+        Buffer.from('\r\n')
+      ]
+    })
+  ])
+}
+
+function parseRedisRespFrame(buffer) {
+  const lineEnd = buffer.indexOf('\r\n')
+  if (lineEnd < 0) return { complete: false }
+  if (buffer.length === 0) throw new Error('P0_REDIS_PROTOCOL_INVALID')
+  const prefix = String.fromCharCode(buffer[0])
+  const header = buffer.subarray(1, lineEnd).toString('utf8')
+  const headerEnd = lineEnd + 2
+  if (prefix === '+') {
+    return { complete: true, consumed: headerEnd, value: header }
+  }
+  if (prefix === '-') {
+    return {
+      complete: true,
+      consumed: headerEnd,
+      error: new Error('P0_REDIS_ERROR: ' + header)
+    }
+  }
+  if (prefix === ':') {
+    if (!/^-?\d+$/.test(header)) throw new Error('P0_REDIS_PROTOCOL_INVALID')
+    const value = Number(header)
+    if (!Number.isSafeInteger(value)) throw new Error('P0_REDIS_PROTOCOL_INVALID')
+    return { complete: true, consumed: headerEnd, value }
+  }
+  if (prefix !== '$' || !/^-?\d+$/.test(header)) {
+    throw new Error('P0_REDIS_PROTOCOL_INVALID')
+  }
+  const length = Number(header)
+  if (!Number.isSafeInteger(length) || length < -1) {
+    throw new Error('P0_REDIS_PROTOCOL_INVALID')
+  }
+  if (length === -1) {
+    return { complete: true, consumed: headerEnd, value: null }
+  }
+  const valueEnd = headerEnd + length
+  if (buffer.length < valueEnd + 2) return { complete: false }
+  if (buffer.subarray(valueEnd, valueEnd + 2).toString('utf8') !== '\r\n') {
+    throw new Error('P0_REDIS_PROTOCOL_INVALID')
+  }
+  return {
+    complete: true,
+    consumed: valueEnd + 2,
+    value: buffer.subarray(headerEnd, valueEnd).toString('utf8')
+  }
+}
+
+export async function openRedisRespSession({
+  host = '127.0.0.1',
+  port = 6379,
+  signal,
+  connect = createConnection
+} = {}) {
+  throwIfP0Aborted(signal)
+  if (host !== '127.0.0.1' || port !== 6379 || typeof connect !== 'function') {
+    throw new Error('P0_VERIFIED_REDIS_CONTAINER_REQUIRED')
+  }
+  let state = 'OPEN'
+  let socket
+  let pending
+  let response = Buffer.alloc(0)
+  let connectSettled = false
+  let closeCalled = false
+  let resolveConnected
+  let rejectConnected
+  const connected = new Promise((resolvePromise, rejectPromise) => {
+    resolveConnected = resolvePromise
+    rejectConnected = rejectPromise
+  })
+  const takePending = () => {
+    const current = pending
+    if (!current) return undefined
+    pending = undefined
+    response = Buffer.alloc(0)
+    current.abortSignal?.removeEventListener('abort', current.onAbort)
+    return current
+  }
+  const destroySocket = () => {
+    if (!socket || socket.destroyed) return
+    try {
+      socket.destroy()
+    } catch {
+      // The session is already terminal; destruction remains best effort.
+    }
+  }
+  const fail = (cause) => {
+    if (state === 'FAILED' || state === 'CLOSED') return
+    const error = cause instanceof Error
+      ? cause
+      : new Error(String(cause ?? 'P0_REDIS_SESSION_FAILED'))
+    state = 'FAILED'
+    signal?.removeEventListener('abort', onAbort)
+    takePending()?.reject(error)
+    if (!connectSettled) {
+      connectSettled = true
+      rejectConnected(error)
+    }
+    destroySocket()
+  }
+  const onAbort = () => fail(abortError(signal, 'local Redis session'))
+  const close = () => {
+    if (closeCalled) return
+    closeCalled = true
+    if (state === 'OPEN') state = 'CLOSED'
+    signal?.removeEventListener('abort', onAbort)
+    takePending()?.reject(new Error('P0_REDIS_SESSION_CLOSED'))
+    destroySocket()
+  }
+
+  try {
+    socket = connect({ host, port })
+  } catch (error) {
+    state = 'FAILED'
+    throw error
+  }
+  if (!socket
+    || typeof socket.once !== 'function'
+    || typeof socket.on !== 'function'
+    || typeof socket.write !== 'function'
+    || typeof socket.destroy !== 'function') {
+    state = 'FAILED'
+    destroySocket()
+    throw new Error('P0_REDIS_SESSION_INVALID')
+  }
+
+  socket.once('connect', () => {
+    if (connectSettled || state !== 'OPEN') return
+    connectSettled = true
+    resolveConnected()
+  })
+  socket.on('data', (chunk) => {
+    if (state !== 'OPEN') return
+    if (!pending) {
+      fail(new Error('P0_REDIS_PROTOCOL_INVALID'))
+      return
+    }
+    response = Buffer.concat([response, Buffer.from(chunk)])
+    let parsed
+    try {
+      parsed = parseRedisRespFrame(response)
+    } catch (error) {
+      fail(error)
+      return
+    }
+    if (!parsed.complete) return
+    if (parsed.consumed !== response.length) {
+      fail(new Error('P0_REDIS_PROTOCOL_INVALID'))
+      return
+    }
+    const current = takePending()
+    if (parsed.error) current.reject(parsed.error)
+    else current.resolve(parsed.value)
+  })
+  socket.on('error', (error) => fail(error))
+  socket.on('end', () => fail(new Error('P0_REDIS_SESSION_CLOSED')))
+  socket.on('close', () => {
+    if (state === 'OPEN') fail(new Error('P0_REDIS_SESSION_CLOSED'))
+  })
+  socket.setTimeout?.(5000, () => fail(new Error('P0_REDIS_TIMEOUT')))
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (signal?.aborted) onAbort()
+  await connected
+
+  return {
+    get state() {
+      return state
+    },
+    async command(args, { signal: commandSignal } = {}) {
+      if (state !== 'OPEN') throw new Error('P0_REDIS_SESSION_CLOSED')
+      if (pending) throw new Error('P0_REDIS_SESSION_BUSY')
+      const payload = encodeRedisRespCommand(args)
+      if (commandSignal?.aborted) {
+        const error = abortError(commandSignal, 'local Redis command')
+        fail(error)
+        throw error
+      }
+      return new Promise((resolvePromise, rejectPromise) => {
+        const onCommandAbort = () => {
+          fail(abortError(commandSignal, 'local Redis command'))
+        }
+        pending = {
+          resolve: resolvePromise,
+          reject: rejectPromise,
+          abortSignal: commandSignal,
+          onAbort: onCommandAbort
+        }
+        response = Buffer.alloc(0)
+        commandSignal?.addEventListener('abort', onCommandAbort, { once: true })
+        if (commandSignal?.aborted) {
+          onCommandAbort()
+          return
+        }
+        try {
+          socket.write(payload)
+        } catch (error) {
+          fail(error)
+        }
+      })
+    },
+    close
+  }
+}
+
+function createInjectedRedisRequestSession(request, { host, port, signal }) {
+  let state = 'OPEN'
+  let busy = false
+  return {
+    get state() {
+      return state
+    },
+    async command(args, { signal: commandSignal = signal } = {}) {
+      if (state !== 'OPEN') throw new Error('P0_REDIS_SESSION_CLOSED')
+      if (busy) throw new Error('P0_REDIS_SESSION_BUSY')
+      if (commandSignal?.aborted) {
+        state = 'FAILED'
+        throw abortError(commandSignal, 'local Redis command')
+      }
+      busy = true
+      try {
+        return await request(args, { host, port, signal: commandSignal })
+      } catch (error) {
+        state = 'FAILED'
+        throw error
+      } finally {
+        busy = false
       }
     },
-    async restoreExact(key, value, expiresAtMs) {
-      if (await request(['SET', key, value]) !== 'OK') throw new Error('P0_REDIS_RESTORE_FAILED')
-      if (expiresAtMs === null) {
-        await request(['PERSIST', key])
-      } else {
-        await request(['PEXPIREAT', key, String(expiresAtMs)])
-      }
-    },
-    async deleteExact(key) {
-      await request(['DEL', key])
-    },
-    async compareDelete(key, value) {
-      const script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
-      return await request(['EVAL', script, '1', key, value]) === 1
+    close() {
+      if (state === 'OPEN') state = 'CLOSED'
     }
   }
 }
 
-function createDockerPostgresAdapter(runCommand = runLocalCommand) {
-  const execute = async (id, database, sql, sensitive = false) => {
+export function createLoopbackRedisAdapter(
+  request = redisRequest,
+  resolveBinding,
+  verifyTransactionBinding,
+  options = {}
+) {
+  const transactionBindings = new AsyncLocalStorage()
+  const verificationFailures = new WeakSet()
+  const exactBinding = (binding) => {
+    if (typeof binding?.id !== 'string' || !/^[a-f0-9]{64}$/.test(binding.id)
+      || binding.image !== 'redis:7'
+      || binding.host !== '127.0.0.1'
+      || binding.hostPort !== 6379) {
+      throw new Error('P0_VERIFIED_REDIS_CONTAINER_REQUIRED')
+    }
+    return {
+      id: binding.id,
+      image: binding.image,
+      host: binding.host,
+      hostPort: binding.hostPort
+    }
+  }
+  const sameBinding = (left, right) => (
+    left.id === right.id
+    && left.image === right.image
+    && left.host === right.host
+    && left.hostPort === right.hostPort
+  )
+  const markVerificationFailure = (error) => {
+    verificationFailures.add(error)
+    return error
+  }
+  const normalizeThrown = (cause) => (
+    cause instanceof Error ? cause : new Error(String(cause))
+  )
+  const resolveExpectedBinding = () => {
+    if (typeof resolveBinding !== 'function'
+      || typeof verifyTransactionBinding !== 'function') {
+      throw markVerificationFailure(
+        new Error('P0_REDIS_TRANSACTION_VERIFIER_REQUIRED')
+      )
+    }
+    try {
+      return exactBinding(resolveBinding())
+    } catch (cause) {
+      throw markVerificationFailure(normalizeThrown(cause))
+    }
+  }
+  const verifyBinding = async (expectedBinding, stage, signal) => {
+    let observedBinding
+    try {
+      observedBinding = exactBinding(await verifyTransactionBinding(
+        structuredClone(expectedBinding),
+        { stage, signal }
+      ))
+    } catch (cause) {
+      throw markVerificationFailure(normalizeThrown(cause))
+    }
+    throwIfP0Aborted(signal)
+    if (!sameBinding(expectedBinding, observedBinding)) {
+      throw markVerificationFailure(
+        new Error('P0_REDIS_CONTAINER_BINDING_MISMATCH')
+      )
+    }
+    return observedBinding
+  }
+  const injectedCreateSession = options?.createSession
+  if (injectedCreateSession !== undefined && typeof injectedCreateSession !== 'function') {
+    throw new Error('P0_REDIS_SESSION_FACTORY_INVALID')
+  }
+  const createSession = injectedCreateSession
+    ?? (request === redisRequest
+      ? (details) => openRedisRespSession(details)
+      : (details) => {
+          if (typeof request !== 'function') {
+            throw new Error('P0_REDIS_SESSION_FACTORY_INVALID')
+          }
+          return createInjectedRedisRequestSession(request, details)
+        })
+  const runVerifiedTransaction = async (operation, { signal } = {}) => {
+    if (typeof operation !== 'function') throw new Error('P0_REDIS_TRANSACTION_INVALID')
+    throwIfP0Aborted(signal)
+    const active = transactionBindings.getStore()
+    if (active) {
+      if (active.session.state !== 'OPEN') {
+        throw new Error('P0_REDIS_SESSION_CLOSED')
+      }
+      return operation()
+    }
+    const expectedBinding = resolveExpectedBinding()
+    const preConnectBinding = await verifyBinding(
+      expectedBinding,
+      'PRE_CONNECT',
+      signal
+    )
+    const session = await createSession({
+      host: preConnectBinding.host,
+      port: preConnectBinding.hostPort,
+      signal
+    })
+    if (typeof session?.command !== 'function'
+      || typeof session?.close !== 'function'
+      || session.state !== 'OPEN') {
+      await session?.close?.()
+      throw new Error('P0_REDIS_SESSION_INVALID')
+    }
+    try {
+      const postConnectBinding = await verifyBinding(
+        expectedBinding,
+        'POST_CONNECT',
+        signal
+      )
+      return await transactionBindings.run(
+        { binding: postConnectBinding, session },
+        operation
+      )
+    } finally {
+      await session.close()
+    }
+  }
+  const executeRequest = (args, { signal } = {}) => {
+    const active = transactionBindings.getStore()
+    if (!active || active.session.state !== 'OPEN') {
+      throw new Error('P0_REDIS_SESSION_CLOSED')
+    }
+    return active.session.command(args, { signal })
+  }
+  return {
+    runVerifiedTransaction,
+    async waitUntilReady({ signal } = {}) {
+      const deadline = Date.now() + 30000
+      let lastError
+      while (Date.now() < deadline) {
+        throwIfInterrupted()
+        throwIfP0Aborted(signal)
+        try {
+          const response = await runVerifiedTransaction(
+            () => executeRequest(['PING'], { signal }),
+            { signal }
+          )
+          if (response === 'PONG') return
+          lastError = new Error('P0_REDIS_PING_INVALID')
+        } catch (error) {
+          throwIfP0Aborted(signal)
+          if (verificationFailures.has(error)) throw error
+          lastError = error
+        }
+        await sleep(200, signal)
+      }
+      throwIfP0Aborted(signal)
+      throw new Error(
+        'Timed out waiting for local Redis'
+        + (lastError ? ': ' + lastError.message : '')
+      )
+    },
+    async setNx(key, value, { signal } = {}) {
+      return runVerifiedTransaction(
+        async () => await executeRequest(['SET', key, value, 'NX'], { signal }) === 'OK',
+        { signal }
+      )
+    },
+    get(key, { signal } = {}) {
+      return runVerifiedTransaction(
+        () => executeRequest(['GET', key], { signal }),
+        { signal }
+      )
+    },
+    async readExact(key, { signal } = {}) {
+      return runVerifiedTransaction(async () => {
+        const value = await executeRequest(['GET', key], { signal })
+        throwIfP0Aborted(signal)
+        if (value === null) return { exists: false, value: null, expiresAtMs: null }
+        const expiry = await executeRequest(['PEXPIRETIME', key], { signal })
+        throwIfP0Aborted(signal)
+        return {
+          exists: true,
+          value,
+          expiresAtMs: expiry === -1 ? null : expiry
+        }
+      }, { signal })
+    },
+    async restoreExact(key, value, expiresAtMs, { signal } = {}) {
+      return runVerifiedTransaction(async () => {
+        if (await executeRequest(['SET', key, value], { signal }) !== 'OK') {
+          throw new Error('P0_REDIS_RESTORE_FAILED')
+        }
+        throwIfP0Aborted(signal)
+        if (expiresAtMs === null) {
+          await executeRequest(['PERSIST', key], { signal })
+        } else {
+          await executeRequest(['PEXPIREAT', key, String(expiresAtMs)], { signal })
+        }
+        throwIfP0Aborted(signal)
+      }, { signal })
+    },
+    async deleteExact(key, { signal } = {}) {
+      return runVerifiedTransaction(async () => {
+        await executeRequest(['DEL', key], { signal })
+        throwIfP0Aborted(signal)
+      }, { signal })
+    },
+    async compareDelete(key, value, { signal } = {}) {
+      const script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end"
+      return runVerifiedTransaction(
+        async () => await executeRequest(
+          ['EVAL', script, '1', key, value],
+          { signal }
+        ) === 1,
+        { signal }
+      )
+    },
+    releaseOwnershipWithReceipt({ ownerKey, receiptKey, runToken, ownerId, signal }) {
+      const script = [
+        "local owner = redis.call('get', KEYS[1])",
+        "local receipt = redis.call('get', KEYS[2])",
+        "if owner == ARGV[1] then",
+        "  if receipt and receipt ~= ARGV[2] then return 'MISMATCH' end",
+        "  redis.call('del', KEYS[1])",
+        "  redis.call('set', KEYS[2], ARGV[2])",
+        "  return 'RELEASED'",
+        'end',
+        "if not owner and receipt == ARGV[2] then return 'ALREADY_RELEASED' end",
+        "return 'MISMATCH'"
+      ].join('\n')
+      return runVerifiedTransaction(
+        () => executeRequest(
+          ['EVAL', script, '2', ownerKey, receiptKey, runToken, ownerId],
+          { signal }
+        ),
+        { signal }
+      )
+    },
+    async removeCleanupReceipt({ receiptKey, ownerId, signal }) {
+      const script = [
+        "local receipt = redis.call('get', KEYS[1])",
+        "if not receipt then return 'ALREADY_ABSENT' end",
+        "if receipt ~= ARGV[1] then return 'MISMATCH' end",
+        "redis.call('del', KEYS[1])",
+        "return 'REMOVED'"
+      ].join('\n')
+      return runVerifiedTransaction(
+        () => executeRequest(
+          ['EVAL', script, '1', receiptKey, ownerId],
+          { signal }
+        ),
+        { signal }
+      )
+    }
+  }
+}
+
+export function createDockerPostgresAdapter(
+  runCommand = runLocalCommand,
+  resolveContainerId = () => undefined
+) {
+  let pinnedContainerId
+  const execute = async (id, database, sql, sensitive = false, signal) => {
+    throwIfP0Aborted(signal)
+    const containerId = resolveContainerId()
+    if (typeof containerId !== 'string' || !/^[a-f0-9]{64}$/.test(containerId)) {
+      throw new Error('P0_VERIFIED_POSTGRES_CONTAINER_REQUIRED')
+    }
+    if (pinnedContainerId === undefined) {
+      pinnedContainerId = containerId
+    } else if (containerId !== pinnedContainerId) {
+      throw new Error('P0_POSTGRES_CONTAINER_ID_CHANGED')
+    }
     const result = await runCommand({
       id,
       command: 'docker',
       args: [
-        'exec', '-i', 'fx-platform-postgres',
+        'exec', '-i', pinnedContainerId,
         'psql', '-U', 'postgres', '-d', database, '-tA', '-v', 'ON_ERROR_STOP=1', '-f', '-'
       ],
       cwd: projectRoot,
       stdin: sql,
       shell: false,
-      sensitive
+      sensitive,
+      signal
     })
+    throwIfP0Aborted(signal)
     if (result?.status !== 0) throw new Error(`P0_POSTGRES_COMMAND_FAILED: ${id}`)
     return String(result.stdout ?? '').trim()
   }
   return {
-    async waitUntilReady() {
+    async waitUntilReady({ signal } = {}) {
       await waitFor(async () => {
         try {
-          return await execute('postgres-ready', 'postgres', 'SELECT 1;\n') === '1'
-        } catch {
+          return await execute('postgres-ready', 'postgres', 'SELECT 1;\n', false, signal) === '1'
+        } catch (error) {
+          throwIfP0Aborted(signal)
           return false
         }
-      }, 'local PostgreSQL', 30000)
+      }, 'local PostgreSQL', 30000, signal)
     },
-    executeAdminSql(sql, { sensitive = false } = {}) {
-      return execute('postgres-admin', 'postgres', `${sql};\n`, sensitive)
+    executeAdminSql(sql, { sensitive = false, signal } = {}) {
+      return execute('postgres-admin', 'postgres', `${sql};\n`, sensitive, signal)
     },
-    async readDatabaseOwnership(segmentName) {
+    async readDatabaseOwnership(segmentName, { signal } = {}) {
       assertP0DatabaseName(segmentName)
       const row = await execute('postgres-owner-read', 'postgres', `
         SELECT datname || E'\\t' || coalesce(shobj_description(oid, 'pg_database'), '')
         FROM pg_database
         WHERE datname = '${sqlLiteral(segmentName)}';
-      `, true)
+      `, true, signal)
+      throwIfP0Aborted(signal)
       if (!row) return null
       const [database, ownerMarker] = row.split('\t')
       return { segmentName: database, ownerMarker }
     },
-    async probeDatabase({ databaseUrl, segmentName }) {
+    async probeDatabase({ databaseUrl, segmentName, signal }) {
       assertP0DatabaseName(segmentName)
       const row = await execute('postgres-database-probe', segmentName, `
         SELECT current_database() || E'\\t'
           || coalesce((SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = current_database()), '')
           || E'\\t' || current_setting('timezone');
-      `, true)
+      `, true, signal)
+      throwIfP0Aborted(signal)
       const [currentDatabase, ownerMarker, timezone] = row.split('\t')
       return { databaseUrl, currentDatabase, ownerMarker, timezone }
+    },
+    async probeBackendConnection({ segmentName, signal }) {
+      assertP0DatabaseName(segmentName)
+      const row = await execute('postgres-backend-activity', segmentName, `
+        SELECT count(*)
+        FROM pg_stat_activity
+        WHERE datname = '${sqlLiteral(segmentName)}'
+          AND backend_type = 'client backend'
+          AND pid <> pg_backend_pid();
+      `, true, signal)
+      throwIfP0Aborted(signal)
+      const activityCount = Number(row)
+      if (!Number.isSafeInteger(activityCount) || activityCount < 0) {
+        throw new Error('P0_BACKEND_DATABASE_ACTIVITY_INVALID')
+      }
+      return activityCount
     }
   }
 }
 
-function isPortOpen(port) {
-  return new Promise((resolvePromise) => {
+function isPortOpen(port, signal) {
+  throwIfP0Aborted(signal)
+  return new Promise((resolvePromise, rejectPromise) => {
     const socket = createConnection({ host: '127.0.0.1', port })
     let settled = false
-    const finish = (open) => {
+    const onAbort = () => finish(false, abortError(signal, `port probe ${port}`))
+    const finish = (open, error) => {
       if (settled) return
       settled = true
+      signal?.removeEventListener('abort', onAbort)
       socket.destroy()
-      resolvePromise(open)
+      if (error) rejectPromise(error)
+      else resolvePromise(open)
     }
     socket.setTimeout(500, () => finish(false))
     socket.once('connect', () => finish(true))
     socket.once('error', () => finish(false))
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
   })
 }
 
-function createLocalInfrastructureAdapter(composeFile) {
+function parseDockerInspection(output, expected) {
+  let inspection
+  try {
+    const parsed = JSON.parse(output)
+    inspection = Array.isArray(parsed) && parsed.length === 1 ? parsed[0] : null
+  } catch (error) {
+    throw new Error('P0_COMPOSE_INSPECT_INVALID', { cause: error })
+  }
+  if (!inspection || inspection.State?.Running !== true) throw new Error('P0_COMPOSE_CONTAINER_NOT_RUNNING')
+  if (typeof inspection.Id !== 'string' || !/^[a-f0-9]{64}$/.test(inspection.Id)) {
+    throw new Error('P0_COMPOSE_CONTAINER_ID_INVALID')
+  }
+  if (inspection.Config?.Image !== expected.image) throw new Error('P0_COMPOSE_IMAGE_MISMATCH')
+  const labels = inspection.Config?.Labels
+  if (!labels || labels['com.docker.compose.service'] !== expected.service) {
+    throw new Error('P0_COMPOSE_LABEL_MISMATCH')
+  }
+  if (labels['com.docker.compose.project'] !== expected.project) {
+    throw new Error('P0_COMPOSE_PROJECT_MISMATCH')
+  }
+  const workingDirectory = labels['com.docker.compose.project.working_dir']
+  if (typeof workingDirectory !== 'string'
+    || resolve(workingDirectory) !== expected.composeDirectory) {
+    throw new Error('P0_COMPOSE_WORKDIR_MISMATCH')
+  }
+  const configFilesLabel = labels['com.docker.compose.project.config_files']
+  const rawConfigFiles = typeof configFilesLabel === 'string'
+    ? configFilesLabel.split(',')
+    : []
+  const actualConfigFiles = rawConfigFiles.map((file) => resolve(file))
+  if (rawConfigFiles.length === 0
+    || rawConfigFiles.some((file, index) => (
+      file.length === 0
+        || !isAbsolute(file)
+        || file !== actualConfigFiles[index]
+        || rawConfigFiles.indexOf(file) !== index
+        || !expected.composeFiles.includes(actualConfigFiles[index])
+    ))
+    || actualConfigFiles.length !== expected.composeFiles.length
+    || actualConfigFiles.some((file, index) => file !== expected.composeFiles[index])) {
+    throw new Error('P0_COMPOSE_CONFIG_MISMATCH')
+  }
+  const bindings = inspection.NetworkSettings?.Ports?.[`${expected.port}/tcp`]
+  if (!Array.isArray(bindings) || bindings.length !== 1
+    || bindings[0]?.HostIp !== '127.0.0.1'
+    || bindings[0]?.HostPort !== String(expected.port)) {
+    throw new Error('P0_COMPOSE_PORT_MISMATCH')
+  }
   return {
-    async verifyComposePort({ service, host, hostPort, containerPort }) {
+    id: inspection.Id,
+    project: labels['com.docker.compose.project'],
+    image: expected.image,
+    host: '127.0.0.1',
+    hostPort: expected.port,
+    environment: inspection.Config?.Env ?? []
+  }
+}
+
+function composeCredential(environment, name) {
+  const prefix = `${name}=`
+  const matches = environment.filter((value) => typeof value === 'string' && value.startsWith(prefix))
+  if (matches.length !== 1) throw new Error('P0_COMPOSE_CREDENTIAL_MISSING')
+  return matches[0].slice(prefix.length)
+}
+
+function withVerifiedComposeDatabaseCredentials(environment, composeIdentity) {
+  const username = composeIdentity?.credentials?.username
+  const password = composeIdentity?.credentials?.password
+  if (typeof username !== 'string' || username.length === 0
+    || typeof password !== 'string' || password.length === 0
+    || username.includes('\0') || password.includes('\0')) {
+    throw new Error('P0_COMPOSE_CREDENTIAL_MISSING')
+  }
+  return {
+    ...environment,
+    DATABASE_USERNAME: username,
+    DATABASE_PASSWORD: password,
+    SPRING_DATASOURCE_USERNAME: username,
+    SPRING_DATASOURCE_PASSWORD: password
+  }
+}
+
+export function createLocalInfrastructureAdapter(
+  composeFile,
+  runCommand = runLocalCommand,
+  { portIsOpen = isPortOpen } = {}
+) {
+  const resolvedComposeFile = resolve(composeFile)
+  const composeDirectory = resolve(dirname(resolvedComposeFile))
+  const runDocker = async (id, args, { signal } = {}) => {
+    throwIfP0Aborted(signal)
+    const result = await runCommand({
+      id,
+      command: 'docker',
+      args,
+      cwd: projectRoot,
+      shell: false,
+      signal
+    })
+    throwIfP0Aborted(signal)
+    if (result?.status !== 0 || result.signal) throw new Error(`P0_DOCKER_COMMAND_FAILED: ${id}`)
+    return String(result.stdout ?? '').trim()
+  }
+  return {
+    async inspectDockerDaemon({ signal } = {}) {
+      const endpoint = await runDocker('docker-context-inspect', [
+        'context', 'inspect', '--format={{.Endpoints.docker.Host}}'
+      ], { signal })
+      return { endpoint }
+    },
+    async verifyComposePort({
+      service,
+      containerName,
+      image,
+      host,
+      hostPort,
+      containerPort,
+      composeFiles = [resolvedComposeFile],
+      expectedProject = P0_COMPOSE_PROJECT
+    }, { signal } = {}) {
+      throwIfP0Aborted(signal)
       if (host !== '127.0.0.1') return false
-      const source = readFileSync(composeFile, 'utf8')
-      return source.includes(`container_name: ${service}`)
+      if (expectedProject !== P0_COMPOSE_PROJECT) throw new Error('P0_COMPOSE_PROJECT_MISMATCH')
+      const resolvedComposeFiles = composeFiles.map((file) => resolve(file))
+      if (!resolvedComposeFiles.includes(resolvedComposeFile)) {
+        throw new Error('P0_COMPOSE_CONFIG_MISMATCH')
+      }
+      const source = readFileSync(resolvedComposeFile, 'utf8')
+      const configured = source.includes(`container_name: ${containerName}`)
         && source.includes(`"${hostPort}:${containerPort}"`)
+      if (!configured) return false
+      if (!await portIsOpen(hostPort, signal)) return true
+      throwIfP0Aborted(signal)
+      const output = await runDocker(`compose-${service}-published-id`, [
+        'ps', '--no-trunc',
+        '--filter', `publish=${hostPort}`,
+        '--format={{.ID}}'
+      ], { signal })
+      const ids = output.split(/\r?\n/).filter(Boolean)
+      if (ids.length !== 1 || !/^[a-f0-9]{64}$/.test(ids[0])) return false
+      const inspection = parseDockerInspection(
+        await runDocker(`compose-${service}-published-inspect`, ['inspect', ids[0]], { signal }),
+        {
+          service,
+          image,
+          port: containerPort,
+          composeDirectory,
+          composeFiles: resolvedComposeFiles,
+          project: expectedProject
+        }
+      )
+      throwIfP0Aborted(signal)
+      return inspection.id === ids[0]
     },
-    async inspectListener({ port }) {
-      return await isPortOpen(port) ? { ownerId: null } : null
+    async databaseExists(segmentName, {
+      composeFiles = [resolvedComposeFile],
+      expectedProject = P0_COMPOSE_PROJECT,
+      signal
+    } = {}) {
+      throwIfP0Aborted(signal)
+      assertP0DatabaseName(segmentName)
+      if (expectedProject !== P0_COMPOSE_PROJECT) throw new Error('P0_COMPOSE_PROJECT_MISMATCH')
+      const resolvedComposeFiles = composeFiles.map((file) => resolve(file))
+      if (!resolvedComposeFiles.includes(resolvedComposeFile)) {
+        throw new Error('P0_COMPOSE_CONFIG_MISMATCH')
+      }
+      const output = await runDocker('compose-postgres-existing-id', [
+        'ps', '--no-trunc',
+        '--filter', `label=com.docker.compose.project=${expectedProject}`,
+        '--filter', 'label=com.docker.compose.service=postgres',
+        '--format={{.ID}}'
+      ], { signal })
+      throwIfP0Aborted(signal)
+      const ids = output.split(/\r?\n/).filter(Boolean)
+      if (ids.length === 0) return false
+      if (ids.length !== 1 || !/^[a-f0-9]{64}$/.test(ids[0])) {
+        throw new Error('P0_COMPOSE_CONTAINER_ID_INVALID')
+      }
+      const [id] = ids
+      const inspection = parseDockerInspection(
+        await runDocker('compose-postgres-existing-inspect', ['inspect', id], { signal }),
+        {
+          service: 'postgres',
+          image: 'postgres:16',
+          port: 5432,
+          composeDirectory,
+          composeFiles: resolvedComposeFiles,
+          project: expectedProject
+        }
+      )
+      throwIfP0Aborted(signal)
+      if (inspection.id !== id) throw new Error('P0_COMPOSE_CONTAINER_ID_MISMATCH')
+      const result = await runCommand({
+        id: 'postgres-database-collision',
+        command: 'docker',
+        args: [
+          'exec', '-i', inspection.id,
+          'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-v', 'ON_ERROR_STOP=1', '-f', '-'
+        ],
+        cwd: projectRoot,
+        stdin: `SELECT 1 FROM pg_database WHERE datname = '${sqlLiteral(segmentName)}';\n`,
+        shell: false,
+        sensitive: false,
+        signal
+      })
+      throwIfP0Aborted(signal)
+      if (result?.status !== 0 || result.signal) throw new Error('P0_DATABASE_COLLISION_CHECK_FAILED')
+      return String(result.stdout ?? '').trim() === '1'
     },
-    async assertPortsFree(ports) {
+    async verifyComposeContainers({
+      composeFiles = [resolvedComposeFile],
+      expectedProject = P0_COMPOSE_PROJECT,
+      signal
+    } = {}) {
+      throwIfP0Aborted(signal)
+      if (expectedProject !== P0_COMPOSE_PROJECT) {
+        throw new Error('P0_COMPOSE_PROJECT_MISMATCH')
+      }
+      const resolvedComposeFiles = composeFiles.map((file) => resolve(file))
+      if (!resolvedComposeFiles.includes(resolvedComposeFile)) {
+        throw new Error('P0_COMPOSE_CONFIG_MISMATCH')
+      }
+      const composeArguments = resolvedComposeFiles.flatMap((file) => ['-f', file])
+      const inspectService = async (service, image, port) => {
+        const id = await runDocker(`compose-${service}-id`, [
+          'compose', '--project-name', expectedProject,
+          ...composeArguments, 'ps', '-q', service
+        ], { signal })
+        throwIfP0Aborted(signal)
+        if (!/^[a-f0-9]{12,64}$/.test(id)) throw new Error('P0_COMPOSE_CONTAINER_ID_INVALID')
+        const output = await runDocker(`compose-${service}-inspect`, ['inspect', id], { signal })
+        throwIfP0Aborted(signal)
+        const identity = parseDockerInspection(output, {
+          service,
+          image,
+          port,
+          composeDirectory,
+          composeFiles: resolvedComposeFiles,
+          project: expectedProject
+        })
+        if (!identity.id.startsWith(id)) throw new Error('P0_COMPOSE_CONTAINER_ID_MISMATCH')
+        return identity
+      }
+      const postgres = await inspectService('postgres', 'postgres:16', 5432)
+      throwIfP0Aborted(signal)
+      const redis = await inspectService('redis', 'redis:7', 6379)
+      throwIfP0Aborted(signal)
+      if (postgres.project !== expectedProject || redis.project !== expectedProject) {
+        throw new Error('P0_COMPOSE_PROJECT_MISMATCH')
+      }
+      const username = composeCredential(postgres.environment, 'POSTGRES_USER')
+      const password = composeCredential(postgres.environment, 'POSTGRES_PASSWORD')
+      if (username !== 'postgres' || password !== 'password') {
+        throw new Error('P0_COMPOSE_CREDENTIAL_MISMATCH')
+      }
+      return {
+        project: postgres.project,
+        postgres: {
+          id: postgres.id,
+          image: postgres.image,
+          host: postgres.host,
+          hostPort: postgres.hostPort
+        },
+        redis: {
+          id: redis.id,
+          image: redis.image,
+          host: redis.host,
+          hostPort: redis.hostPort
+        },
+        credentials: { username, password }
+      }
+    },
+    async inspectListener({ port }, { signal } = {}) {
+      return await isPortOpen(port, signal) ? { ownerId: null } : null
+    },
+    async assertPortsFree(ports, { signal } = {}) {
       for (const port of ports) {
-        if (await isPortOpen(port)) throw new Error(`P0_PORT_STILL_IN_USE: ${port}`)
+        throwIfP0Aborted(signal)
+        if (await portIsOpen(port, signal)) throw new Error(`P0_PORT_STILL_IN_USE: ${port}`)
       }
     }
   }
 }
 
-function startP0ManagedProcess(label, command, args, cwd, environment) {
-  const child = spawn(command, args, {
-    cwd,
-    env: environment,
+function bindP0AbortToManagedProcess(child, signal, label) {
+  if (!signal) return
+  const onAbort = () => {
+    child.p0AbortTermination ??= terminateProcessTree(child, label)
+    void child.p0AbortTermination.catch(() => {})
+  }
+  signal.addEventListener('abort', onAbort, { once: true })
+  child.once('exit', () => signal.removeEventListener('abort', onAbort))
+  if (signal.aborted) onAbort()
+}
+
+export function startP0ManagedProcess(
+  label,
+  command,
+  args,
+  cwd,
+  environment,
+  signal,
+  {
+    normalizeDescriptor = normalizeLocalCommandDescriptor,
+    spawnProcess = spawn
+  } = {}
+) {
+  throwIfP0Aborted(signal)
+  const descriptor = normalizeDescriptor({ command, args, cwd, env: environment })
+  const child = spawnProcess(descriptor.command, descriptor.args, {
+    cwd: descriptor.cwd,
+    env: descriptor.env,
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,
     windowsHide: true
   })
-  const log = { label, command: [command, ...args].join(' '), output: '' }
+  observeLocalChildSpawn(child, { descriptor, label, registerIdentity: true })
+  const log = {
+    label,
+    command: [descriptor.command, ...descriptor.args].join(' '),
+    output: ''
+  }
   processLogs.push(log)
   child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
   child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
   managedProcesses.push(child)
+  bindP0AbortToManagedProcess(child, signal, label)
   return child
 }
 
-function createLocalProcessManager(runCommand = runLocalCommand) {
+export function createLocalProcessManager(
+  runCommand = runLocalCommand,
+  {
+    stopProcesses = stopManagedProcesses,
+    acquireNativeProcessHandle = acquireLocalNativeProcessHandle
+  } = {}
+) {
   return {
-    async startOwnedBackend({ environment }) {
+    async startOwnedBackend({ environment, signal }) {
       const mavenArguments = [
         'spring-boot:run',
         '-Dspring-boot.run.profiles=dev'
       ]
-      if (process.platform === 'win32') {
-        return startP0ManagedProcess(
-          'p0-backend',
-          environment.ComSpec ?? process.env.ComSpec ?? 'cmd.exe',
-          ['/d', '/s', '/c', process.env.MAVEN_CMD ?? 'mvn.cmd', ...mavenArguments],
-          join(projectRoot, 'backend'),
-          environment
-        )
-      }
-      return startP0ManagedProcess(
+      const child = startP0ManagedProcess(
         'p0-backend',
-        process.env.MAVEN_CMD ?? 'mvn',
+        process.platform === 'win32' ? 'mvn.cmd' : 'mvn',
         mavenArguments,
         join(projectRoot, 'backend'),
-        environment
+        environment,
+        signal
       )
+      await child.p0SpawnReady
+      if (!child.processIdentity) {
+        await terminateProcessTree(child, 'unidentified P0 backend')
+        throw new Error('P0_PROCESS_IDENTITY_UNKNOWN')
+      }
+      return child
     },
-    async waitForBackendHealth(backend, url) {
+    async waitForBackendHealth(backend, url, signal) {
       await waitFor(async () => {
         assertProcessRunning(backend)
-        const response = await fetch(url, { signal: AbortSignal.timeout(2000) }).catch(() => null)
+        let response
+        try {
+          response = await fetchP0Local(url, { signal, timeoutMs: 2000 })
+        } catch (error) {
+          throwIfP0Aborted(signal)
+          return false
+        }
+        throwIfP0Aborted(signal)
         if (!response?.ok) return false
-        return (await response.json().catch(() => null))?.status === 'UP'
-      }, 'owned P0 backend health', 120000)
+        const body = await response.json().catch((error) => {
+          throwIfP0Aborted(signal)
+          return null
+        })
+        throwIfP0Aborted(signal)
+        return body?.status === 'UP'
+      }, 'owned P0 backend health', 120000, signal)
     },
-    async waitForBusinessEndpoint(backend, url) {
+    async waitForBusinessEndpoint(backend, url, signal) {
       await waitFor(async () => {
         assertProcessRunning(backend)
-        return canFetch(url)
-      }, 'owned P0 backend business endpoint', 30000)
+        return canFetch(url, signal)
+      }, 'owned P0 backend business endpoint', 30000, signal)
     },
-    async stopOwnedBackend(backend) {
-      if (backend) await terminateProcessTree(backend, 'owned P0 backend')
+    async stopOwnedBackend(backend, { signal } = {}) {
+      if (!backend) return
+      if (backend.p0AbortTermination) await backend.p0AbortTermination
+      throwIfP0Aborted(signal)
+      await terminateProcessTree(backend, 'owned P0 backend', signal)
     },
-    stopParentBackend() {
-      return stopManagedProcesses()
+    stopParentBackend({ signal } = {}) {
+      return stopProcesses({ signal })
     },
-    runCanonicalChild(invocation) {
+    acquireNativeProcessHandle,
+    runCanonicalChild(invocation, { signal, onSpawn } = {}) {
+      validateCanonicalChildEnvironment(invocation)
       return runCommand({
         id: 'canonical-child',
         command: invocation.command,
         args: invocation.args,
         cwd: projectRoot,
         env: invocation.env,
-        shell: false
+        shell: false,
+        signal,
+        async onSpawn(child) {
+          if (!child.processIdentity) throw new Error('P0_PROCESS_IDENTITY_UNKNOWN')
+          await onSpawn?.(child)
+        }
       })
     }
   }
 }
 
-async function writeRedisRecoveryState(runRoot, snapshot, touchedKeys) {
+async function writeRedisRecoveryState({
+  runRoot,
+  runId,
+  ownerId,
+  inventory,
+  snapshot,
+  touchedKeys,
+  signal
+}) {
+  throwIfP0Aborted(signal)
   const path = join(runRoot, 'control', 'redis.json')
-  let handle
-  try {
-    handle = await open(path, 'wx', 0o600)
-    await handle.writeFile(`${JSON.stringify({ snapshot, touchedKeys }, null, 2)}\n`, 'utf8')
-  } finally {
-    await handle?.close()
-  }
+  const recovery = createP0RedisRecoveryState({
+    runId,
+    ownerId,
+    inventory,
+    snapshot,
+    touchedKeys
+  })
+  await writeControlJsonNoClobber(path, recovery, 'P0_REDIS_SNAPSHOT_EXISTS')
+  throwIfP0Aborted(signal)
   return path
 }
 
-async function recoverP0CleanupContext(artifactBase, runId) {
-  let paths
-  try {
-    paths = await existingControlPaths(artifactBase, runId)
-  } catch (error) {
-    if (error?.message === 'P0_CONTROL_MISSING') return { missing: true }
-    throw error
+export async function runP0TrackedRedisMutation({
+  artifactBase,
+  runId,
+  runToken,
+  key,
+  mutate,
+  signal
+}) {
+  throwIfP0Aborted(signal)
+  assertExactRedisKey(key)
+  if (typeof mutate !== 'function') throw new Error('P0_REDIS_MUTATION_INVALID')
+  const active = await activeControlManifestForUpdate(artifactBase, runId, runToken)
+  throwIfP0Aborted(signal)
+  if (active.manifest.redisState !== 'SNAPSHOT_READY') {
+    throw new Error('P0_REDIS_SNAPSHOT_NOT_READY')
   }
-  if (existsSync(paths.cleanedPath) && !existsSync(paths.ownershipPath)) {
-    return { alreadyCleaned: true }
+  const recovery = validateP0RedisRecoveryState(
+    await readControlJson(active.paths.redisPath),
+    { runId, ownerId: active.manifest.ownerId }
+  )
+  throwIfP0Aborted(signal)
+  if (!recovery.touchedKeys.includes(key)) {
+    const updated = createP0RedisRecoveryState({
+      runId,
+      ownerId: active.manifest.ownerId,
+      inventory: P0_DEFAULT_REDIS_KEYS,
+      snapshot: recovery.snapshot,
+      touchedKeys: [...recovery.touchedKeys, key]
+    })
+    throwIfP0Aborted(signal)
+    await replaceControlJsonAtomic(active.paths.redisPath, updated)
+    throwIfP0Aborted(signal)
   }
+  throwIfP0Aborted(signal)
+  const result = await mutate({ signal })
+  throwIfP0Aborted(signal)
+  return result
+}
+
+async function recoverP0ActiveControlContext(artifactBase, runId) {
+  const paths = await existingControlPaths(artifactBase, runId)
   let manifest
   try {
-    manifest = JSON.parse(await readFile(paths.ownershipPath, 'utf8'))
+    manifest = await readControlJson(paths.ownershipPath)
   } catch (error) {
+    if (error?.message === 'P0_CONTROL_FILE_UNSAFE') throw error
     throw new Error('P0_CONTROL_MISSING', { cause: error })
   }
-  const ownerToken = manifest.ownerToken
-  const ownerId = ownerIdForToken(ownerToken)
-  if (manifest.runId !== runId || manifest.ownerId !== ownerId) {
-    throw new Error('P0_OWNER_MISMATCH')
+  if (manifest?.status === 'CLEANED') {
+    validateCleanedControlMarker(manifest, runId)
+    return {
+      alreadyCleaned: true,
+      artifactBase,
+      paths,
+      manifest,
+      runRoot: paths.runRoot,
+      ownerId: manifest.ownerId
+    }
   }
+  validateActiveControlManifest(manifest, runId)
+  const ownerToken = manifest.ownerToken
+  const ownerId = manifest.ownerId
   const database = manifest.database
   const canonicalDatabase = typeof database === 'string' ? database : database?.canonical
   const matrixDatabase = typeof database === 'object' ? database?.matrix : null
   if (canonicalDatabase) assertP0DatabaseName(canonicalDatabase)
   if (matrixDatabase) assertP0DatabaseName(matrixDatabase)
-  let redisRecovery
-  try {
-    redisRecovery = JSON.parse(await readFile(join(paths.runRoot, 'control', 'redis.json'), 'utf8'))
-  } catch (error) {
-    throw new Error('P0_REDIS_SNAPSHOT_MISSING', { cause: error })
-  }
-  if (!Array.isArray(redisRecovery.snapshot) || !Array.isArray(redisRecovery.touchedKeys)) {
-    throw new Error('P0_REDIS_SNAPSHOT_INVALID')
-  }
+  const ownedDatabaseSegments = Array.isArray(manifest.journal?.resources)
+    ? manifest.journal.resources
+        .filter(({ type, id }) => type === 'database' && typeof id === 'string')
+        .map(({ id }) => id)
+    : []
+  for (const segmentName of ownedDatabaseSegments) assertP0DatabaseName(segmentName)
   return {
     artifactBase,
+    paths,
+    manifest,
     runRoot: paths.runRoot,
     ownerToken,
     ownerId,
     canonicalDatabase,
     matrixDatabase,
+    ownedDatabaseSegments
+  }
+}
+
+function assertP0PreSnapshotRecoverySafe(manifest) {
+  const resources = manifest.journal?.resources
+  if (!Array.isArray(resources)) throw new Error('P0_JOURNAL_INVALID')
+  for (const resource of resources) {
+    const allowedOverride = resource?.type === 'override' && resource.id === 'compose-loopback'
+    const allowedCompose = resource?.type === 'process' && resource.id === 'compose-up'
+    if (!allowedOverride && !allowedCompose) {
+      throw new Error('P0_REDIS_PRE_SNAPSHOT_RECOVERY_UNSAFE')
+    }
+  }
+}
+
+function assertP0NotAcquiredCleanupSafe(manifest) {
+  if (manifest.redisState !== 'NOT_ACQUIRED'
+    || !Array.isArray(manifest.journal?.resources)
+    || manifest.journal.resources.some((resource) => (
+      resource?.type === 'database'
+        || resource?.type === 'canonical-child'
+        || !['process', 'override'].includes(resource?.type)
+    ))) {
+    throw new Error('P0_NOT_ACQUIRED_RECOVERY_UNSAFE')
+  }
+}
+
+async function recoverP0CleanupContext(artifactBase, runId) {
+  const active = await recoverP0ActiveControlContext(artifactBase, runId)
+  if (active.alreadyCleaned) return active
+  const { paths } = active
+  const redisRecoveryFile = await inspectSafeControlFile(paths.redisPath, { allowMissing: true })
+  if (!redisRecoveryFile) {
+    if (active.manifest.redisState === 'NOT_ACQUIRED') {
+      assertP0NotAcquiredCleanupSafe(active.manifest)
+      return {
+        ...active,
+        redisRecoveryMode: 'NOT_ACQUIRED',
+        redisSnapshot: [],
+        touchedRedisKeys: []
+      }
+    }
+    if (!['ACQUIRE_ARMED', 'OWNED', 'REDIS_RELEASE_ARMED'].includes(active.manifest.redisState)) {
+      throw new Error('P0_REDIS_SNAPSHOT_MISSING')
+    }
+    assertP0PreSnapshotRecoverySafe(active.manifest)
+    return {
+      ...active,
+      redisRecoveryMode: 'RELEASE_ONLY',
+      redisSnapshot: [],
+      touchedRedisKeys: []
+    }
+  }
+  let redisRecovery
+  try {
+    redisRecovery = await readControlJson(paths.redisPath)
+  } catch (error) {
+    if (error?.message === 'P0_CONTROL_FILE_UNSAFE') throw error
+    throw new Error('P0_REDIS_SNAPSHOT_MISSING', { cause: error })
+  }
+  redisRecovery = validateP0RedisRecoveryState(redisRecovery, {
+    runId,
+    ownerId: active.ownerId
+  })
+  return {
+    ...active,
+    redisRecoveryMode: 'SNAPSHOT',
     redisSnapshot: redisRecovery.snapshot,
     touchedRedisKeys: redisRecovery.touchedKeys
+  }
+}
+
+export function mergeP0CaseFragments(entry, fragments) {
+  if (!entry || typeof entry !== 'object'
+    || !Array.isArray(entry.selectedSubruns)
+    || !Array.isArray(fragments)
+    || fragments.length === 0) {
+    throw new Error('P0_CASE_FRAGMENT_INCOMPLETE')
+  }
+  const expected = new Map(entry.selectedSubruns.map((subrun) => [subrun?.id, subrun]))
+  if (expected.size !== entry.selectedSubruns.length || expected.has(undefined)) {
+    throw new Error('P0_CASE_FRAGMENT_INCOMPLETE')
+  }
+  const observed = new Map()
+  let passed = true
+  for (const fragment of fragments) {
+    if (fragment?.id !== entry.id || !Array.isArray(fragment.subruns)) {
+      throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
+    }
+    if (fragment.status !== 'PASS') passed = false
+    for (const subrun of fragment.subruns) {
+      const required = expected.get(subrun?.id)
+      if (!required
+        || subrun.profile !== required.profile
+        || subrun.viewport !== required.viewport) {
+        throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
+      }
+      if (observed.has(subrun.id)) throw new Error('P0_CASE_FRAGMENT_DUPLICATE')
+      observed.set(subrun.id, subrun)
+      if (subrun.status !== 'PASS') passed = false
+    }
+  }
+  if (observed.size !== expected.size) throw new Error('P0_CASE_FRAGMENT_INCOMPLETE')
+  const canonical = entry.definition?.requiredSubruns ?? []
+  const exactCanonicalScope = !entry.cropped
+    && canonical.length === entry.selectedSubruns.length
+    && canonical.every((subrun, index) => {
+      const selected = entry.selectedSubruns[index]
+      return selected?.id === subrun.id
+        && selected.profile === subrun.profile
+        && selected.viewport === subrun.viewport
+    })
+  return {
+    id: entry.id,
+    status: passed ? 'PASS' : 'FAIL',
+    scopeComplete: exactCanonicalScope,
+    subruns: entry.selectedSubruns.map(({ id }) => observed.get(id))
   }
 }
 
@@ -4148,34 +8306,181 @@ function validateCompletedP0Cases(plan, caseResults, matrixPhases) {
     if (caseResults.length !== 0) throw new Error('P0_REPORT_UNEXPECTED_CASES')
     return
   }
-  if (caseResults.length !== plan.definitions.length) throw new Error('P0_REPORT_INCOMPLETE')
+  const entries = Array.isArray(plan.executionEntries)
+    ? plan.executionEntries
+    : plan.definitions.map((definition) => ({
+        id: definition.id,
+        definition,
+        selectedSubruns: definition.requiredSubruns,
+        cropped: false
+      }))
+  if (caseResults.length !== entries.length) throw new Error('P0_REPORT_INCOMPLETE')
   const byId = new Map(caseResults.map((result) => [result?.id, result]))
   if (byId.size !== caseResults.length) throw new Error('P0_REPORT_DUPLICATE_CASE')
-  for (const definition of plan.definitions) {
-    const result = byId.get(definition.id)
-    if (result?.status !== 'PASS' || result.scopeComplete !== true) {
-      throw new Error(`P0_REPORT_CASE_INCOMPLETE: ${definition.id}`)
+  for (const entry of entries) {
+    const definition = entry.definition
+    const expectedSubruns = entry.selectedSubruns
+    const result = byId.get(entry.id)
+    if (result?.status !== 'PASS' || result.scopeComplete !== !entry.cropped) {
+      throw new Error(`P0_REPORT_CASE_INCOMPLETE: ${entry.id}`)
     }
     if (!Array.isArray(result.subruns)
-      || result.subruns.length !== definition.requiredSubruns.length) {
-      throw new Error(`P0_REPORT_SUBRUN_INCOMPLETE: ${definition.id}`)
+      || result.subruns.length !== expectedSubruns.length) {
+      throw new Error(`P0_REPORT_SUBRUN_INCOMPLETE: ${entry.id}`)
     }
     const subruns = new Map(result.subruns.map((subrun) => [subrun?.id, subrun]))
     if (subruns.size !== result.subruns.length) {
-      throw new Error(`P0_REPORT_SUBRUN_DUPLICATE: ${definition.id}`)
+      throw new Error(`P0_REPORT_SUBRUN_DUPLICATE: ${entry.id}`)
     }
-    for (const required of definition.requiredSubruns) {
+    for (const required of expectedSubruns) {
       const actual = subruns.get(required.id)
       if (actual?.status !== 'PASS'
         || actual.profile !== required.profile
         || actual.viewport !== required.viewport) {
-        throw new Error(`P0_REPORT_SUBRUN_INCOMPLETE: ${definition.id}/${required.id}`)
+        throw new Error(`P0_REPORT_SUBRUN_INCOMPLETE: ${entry.id}/${required.id}`)
       }
     }
   }
 }
 
+async function writeP0ReportAtomic(path, report) {
+  await inspectSafeControlFile(path, { allowMissing: true })
+  const temporaryPath = await writeDurableControlTemp(
+    path,
+    `${JSON.stringify(report, null, 2)}\n`
+  )
+  try {
+    await rename(temporaryPath, path)
+    await syncControlDirectory(path)
+  } finally {
+    await rm(temporaryPath, { force: true })
+  }
+  const persisted = await readControlJson(path)
+  if (JSON.stringify(persisted) !== JSON.stringify(report)) {
+    throw new Error('P0_REPORT_PERSISTENCE_MISMATCH')
+  }
+  return persisted
+}
+
+function safeP0ComposeIdentity(identity) {
+  const project = identity?.project
+  const normalizeContainer = (container, port) => {
+    if (typeof container?.id !== 'string'
+      || !/^[a-f0-9]{64}$/.test(container.id)
+      || typeof container.image !== 'string'
+      || container.image.length === 0
+      || container.host !== '127.0.0.1'
+      || container.hostPort !== port) {
+      throw new Error('P0_COMPOSE_IDENTITY_INVALID')
+    }
+    return {
+      id: container.id,
+      image: container.image,
+      host: container.host,
+      hostPort: container.hostPort
+    }
+  }
+  if (project !== P0_COMPOSE_PROJECT) {
+    throw new Error('P0_COMPOSE_IDENTITY_INVALID')
+  }
+  return {
+    project,
+    postgres: normalizeContainer(identity.postgres, 5432),
+    redis: normalizeContainer(identity.redis, 6379)
+  }
+}
+
+function safeP0ComposeTarget(target) {
+  if (target?.expectedProject !== P0_COMPOSE_PROJECT
+    || !Array.isArray(target.composeFiles)
+    || target.composeFiles.length !== 2
+    || target.composeFiles.some((file) => typeof file !== 'string' || !isAbsolute(file))
+    || resolve(target.composeFiles[0]) !== resolve(projectRoot, 'infra', 'docker-compose.yml')
+    || resolve(target.composeFiles[1]) === resolve(target.composeFiles[0])) {
+    throw new Error('P0_COMPOSE_TARGET_INVALID')
+  }
+  return Object.freeze({
+    expectedProject: P0_COMPOSE_PROJECT,
+    composeFiles: Object.freeze(target.composeFiles.map((file) => resolve(file)))
+  })
+}
+
+async function revalidateP0CleanupComposeIdentity({
+  artifactBase,
+  manifest,
+  infrastructure,
+  signal
+}) {
+  let persistedTarget
+  let persistedIdentity
+  try {
+    persistedTarget = safeP0ComposeTarget(manifest.composeTarget)
+    persistedIdentity = safeP0ComposeIdentity(manifest.composeIdentity)
+  } catch (error) {
+    throw new Error('P0_CLEANUP_COMPOSE_IDENTITY_INVALID', { cause: error })
+  }
+  const verifiedTarget = await verifyP0ComposeTarget({ artifactBase })
+  throwIfP0Aborted(signal)
+  if (JSON.stringify(persistedTarget) !== JSON.stringify(verifiedTarget)) {
+    throw new Error('P0_CLEANUP_COMPOSE_IDENTITY_MISMATCH')
+  }
+  if (typeof infrastructure.inspectDockerDaemon !== 'function'
+    || typeof infrastructure.verifyComposeContainers !== 'function') {
+    throw new Error('P0_CLEANUP_COMPOSE_VERIFIER_REQUIRED')
+  }
+  const daemon = await infrastructure.inspectDockerDaemon({ signal })
+  throwIfP0Aborted(signal)
+  assertLocalDockerEndpoint(daemon?.endpoint)
+  const observedIdentity = safeP0ComposeIdentity(
+    await infrastructure.verifyComposeContainers({
+      composeFiles: verifiedTarget.composeFiles,
+      expectedProject: verifiedTarget.expectedProject,
+      signal
+    })
+  )
+  throwIfP0Aborted(signal)
+  if (JSON.stringify(persistedIdentity) !== JSON.stringify(observedIdentity)) {
+    throw new Error('P0_CLEANUP_COMPOSE_IDENTITY_MISMATCH')
+  }
+  return observedIdentity
+}
+
+export function validateP0ResumeJournal(manifest, matrixDatabase) {
+  const resources = manifest.journal?.resources
+  if (!Array.isArray(resources)) throw new Error('P0_RESUME_JOURNAL_INVALID')
+  const override = resources.find(({ type, id }) => type === 'override' && id === 'compose-loopback')
+  const compose = resources.find(({ type, id }) => type === 'process' && id === 'compose-up')
+  if ((override !== undefined
+      && (override?.state !== 'STARTED' || override.path !== 'control/compose.loopback.yml'))
+    || compose?.state !== 'COMPLETED') {
+    throw new Error('P0_RESUME_JOURNAL_INVALID')
+  }
+  for (const resource of resources) {
+    if (resource?.live === true
+      && (!Number.isSafeInteger(resource.pid)
+        || resource.pid < 1
+        || typeof resource.processStartedAt !== 'string'
+        || resource.processStartedAt.length === 0
+        || !P0_PROCESS_FINGERPRINT_PATTERN.test(resource.processFingerprint ?? ''))) {
+      throw new Error('P0_PROCESS_IDENTITY_MISSING')
+    }
+    if (resource?.state === 'PLANNED'
+      || (resource?.live === true && resource.state !== 'COMPLETED')
+      || (resource?.type === 'database' && resource.state !== 'STARTED')) {
+      throw new Error('P0_RESUME_JOURNAL_INCOMPLETE')
+    }
+  }
+  const databases = [...new Set(resources
+    .filter(({ type, id }) => type === 'database' && typeof id === 'string')
+    .map(({ id }) => id))]
+  for (const segmentName of databases) assertP0DatabaseName(segmentName)
+  if (!databases.includes(matrixDatabase)) throw new Error('P0_RESUME_DATABASE_MISSING')
+  return databases
+}
+
 export function createDefaultP0Dependencies(runtime = {}) {
+  const platform = P0_HOST_PLATFORM
+  const processTreeProvider = runtime.processTreeProvider
   const inheritedEnv = runtime.inheritedEnv ?? process.env
   const artifactBase = resolve(
     runtime.artifactBase
@@ -4183,6 +8488,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
       ?? join(projectRoot, 'artifacts', 'p0-user-trading')
   )
   const composeFile = join(projectRoot, 'infra', 'docker-compose.yml')
+  const composeTarget = createP0ComposeTarget({ artifactBase })
   const commandEnvironment = sanitizedBackendEnvironment(inheritedEnv)
   const executeCommand = runtime.runCommand ?? runLocalCommand
   const runCommand = (descriptor) => executeCommand({
@@ -4190,286 +8496,938 @@ export function createDefaultP0Dependencies(runtime = {}) {
     env: { ...commandEnvironment, ...descriptor.env },
     shell: false
   })
-  const redis = runtime.redis ?? createLoopbackRedisAdapter(runtime.redisRequest)
-  const postgres = runtime.postgres ?? createDockerPostgresAdapter(runCommand)
-  const infrastructure = runtime.infrastructure ?? createLocalInfrastructureAdapter(composeFile)
+  let composeIdentity
+  let redisVerificationManifest
+  const infrastructure = runtime.infrastructure ?? createLocalInfrastructureAdapter(composeFile, runCommand)
+  const redis = runtime.redis ?? createLoopbackRedisAdapter(
+    runtime.redisRequest,
+    () => composeIdentity?.redis,
+    async (_expectedBinding, { signal } = {}) => {
+      if (!redisVerificationManifest) {
+        throw new Error('P0_REDIS_TRANSACTION_VERIFIER_REQUIRED')
+      }
+      const observedIdentity = await revalidateP0CleanupComposeIdentity({
+        artifactBase,
+        manifest: redisVerificationManifest,
+        infrastructure,
+        signal
+      })
+      return observedIdentity.redis
+    }
+  )
+  const postgres = runtime.postgres ?? createDockerPostgresAdapter(
+    runCommand,
+    () => composeIdentity?.postgres?.id
+  )
   const processManager = runtime.processManager ?? createLocalProcessManager(runCommand)
   const nextRunToken = runtime.runToken ?? (() => `${randomUUID()}${randomUUID()}`)
   const nextRandomSuffix = runtime.randomSuffix
     ?? (() => randomUUID().replaceAll('-', '').slice(0, 12))
   const now = runtime.now ?? (() => new Date().toISOString())
-  const redisKeys = runtime.redisKeys ?? []
+  const replaceOwnership = runtime.replaceOwnership ?? replaceControlJsonAtomic
+  const redisKeys = [...(runtime.redisKeys ?? P0_DEFAULT_REDIS_KEYS)]
+  if (JSON.stringify(redisKeys) !== JSON.stringify(P0_DEFAULT_REDIS_KEYS)) {
+    throw new Error('P0_REDIS_INVENTORY_INVALID')
+  }
+  const captureIdentity = runtime.captureIdentity ?? (() => captureLocalGitIdentity(projectRoot))
+  const databaseExists = runtime.databaseExists
+    ?? (typeof infrastructure.databaseExists === 'function'
+      ? (segmentName, details) => infrastructure.databaseExists(segmentName, details)
+      : async () => false)
+  const dispatchCaseOperation = runtime.dispatchCase ?? runCase
+
+  const finalizePendingCleanupReceipt = async (cleanedContext, runId, { signal } = {}) => {
+    throwIfP0Aborted(signal)
+    const marker = validateCleanedControlMarker(cleanedContext.manifest, runId)
+    if (['NOT_REQUIRED', 'COMPLETED'].includes(marker.receipt.state)) return marker
+    composeIdentity = await revalidateP0CleanupComposeIdentity({
+      artifactBase: cleanedContext.artifactBase ?? artifactBase,
+      manifest: marker,
+      infrastructure,
+      signal
+    })
+    throwIfP0Aborted(signal)
+    redisVerificationManifest = marker
+    await removeP0CleanupReceipt({ redis, marker, signal })
+    throwIfP0Aborted(signal)
+    const completed = {
+      ...marker,
+      receipt: {
+        ...marker.receipt,
+        state: 'COMPLETED',
+        completedAt: now()
+      }
+    }
+    validateCleanedControlMarker(completed, runId)
+    await replaceOwnership(cleanedContext.paths.ownershipPath, completed)
+    await assertPersistedCleanedControlMarker({
+      ownershipPath: cleanedContext.paths.ownershipPath,
+      expected: completed,
+      runId
+    })
+    throwIfP0Aborted(signal)
+    return completed
+  }
+
+  const finishAlreadyCleaned = async (cleanedContext, runId, { signal } = {}) => {
+    if (cleanedContext.manifest.schemaVersion === 2
+      && cleanedContext.manifest.receipt.state === 'PENDING'
+      && platform === 'win32') {
+      requireP0CleanupProcessTreeProvider(processTreeProvider)
+    }
+    await finalizePendingCleanupReceipt(cleanedContext, runId, { signal })
+    throwIfP0Aborted(signal)
+    return { status: 'CLEANED', alreadyCleaned: true }
+  }
 
   const dependencies = {
-    installSignalHandlers: runtime.installSignalHandlers ?? installP0SignalHandlers,
-    async initializeOwnership(options, plan) {
-      const ownerToken = nextRunToken()
-      const ownerId = ownerIdForToken(ownerToken)
-      const canonicalDatabase = databaseSegmentForAttempt({
-        phase: 'canonical',
-        attempt: 1,
-        randomSuffix: nextRandomSuffix()
-      })
-      const matrixDatabase = databaseSegmentForAttempt({
-        phase: 'matrix',
-        attempt: 1,
-        randomSuffix: nextRandomSuffix()
-      })
-      const databaseUrl = `jdbc:postgresql://127.0.0.1:5432/${matrixDatabase}`
-      const endpoints = {
-        api: 'http://127.0.0.1:18086',
-        web: 'http://127.0.0.1:5199',
-        admin: 'http://127.0.0.1:5200',
-        databaseUrl,
-        redisHost: '127.0.0.1',
-        redisPort: 6379
-      }
-      await runSafetyPreflight({
-        ownerId,
-        database: matrixDatabase,
-        endpoints,
+    composeTarget,
+    installSignalHandlers(handler) {
+      assertP0ProcessTreeCapability()
+      return (runtime.installSignalHandlers ?? installP0SignalHandlers)(handler)
+    },
+    async initializeOwnership(options, plan, { signal } = {}) {
+      throwIfP0Aborted(signal)
+      assertP0ProcessTreeCapability()
+      const reservation = await prepareP0RunReservation({
+        options,
+        plan,
+        artifactBase,
         inheritedEnv,
-        infrastructure
+        captureIdentity,
+        databaseExists,
+        nextRunToken,
+        nextRandomSuffix,
+        infrastructure,
+        signal,
+        now
       })
-      const compose = await runCommand({
-        id: 'compose-up',
-        command: 'docker',
-        args: ['compose', '-f', composeFile, 'up', '-d', '--pull', 'never'],
-        cwd: projectRoot
-      })
-      if (compose?.status !== 0) throw new Error('P0_COMPOSE_START_FAILED')
-      await postgres.waitUntilReady?.()
-      await redis.waitUntilReady?.()
-
-      let control
-      let redisAcquired = false
-      let redisSnapshot = []
-      try {
-        control = await createControlManifest({
-          artifactBase,
-          runId: options.runId,
-          runToken: ownerToken,
-          mode: options.mode,
-          selection: plan.definitions.map(({ id }) => id),
-          database: { canonical: canonicalDatabase, matrix: matrixDatabase },
-          now
-        })
-        await acquireRedisOwnership({ redis, runToken: ownerToken, role: 'parent' })
-        redisAcquired = true
-        redisSnapshot = await snapshotRedisKeys({ redis, keys: redisKeys })
-        await writeRedisRecoveryState(control.runRoot, redisSnapshot, [])
-        await createOwnedDatabase({
-          segmentName: matrixDatabase,
-          runToken: ownerToken,
-          postgres
-        })
-        await alterOwnedDatabaseTimezone({
-          segmentName: matrixDatabase,
-          runToken: ownerToken,
-          postgres
-        })
-        await verifyDatabaseIdentity({
-          segmentName: matrixDatabase,
-          runToken: ownerToken,
-          databaseUrl,
-          postgres
-        })
-      } catch (error) {
-        let failure = error
-        let resourcesCleaned = true
-        try {
-          const identity = await postgres.readDatabaseOwnership(matrixDatabase)
-          if (identity !== null) {
-            await dropOwnedDatabase({ segmentName: matrixDatabase, runToken: ownerToken, postgres })
-          }
-        } catch (cleanupError) {
-          resourcesCleaned = false
-          failure = appendFailure(failure, cleanupError, 'P0 database rollback')
-        }
-        if (redisAcquired) {
-          try {
-            await cleanupOwnedRedis({
-              redis,
-              runToken: ownerToken,
-              snapshot: redisSnapshot,
-              touchedKeys: []
-            })
-          } catch (cleanupError) {
-            resourcesCleaned = false
-            failure = appendFailure(failure, cleanupError, 'P0 Redis rollback')
-          }
-        }
-        if (control && resourcesCleaned) {
-          try {
-            await completeControlCleanup({
-              artifactBase,
-              runId: options.runId,
-              runToken: ownerToken,
-              resourcesCleaned: true,
-              now
-            })
-          } catch (cleanupError) {
-            failure = appendFailure(failure, cleanupError, 'P0 control rollback')
-          }
-        }
-        throw failure
+      throwIfP0Aborted(signal)
+      const assertIdentity = async ({ signal: identitySignal = signal } = {}) => {
+        throwIfP0Aborted(identitySignal)
+        const currentIdentity = await captureIdentity({ signal: identitySignal })
+        throwIfP0Aborted(identitySignal)
+        return assertP0RunIdentityUnchanged(
+          reservation.identity,
+          currentIdentity,
+          { runRoot: reservation.runRoot }
+        )
       }
-      return {
-        ...control,
+      const journalMutation = (resource, start) => runP0JournaledMutation({
+        artifactBase,
+        runId: options.runId,
+        runToken: reservation.ownerToken,
+        resource,
+        start,
+        signal,
+        now
+      })
+      await assertIdentity()
+      throwIfP0Aborted(signal)
+      const { composeFiles, expectedProject } = reservation.composeTarget
+      const buildPreparedContext = (redisSnapshot, touchedRedisKeys) => ({
+        ...reservation,
         artifactBase,
         scriptPath: fileURLToPath(import.meta.url),
-        ownerToken,
-        ownerId,
-        canonicalDatabase,
-        matrixDatabase,
-        databaseUrl,
-        endpoints,
+        composeIdentity,
         inheritedEnv,
         redisSnapshot,
-        touchedRedisKeys: [],
+        touchedRedisKeys,
+        ownedDatabaseSegments: [],
+        runRedisMutation(key, mutate) {
+          return runP0TrackedRedisMutation({
+            artifactBase,
+            runId: options.runId,
+            runToken: reservation.ownerToken,
+            key,
+            signal,
+            mutate: async () => {
+              throwIfP0Aborted(signal)
+              if (!touchedRedisKeys.includes(key)) touchedRedisKeys.push(key)
+              throwIfP0Aborted(signal)
+              const result = await mutate({ signal })
+              throwIfP0Aborted(signal)
+              return result
+            }
+          })
+        },
+        assertIdentity,
         caseResults: []
+      })
+      if (reservation.resumed) {
+        throwIfP0Aborted(signal)
+        const recovery = await recoverP0CleanupContext(artifactBase, options.runId)
+        throwIfP0Aborted(signal)
+        if (recovery.manifest.redisState !== 'SNAPSHOT_READY') {
+          throw new Error('P0_REDIS_STATE_INVALID')
+        }
+        const databases = validateP0ResumeJournal(
+          recovery.manifest,
+          reservation.matrixDatabase
+        )
+        if (typeof infrastructure.verifyComposeContainers !== 'function') {
+          throw new Error('P0_RESUME_COMPOSE_IDENTITY_MISSING')
+        }
+        composeIdentity = await infrastructure.verifyComposeContainers({
+          composeFiles,
+          expectedProject,
+          signal
+        })
+        throwIfP0Aborted(signal)
+        if (JSON.stringify(safeP0ComposeIdentity(composeIdentity))
+          !== JSON.stringify(safeP0ComposeIdentity(recovery.manifest.composeIdentity))) {
+          throw new Error('P0_RESUME_COMPOSE_IDENTITY_MISMATCH')
+        }
+        redisVerificationManifest = recovery.manifest
+        await postgres.waitUntilReady?.({ signal })
+        throwIfP0Aborted(signal)
+        await redis.waitUntilReady?.({ signal })
+        throwIfP0Aborted(signal)
+        await acquireRedisOwnership({
+          redis,
+          runToken: reservation.ownerToken,
+          role: 'child',
+          signal
+        })
+        throwIfP0Aborted(signal)
+        for (const segmentName of databases) {
+          throwIfP0Aborted(signal)
+          await requireOwnedDatabase({
+            segmentName,
+            runToken: reservation.ownerToken,
+            postgres,
+            signal
+          })
+          throwIfP0Aborted(signal)
+          await verifyDatabaseIdentity({
+            segmentName,
+            runToken: reservation.ownerToken,
+            databaseUrl: `jdbc:postgresql://127.0.0.1:5432/${segmentName}`,
+            postgres,
+            signal
+          })
+          throwIfP0Aborted(signal)
+        }
+        await assertIdentity()
+        return buildPreparedContext(recovery.redisSnapshot, recovery.touchedRedisKeys)
       }
+      const composeArguments = composeFiles.flatMap((file) => ['-f', file])
+      const composeFingerprint = sha256Text(JSON.stringify([
+        'docker', 'compose', '--project-name', P0_COMPOSE_PROJECT,
+        ...composeArguments, 'up', '-d', '--pull', 'never'
+      ]))
+      const compose = await runP0JournaledCommand({
+        artifactBase,
+        runId: options.runId,
+        runToken: reservation.ownerToken,
+        resourceId: 'compose-up',
+        commandFingerprint: composeFingerprint,
+        descriptor: {
+          id: 'compose-up',
+          command: 'docker',
+          args: [
+            'compose', '--project-name', P0_COMPOSE_PROJECT,
+            ...composeArguments, 'up', '-d', '--pull', 'never'
+          ],
+          cwd: projectRoot
+        },
+        runCommand,
+        inspectProcess: processManager.inspectProcess,
+        signal,
+        now
+      })
+      throwIfP0Aborted(signal)
+      if (compose?.status !== 0) throw new Error('P0_COMPOSE_START_FAILED')
+      if (typeof infrastructure.verifyComposeContainers === 'function') {
+        composeIdentity = await infrastructure.verifyComposeContainers({
+          composeFiles,
+          expectedProject,
+          signal
+        })
+        throwIfP0Aborted(signal)
+      } else if (!runtime.infrastructure) {
+        throw new Error('P0_COMPOSE_IDENTITY_MISSING')
+      }
+      if (composeIdentity) {
+        throwIfP0Aborted(signal)
+        const active = await activeControlManifestForUpdate(
+          artifactBase,
+          options.runId,
+          reservation.ownerToken
+        )
+        throwIfP0Aborted(signal)
+        active.manifest.composeTarget = safeP0ComposeTarget(reservation.composeTarget)
+        active.manifest.composeIdentity = safeP0ComposeIdentity(composeIdentity)
+        throwIfP0Aborted(signal)
+        await replaceControlJsonAtomic(active.paths.ownershipPath, active.manifest)
+        throwIfP0Aborted(signal)
+        redisVerificationManifest = active.manifest
+      }
+      await postgres.waitUntilReady?.({ signal })
+      throwIfP0Aborted(signal)
+      await redis.waitUntilReady?.({ signal })
+      throwIfP0Aborted(signal)
+      await assertIdentity()
+
+      let redisSnapshot
+      let touchedRedisKeys
+      await transitionP0RedisControlState({
+        artifactBase,
+        runId: options.runId,
+        runToken: reservation.ownerToken,
+        from: 'NOT_ACQUIRED',
+        to: 'ACQUIRE_ARMED',
+        signal
+      })
+      throwIfP0Aborted(signal)
+      await acquireRedisOwnership({
+        redis,
+        runToken: reservation.ownerToken,
+        role: 'parent',
+        signal
+      })
+      throwIfP0Aborted(signal)
+      await transitionP0RedisControlState({
+        artifactBase,
+        runId: options.runId,
+        runToken: reservation.ownerToken,
+        from: 'ACQUIRE_ARMED',
+        to: 'OWNED',
+        signal
+      })
+      throwIfP0Aborted(signal)
+      redisSnapshot = await snapshotRedisKeys({ redis, keys: redisKeys, signal })
+      throwIfP0Aborted(signal)
+      touchedRedisKeys = []
+      await writeRedisRecoveryState({
+        runRoot: reservation.runRoot,
+        runId: options.runId,
+        ownerId: reservation.ownerId,
+        inventory: redisKeys,
+        snapshot: redisSnapshot,
+        touchedKeys: touchedRedisKeys,
+        signal
+      })
+      throwIfP0Aborted(signal)
+      await transitionP0RedisControlState({
+        artifactBase,
+        runId: options.runId,
+        runToken: reservation.ownerToken,
+        from: 'OWNED',
+        to: 'SNAPSHOT_READY',
+        signal
+      })
+      throwIfP0Aborted(signal)
+      await journalMutation({
+        type: 'database',
+        id: reservation.matrixDatabase
+      }, async () => {
+        await createOwnedDatabase({
+          segmentName: reservation.matrixDatabase,
+          runToken: reservation.ownerToken,
+          postgres,
+          signal
+        })
+        throwIfP0Aborted(signal)
+        await alterOwnedDatabaseTimezone({
+          segmentName: reservation.matrixDatabase,
+          runToken: reservation.ownerToken,
+          postgres,
+          signal
+        })
+        throwIfP0Aborted(signal)
+        return verifyDatabaseIdentity({
+          segmentName: reservation.matrixDatabase,
+          runToken: reservation.ownerToken,
+          databaseUrl: reservation.databaseUrl,
+          postgres,
+          signal
+        })
+      })
+      throwIfP0Aborted(signal)
+      return buildPreparedContext(redisSnapshot, touchedRedisKeys)
     },
     phaseOperations: {
-      async runPreflight(context) {
+      async runPreflight(context, _plan, { signal } = {}) {
+        assertP0ProcessTreeCapability()
         return runP0Preflight({
           projectRoot,
           gateOutput: join(context.runRoot, 'preflight', 'surefire-gate.json'),
           databaseUrl: context.databaseUrl,
           now,
+          signal,
           operations: {
-            runCommand,
+            runCommand(descriptor) {
+              return runP0JournaledCommand({
+                artifactBase,
+                runId: context.options.runId,
+                runToken: context.ownerToken,
+                resourceId: `gate:${descriptor.id}`,
+                commandFingerprint: sha256Text(JSON.stringify([
+                  descriptor.command,
+                  descriptor.args ?? [],
+                  descriptor.cwd
+                ])),
+                descriptor,
+                runCommand,
+                inspectProcess: processManager.inspectProcess,
+                signal,
+                now
+              })
+            },
             async recordGate(id, result) {
+              throwIfP0Aborted(signal)
               writeCaseResultAtomic(join(context.runRoot, 'preflight', `${safeName(id)}.json`), {
                 id,
                 status: result?.status === 0 ? 'PASS' : 'FAIL',
                 signal: result?.signal ?? null
               })
+              throwIfP0Aborted(signal)
             },
-            startOwnedBackend: (...args) => processManager.startOwnedBackend(...args),
+            startOwnedBackend: (...args) => {
+              const input = {
+                ...args[0],
+                environment: withVerifiedComposeDatabaseCredentials(
+                  args[0]?.environment ?? {},
+                  composeIdentity
+                )
+              }
+              return runP0JournaledMutation({
+                artifactBase,
+                runId: context.options.runId,
+                runToken: context.ownerToken,
+                resource: {
+                  type: 'process',
+                  id: `backend:preflight:${input.profile ?? 'UNKNOWN'}`,
+                  live: true,
+                  commandFingerprint: sha256Text('owned-p0-backend')
+                },
+                start: () => processManager.startOwnedBackend(input),
+                stopLiveProcess: (backend, details) => (
+                  processManager.stopOwnedBackend(backend, details)
+                ),
+                signal: input.signal,
+                now
+              })
+            },
             waitForBackendHealth: (...args) => processManager.waitForBackendHealth(...args),
             waitForBusinessEndpoint: (...args) => processManager.waitForBusinessEndpoint(...args),
+            verifyBackendDatabaseIdentity: (_backend, { signal } = {}) => verifyLiveBackendDatabaseIdentity({
+              segmentName: context.matrixDatabase,
+              runToken: context.ownerToken,
+              databaseUrl: context.databaseUrl,
+              postgres,
+              signal
+            }),
             stopOwnedBackend: (...args) => processManager.stopOwnedBackend(...args),
-            assertBusinessPortsFree: (ports) => infrastructure.assertPortsFree(ports)
+            assertBusinessPortsFree: (ports) => infrastructure.assertPortsFree(ports, { signal })
           }
         })
       },
-      async assertRedisOwnership(context) {
-        if (await redis.get(P0_REDIS_OWNER_KEY) !== context.ownerToken) {
+      stopProfileBackend(_context, _profile, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        throwIfP0Aborted(signal)
+        return processManager.stopParentBackend({ signal })
+      },
+      assertProfilePortFree(port, _context, _profile, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        return infrastructure.assertPortsFree([port], { signal })
+      },
+      async prepareProfileDatabase({ phase, attempt, signal }, context) {
+        assertP0ProcessTreeCapability()
+        throwIfP0Aborted(signal)
+        if (!context.phaseDatabaseSegments) context.phaseDatabaseSegments = new Map()
+        if (!(context.phaseDatabaseSegments instanceof Map)) {
+          throw new Error('P0_PHASE_DATABASE_STATE_INVALID')
+        }
+        const key = `${phase}:${attempt}`
+        if (context.phaseDatabaseSegments.has(key)) return context.phaseDatabaseSegments.get(key)
+        const randomSuffix = createHash('sha256')
+          .update(`${context.ownerId}:${phase}:${attempt}`)
+          .digest('hex')
+          .slice(0, 12)
+        const segmentName = databaseSegmentForAttempt({ phase, attempt, randomSuffix })
+        if (await databaseExists(segmentName, {
+          composeFiles: composeTarget.composeFiles,
+          expectedProject: composeTarget.expectedProject,
+          signal
+        })) throw new Error('P0_DATABASE_COLLISION')
+        throwIfP0Aborted(signal)
+        const databaseUrl = `jdbc:postgresql://127.0.0.1:5432/${segmentName}`
+        await runP0JournaledMutation({
+          artifactBase,
+          runId: context.options.runId,
+          runToken: context.ownerToken,
+          resource: { type: 'database', id: segmentName, phase, attempt },
+          start: async () => {
+            await createOwnedDatabase({
+              segmentName,
+              runToken: context.ownerToken,
+              postgres,
+              signal
+            })
+            throwIfP0Aborted(signal)
+            await alterOwnedDatabaseTimezone({
+              segmentName,
+              runToken: context.ownerToken,
+              postgres,
+              signal
+            })
+            throwIfP0Aborted(signal)
+            return verifyDatabaseIdentity({
+              segmentName,
+              runToken: context.ownerToken,
+              databaseUrl,
+              postgres,
+              signal
+            })
+          },
+          signal,
+          now
+        })
+        throwIfP0Aborted(signal)
+        const descriptor = { phase, attempt, segmentName, databaseUrl }
+        context.phaseDatabaseSegments.set(key, descriptor)
+        context.ownedDatabaseSegments ??= []
+        if (!context.ownedDatabaseSegments.includes(segmentName)) {
+          context.ownedDatabaseSegments.push(segmentName)
+        }
+        return descriptor
+      },
+      startProfileBackend({ phase, profile, attempt, environment, signal }, context) {
+        assertP0ProcessTreeCapability()
+        const ownedEnvironment = withVerifiedComposeDatabaseCredentials(environment, composeIdentity)
+        return runP0JournaledMutation({
+          artifactBase,
+          runId: context.options.runId,
+          runToken: context.ownerToken,
+          resource: {
+            type: 'process',
+            id: `backend:${phase}:${attempt}:${profile}`,
+            live: true,
+            commandFingerprint: sha256Text(`owned-p0-backend:${phase}:${attempt}:${profile}`)
+          },
+          start: () => processManager.startOwnedBackend({
+            profile,
+            environment: ownedEnvironment,
+            signal
+          }),
+          stopLiveProcess: (backend, details) => processManager.stopOwnedBackend(backend, details),
+          signal,
+          now
+        })
+      },
+      waitForProfileHealth(backend, _context, _profile, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        return processManager.waitForBackendHealth(
+          backend,
+          'http://127.0.0.1:18086/actuator/health',
+          signal
+        )
+      },
+      waitForProfileBusinessEndpoint(backend, _context, _profile, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        return processManager.waitForBusinessEndpoint(
+          backend,
+          'http://127.0.0.1:18086/api/market/symbols',
+          signal
+        )
+      },
+      verifyProfileDatabaseIdentity(_backend, context, _profile, phaseDatabase, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        return verifyLiveBackendDatabaseIdentity({
+          segmentName: phaseDatabase.segmentName,
+          runToken: context.ownerToken,
+          databaseUrl: phaseDatabase.databaseUrl,
+          postgres,
+          signal
+        })
+      },
+      async assertRedisOwnership(context, _stage, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        throwIfP0Aborted(signal)
+        const redisOwner = await runRedisOwnershipTransaction(
+          redis,
+          () => redis.get(P0_REDIS_OWNER_KEY, { signal }),
+          { signal }
+        )
+        if (redisOwner !== context.ownerToken) {
           throw new Error('P0_REDIS_OWNER_MISMATCH')
         }
+        throwIfP0Aborted(signal)
       },
-      stopParentBackend() {
-        return processManager.stopParentBackend()
+      stopParentBackend(_context, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        return processManager.stopParentBackend({ signal })
       },
-      assertBusinessPortsFree(ports) {
-        return infrastructure.assertPortsFree(ports)
+      assertBusinessPortsFree(ports, _context, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        return infrastructure.assertPortsFree(ports, { signal })
       },
-      runCanonicalChild(invocation) {
-        return processManager.runCanonicalChild(invocation)
+      runCanonicalChild(invocation, context, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        return runP0JournaledMutation({
+          artifactBase,
+          runId: context.options.runId,
+          runToken: context.ownerToken,
+          resource: {
+            type: 'database',
+            id: context.canonicalDatabase
+          },
+          start: () => runP0JournaledMutation({
+            artifactBase,
+            runId: context.options.runId,
+            runToken: context.ownerToken,
+            resource: {
+              type: 'canonical-child',
+              id: 'canonical:attempt-1',
+              live: true,
+              database: context.canonicalDatabase,
+              commandFingerprint: sha256Text(JSON.stringify([
+                invocation.command,
+                invocation.args,
+                projectRoot
+              ]))
+            },
+            start: (markStarted) => processManager.runCanonicalChild(invocation, {
+              signal,
+              onSpawn: markStarted
+            }),
+            signal,
+            now
+          }),
+          signal,
+          now
+        })
       },
-      async verifyCanonicalChildCleanup(child) {
-        if (child?.status !== 0 || child.signal) throw new Error('P0_CANONICAL_CHILD_FAILED')
+      verifyCanonicalChildCleanup(child, context, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        return verifyCanonicalChildResult({ child, context, redis, postgres, signal })
       },
-      async runAuthority(context, plan) {
-        return runtime.runAuthority?.(context, plan)
+      async runAuthority(context, plan, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        throwIfP0Aborted(signal)
+        if (typeof runtime.runAuthority !== 'function') {
+          throw new Error('P0_AUTHORITY_OPERATION_REQUIRED')
+        }
+        const result = await runtime.runAuthority(context, plan, { signal })
+        throwIfP0Aborted(signal)
+        return result
       },
-      async writeReport(context, plan) {
-        return runtime.writePhaseReport?.(context, plan)
+      async writeReport(context, plan, { signal } = {}) {
+        assertP0ProcessTreeCapability()
+        return executeP0ReportPhaseBoundary({
+          context,
+          plan,
+          writePhaseReport: runtime.writePhaseReport,
+          signal
+        })
       }
     },
-    dispatchCase: runtime.dispatchCase ?? runCase,
+    dispatchCase(...args) {
+      assertP0ProcessTreeCapability()
+      return dispatchCaseOperation(...args)
+    },
     handlers: runtime.handlers ?? Object.create(null),
-    async writeReport(execution, prepared) {
-      validateCompletedP0Cases(
-        execution.plan,
-        execution.caseResults,
-        execution.phaseResult.matrixPhases
+    async writeReport(execution, prepared, { signal } = {}) {
+      assertP0ProcessTreeCapability()
+      throwIfP0Aborted(signal)
+      await prepared.assertIdentity?.({ signal })
+      throwIfP0Aborted(signal)
+      const scope = execution.plan?.scope ?? 'MATRIX'
+      if (!['MATRIX', 'CONTROL'].includes(scope)) throw new Error('P0_PLAN_SCOPE_INVALID')
+      const aggregateState = prepared.runState ?? {
+        definitions: P0_CASES,
+        registryFingerprint: P0_REGISTRY_FINGERPRINT,
+        selection: p0RunSelection(prepared.options)
+      }
+      if (scope === 'CONTROL' && execution.caseResults.length !== 0) {
+        throw new Error('P0_REPORT_UNEXPECTED_CASES')
+      }
+      const aggregate = scope === 'MATRIX'
+        ? aggregateReport({
+            ...aggregateState,
+            selection: artifactP0Selection(aggregateState.selection)
+          }, execution.caseResults)
+        : {
+            verdict: 'PARTIAL_PASS',
+            scopeComplete: false,
+            counts: { PASS: 0, FAIL: 0, BLOCKED: 0, INVALID_TEST: 0, MISSING: 0 },
+            issues: []
+          }
+      const mode = prepared.runState?.mode ?? persistedP0Mode(prepared.options.mode)
+      if (!['DISCOVERY', 'CERTIFICATION'].includes(mode)) throw new Error('P0_MODE_INVALID')
+      const safeCases = redactNetworkEntry({ cases: execution.caseResults }).cases
+      if (!Array.isArray(safeCases) || safeCases.length !== execution.caseResults.length) {
+        throw new Error('P0_REPORT_EVIDENCE_INVALID')
+      }
+      const expectedControlPhases = execution.plan.phases.filter(
+        (phase) => P0_CONTROL_PHASES.has(phase)
       )
+      const controlResults = execution.controlResults ?? []
+      if (scope === 'CONTROL'
+        && (!Array.isArray(controlResults)
+          || controlResults.length !== expectedControlPhases.length
+          || controlResults.some((result, index) => (
+            !result
+            || typeof result !== 'object'
+            || Array.isArray(result)
+            || result.phase !== expectedControlPhases[index]
+            || result.status !== 'PASS'
+            || !Object.hasOwn(result, 'evidence')
+          )))) {
+        throw new Error('P0_REPORT_CONTROL_EVIDENCE_INVALID')
+      }
+      const safeControlResults = scope === 'CONTROL'
+        ? controlResults.map((result) => {
+            const safe = redactNetworkEntry({ evidence: result.evidence })
+            return {
+              phase: result.phase,
+              status: result.status,
+              evidence: Object.hasOwn(safe, 'evidence') ? safe.evidence : null
+            }
+          })
+        : []
       const report = {
         schemaVersion: 1,
-        status: 'PASS',
-        verdict: execution.plan.verdict,
+        status: aggregate.verdict,
+        ...aggregate,
         runId: prepared.options.runId,
-        mode: prepared.options.mode,
+        mode,
+        scope,
         phases: execution.plan.phases,
-        selection: execution.plan.definitions.map(({ id }) => id),
+        selection: aggregateState.selection,
+        identity: prepared.identity ? structuredClone(prepared.identity) : null,
         ownerId: prepared.ownerId,
         database: {
           canonical: prepared.canonicalDatabase,
           matrix: prepared.matrixDatabase
         },
-        caseResults: execution.caseResults,
+        caseResults: safeCases,
+        ...(scope === 'CONTROL' ? { controlResults: safeControlResults } : {}),
         completedAt: now()
       }
-      writeCaseResultAtomic(join(prepared.runRoot, 'report.json'), report)
-      return report
+      throwIfP0Aborted(signal)
+      const persisted = await writeP0ReportAtomic(join(prepared.runRoot, 'report.json'), report)
+      throwIfP0Aborted(signal)
+      return persisted
     },
-    async cleanup(prepared, _details, options) {
-      const context = prepared ?? await recoverP0CleanupContext(artifactBase, options.runId)
-      if (context.missing || context.alreadyCleaned) {
-        return { status: 'CLEANED', alreadyCleaned: true }
+    async cleanup(prepared, { signal } = {}, options) {
+      throwIfP0Aborted(signal)
+      let context = prepared
+      let active
+      if (context) {
+        const recovered = await recoverP0ActiveControlContext(
+          context.artifactBase ?? artifactBase,
+          options.runId
+        )
+        throwIfP0Aborted(signal)
+        if (recovered.alreadyCleaned) {
+          if (recovered.ownerId !== context.ownerId) throw new Error('P0_OWNER_MISMATCH')
+          return finishAlreadyCleaned(recovered, options.runId, { signal })
+        }
+        active = await activeControlManifestForUpdate(
+          context.artifactBase ?? artifactBase,
+          options.runId,
+          context.ownerToken
+        )
+        throwIfP0Aborted(signal)
+      } else {
+        const recovered = await recoverP0ActiveControlContext(artifactBase, options.runId)
+        throwIfP0Aborted(signal)
+        if (recovered.alreadyCleaned) {
+          return finishAlreadyCleaned(recovered, options.runId, { signal })
+        }
+        context = recovered
+        active = { paths: recovered.paths, manifest: recovered.manifest }
       }
-      const failures = []
-      try {
-        await processManager.stopParentBackend()
-      } catch (error) {
-        failures.push(error)
+      const hasJournaledProcesses = active.manifest.journal.resources.some((resource) => (
+        ['process', 'canonical-child'].includes(resource?.type)
+          && (resource.live === true
+            || (resource.state === 'STARTED'
+              && Number.isSafeInteger(resource.pid)
+              && resource.pid > 0))
+      ))
+      const hasJournaledDatabases = active.manifest.journal.resources.some(
+        (resource) => resource?.type === 'database'
+      )
+      const hasRedisResources = active.manifest.redisState !== 'NOT_ACQUIRED'
+      const requiresCleanupAuthority = hasJournaledProcesses
+        || hasJournaledDatabases
+        || hasRedisResources
+      const verifiedProcessTreeProvider = platform === 'win32' && requiresCleanupAuthority
+        ? requireP0CleanupProcessTreeProvider(processTreeProvider)
+        : null
+      redisVerificationManifest = active.manifest
+      const terminateOwnedProcesses = () => terminateJournaledOwnedProcesses({
+        resources: active.manifest.journal.resources,
+        acquireNativeProcessHandle: verifiedProcessTreeProvider
+          ? (pid, details) => verifiedProcessTreeProvider.acquireNativeProcessHandle(pid, details)
+          : processManager.acquireNativeProcessHandle,
+        requireTreeProof: platform === 'win32',
+        signal
+      })
+      if (platform === 'win32' && hasJournaledProcesses) {
+        await terminateOwnedProcesses()
+        throwIfP0Aborted(signal)
       }
-      try {
-        await infrastructure.assertPortsFree([18086, 5199, 5200])
-      } catch (error) {
-        failures.push(error)
+      await processManager.stopParentBackend({ signal })
+      throwIfP0Aborted(signal)
+      if (platform !== 'win32' && hasJournaledProcesses) {
+        await terminateOwnedProcesses()
+        throwIfP0Aborted(signal)
       }
-      const databases = [context.canonicalDatabase, context.matrixDatabase].filter(Boolean)
+      const recoveredContext = await recoverP0CleanupContext(artifactBase, options.runId)
+      throwIfP0Aborted(signal)
+      if (prepared && (recoveredContext.ownerId !== context.ownerId
+        || recoveredContext.ownerToken !== context.ownerToken)) {
+        throw new Error('P0_OWNER_MISMATCH')
+      }
+      context = recoveredContext
+      active = { paths: recoveredContext.paths, manifest: recoveredContext.manifest }
+      redisVerificationManifest = active.manifest
+      const databases = [...new Set(active.manifest.journal.resources
+        .filter(({ type, id }) => type === 'database' && typeof id === 'string')
+        .map(({ id }) => id))]
+      for (const segmentName of databases) assertP0DatabaseName(segmentName)
+      if (databases.length !== 0 || context.redisRecoveryMode !== 'NOT_ACQUIRED') {
+        composeIdentity = await revalidateP0CleanupComposeIdentity({
+          artifactBase: context.artifactBase,
+          manifest: active.manifest,
+          infrastructure,
+          signal
+        })
+        throwIfP0Aborted(signal)
+      }
+      await infrastructure.assertPortsFree([18086, 5199, 5200], { signal })
+      throwIfP0Aborted(signal)
+      if (context.redisRecoveryMode === 'NOT_ACQUIRED') {
+        if (databases.length !== 0) throw new Error('P0_NOT_ACQUIRED_RECOVERY_UNSAFE')
+        await completeControlCleanup({
+          artifactBase: context.artifactBase,
+          runId: options.runId,
+          runToken: context.ownerToken,
+          resourcesCleaned: true,
+          redisNotAcquired: true,
+          replaceOwnership,
+          now
+        })
+        throwIfP0Aborted(signal)
+        return {
+          status: 'CLEANED',
+          databases: 0,
+          redis: 'NOT_ACQUIRED',
+          restored: 0
+        }
+      }
       for (const segmentName of databases) {
-        try {
-          const identity = await postgres.readDatabaseOwnership(segmentName)
-          if (identity !== null) {
-            await dropOwnedDatabase({
-              segmentName,
-              runToken: context.ownerToken,
-              postgres
-            })
-          }
-        } catch (error) {
-          failures.push(error)
-        }
-      }
-      try {
-        const redisOwner = await redis.get(P0_REDIS_OWNER_KEY)
-        if (redisOwner === context.ownerToken) {
-          await cleanupOwnedRedis({
-            redis,
+        throwIfP0Aborted(signal)
+        const identity = await postgres.readDatabaseOwnership(segmentName, { signal })
+        throwIfP0Aborted(signal)
+        if (identity !== null) {
+          await dropOwnedDatabase({
+            segmentName,
             runToken: context.ownerToken,
-            snapshot: context.redisSnapshot,
-            touchedKeys: context.touchedRedisKeys
+            postgres,
+            signal
           })
-        } else if (redisOwner !== null) {
-          throw new Error('P0_REDIS_OWNER_MISMATCH')
+          throwIfP0Aborted(signal)
         }
-      } catch (error) {
-        failures.push(error)
       }
-      if (failures.length > 0) throw new AggregateError(failures, 'P0_CLEANUP_FAILED')
+      let restored = 0
+      const redisState = active.manifest.redisState
+      const redisRecoveryMode = context.redisRecoveryMode
+        ?? (Array.isArray(context.redisSnapshot) && Array.isArray(context.touchedRedisKeys)
+          ? 'SNAPSHOT'
+          : null)
+      const shouldRestoreSnapshot = redisState === 'SNAPSHOT_READY'
+        || (redisState === 'OWNED' && redisRecoveryMode === 'SNAPSHOT')
+      const release = await runRedisOwnershipTransaction(redis, async () => {
+        if (shouldRestoreSnapshot) {
+          if (await redis.get(P0_REDIS_OWNER_KEY, { signal }) !== context.ownerToken) {
+            throw new Error('P0_REDIS_OWNER_MISMATCH')
+          }
+          throwIfP0Aborted(signal)
+          restored = await restoreP0RedisSnapshot({
+            redis,
+            snapshot: context.redisSnapshot,
+            touchedKeys: context.touchedRedisKeys,
+            signal
+          })
+          throwIfP0Aborted(signal)
+          await transitionP0RedisControlState({
+            artifactBase: context.artifactBase,
+            runId: options.runId,
+            runToken: context.ownerToken,
+            from: redisState,
+            to: 'REDIS_RELEASE_ARMED',
+            signal
+          })
+          throwIfP0Aborted(signal)
+          active.manifest.redisState = 'REDIS_RELEASE_ARMED'
+        } else if (['ACQUIRE_ARMED', 'OWNED'].includes(redisState)) {
+          if (redisRecoveryMode !== 'RELEASE_ONLY') throw new Error('P0_REDIS_STATE_INVALID')
+          assertP0PreSnapshotRecoverySafe(active.manifest)
+          if (await redis.get(P0_REDIS_OWNER_KEY, { signal }) !== context.ownerToken) {
+            throw new Error('P0_REDIS_OWNER_MISMATCH')
+          }
+          throwIfP0Aborted(signal)
+          await transitionP0RedisControlState({
+            artifactBase: context.artifactBase,
+            runId: options.runId,
+            runToken: context.ownerToken,
+            from: redisState,
+            to: 'REDIS_RELEASE_ARMED',
+            signal
+          })
+          throwIfP0Aborted(signal)
+          active.manifest.redisState = 'REDIS_RELEASE_ARMED'
+        } else if (redisState !== 'REDIS_RELEASE_ARMED') {
+          throw new Error('P0_REDIS_STATE_INVALID')
+        }
+        return releaseP0RedisOwnershipWithReceipt({
+          redis,
+          runToken: context.ownerToken,
+          ownerId: context.ownerId,
+          signal
+        })
+      }, { signal })
+      throwIfP0Aborted(signal)
       await completeControlCleanup({
         artifactBase: context.artifactBase,
         runId: options.runId,
         runToken: context.ownerToken,
         resourcesCleaned: true,
+        redisReleaseReceipt: release.receipt,
+        replaceOwnership,
         now
       })
+      throwIfP0Aborted(signal)
+      const cleanedContext = await recoverP0ActiveControlContext(
+        context.artifactBase,
+        options.runId
+      )
+      await finalizePendingCleanupReceipt(cleanedContext, options.runId, { signal })
+      throwIfP0Aborted(signal)
       return {
         status: 'CLEANED',
         databases: databases.length,
-        redis: 'RESTORED'
+        redis: 'RESTORED',
+        restored
       }
     }
   }
+  defaultP0DependencyInstances.add(dependencies)
   return dependencies
 }
 
-export async function runP0Suite(options, dependencies = createDefaultP0Dependencies()) {
+export async function runP0Suite(options, dependencies) {
+  const usesDefaultDependencies = dependencies === undefined
+    || defaultP0DependencyInstances.has(dependencies)
+  if (usesDefaultDependencies && options.phase !== 'cleanup') {
+    assertP0ProcessTreeCapability()
+  }
+  dependencies ??= createDefaultP0Dependencies()
   const plan = planP0Execution(options, P0_CASES)
   const installSignalHandlers = dependencies.installSignalHandlers ?? installP0SignalHandlers
   const dispatchCase = dependencies.dispatchCase ?? runCase
@@ -4495,25 +9453,68 @@ export async function runP0Suite(options, dependencies = createDefaultP0Dependen
         if (!baseOperations || typeof baseOperations !== 'object') {
           throw new Error('P0_PHASE_OPERATIONS_INVALID')
         }
+        const controlResults = []
         const phaseResult = await executeP0PlanPhases({
           plan,
           context: prepared,
+          signal: details.signal,
+          controlResults,
           operations: {
             ...baseOperations,
-            async runMatrixPhase(phase) {
-              const definitions = phase === 'selected'
-                ? plan.definitions
-                : plan.definitions.filter((definition) => definition.phase === phase)
-              for (const definition of definitions) {
-                const result = await dispatchCase(definition, prepared, handlers)
-                prepared.caseResults.push(result)
+            async runMatrixPhase(phase, _context, _phasePlan, { signal } = {}) {
+              const entries = phase === 'selected'
+                ? plan.executionEntries
+                : plan.executionEntries.filter((entry) => entry.phase === phase)
+              const executeEntry = async (entry, selectedSubruns = entry.selectedSubruns) => {
+                const definition = {
+                  ...entry.definition,
+                  requiredSubruns: selectedSubruns
+                }
+                throwIfP0Aborted(signal)
+                const result = await dispatchCase(definition, prepared, handlers, { signal })
+                throwIfP0Aborted(signal)
+                return result
               }
+              if (supportsP0ProfileLifecycle(baseOperations)) {
+                const fragmentsByEntry = new Map(entries.map(({ id }) => [id, []]))
+                let attempt = 0
+                for (const profile of plan.profiles) {
+                  const profileEntries = entries.filter((entry) => (
+                    entry.selectedSubruns.some((subrun) => subrun.profile === profile)
+                  ))
+                  if (profileEntries.length === 0) continue
+                  attempt += 1
+                  await activateP0Profile({
+                    phase,
+                    profile,
+                    attempt,
+                    context: prepared,
+                    operations: baseOperations,
+                    signal
+                  })
+                  for (const entry of profileEntries) {
+                    const selectedSubruns = entry.selectedSubruns
+                      .filter((subrun) => subrun.profile === profile)
+                    fragmentsByEntry.get(entry.id).push(
+                      await executeEntry(entry, selectedSubruns)
+                    )
+                  }
+                }
+                for (const entry of entries) {
+                  const fragments = fragmentsByEntry.get(entry.id)
+                  if (fragments.length === 0) fragments.push(await executeEntry(entry))
+                  prepared.caseResults.push(mergeP0CaseFragments(entry, fragments))
+                }
+                return
+              }
+              for (const entry of entries) prepared.caseResults.push(await executeEntry(entry))
             }
           }
         })
         return {
           plan,
           phaseResult,
+          controlResults,
           caseResults: [...prepared.caseResults]
         }
       },
@@ -4531,16 +9532,24 @@ export function createSmokeMain({
   runCanonicalSmoke: runCanonical = runCanonicalSmoke,
   runP0Suite: runP0 = runP0Suite,
   createP0Dependencies = createDefaultP0Dependencies,
-  writeStdout = (value) => process.stdout.write(value)
+  writeStdout = (value) => process.stdout.write(value),
+  processTreeProvider
 } = {}) {
+  const usesDefaultCanonical = runCanonical === runCanonicalSmoke
+  const usesDefaultP0 = runP0 === runP0Suite
+    && createP0Dependencies === createDefaultP0Dependencies
   return async (argv) => {
     const options = parseP0Cli(argv)
-    if (options.suite === 'canonical') return runCanonical()
     if (options.list) {
       writeStdout(`${JSON.stringify(P0_CASES, null, 2)}\n`)
       return { listed: P0_CASES.length }
     }
-    return runP0(options, createP0Dependencies())
+    if (options.suite === 'canonical') {
+      if (usesDefaultCanonical) assertP0ProcessTreeCapability()
+      return runCanonical({ processTreeProvider })
+    }
+    if (usesDefaultP0 && options.phase !== 'cleanup') assertP0ProcessTreeCapability()
+    return runP0(options, createP0Dependencies({ processTreeProvider }))
   }
 }
 
