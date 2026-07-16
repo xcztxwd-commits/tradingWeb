@@ -6,6 +6,7 @@ import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const workspaceSource = readFileSync(join(currentDir, 'ChartWorkspace.tsx'), 'utf8')
+const settingsHookSource = readFileSync(join(currentDir, '..', 'useTradingChartSettings.ts'), 'utf8')
 const panelSource = readFileSync(join(currentDir, 'KLineChartPanel.tsx'), 'utf8')
 const workspaceStyles = readFileSync(join(currentDir, 'ChartWorkspace.module.css'), 'utf8')
 
@@ -43,5 +44,29 @@ describe('ChartWorkspace fullscreen target', () => {
     assert.match(workspaceStyles, /\.drawingToolbarLoading\s*{[\s\S]*min-width:\s*46px/)
     assert.match(workspaceStyles, /\.drawingToolbarLoading\s*{[\s\S]*min-height:\s*320px/)
     assert.match(workspaceStyles, /@media\s*\(max-width:\s*768px\)\s*{[\s\S]*\.drawingToolbarLoading\s*{[\s\S]*display:\s*none/)
+  })
+})
+
+describe('ChartWorkspace P0 interval boundary', () => {
+  it('normalizes before rendering either the toolbar or candle panel without persisting from the workspace', () => {
+    assert.match(workspaceSource, /normalizeChartInterval\(symbol,\s*settings\.interval\)/)
+    assert.doesNotMatch(workspaceSource, /onPeriodChange\(activeInterval\)/)
+    assert.match(workspaceSource, /<ChartTopToolbar[\s\S]*symbol=\{symbol\}[\s\S]*settings=\{activeSettings\}/)
+    assert.match(workspaceSource, /<KLineChartPanel[\s\S]*period=\{activeInterval\}[\s\S]*symbol=\{symbol\}/)
+  })
+
+  it('returns synchronously selected symbol settings instead of the stale owned state', () => {
+    assert.match(settingsHookSource, /useState<OwnedChartSettingsState>/)
+    assert.match(settingsHookSource, /const selectedChartSettingsState = selectChartSettingsForSymbol\(\s*chartSettingsState,\s*selectedSymbol\s*\)/)
+    assert.match(settingsHookSource, /chartSettings:\s*selectedChartSettingsState\.settings/)
+    assert.doesNotMatch(settingsHookSource, /chartSettings:\s*chartSettingsState\.settings/)
+    assert.doesNotMatch(settingsHookSource, /useEffect/)
+  })
+
+  it('bases an update on the selected symbol settings when the owned state is stale', () => {
+    assert.match(
+      settingsHookSource,
+      /setChartSettingsState\(\(current\) => \{[\s\S]*selectChartSettingsForSymbol\(current,\s*selectedSymbol\)[\s\S]*updater\(selectedState\.settings\)/
+    )
   })
 })

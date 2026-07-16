@@ -55,12 +55,12 @@ class MarketControllerTest {
 
   @Test
   void orderBookReturnsRealtimeCacheWhenPresent() {
-    MarketDepthResponse depth = new MarketDepthResponse("BTCUSDT", 1781462400000L, List.of(), List.of());
+    MarketDepthResponse depth = new MarketDepthResponse("EURUSD", 1781462400000L, List.of(), List.of());
     realtimeCache.putOrderBook(depth);
 
     MarketController controller = controller();
 
-    assertThat(controller.orderBook("BTCUSDT").data()).isSameAs(depth);
+    assertThat(controller.orderBook("EURUSD").data()).isSameAs(depth);
     verifyNoInteractions(marketDataRouter);
   }
 
@@ -76,13 +76,51 @@ class MarketControllerTest {
 
   @Test
   void tradesReturnRealtimeCacheWhenPresent() {
-    RecentTradeResponse trade = trade("1");
+    RecentTradeResponse trade = new RecentTradeResponse(
+        "1", "EURUSD", new BigDecimal("1.1"), BigDecimal.ONE, "BUY", 1781462400000L);
     realtimeCache.addTrade(trade);
 
     MarketController controller = controller();
 
-    assertThat(controller.trades("BTCUSDT", 10).data()).containsExactly(trade);
+    assertThat(controller.trades("EURUSD", 10).data()).containsExactly(trade);
     verifyNoInteractions(marketDataRouter);
+  }
+
+  @Test
+  void p0OrderBookAndTradesBypassLegacyRealtimeCache() {
+    MarketDepthResponse cachedDepth = new MarketDepthResponse("BTCUSDT", 1L, List.of(), List.of());
+    RecentTradeResponse cachedTrade = trade("cached");
+    realtimeCache.putOrderBook(cachedDepth);
+    realtimeCache.addTrade(cachedTrade);
+    MarketDepthResponse authoritativeDepth = new MarketDepthResponse("BTCUSDT", 2L, List.of(), List.of());
+    RecentTradeResponse authoritativeTrade = trade("authoritative");
+    when(marketDataRouter.orderBook("BTCUSDT")).thenReturn(authoritativeDepth);
+    when(marketDataRouter.recentTrades("BTCUSDT", 10)).thenReturn(List.of(authoritativeTrade));
+
+    MarketController controller = controller();
+
+    assertThat(controller.orderBook("BTCUSDT").data()).isSameAs(authoritativeDepth);
+    assertThat(controller.trades("BTCUSDT", 10).data()).containsExactly(authoritativeTrade);
+  }
+
+  @Test
+  void perpetualReferenceEndpointDelegatesToAuthoritativeRouter() {
+    var response = new com.fxplatform.market.dto.PerpetualReferenceResponse(
+        "BTCUSDT-PERP", "BTC-USDT-SWAP", "okx-swap",
+        com.fxplatform.market.model.MarketSourceMode.PUBLIC_EXTERNAL,
+        new BigDecimal("99"), new BigDecimal("101"), new BigDecimal("100"),
+        new BigDecimal("100.2"), new BigDecimal("100.1"),
+        java.time.Instant.parse("2026-07-12T00:00:00Z"),
+        java.time.Instant.parse("2026-07-12T00:00:05Z"), false);
+    when(marketDataRouter.perpetualReference("BTCUSDT-PERP")).thenReturn(response);
+
+    var result = controller().perpetualReference("BTCUSDT-PERP").data();
+
+    assertThat(result).isSameAs(response);
+    assertThat(result.fundingRate()).isNull();
+    assertThat(result.fundingTime()).isNull();
+    assertThat(result.nextFundingTime()).isNull();
+    assertThat(result.fundingSource()).isNull();
   }
 
   @Test

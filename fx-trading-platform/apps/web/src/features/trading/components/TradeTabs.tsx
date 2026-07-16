@@ -1,25 +1,16 @@
 import { useTranslation } from 'react-i18next'
 
 type Props = {
-  onToolsUnavailable: () => void
+  productType?: 'CRYPTO_SPOT' | 'LINEAR_PERP' | 'FX_MARGIN' | 'INVERSE_PERP'
 }
 
-export function TradeTabs({ onToolsUnavailable }: Props) {
+export function TradeTabs({ productType }: Props) {
   const { t } = useTranslation()
 
   return (
-    <div className="trade-panel__top-tabs" role="tablist" aria-label={t('trading.panel')}>
+    <div className="trade-panel__top-tabs" aria-label={t('trading.panel')}>
       <button type="button" className="trade-panel__top-tab trade-panel__top-tab--active" role="tab" aria-selected="true">
-        {t('trading.spot')}
-      </button>
-      <button type="button" className="trade-panel__top-tab" role="tab" aria-selected="false" onClick={onToolsUnavailable}>
-        {t('trading.crossMargin')}
-      </button>
-      <button type="button" className="trade-panel__top-tab" role="tab" aria-selected="false" onClick={onToolsUnavailable}>
-        {t('trading.isolatedMargin')}
-      </button>
-      <button type="button" className="trade-panel__top-tab" role="tab" aria-selected="false" onClick={onToolsUnavailable}>
-        {t('trading.gridTrading')}
+        {productType === 'LINEAR_PERP' ? t('trading.perpetual') : t('trading.spot')}
       </button>
     </div>
   )

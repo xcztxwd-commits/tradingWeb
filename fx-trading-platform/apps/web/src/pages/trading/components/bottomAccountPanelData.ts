@@ -1,5 +1,6 @@
 import type { OrderResponse, PositionResponse } from '../../../components/tables/types'
 import type { AccountSummary, LedgerEntry } from '../../../types/trading'
+import type { AccountTransferResponse, BatchActionResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
 import { isCurrentOrderStatus } from '../../orders/orderActionPolicy.ts'
 import type { BottomAccountTab } from './bottomAccountTabs.ts'
 
@@ -19,9 +20,12 @@ export type StrategyRow = {
 }
 
 export type BottomAccountPanelData = {
-  account: AccountSummary
+  account?: AccountSummary
   orders: OrderResponse[]
   positions: PositionResponse[]
+  trades: Trade[]
+  fundingSettlements: FundingSettlement[]
+  transfers: AccountTransferResponse[]
   ledgerEntries: LedgerEntry[]
   strategies: StrategyRow[]
 }
@@ -40,8 +44,26 @@ export type BottomAccountTabView =
       rows: unknown[][]
     }
   | {
+      kind: 'trades'
+      emptyLabel: string
+      trades: Trade[]
+      rows: unknown[][]
+    }
+  | {
+      kind: 'funding'
+      emptyLabel: string
+      settlements: FundingSettlement[]
+      rows: unknown[][]
+    }
+  | {
+      kind: 'transfers'
+      emptyLabel: string
+      transfers: AccountTransferResponse[]
+      rows: unknown[][]
+    }
+  | {
       kind: 'asset'
-      account: AccountSummary
+      account?: AccountSummary
       ledgerEntries: LedgerEntry[]
       metricRows: unknown[][]
       rows: unknown[][]
@@ -53,15 +75,49 @@ export type BottomAccountTabView =
       rows: unknown[][]
     }
 
+export type BottomAccountBatchAction = {
+  kind: 'cancel-all-orders' | 'close-all-positions'
+  disabled: boolean
+}
+
+export function getBottomAccountBatchAction(
+  tab: BottomAccountTab,
+  view: BottomAccountTabView,
+  sessionReady: boolean,
+  pending: boolean
+): BottomAccountBatchAction | null {
+  if (tab === 'currentOrders' && view.kind === 'orders') {
+    return { kind: 'cancel-all-orders', disabled: !sessionReady || pending || view.orders.length === 0 }
+  }
+  if (tab === 'currentPositions' && view.kind === 'positions') {
+    return { kind: 'close-all-positions', disabled: !sessionReady || pending || view.positions.length === 0 }
+  }
+  return null
+}
+
+export function getBottomAccountBatchActionError(response: BatchActionResponse, fallback: string) {
+  const items = response.items ?? []
+  const failures = items.filter((item) => item.status === 'FAILED')
+  if (failures.length === 0) return null
+  const details = failures
+    .map(({ errorCode, message }) => [errorCode, message].filter(Boolean).join(': '))
+    .filter(Boolean)
+  return `${fallback} ${failures.length}/${items.length}${details.length > 0 ? `: ${details.join('; ')}` : ''}`
+}
+
 type BottomAccountPanelInput = {
   account?: AccountSummary
   orders?: OrderResponse[]
   positions?: PositionResponse[]
+  trades?: Trade[]
+  fundingSettlements?: FundingSettlement[]
+  transfers?: AccountTransferResponse[]
   ledgerEntries?: LedgerEntry[]
   strategies?: StrategyRow[]
 }
 
-export const mockBottomAccountPanelData: BottomAccountPanelData = {
+/** @internal Explicit display-model fixture; never used by the runtime resolver. */
+export const bottomAccountPanelTestData: BottomAccountPanelData = {
   account: {
     id: 'mock-account-001',
     accountType: 'DEMO',
@@ -116,6 +172,9 @@ export const mockBottomAccountPanelData: BottomAccountPanelData = {
       createdAt: '2026-06-06T09:24:00.000Z'
     }
   ],
+  trades: [],
+  fundingSettlements: [],
+  transfers: [],
   positions: [
     {
       id: 'mock-current-position-xau',
@@ -216,11 +275,14 @@ export const mockBottomAccountPanelData: BottomAccountPanelData = {
 
 export function resolveBottomAccountPanelData(input: BottomAccountPanelInput = {}): BottomAccountPanelData {
   return {
-    account: input.account ?? mockBottomAccountPanelData.account,
-    orders: input.orders ?? mockBottomAccountPanelData.orders,
-    positions: input.positions ?? mockBottomAccountPanelData.positions,
-    ledgerEntries: input.ledgerEntries ?? mockBottomAccountPanelData.ledgerEntries,
-    strategies: input.strategies ?? mockBottomAccountPanelData.strategies
+    account: input.account,
+    orders: input.orders ?? [],
+    positions: input.positions ?? [],
+    trades: input.trades ?? [],
+    fundingSettlements: input.fundingSettlements ?? [],
+    transfers: input.transfers ?? [],
+    ledgerEntries: input.ledgerEntries ?? [],
+    strategies: input.strategies ?? []
   }
 }
 
@@ -263,6 +325,27 @@ export function getBottomAccountTabView(
         positions: historicalPositions,
         rows: historicalPositions.map(positionRow)
       }
+    case 'trades':
+      return {
+        kind: 'trades',
+        emptyLabel: t('trading.emptyTrades'),
+        trades: data.trades,
+        rows: data.trades.map(tradeRow)
+      }
+    case 'funding':
+      return {
+        kind: 'funding',
+        emptyLabel: t('trading.emptyFundingSettlements'),
+        settlements: data.fundingSettlements,
+        rows: data.fundingSettlements.map(fundingRow)
+      }
+    case 'transfers':
+      return {
+        kind: 'transfers',
+        emptyLabel: t('trading.emptyAccountTransfers'),
+        transfers: data.transfers,
+        rows: data.transfers.map(transferRow)
+      }
     case 'assets': {
       const metricRows = accountMetricRows(data.account)
       const ledgerRows = data.ledgerEntries.map(ledgerRow)
@@ -300,7 +383,20 @@ function positionRow(position: PositionResponse) {
   ]
 }
 
-function accountMetricRows(account: AccountSummary) {
+function tradeRow(trade: Trade) {
+  return [trade.symbol, trade.side, trade.lots, trade.price, trade.fee, trade.feeAsset, trade.executedAt]
+}
+
+function fundingRow(settlement: FundingSettlement) {
+  return [settlement.symbol, settlement.fundingRate, settlement.amount, settlement.asset, settlement.source, settlement.fundingTime]
+}
+
+function transferRow(transfer: AccountTransferResponse) {
+  return [transfer.direction, transfer.amount, transfer.spotAvailable, transfer.perpBalance, transfer.replayed, transfer.createdAt]
+}
+
+function accountMetricRows(account?: AccountSummary) {
+  if (!account) return []
   return [
     ['Balance', account.balance],
     ['Equity', account.equity],

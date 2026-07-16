@@ -6,25 +6,27 @@ export type TradingBalances = Record<string, number>
 
 export function createLocalPreviewOrder(payload: OrderPayload, createdAt = new Date().toISOString()): OrderResponse {
   return {
-    id: payload.clientOrderId ?? payload.idempotencyKey,
+    id: payload.clientOrderId,
     symbol: payload.symbol,
     side: payload.side,
     orderType: payload.orderType,
     status: 'LOCAL_PREVIEW',
-    lots: payload.quantity ?? payload.lots,
+    lots: payload.quantity,
     executionPrice: null,
     createdAt
   }
 }
 
 export function deriveTradingBalances(
+  product: 'spot' | 'perpetual',
   account: AccountSummary | undefined,
-  positions: PositionResponse[],
+  _positions: PositionResponse[],
   symbol: string,
   walletBalances: WalletBalance[] = []
 ): TradingBalances {
-  if (walletBalances.length > 0) {
+  if (product === 'spot') {
     return walletBalances.reduce<TradingBalances>((balances, wallet) => {
+      if (wallet.walletType.trim().toUpperCase() !== 'SPOT') return balances
       const asset = wallet.asset.trim().toUpperCase()
       if (asset) {
         balances[asset] = amountToNumber(wallet.available)
@@ -34,35 +36,19 @@ export function deriveTradingBalances(
   }
 
   const balances: TradingBalances = {}
-  const { baseAsset, quoteAsset } = parseSymbolAssets(symbol)
+  const { quoteAsset } = parseSymbolAssets(symbol)
 
   if (account) {
-    const currency = account.baseCurrency.toUpperCase()
+    const currency = account.baseCurrency.trim().toUpperCase()
     const freeMargin = amountToNumber(account.freeMargin)
-    balances[currency] = freeMargin
+    if (currency) balances[currency] = freeMargin
 
     if (isStableCurrencyAlias(currency, quoteAsset)) {
       balances[quoteAsset] = freeMargin
     }
   }
 
-  const selectedSymbol = normalizeSymbol(symbol)
-  const baseLots = positions.reduce((total, position) => {
-    if (normalizeSymbol(position.symbol) !== selectedSymbol) return total
-    if (position.status.toUpperCase() === 'CLOSED') return total
-    if (position.side.toUpperCase() !== 'BUY') return total
-    return total + amountToNumber(position.lots)
-  }, 0)
-
-  if (baseLots > 0) {
-    balances[baseAsset] = (balances[baseAsset] ?? 0) + baseLots
-  }
-
   return balances
-}
-
-function normalizeSymbol(symbol: string) {
-  return symbol.replace(/[-_/]/g, '').toUpperCase()
 }
 
 function amountToNumber(value: string | number | null | undefined) {

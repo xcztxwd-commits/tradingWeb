@@ -22,7 +22,12 @@ export const authenticatedNavItems: AppNavItem[] = [
 export const mobileNavItems: AppNavItem[] = [
   { to: '/', labelKey: 'nav.home', icon: Home },
   { to: '/markets', labelKey: 'nav.markets', icon: Briefcase },
-  { to: '/trading', labelKey: 'nav.trading', icon: BarChart3 },
+  {
+    to: '/trade/spot/BTCUSDT',
+    labelKey: 'nav.trading',
+    icon: BarChart3,
+    activePaths: ['/trade/spot', '/trade/perpetual']
+  },
   { to: '/account/orders/trades', labelKey: 'nav.orders', icon: ListOrdered, activePaths: ['/account/orders/trades'] },
   {
     to: '/account/overview',

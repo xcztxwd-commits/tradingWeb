@@ -38,6 +38,17 @@ export type MarketCategory = 'all' | 'favorites' | 'fx' | 'crypto' | 'metals' | 
 
 export type ProductType = 'FX_MARGIN' | 'CRYPTO_SPOT' | 'LINEAR_PERP' | 'INVERSE_PERP'
 
+export type MarketSourceMode = 'PUBLIC_EXTERNAL' | 'LOCAL_SIMULATED'
+
+export type MarketSourceMetadata = {
+  providerCode: string
+  providerSymbol: string
+  sourceMode: MarketSourceMode
+  asOf: string
+  expiresAt: string
+  stale: boolean
+}
+
 export type MarketListItem = {
   symbol: string
   base: string
@@ -113,6 +124,8 @@ export type TradingQuote = {
   volume: string
   source: string
   timestamp: number
+  marketSource?: MarketSourceMetadata
+  tradable?: boolean
 }
 
 export type IndicatorName = 'MA' | 'EMA' | 'BOLL' | 'MACD' | 'RSI'

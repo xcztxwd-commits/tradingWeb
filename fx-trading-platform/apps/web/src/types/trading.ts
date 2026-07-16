@@ -1,3 +1,16 @@
+import type {
+  CreateOcoOrderRequest,
+  CreateOrderRequest,
+  MarginMode,
+  PositionMode,
+  PositionSide,
+  QuantityUnit,
+  TradingSettingsResponse,
+  UpdateOrderRequest,
+  UpdatePositionModeRequest,
+  UpdateSymbolSettingsRequest
+} from '@fx-platform/shared-types'
+
 export type SymbolItem = {
   symbol: string
   displayName: string
@@ -101,28 +114,44 @@ export type AssetConversionResponse = {
   conversionId: string
 }
 
-export type OrderPayload = {
-  accountId: string
-  symbol: string
-  side: 'BUY' | 'SELL'
-  orderType: 'MARKET' | 'LIMIT' | 'STOP'
-  quantity: string
-  price?: string
-  clientOrderId: string
-  lots: string
-  requestedPrice?: string
-  stopLoss?: string
-  takeProfit?: string
+export type OrderPayload = Omit<
+  Pick<
+    CreateOrderRequest,
+    | 'accountId'
+    | 'symbol'
+    | 'side'
+    | 'orderType'
+    | 'idempotencyKey'
+    | 'clientOrderId'
+    | 'quantity'
+    | 'price'
+    | 'leverage'
+    | 'positionSide'
+    | 'quantityUnit'
+    | 'marginMode'
+    | 'triggerPrice'
+    | 'triggerPriceType'
+    | 'reduceOnly'
+    | 'attachedProtections'
+  >,
+  'idempotencyKey' | 'clientOrderId' | 'quantity'
+> & {
   idempotencyKey: string
-  leverage?: number
+  clientOrderId: string
+  quantity: number
 }
 
-export type UpdateOrderPayload = {
-  quantity?: string
-  price?: string
-  stopLoss?: string
-  takeProfit?: string
-}
+export type OcoOrderPayload = CreateOcoOrderRequest
+
+export type TradingSettings = TradingSettingsResponse
+export type PositionModeValue = PositionMode
+export type PositionSideValue = PositionSide
+export type MarginModeValue = MarginMode
+export type QuantityUnitValue = QuantityUnit
+export type PositionModePayload = UpdatePositionModeRequest
+export type SymbolSettingsPayload = UpdateSymbolSettingsRequest
+
+export type UpdateOrderPayload = Pick<UpdateOrderRequest, 'quantity' | 'price'>
 
 export type UpdatePositionProtectionPayload = {
   stopLoss?: string

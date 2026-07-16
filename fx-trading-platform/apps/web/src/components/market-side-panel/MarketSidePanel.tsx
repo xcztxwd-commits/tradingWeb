@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { OrderBookSkeleton } from '../loading/TerminalSkeleton'
+import { MarketSourceBadge } from '../../features/trading/components/MarketSourceBadge'
 import { useMarketDataSnapshot } from '../../features/market/marketDataStore'
 import { startQuoteMarketDataAdapter } from '../../features/market/quoteMarketDataAdapter'
 import { OrderBook } from './OrderBook'
@@ -32,6 +33,9 @@ export function MarketSidePanel({ symbol, token = null, loading = false, onSelec
     snapshot.asks.length === 0 &&
     snapshot.bids.length === 0 &&
     snapshot.recentTrades.length === 0
+  const marketStatus = snapshot.status ?? (isInitialMarketSnapshot ? 'loading' : 'ready')
+  const marketLoading = loading || snapshot.status === 'loading' || marketStatus === 'loading'
+  const marketUnavailable = marketStatus === 'unavailable' || marketStatus === 'stale' || marketStatus === 'source-changing'
 
   useEffect(() => startQuoteMarketDataAdapter(symbol, token), [symbol, token])
 
@@ -68,6 +72,14 @@ export function MarketSidePanel({ symbol, token = null, loading = false, onSelec
             {t('trading.recentTrades')}
           </button>
         </div>
+        {snapshot.source ? (
+          <MarketSourceBadge
+            source={snapshot.source.sourceMode}
+            providerCode={snapshot.source.providerCode}
+            stale={snapshot.status === 'stale'}
+            className={styles.sourceBadge}
+          />
+        ) : null}
         <OrderBookToolbar
           aggregationStep={aggregationStep}
           displayMode={displayMode}
@@ -86,8 +98,18 @@ export function MarketSidePanel({ symbol, token = null, loading = false, onSelec
       </header>
 
       <div className={styles.content}>
-        {activeTab === 'orderbook' && (loading || isInitialMarketSnapshot) ? (
+        {activeTab === 'orderbook' && marketLoading ? (
           <OrderBookSkeleton />
+        ) : marketUnavailable ? (
+          <div className={styles.emptyState} role="status">
+            {t(
+              snapshot.status === 'stale'
+                ? 'trading.marketDataStale'
+                : snapshot.status === 'source-changing'
+                  ? 'trading.marketDataSourceChanging'
+                  : 'trading.marketDataUnavailable'
+            )}
+          </div>
         ) : activeTab === 'orderbook' ? (
           <OrderBook
             aggregationStep={aggregationStep}

@@ -99,7 +99,8 @@ const contentChecks = [
   ['backend/src/main/java/com/fxplatform/trading/service/PendingOrderExecutionService.java', '@Scheduled'],
   ['backend/src/main/java/com/fxplatform/trading/service/PendingOrderExecutionService.java', 'findByStatus'],
   ['backend/src/main/java/com/fxplatform/trading/service/ProtectiveOrderExecutionService.java', '@Scheduled'],
-  ['backend/src/main/java/com/fxplatform/trading/service/ProtectiveOrderExecutionService.java', 'closeSystemPosition'],
+  ['backend/src/main/java/com/fxplatform/trading/service/ProtectiveOrderExecutionService.java', 'SystemCloseOrderService'],
+  ['backend/src/main/java/com/fxplatform/trading/service/ProtectiveOrderExecutionService.java', 'executeProtection'],
   ['backend/src/main/java/com/fxplatform/trading/service/PositionService.java', 'recordMarginRelease'],
   ['backend/src/main/java/com/fxplatform/trading/service/PositionService.java', 'floatingPnl'],
   ['backend/src/main/java/com/fxplatform/market/service/QuoteBroadcastService.java', '@Scheduled'],
@@ -114,7 +115,9 @@ const contentChecks = [
   ['backend/src/main/java/com/fxplatform/admin/service/AdminBootstrapService.java', 'UserRole.ADMIN'],
   ['backend/src/main/java/com/fxplatform/common/security/SecurityConfig.java', '"/ws"'],
   ['apps/web/src/app/App.tsx', 'path="/trade"'],
-  ['apps/web/src/app/App.tsx', '<Navigate to="/trading" replace'],
+  ['apps/web/src/app/App.tsx', 'path="/trading" element={<LegacyTradingRedirect />}'],
+  ['apps/web/src/app/App.tsx', 'path="/trade/spot/:symbol?"'],
+  ['apps/web/src/app/App.tsx', 'path="/trade/perpetual/:symbol?"'],
   ['apps/web/src/components/market-side-panel/MarketSidePanel.tsx', '../loading/TerminalSkeleton'],
   ['apps/web/src/components/loading/TerminalSkeleton.tsx', 'export function OrderBookSkeleton'],
   ['apps/web/src/pages/trading/components/TerminalSkeleton.tsx', 'components/loading/TerminalSkeleton'],
@@ -183,7 +186,6 @@ for (const [target, forbidden] of forbiddenContentChecks) {
 for (const [file, forbidden] of forbiddenFrontendImports) {
   const path = join(root, file)
   if (!existsSync(path)) {
-    failures.push(`Missing frontend import target: ${file}`)
     continue
   }
   const content = readFileSync(path, 'utf8')

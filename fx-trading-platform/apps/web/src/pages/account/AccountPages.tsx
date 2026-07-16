@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDownCircle, ArrowUpCircle, Bell, CheckCircle2, CircleDollarSign, RefreshCcw, Settings, ShieldCheck, UserRound } from 'lucide-react'
+import { ArrowDownCircle, ArrowUpCircle, Bell, CheckCircle2, CircleDollarSign, Settings, ShieldCheck, UserRound } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 
@@ -8,10 +8,9 @@ import { DataTable, type DataTableColumn } from '../../components/user-page/Data
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { filterByStatus, formatApiError, toNumber } from '../../components/user-page/userPageModels'
 import { useTradingSession, type TradingSessionMode } from '../../features/trading-session/useTradingSession'
-import { convertAsset } from '../../services/accountApi'
 import { createFundOrder, getFundOrders } from '../../services/financeApi'
 import type { OrderResponse, PositionResponse } from '../../components/tables/types'
-import type { AccountSummary, Amount, FundOrder, LedgerEntry, WalletBalance, WalletType } from '../../types/trading'
+import type { AccountSummary, Amount, FundOrder, LedgerEntry, WalletBalance } from '../../types/trading'
 
 const accountNav = [
   { to: '/account/overview', label: 'Overview' },
@@ -29,8 +28,6 @@ const tradeOrderTabs = [
   { value: 'HISTORY', label: 'Order history' },
   { value: 'FILLED', label: 'Fill history' }
 ] as const
-const assetConversionWalletTypes: WalletType[] = ['FX_MARGIN', 'SPOT', 'USDT_PERP', 'COIN_PERP', 'FUNDING']
-
 type TradeOrderTab = (typeof tradeOrderTabs)[number]['value']
 
 type AssetRow = {
@@ -91,14 +88,11 @@ export function AccountOverviewPage() {
 export function AccountAssetsPage() {
   const {
     account,
-    accountId,
     ledgerEntries,
     loginRequired,
-    refreshAccountData,
     retrySession,
     sessionError,
     sessionMode,
-    token,
     walletBalances
   } = useTradingSession()
   const frozenAmount = toNumber(account?.usedMargin) ?? 0
@@ -125,12 +119,7 @@ export function AccountAssetsPage() {
         <AssetAccountCards account={account} rows={assetRows} />
         <RecentLedgerPanel entries={ledgerEntries.slice(0, 6)} />
       </div>
-      <AssetConversionPanel
-        accountId={accountId}
-        refreshAccountData={refreshAccountData}
-        token={token}
-        walletBalances={walletBalances}
-      />
+      <DemoWalletOperationsLink account={account} walletBalances={walletBalances} />
       <DataTable
         rows={assetRows}
         columns={assetColumns}
@@ -624,109 +613,21 @@ function AssetAccountCards({ account, rows }: { account?: AccountSummary; rows: 
   )
 }
 
-function AssetConversionPanel({
-  accountId,
-  refreshAccountData,
-  token,
-  walletBalances
-}: {
-  accountId?: string
-  refreshAccountData: (accessToken?: string | null, currentAccountId?: string) => Promise<void>
-  token: string | null
-  walletBalances: WalletBalance[]
-}) {
-  const [fromWalletType, setFromWalletType] = useState<WalletType>('USDT_PERP')
-  const [toWalletType, setToWalletType] = useState<WalletType>('FX_MARGIN')
-  const [notice, setNotice] = useState<string | null>(null)
-  const [apiError, setApiError] = useState<ReturnType<typeof formatApiError> | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-  const sourceBalance = walletBalances.find((balance) => balance.walletType === fromWalletType && balance.asset === 'USDT')
-
-  const handleConversionSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!token || !accountId) return
-    const form = new FormData(event.currentTarget)
-    setSubmitting(true)
-    setNotice(null)
-    setApiError(null)
-    try {
-      const response = await convertAsset(
-        accountId,
-        {
-          fromWalletType: String(form.get('fromWalletType') ?? fromWalletType),
-          fromAsset: 'USDT',
-          toWalletType: String(form.get('toWalletType') ?? toWalletType),
-          toAsset: 'USD',
-          amount: String(form.get('amount') ?? '')
-        },
-        token
-      )
-      setNotice(`Converted ${response.fromAmount} ${response.fromAsset} to ${response.toAmount} ${response.toAsset}.`)
-      await refreshAccountData(token, accountId)
-    } catch (error) {
-      setApiError(formatApiError(error))
-    } finally {
-      setSubmitting(false)
-    }
-  }
+function DemoWalletOperationsLink({ account, walletBalances }: { account?: AccountSummary; walletBalances: WalletBalance[] }) {
+  const spotAvailable = walletBalances.find((balance) => balance.walletType === 'SPOT' && balance.asset === 'USDT')?.available
 
   return (
     <section className="account-panel">
       <div className="account-panel__head">
         <div>
-          <h2>Asset conversion</h2>
-          <p>Demo conversion currently supports USDT to USD between backend wallet accounts.</p>
+          <h2>Demo Spot and Perpetual</h2>
+          <p>Use the shared wallet controls to transfer Demo USDT or reset the Demo account.</p>
         </div>
-        <RefreshCcw size={20} aria-hidden="true" />
+        <Link className="table-action table-action--primary" to="/wallet#wallet-assets">
+          Open transfer / reset
+        </Link>
       </div>
-      {apiError ? <ApiErrorState error={apiError} /> : null}
-      {notice ? <div className="user-page__notice">{notice}</div> : null}
-      <form className="user-page__form" onSubmit={handleConversionSubmit}>
-        <label>
-          <span>From wallet</span>
-          <select
-            name="fromWalletType"
-            value={fromWalletType}
-            onChange={(event) => setFromWalletType(event.target.value as WalletType)}
-          >
-            {assetConversionWalletTypes.map((walletType) => (
-              <option key={walletType} value={walletType}>
-                {walletType}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>From asset</span>
-          <input name="fromAsset" value="USDT" readOnly />
-        </label>
-        <label>
-          <span>To wallet</span>
-          <select
-            name="toWalletType"
-            value={toWalletType}
-            onChange={(event) => setToWalletType(event.target.value as WalletType)}
-          >
-            {assetConversionWalletTypes.map((walletType) => (
-              <option key={walletType} value={walletType}>
-                {walletType}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>To asset</span>
-          <input name="toAsset" value="USD" readOnly />
-        </label>
-        <label>
-          <span>Amount</span>
-          <input name="amount" type="number" min="0.00000001" step="0.00000001" required />
-        </label>
-        <button className="table-action table-action--primary" disabled={!token || !accountId || submitting} type="submit">
-          {submitting ? 'Converting' : 'Convert USDT to USD'}
-        </button>
-      </form>
-      <small>Available source balance: {sourceBalance?.available ?? '-'} USDT</small>
+      <small>Spot available: {spotAvailable ?? '-'} USDT · Perpetual available: {account?.freeMargin ?? '-'} USDT</small>
     </section>
   )
 }

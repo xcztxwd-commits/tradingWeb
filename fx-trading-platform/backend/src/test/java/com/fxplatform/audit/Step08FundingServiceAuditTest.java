@@ -7,8 +7,10 @@ import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.risk.service.TradingInstrumentClassifier;
 import com.fxplatform.trading.entity.FundingRateEntity;
@@ -23,7 +25,10 @@ import com.fxplatform.trading.service.FundingService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -52,6 +57,19 @@ class Step08FundingServiceAuditTest {
   @Mock
   private SymbolRepository symbolRepository;
 
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  private final Map<UUID, PositionEntity> positions = new HashMap<>();
+
+  @BeforeEach
+  void rowLockQueriesReturnTheSameFixtureRows() {
+    org.mockito.Mockito.lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+    org.mockito.Mockito.lenient().when(positionRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> Optional.ofNullable(positions.get(invocation.getArgument(0))));
+  }
+
   @ParameterizedTest
   @CsvSource({
       "BUY,0.0001,-5.00000000,9995.00000000",
@@ -65,7 +83,8 @@ class Step08FundingServiceAuditTest {
   ) {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId, "10000.00000000");
-    PositionEntity position = position(accountId, "BTCUSDT", side, "1", "50000");
+    PositionEntity position = position(
+        accountId, "BTCUSDT", ProductType.LINEAR_PERP, side, "1", "50000");
 
     when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
     when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(perpSymbol(
@@ -96,7 +115,8 @@ class Step08FundingServiceAuditTest {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId, "1.00000000");
     account.setBaseCurrency("BTC");
-    PositionEntity position = position(accountId, "BTCUSD", OrderSide.BUY, "100", "50000");
+    PositionEntity position = position(
+        accountId, "BTCUSD", ProductType.INVERSE_PERP, OrderSide.BUY, "100", "50000");
 
     when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
     when(symbolRepository.findBySymbol("BTCUSD")).thenReturn(Optional.of(perpSymbol(
@@ -126,7 +146,8 @@ class Step08FundingServiceAuditTest {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId, "1.00000000");
     account.setBaseCurrency("BTC");
-    PositionEntity position = position(accountId, "BTCUSD", OrderSide.SELL, "100", "50000");
+    PositionEntity position = position(
+        accountId, "BTCUSD", ProductType.INVERSE_PERP, OrderSide.SELL, "100", "50000");
 
     when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
     when(symbolRepository.findBySymbol("BTCUSD")).thenReturn(Optional.of(perpSymbol(
@@ -160,7 +181,8 @@ class Step08FundingServiceAuditTest {
         accountRepository,
         ledgerService,
         symbolRepository,
-        new TradingInstrumentClassifier());
+        new TradingInstrumentClassifier(),
+        demoExecutionGuard);
   }
 
   private static TradingAccountEntity account(UUID accountId, String balance) {
@@ -174,11 +196,19 @@ class Step08FundingServiceAuditTest {
     return account;
   }
 
-  private static PositionEntity position(UUID accountId, String symbol, OrderSide side, String lots, String markPrice) {
+  private PositionEntity position(
+      UUID accountId,
+      String symbol,
+      ProductType productType,
+      OrderSide side,
+      String lots,
+      String markPrice
+  ) {
     PositionEntity position = new PositionEntity();
     position.setId(UUID.randomUUID());
     position.setAccountId(accountId);
     position.setSymbol(symbol);
+    position.setProductType(productType);
     position.setSide(side);
     position.setLots(new BigDecimal(lots));
     position.setOpenPrice(new BigDecimal(markPrice));
@@ -186,6 +216,7 @@ class Step08FundingServiceAuditTest {
     position.setMarkPrice(new BigDecimal(markPrice));
     position.setStatus(PositionStatus.OPEN);
     position.setFundingPnl(BigDecimal.ZERO);
+    positions.put(position.getId(), position);
     return position;
   }
 
@@ -211,6 +242,9 @@ class Step08FundingServiceAuditTest {
     SymbolEntity symbol = new SymbolEntity();
     symbol.setSymbol(symbolCode);
     symbol.setAssetClass(assetClass);
+    symbol.setProductType(assetClass.startsWith("INVERSE")
+        ? ProductType.INVERSE_PERP
+        : ProductType.LINEAR_PERP);
     symbol.setBaseCurrency(baseCurrency);
     symbol.setQuoteCurrency(quoteCurrency);
     symbol.setLotSize(new BigDecimal(contractSize));

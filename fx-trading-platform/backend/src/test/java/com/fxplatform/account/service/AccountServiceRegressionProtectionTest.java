@@ -21,7 +21,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class AccountServiceRegressionProtectionTest {
@@ -35,30 +34,32 @@ class AccountServiceRegressionProtectionTest {
   @Mock
   private AccountSnapshotService accountSnapshotService;
 
+  @Mock
+  private DemoAccountLifecycleService demoAccountLifecycleService;
+
+  @Mock
+  private AccountTransferService accountTransferService;
+
   @Test
-  void createDemoAccountInitializesBalanceEquityAndFreeMarginFromConfiguredDefaults() {
+  void createDemoAccountUsesTheIdempotentLifecycleResult() {
     UUID userId = UUID.randomUUID();
-    BigDecimal defaultBalance = new BigDecimal("10000.00000000");
-    AccountService service = new AccountService(accountRepository, ledgerService, accountSnapshotService);
-    ReflectionTestUtils.setField(service, "defaultDemoBalance", defaultBalance);
-    ReflectionTestUtils.setField(service, "defaultCurrency", "USD");
-    ReflectionTestUtils.setField(service, "defaultLeverage", 100);
-    when(accountRepository.save(org.mockito.ArgumentMatchers.any(TradingAccountEntity.class)))
-        .thenAnswer(invocation -> invocation.getArgument(0));
+    TradingAccountEntity expected = new TradingAccountEntity();
+    expected.setId(UUID.randomUUID());
+    expected.setUserId(userId);
+    when(demoAccountLifecycleService.getOrCreateDemoAccount(userId)).thenReturn(expected);
+    AccountService service = new AccountService(
+        accountRepository,
+        ledgerService,
+        accountSnapshotService,
+        null,
+        null,
+        demoAccountLifecycleService,
+        accountTransferService);
 
     TradingAccountEntity account = service.createDemoAccount(userId);
 
-    assertThat(account.getUserId()).isEqualTo(userId);
-    assertThat(account.getAccountType()).isEqualTo(AccountType.DEMO);
-    assertThat(account.getStatus()).isEqualTo(AccountStatus.ACTIVE);
-    assertThat(account.getBaseCurrency()).isEqualTo("USD");
-    assertThat(account.getLeverage()).isEqualTo(100);
-    assertThat(account.getBalance()).isEqualByComparingTo(defaultBalance);
-    assertThat(account.getEquity()).isEqualByComparingTo(defaultBalance);
-    assertThat(account.getFreeMargin()).isEqualByComparingTo(defaultBalance);
-    assertThat(account.getUsedMargin()).isEqualByComparingTo(BigDecimal.ZERO);
-    verify(accountRepository).save(account);
-    verify(ledgerService).recordDemoDeposit(eq(account), eq(defaultBalance), eq("Initial DEMO balance"));
+    assertThat(account).isSameAs(expected);
+    verify(demoAccountLifecycleService).getOrCreateDemoAccount(userId);
   }
 
   @Test

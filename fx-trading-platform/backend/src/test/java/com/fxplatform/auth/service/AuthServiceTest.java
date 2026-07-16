@@ -81,7 +81,7 @@ class AuthServiceTest {
     assertThat(saved.getEmail()).isNull();
     assertThat(saved.getPhone()).isEqualTo("+60 raw phone");
     assertThat(saved.getPasswordHash()).isEqualTo("encoded-password");
-    verify(accountService).createDemoAccount(userId);
+    verify(accountService).getOrCreateDemoAccount(userId);
     verify(authSessionService).createSession(any(UUID.class), eq(userId), eq("registered-refresh-token"), any(), any(), any());
     assertThat(response.email()).isEqualTo("+60 raw phone");
     assertThat(response.accessToken()).isEqualTo("registered-token");

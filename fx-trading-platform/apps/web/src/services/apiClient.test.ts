@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { afterEach, describe, it } from 'node:test'
 
-import { ApiClientError, apiGet, parseApiErrorPayload } from './apiClient.ts'
+import { ApiClientError, apiDelete, apiGet, parseApiErrorPayload } from './apiClient.ts'
 
 const originalFetch = globalThis.fetch
 const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
@@ -92,6 +92,21 @@ describe('api client error model', () => {
     assert.equal(calls[2].authorization, 'Bearer new-access-token')
     assert.equal(storage.getItem('fx-platform-auth-token'), 'new-access-token')
     assert.equal(storage.getItem('fx-platform-auth-refresh-token'), 'new-refresh-token')
+  })
+
+  it('sends DELETE through the shared authenticated response and error pipeline without a body', async () => {
+    let captured: { method?: string; body?: BodyInit | null; authorization: string | null } | undefined
+    globalThis.fetch = (async (_url, init) => {
+      captured = {
+        method: init?.method,
+        body: init?.body,
+        authorization: new Headers(init?.headers).get('Authorization')
+      }
+      return jsonResponse(200, { success: true, code: 'OK', message: 'OK', data: { id: 'order-1' } })
+    }) as typeof fetch
+
+    assert.deepEqual(await apiDelete('/api/trading/protections/order-1', 'token_1'), { id: 'order-1' })
+    assert.deepEqual(captured, { method: 'DELETE', body: undefined, authorization: 'Bearer token_1' })
   })
 })
 

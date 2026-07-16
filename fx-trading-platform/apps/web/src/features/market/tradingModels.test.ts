@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
 import {
@@ -9,7 +10,6 @@ import {
   makeMockCandles,
   toKLinePeriod
 } from './tradingModels.ts'
-import { mockTradingMarkets } from './mockTradingData.ts'
 
 describe('trading page models', () => {
   it('maps terminal periods to KLineCharts periods', () => {
@@ -51,11 +51,8 @@ describe('trading page models', () => {
     assert.ok(candles.every((item) => item.low <= Math.min(item.open, item.close)))
   })
 
-  it('keeps mainstream crypto extension slots in the local market fallback list', () => {
-    assert.deepEqual(
-      mockTradingMarkets.filter((market) => market.category === 'crypto').map((market) => market.symbol),
-      ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT']
-    )
+  it('keeps generated market fixtures out of the production market feature', () => {
+    assert.equal(existsSync(new URL('./mockTradingData.ts', import.meta.url)), false)
   })
 
   it('filters markets by category, query and favorites', () => {

@@ -232,6 +232,11 @@ export type ChartSettings = {
 
 const chartSettingsStoragePrefix = 'fx-trading-platform:chart-settings:v1:'
 const defaultFavoriteIntervals: TradingPeriod[] = ['15m', '1h', '1d']
+const p0ChartSymbolKeys = new Set([
+  'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+  'BTCUSDTPERP', 'ETHUSDTPERP', 'BNBUSDTPERP', 'SOLUSDTPERP', 'XRPUSDTPERP'
+])
+const p0ChartIntervalValues = new Set<TradingPeriod>(['time', '1s', '1m', '5m', '15m', '1h', '4h', '1d'])
 const movingAveragePeriods = [5, 10, 20, 30, 60, 120]
 const movingAverageColors = ['#ffab2e', '#e83e78', '#4dd0e1', '#f4511e', '#ab47bc', '#66bb6a']
 
@@ -257,10 +262,28 @@ export const allChartIntervals: ChartIntervalOption[] = [
   { value: '3M', label: 'chart.intervals.3M' }
 ]
 
-export function quickChartIntervals(settings?: Pick<ChartSettings, 'favoriteIntervals'>): ChartIntervalOption[] {
+const p0ChartIntervals = allChartIntervals.filter((item) => p0ChartIntervalValues.has(item.value))
+
+export function isP0ChartSymbol(symbol: string) {
+  return p0ChartSymbolKeys.has(normalizeChartSymbol(symbol))
+}
+
+export function getChartIntervalOptions(symbol: string): ChartIntervalOption[] {
+  return isP0ChartSymbol(symbol) ? p0ChartIntervals : allChartIntervals
+}
+
+export function normalizeChartInterval(symbol: string, interval: TradingPeriod): TradingPeriod {
+  if (!isP0ChartSymbol(symbol) || p0ChartIntervalValues.has(interval)) return interval
+  return '1m'
+}
+
+export function quickChartIntervals(
+  settings?: Pick<ChartSettings, 'favoriteIntervals'>,
+  options: ChartIntervalOption[] = allChartIntervals
+): ChartIntervalOption[] {
   const favorites = normalizeFavoriteIntervals(settings?.favoriteIntervals, defaultFavoriteIntervals)
   return favorites
-    .map((interval) => allChartIntervals.find((item) => item.value === interval))
+    .map((interval) => options.find((item) => item.value === interval))
     .filter((item): item is ChartIntervalOption => Boolean(item))
 }
 
@@ -513,6 +536,37 @@ export function loadChartSettings(symbol: string, storage = getBrowserStorage())
     return normalizeChartSettings(JSON.parse(raw))
   } catch {
     return cloneSettings(defaultChartSettings)
+  }
+}
+
+export type OwnedChartSettingsState = {
+  ownerSymbol: string
+  settings: ChartSettings
+}
+
+export function loadChartSettingsForSymbol(symbol: string, storage = getBrowserStorage()): ChartSettings {
+  const settings = loadChartSettings(symbol, storage)
+  const interval = normalizeChartInterval(symbol, settings.interval)
+  if (interval === settings.interval) return settings
+
+  const normalizedSettings = { ...settings, interval }
+  try {
+    saveChartSettings(symbol, normalizedSettings, storage)
+  } catch {
+    // Storage persistence is best-effort; rendering must still use the safe interval.
+  }
+  return normalizedSettings
+}
+
+export function selectChartSettingsForSymbol(
+  state: OwnedChartSettingsState,
+  selectedSymbol: string,
+  loadSettings: (symbol: string) => ChartSettings = loadChartSettingsForSymbol
+): OwnedChartSettingsState {
+  if (state.ownerSymbol === selectedSymbol) return state
+  return {
+    ownerSymbol: selectedSymbol,
+    settings: loadSettings(selectedSymbol)
   }
 }
 
@@ -1130,6 +1184,10 @@ function cloneSettings(settings: ChartSettings): ChartSettings {
 
 function isTradingPeriod(value: unknown): value is TradingPeriod {
   return typeof value === 'string' && allChartIntervals.some((item) => item.value === value)
+}
+
+function normalizeChartSymbol(symbol: string) {
+  return symbol.trim().replace(/[-_/]/g, '').toUpperCase()
 }
 
 function isChartType(value: unknown): value is ChartType {

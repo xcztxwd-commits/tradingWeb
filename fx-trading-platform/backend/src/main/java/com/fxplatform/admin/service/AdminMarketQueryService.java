@@ -2,30 +2,79 @@ package com.fxplatform.admin.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fxplatform.admin.dto.AdminPageResponse;
+import com.fxplatform.admin.dto.response.AdminFundingConfigResponse;
 import com.fxplatform.admin.dto.response.AdminPriceAdjustmentResponse;
 import com.fxplatform.admin.dto.response.AdminSymbolCategoryResponse;
 import com.fxplatform.admin.dto.response.AdminSymbolResponse;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.market.entity.SymbolCategoryEntity;
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.funding.FundingRateFreshnessPolicy;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.PriceAdjustmentRepository;
 import com.fxplatform.market.repository.SymbolCategoryRepository;
 import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.trading.repository.FundingRateRepository;
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
-import lombok.RequiredArgsConstructor;
+import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
  * AdminMarketQueryService 提供后台产品和行情品种只读查询能力。
  */
 @Service
-@RequiredArgsConstructor
 public class AdminMarketQueryService {
 
   /** 品种 Mapper，用于后台产品列表分页查询。 */
   private final SymbolRepository symbolRepository;
   private final SymbolCategoryRepository symbolCategoryRepository;
   private final PriceAdjustmentRepository priceAdjustmentRepository;
+  private final FundingRateRepository fundingRateRepository;
+  private final Clock clock;
+
+  @Autowired
+  public AdminMarketQueryService(
+      SymbolRepository symbolRepository,
+      SymbolCategoryRepository symbolCategoryRepository,
+      PriceAdjustmentRepository priceAdjustmentRepository,
+      FundingRateRepository fundingRateRepository
+  ) {
+    this(
+        symbolRepository,
+        symbolCategoryRepository,
+        priceAdjustmentRepository,
+        fundingRateRepository,
+        Clock.systemUTC());
+  }
+
+  AdminMarketQueryService(
+      SymbolRepository symbolRepository,
+      SymbolCategoryRepository symbolCategoryRepository,
+      PriceAdjustmentRepository priceAdjustmentRepository,
+      FundingRateRepository fundingRateRepository,
+      Clock clock
+  ) {
+    this.symbolRepository = symbolRepository;
+    this.symbolCategoryRepository = symbolCategoryRepository;
+    this.priceAdjustmentRepository = priceAdjustmentRepository;
+    this.fundingRateRepository = fundingRateRepository;
+    this.clock = clock;
+  }
+
+  public AdminFundingConfigResponse fundingConfig(UUID symbolId) {
+    SymbolEntity symbol = symbolRepository.findById(symbolId)
+        .orElseThrow(() -> new BusinessException("SYMBOL_NOT_FOUND", "Symbol not found"));
+    requireLinearPerpetual(symbol);
+    return AdminFundingConfigResponse.from(
+        symbol,
+        FundingRateFreshnessPolicy.activeOrNull(
+            fundingRateRepository.findLatestBySymbol(symbol.getSymbol()).orElse(null),
+            symbol.getFundingStaleSeconds(),
+            clock.instant()));
+  }
 
   /** 分页查询全部产品品种，按 symbol 升序返回。 */
   public AdminPageResponse<AdminSymbolResponse> symbols(int page, int size) {
@@ -92,5 +141,13 @@ public class AdminMarketQueryService {
         .stream()
         .map(AdminPriceAdjustmentResponse::from)
         .toList();
+  }
+
+  private void requireLinearPerpetual(SymbolEntity symbol) {
+    if (symbol.getProductType() != ProductType.LINEAR_PERP) {
+      throw new BusinessException(
+          "FUNDING_CONFIG_PRODUCT_TYPE_UNSUPPORTED",
+          "Funding configuration is supported only for linear perpetual symbols");
+    }
   }
 }

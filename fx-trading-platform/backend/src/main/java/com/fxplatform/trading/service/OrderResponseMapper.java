@@ -12,7 +12,9 @@ import org.springframework.stereotype.Component;
 public class OrderResponseMapper {
 
   public OrderResponse toResponse(OrderEntity order) {
-    BigDecimal quantity = order.getQuantity() != null ? order.getQuantity() : order.getLots();
+    BigDecimal quantity = order.getOriginalQuantity() != null
+        ? order.getOriginalQuantity()
+        : order.getQuantity() != null ? order.getQuantity() : order.getLots();
     BigDecimal price = order.getPrice() != null ? order.getPrice() : order.getRequestedPrice();
     BigDecimal avgFillPrice = order.getAvgFillPrice() != null ? order.getAvgFillPrice() : order.getExecutionPrice();
     return new OrderResponse(
@@ -39,6 +41,28 @@ public class OrderResponseMapper {
         order.getCreatedAt(),
         order.getUpdatedAt(),
         order.getFilledAt(),
-        order.getCanceledAt());
+        order.getCanceledAt(),
+        order.getProductType(),
+        order.getPositionMode(),
+        order.getPositionSide(),
+        order.getMarginMode(),
+        order.getQuantityUnit(),
+        order.getOriginalQuantity(),
+        order.getBaseQuantity(),
+        order.getTimeInForce(),
+        order.getReduceOnly(),
+        order.getOrderOrigin(),
+        OrderSystemReasonPolicy.external(order),
+        order.getFeeAsset(),
+        order.getLiquidityRole(),
+        order.getTriggerPrice(),
+        order.getTriggerPriceType(),
+        order.getTriggerExecutionType(),
+        order.getProtectionType(),
+        order.getParentOrderId(),
+        order.getParentPositionId(),
+        order.getContingencyGroupId(),
+        order.getHoldOwnerOrderId(),
+        order.getVersion());
   }
 }

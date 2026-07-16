@@ -1,25 +1,26 @@
 package com.fxplatform.account.service;
 
 import com.fxplatform.account.dto.AccountResponse;
+import com.fxplatform.account.dto.AccountTransferRequest;
+import com.fxplatform.account.dto.AccountTransferResponse;
 import com.fxplatform.account.dto.AccountSnapshot;
 import com.fxplatform.account.dto.AssetConversionRequest;
 import com.fxplatform.account.dto.AssetConversionResponse;
 import com.fxplatform.account.dto.AssetLedgerEntryResponse;
 import com.fxplatform.account.dto.WalletBalanceResponse;
+import com.fxplatform.account.dto.DemoResetResponse;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.ledger.service.LedgerService;
-import com.fxplatform.wallet.enums.AssetLedgerEntryType;
-import com.fxplatform.wallet.enums.WalletType;
 import com.fxplatform.wallet.service.AssetConversionService;
 import com.fxplatform.wallet.service.WalletService;
+import com.fxplatform.wallet.enums.WalletType;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +35,8 @@ public class AccountService {
   private final AccountSnapshotService accountSnapshotService;
   private final WalletService walletService;
   private final AssetConversionService assetConversionService;
+  private final DemoAccountLifecycleService demoAccountLifecycleService;
+  private final AccountTransferService accountTransferService;
 
   @Autowired
   public AccountService(
@@ -41,13 +44,34 @@ public class AccountService {
       LedgerService ledgerService,
       AccountSnapshotService accountSnapshotService,
       WalletService walletService,
-      AssetConversionService assetConversionService
+      AssetConversionService assetConversionService,
+      DemoAccountLifecycleService demoAccountLifecycleService,
+      AccountTransferService accountTransferService
   ) {
     this.accountRepository = accountRepository;
     this.ledgerService = ledgerService;
     this.accountSnapshotService = accountSnapshotService;
     this.walletService = walletService;
     this.assetConversionService = assetConversionService;
+    this.demoAccountLifecycleService = demoAccountLifecycleService;
+    this.accountTransferService = accountTransferService;
+  }
+
+  public AccountService(
+      TradingAccountRepository accountRepository,
+      LedgerService ledgerService,
+      AccountSnapshotService accountSnapshotService,
+      WalletService walletService,
+      AssetConversionService assetConversionService
+  ) {
+    this(
+        accountRepository,
+        ledgerService,
+        accountSnapshotService,
+        walletService,
+        assetConversionService,
+        null,
+        null);
   }
 
   public AccountService(
@@ -56,7 +80,7 @@ public class AccountService {
       AccountSnapshotService accountSnapshotService,
       WalletService walletService
   ) {
-    this(accountRepository, ledgerService, accountSnapshotService, walletService, null);
+    this(accountRepository, ledgerService, accountSnapshotService, walletService, null, null, null);
   }
 
   public AccountService(
@@ -64,52 +88,48 @@ public class AccountService {
       LedgerService ledgerService,
       AccountSnapshotService accountSnapshotService
   ) {
-    this(accountRepository, ledgerService, accountSnapshotService, null, null);
+    this(accountRepository, ledgerService, accountSnapshotService, null, null, null, null);
   }
 
-  @Value("${trading.default-demo-balance}")
-  private BigDecimal defaultDemoBalance;
-
-  @Value("${trading.default-account-currency}")
-  private String defaultCurrency;
-
-  @Value("${trading.default-leverage}")
-  private Integer defaultLeverage;
-
-  @Transactional
   public TradingAccountEntity createDemoAccount(UUID userId) {
-    TradingAccountEntity account = new TradingAccountEntity();
-    account.setUserId(userId);
-    account.setBaseCurrency(defaultCurrency);
-    account.setLeverage(defaultLeverage);
-    account.setBalance(defaultDemoBalance);
-    account.setEquity(defaultDemoBalance);
-    account.setFreeMargin(defaultDemoBalance);
-    accountRepository.save(account);
+    return getOrCreateDemoAccount(userId);
+  }
 
-    // 所有资金初始化都必须落 Ledger，避免出现无法审计的余额变化。
-    ledgerService.recordDemoDeposit(account, defaultDemoBalance, "Initial DEMO balance");
-    if (walletService != null) {
-      walletService.creditAvailableWithEntryType(
-          account.getId(),
-          WalletType.FX_MARGIN,
-          account.getBaseCurrency(),
-          defaultDemoBalance,
-          "DEMO_ACCOUNT",
-          account.getId(),
-          "Initial DEMO wallet balance",
-          AssetLedgerEntryType.CREDIT_AVAILABLE.code());
-      walletService.creditAvailableWithEntryType(
-          account.getId(),
-          WalletType.SPOT,
-          "USDT",
-          defaultDemoBalance,
-          "DEMO_ACCOUNT",
-          account.getId(),
-          "Initial DEMO spot wallet balance",
-          AssetLedgerEntryType.CREDIT_AVAILABLE.code());
+  public TradingAccountEntity getOrCreateDemoAccount(UUID userId) {
+    if (demoAccountLifecycleService == null) {
+      throw new BusinessException("DEMO_ACCOUNT_LIFECYCLE_UNAVAILABLE", "Demo account lifecycle is unavailable");
     }
-    return account;
+    return demoAccountLifecycleService.getOrCreateDemoAccount(userId);
+  }
+
+  public AccountTransferResponse transfer(
+      UUID userId,
+      UUID accountId,
+      AccountTransferRequest request
+  ) {
+    if (accountTransferService == null) {
+      throw new BusinessException("ACCOUNT_TRANSFER_UNAVAILABLE", "Account transfer is unavailable");
+    }
+    return accountTransferService.transfer(
+        userId,
+        accountId,
+        request.direction(),
+        request.amount(),
+        request.requestId());
+  }
+
+  public DemoResetResponse resetDemo(UUID userId, UUID accountId, UUID requestId) {
+    if (demoAccountLifecycleService == null) {
+      throw new BusinessException("DEMO_ACCOUNT_LIFECYCLE_UNAVAILABLE", "Demo account lifecycle is unavailable");
+    }
+    return demoAccountLifecycleService.reset(userId, accountId, requestId);
+  }
+
+  public List<AccountTransferResponse> transferHistory(UUID userId, UUID accountId) {
+    if (accountTransferService == null) {
+      throw new BusinessException("ACCOUNT_TRANSFER_UNAVAILABLE", "Account transfer is unavailable");
+    }
+    return accountTransferService.history(userId, accountId);
   }
 
   public List<AccountResponse> accountsForUser(UUID userId) {
@@ -165,6 +185,7 @@ public class AccountService {
     }
     UUID conversionId = request.conversionId() == null ? UUID.randomUUID() : request.conversionId();
     return AssetConversionResponse.from(assetConversionService.convert(
+        userId,
         accountId,
         WalletType.fromCode(request.fromWalletType()),
         request.fromAsset(),

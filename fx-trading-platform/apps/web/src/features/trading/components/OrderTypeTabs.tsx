@@ -1,24 +1,24 @@
-import { Info } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { StrategyDropdown } from './StrategyDropdown'
 import type { PrimaryOrderType, StrategyType } from '../types/order'
 
 type Props = {
   orderType: PrimaryOrderType
   strategyType: StrategyType
+  allowOco: boolean
   onOrderTypeChange: (value: PrimaryOrderType) => void
-  onStrategyOrderTypeChange: (value: PrimaryOrderType) => void
+  onStrategyTypeChange: (value: 'trigger' | 'oco') => void
 }
 
 export function OrderTypeTabs({
   orderType,
   strategyType,
+  allowOco,
   onOrderTypeChange,
-  onStrategyOrderTypeChange
+  onStrategyTypeChange
 }: Props) {
   const { t } = useTranslation()
-  const strategyActive = strategyType === 'tp_sl'
+  const strategyActive = strategyType === 'trigger' || strategyType === 'oco'
 
   return (
     <div className="trade-panel__order-tabs" role="tablist" aria-label={t('trading.orderType')}>
@@ -40,10 +40,26 @@ export function OrderTypeTabs({
       >
         {t('trading.marketOrder')}
       </button>
-      <StrategyDropdown active={strategyActive} orderType={orderType} onChange={onStrategyOrderTypeChange} />
-      <span className="trade-panel__order-info" aria-hidden="true">
-        <Info size={14} />
-      </span>
+      <button
+        type="button"
+        className={`trade-panel__order-tab ${strategyType === 'trigger' ? 'trade-panel__order-tab--active' : ''}`}
+        role="tab"
+        aria-selected={strategyType === 'trigger'}
+        onClick={() => onStrategyTypeChange('trigger')}
+      >
+        Stop Market
+      </button>
+      {allowOco ? (
+        <button
+          type="button"
+          className={`trade-panel__order-tab ${strategyType === 'oco' ? 'trade-panel__order-tab--active' : ''}`}
+          role="tab"
+          aria-selected={strategyType === 'oco'}
+          onClick={() => onStrategyTypeChange('oco')}
+        >
+          OCO
+        </button>
+      ) : null}
     </div>
   )
 }

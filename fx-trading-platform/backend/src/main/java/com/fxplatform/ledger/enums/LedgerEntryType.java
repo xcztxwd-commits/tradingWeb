@@ -4,6 +4,10 @@ package com.fxplatform.ledger.enums;
  * LedgerEntryType 定义资金流水模块的枚举值。
  */
 public enum LedgerEntryType {
+  DEMO_INIT,
+  DEMO_RESET,
+  TRANSFER_IN,
+  TRANSFER_OUT,
   DEMO_DEPOSIT,
   ORDER_HOLD,
   ORDER_RELEASE,
@@ -15,6 +19,7 @@ public enum LedgerEntryType {
   FINANCING,
   CONVERSION_FEE,
   LIQUIDATION_FEE,
+  BANKRUPTCY_SHORTFALL,
   FORCED_CLOSE,
   ADMIN_ADJUSTMENT
 }

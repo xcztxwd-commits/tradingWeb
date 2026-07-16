@@ -10,7 +10,7 @@ import {
   syncLimitPriceFromMarket,
   validateOrder
 } from './useTradeForm.ts'
-import { mockBalances, mockMarket } from './useMockBalances.ts'
+import { testBalances as mockBalances, testMarket as mockMarket } from './tradeFormTestFixtures.ts'
 import { strategyOptions } from '../types/order.ts'
 import type { TradeFormState } from '../types/order.ts'
 
@@ -166,25 +166,20 @@ describe('trade form model', () => {
     assert.equal(payload.orderType, 'limit')
     assert.equal(payload.strategyType, 'advanced_limit')
     assert.equal(payload.advancedLimitMode, 'post_only')
-    assert.match(payload.clientOrderId, /^mock_/)
+    assert.match(payload.clientOrderId, /^web_/)
   })
 
-  it('exposes the complete first-phase strategy menu model', () => {
+  it('exposes only the P0 stop-market and OCO strategy menu model', () => {
     assert.deepEqual(
       strategyOptions.map((option) => option.labelKey),
       [
-        'trading.strategy.tpSl',
-        'trading.strategy.trailingTpSl',
         'trading.strategy.trigger',
-        'trading.strategy.advancedLimit',
-        'trading.strategy.splitOrder',
-        'trading.strategy.iceberg',
-        'trading.strategy.twap'
+        'trading.strategy.oco'
       ]
     )
     assert.deepEqual(
       strategyOptions.filter((option) => !option.available).map((option) => option.value),
-      ['split_order', 'iceberg', 'twap']
+      []
     )
   })
 })

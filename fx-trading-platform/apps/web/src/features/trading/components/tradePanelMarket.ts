@@ -2,10 +2,12 @@ import type { TradeMarket } from '../types/order'
 import { parseSymbolAssets } from '../utils/symbols.ts'
 
 type Snapshot = {
+  symbol?: string
   bids: Array<{ price: number }>
   asks: Array<{ price: number }>
   lastPrice: number
   updatedAt?: number
+  tradable?: boolean
 }
 
 type MarketProfile = {
@@ -17,11 +19,12 @@ type MarketProfile = {
 
 export function createPanelMarket(symbol: string, snapshot: Snapshot, profile: MarketProfile = {}): TradeMarket {
   const { baseAsset, quoteAsset } = parseSymbolAssets(symbol)
-  const normalizedSymbol = `${baseAsset}-${quoteAsset}`
+  const normalizedSymbol = normalizePlatformSymbol(symbol)
 
-  const bestBid = snapshot.bids[0]?.price ?? 0
-  const bestAsk = snapshot.asks[0]?.price ?? 0
-  const lastPrice = snapshot.lastPrice || (bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : 0)
+  const marketDataReady = snapshot.tradable === true && normalizePlatformSymbol(snapshot.symbol ?? '') === normalizedSymbol
+  const bestBid = marketDataReady ? snapshot.bids[0]?.price ?? 0 : 0
+  const bestAsk = marketDataReady ? snapshot.asks[0]?.price ?? 0 : 0
+  const lastPrice = marketDataReady ? snapshot.lastPrice || (bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : 0) : 0
   const leverage = resolveMarketLeverage(profile.leverage)
   const productType = profile.productType
 
@@ -37,6 +40,7 @@ export function createPanelMarket(symbol: string, snapshot: Snapshot, profile: M
     leverage,
     productType,
     quoteTimestamp: snapshot.updatedAt,
+    tradable: marketDataReady,
     rules: profile.rules
   }
 }
@@ -68,5 +72,11 @@ function resolveMarketLeverage(leverage?: number) {
 }
 
 function isForexSymbol(symbol: string) {
-  return /^[A-Z]{3}-[A-Z]{3}$/.test(symbol) && !symbol.endsWith('-USDT')
+  return /^[A-Z]{6}$/.test(symbol) && !symbol.endsWith('USDT')
+}
+
+function normalizePlatformSymbol(symbol: string) {
+  const normalized = symbol.trim().toUpperCase()
+  if (normalized.endsWith('-PERP')) return normalized
+  return normalized.replace(/[-_/]/g, '')
 }

@@ -5,11 +5,18 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.dto.AssetConversionRequest;
+import com.fxplatform.account.dto.AccountTransferRequest;
+import com.fxplatform.account.dto.AccountTransferRequest.Direction;
+import com.fxplatform.account.dto.AccountTransferResponse;
+import com.fxplatform.account.dto.DemoResetRequest;
+import com.fxplatform.account.dto.DemoResetResponse;
 import com.fxplatform.account.dto.AssetConversionResponse;
 import com.fxplatform.account.dto.AssetLedgerEntryResponse;
 import com.fxplatform.account.dto.WalletBalanceResponse;
 import com.fxplatform.account.service.AccountService;
+import com.fxplatform.account.service.AccountTransferQueryService;
 import com.fxplatform.common.security.UserPrincipal;
+import com.fxplatform.trading.dto.response.TradingPageResponse;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -82,7 +89,7 @@ class AccountControllerWalletTest {
     UUID accountId = UUID.randomUUID();
     UUID conversionId = UUID.randomUUID();
     AssetConversionRequest request = new AssetConversionRequest(
-        "USDT_PERP",
+        "SPOT",
         "USDT",
         "FX_MARGIN",
         "USD",
@@ -90,7 +97,7 @@ class AccountControllerWalletTest {
         conversionId);
     AssetConversionResponse conversion = new AssetConversionResponse(
         accountId,
-        "USDT_PERP",
+        "SPOT",
         "USDT",
         "FX_MARGIN",
         "USD",
@@ -108,5 +115,70 @@ class AccountControllerWalletTest {
         request);
 
     assertThat(response.data()).isEqualTo(conversion);
+  }
+
+  @Test
+  void transferEndpointBindsTheAuthenticatedOwnerAndRequestId() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID requestId = UUID.randomUUID();
+    AccountTransferRequest request = new AccountTransferRequest(
+        Direction.SPOT_TO_PERP, new BigDecimal("250.00000000"), requestId);
+    AccountTransferResponse expected = new AccountTransferResponse(
+        accountId, requestId, Direction.SPOT_TO_PERP, request.amount(),
+        new BigDecimal("49750.00000000"), new BigDecimal("50250.00000000"),
+        new BigDecimal("50250.00000000"), false, Instant.now());
+    AccountService accountService = org.mockito.Mockito.mock(AccountService.class);
+    when(accountService.transfer(userId, accountId, request)).thenReturn(expected);
+    AccountController controller = new AccountController(accountService);
+
+    var response = controller.transfer(
+        new UserPrincipal(userId, "trader@example.com", "TRADER"), accountId, request);
+
+    assertThat(response.data()).isEqualTo(expected);
+  }
+
+  @Test
+  void demoResetEndpointBindsTheAuthenticatedOwnerAndRequestId() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID requestId = UUID.randomUUID();
+    DemoResetRequest request = new DemoResetRequest(requestId);
+    DemoResetResponse expected = new DemoResetResponse(
+        accountId, requestId, 2L, new BigDecimal("50000.00000000"),
+        new BigDecimal("50000.00000000"), new BigDecimal("50000.00000000"),
+        Instant.now(), false);
+    AccountService accountService = org.mockito.Mockito.mock(AccountService.class);
+    when(accountService.resetDemo(userId, accountId, requestId)).thenReturn(expected);
+    AccountController controller = new AccountController(accountService);
+
+    var response = controller.resetDemo(
+        new UserPrincipal(userId, "trader@example.com", "TRADER"), accountId, request);
+
+    assertThat(response.data()).isEqualTo(expected);
+  }
+
+  @Test
+  void transferHistoryEndpointUsesTheAuthenticatedOwner() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    AccountService accountService = org.mockito.Mockito.mock(AccountService.class);
+    AccountTransferQueryService transferQueryService =
+        org.mockito.Mockito.mock(AccountTransferQueryService.class);
+    TradingPageResponse<AccountTransferResponse> page =
+        new TradingPageResponse<>(List.of(), 2, 25, 0, 0);
+    when(transferQueryService.history(
+        userId, accountId, Direction.PERP_TO_SPOT, 2, 25)).thenReturn(page);
+    AccountController controller = new AccountController(accountService);
+    controller.setAccountTransferQueryService(transferQueryService);
+
+    var response = controller.transferHistory(
+        new UserPrincipal(userId, "trader@example.com", "TRADER"),
+        accountId,
+        Direction.PERP_TO_SPOT,
+        2,
+        25);
+
+    assertThat(response.data()).isSameAs(page);
   }
 }

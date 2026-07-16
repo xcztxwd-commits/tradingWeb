@@ -24,6 +24,7 @@ type TradeFormHook = {
   setPriceFocused: (focused: boolean) => void
   setOrderType: (orderType: PrimaryOrderType) => void
   setStrategyType: (strategyType: StrategyType) => void
+  setAttachedProtections: (protections: TradeFormState['attachedProtections']) => void
   setPercent: (percent: number) => void
   fillBestPrice: () => void
   fillLimitPrice: (price: number | string) => LimitPriceFillResult
@@ -64,7 +65,8 @@ const validationMessageKeys: Record<OrderValidationErrorKey, string> = {
   takeProfitTriggerPrice: 'validation.takeProfitTriggerPrice',
   stopLossTriggerPrice: 'validation.stopLossTriggerPrice',
   trailingCallbackRatio: 'validation.trailingCallbackRatio',
-  triggerPrice: 'validation.triggerPrice'
+  triggerPrice: 'validation.triggerPrice',
+  attachedProtections: 'validation.triggerPrice'
 }
 
 export function useTradeForm(
@@ -128,6 +130,10 @@ export function useTradeForm(
     }))
   }, [])
 
+  const setAttachedProtections = useCallback((protections: TradeFormState['attachedProtections']) => {
+    setForm((current) => replaceAttachedProtections(current, protections))
+  }, [])
+
   const setPercent = useCallback(
     (percent: number) => {
       setForm((current) => applyPercent(current, percent, balances, market))
@@ -173,11 +179,19 @@ export function useTradeForm(
     setPriceFocused,
     setOrderType,
     setStrategyType,
+    setAttachedProtections,
     setPercent,
     fillBestPrice,
     fillLimitPrice,
     reset
   }
+}
+
+export function replaceAttachedProtections(
+  form: TradeFormState,
+  protections: TradeFormState['attachedProtections']
+): TradeFormState {
+  return { ...form, attachedProtections: [...protections] }
 }
 
 export function createInitialTradeForm(side: TradeSide, market: TradeMarket): TradeFormState {
@@ -205,7 +219,12 @@ export function createInitialTradeForm(side: TradeSide, market: TradeMarket): Tr
     triggerPrice: '',
     advancedLimitMode: 'normal',
     timeInForce: 'gtc',
-    clientOrderId: createClientOrderId()
+    clientOrderId: createClientOrderId(),
+    positionSide: 'BOTH',
+    marginMode: market.productType === 'CRYPTO_SPOT' ? 'CASH' : 'CROSS',
+    quantityUnit: market.quantityMode === 'contracts' ? 'CONTRACTS' : 'BASE',
+    reduceOnly: false,
+    attachedProtections: []
   }
 }
 
@@ -223,7 +242,7 @@ export function deriveTradeForm(
   if (next.orderType === 'market') {
     const marketPrice = market?.lastPrice ?? 0
     const unitSize = getMarketUnitSize(market)
-    if (usesQuoteBudgetMarketBuy(next, market) && sourceField === 'total' && total > 0 && marketPrice > 0) {
+    if ((usesQuoteBudgetMarketBuy(next, market) || usesQuoteQuantity(next, market)) && sourceField === 'total' && total > 0 && marketPrice > 0) {
       next.amount = formatDecimal(total / (marketPrice * unitSize))
     }
     if (sourceField === 'amount' && amount > 0 && marketPrice > 0) {
@@ -375,8 +394,23 @@ export function validateOrder(form: TradeFormState, options: ValidationOptions, 
     errors.push('trailingCallbackRatio')
   }
 
-  if (form.strategyType === 'trigger' && toNumber(form.triggerPrice) <= 0) {
+  if ((form.strategyType === 'trigger' || form.strategyType === 'oco') && toNumber(form.triggerPrice) <= 0) {
     errors.push('triggerPrice')
+  }
+
+  const parentProtectionQuantity = form.quantityUnit === 'QUOTE' ? toNumber(form.total) : amount
+  const protectionTotals = { TAKE_PROFIT: 0, STOP_LOSS: 0 }
+  const invalidProtection = form.attachedProtections.some((protection) => {
+    const quantity = toNumber(protection.quantity)
+    protectionTotals[protection.protectionType] += quantity
+    return toNumber(protection.triggerPrice) <= 0
+      || (protection.triggerExecutionType === 'LIMIT' && toNumber(protection.price) <= 0)
+      || quantity <= 0
+      || protection.quantityUnit !== form.quantityUnit
+      || protectionTotals[protection.protectionType] > parentProtectionQuantity
+  })
+  if (form.attachedProtections.length > 10 || invalidProtection) {
+    errors.push('attachedProtections')
   }
 
   return buildValidationResult(errors, t)
@@ -384,7 +418,7 @@ export function validateOrder(form: TradeFormState, options: ValidationOptions, 
 
 export function getOrderNotional(form: TradeFormState, market: TradeMarket) {
   const total = toNumber(form.total)
-  if (usesQuoteBudgetMarketBuy(form, market) && total > 0) return total
+  if ((usesQuoteBudgetMarketBuy(form, market) || usesQuoteQuantity(form, market)) && total > 0) return total
 
   const amount = toNumber(form.amount)
   const price = form.orderType === 'market' ? market.lastPrice : toNumber(form.price)
@@ -396,8 +430,15 @@ export function getRequiredMargin(form: TradeFormState, market: TradeMarket) {
   return isMarginQuantityMarket(market) ? notional / getMarginLeverage(market) : notional
 }
 
-export function usesQuoteBudgetMarketBuy(form: Pick<TradeFormState, 'side' | 'orderType'>, market?: TradeMarket) {
-  return form.side === 'buy' && form.orderType === 'market' && market?.quantityMode === 'quote-budget'
+export function usesQuoteBudgetMarketBuy(form: Pick<TradeFormState, 'side' | 'orderType' | 'strategyType'>, market?: TradeMarket) {
+  return form.side === 'buy'
+    && form.orderType === 'market'
+    && form.strategyType !== 'trigger'
+    && market?.quantityMode === 'quote-budget'
+}
+
+export function usesQuoteQuantity(form: Pick<TradeFormState, 'quantityUnit'>, market?: TradeMarket) {
+  return isMarginQuantityMarket(market) && form.quantityUnit === 'QUOTE'
 }
 
 export function isMarginQuantityMarket(market?: TradeMarket) {
@@ -434,7 +475,7 @@ function normalizeNumericInput(value: string) {
 }
 
 function createClientOrderId() {
-  return `mock_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`
+  return `web_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`
 }
 
 function buildValidationResult(errors: OrderValidationErrorKey[], t?: TFunction): OrderValidationResult {

@@ -7,7 +7,7 @@ import java.math.BigDecimal;
  * UpdateOrderRequest carries editable fields for a pending order.
  */
 public record UpdateOrderRequest(
-    @DecimalMin("0.01") BigDecimal quantity,
+    @DecimalMin(value = "0", inclusive = false) BigDecimal quantity,
     BigDecimal price,
     BigDecimal stopLoss,
     BigDecimal takeProfit

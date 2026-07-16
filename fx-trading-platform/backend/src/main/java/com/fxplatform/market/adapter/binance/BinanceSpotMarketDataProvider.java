@@ -11,8 +11,14 @@ import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
 import com.fxplatform.market.dto.SymbolResponse;
 import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.model.CandleRequest;
+import com.fxplatform.market.model.MarketSourceMode;
+import com.fxplatform.market.model.SpotMarketBundle;
+import com.fxplatform.market.provider.MarketBundleAssembler;
 import com.fxplatform.market.provider.MarketDataCapability;
+import com.fxplatform.market.provider.MarketDataDurations;
 import com.fxplatform.market.provider.MarketDataProviderAdapter;
+import com.fxplatform.market.provider.MarketRequestDeadline;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -22,6 +28,7 @@ import java.net.http.HttpResponse;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,6 +37,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -41,6 +49,7 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
   private static final List<CryptoSymbol> FALLBACK_CRYPTO_SYMBOLS = List.of(
       new CryptoSymbol("BTCUSDT", "Bitcoin / Tether", "BTC", "USDT"),
       new CryptoSymbol("ETHUSDT", "Ethereum / Tether", "ETH", "USDT"),
+      new CryptoSymbol("BNBUSDT", "BNB / Tether", "BNB", "USDT"),
       new CryptoSymbol("SOLUSDT", "Solana / Tether", "SOL", "USDT"),
       new CryptoSymbol("XRPUSDT", "XRP / Tether", "XRP", "USDT"),
       new CryptoSymbol("BCHUSDT", "Bitcoin Cash / Tether", "BCH", "USDT"),
@@ -50,15 +59,54 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
   private final String restBaseUrl;
   private final HttpClient httpClient;
   private final ObjectMapper objectMapper;
+  private final Clock clock;
+  private final Duration freshness;
+  private final Duration requestTimeout;
+
+  @Autowired
+  public BinanceSpotMarketDataProvider(
+      @Value("${binance.rest-base-url:https://api.binance.com}") String restBaseUrl,
+      @Value("${market.bundle-freshness:3s}") String freshnessValue,
+      @Value("${market.public-http-timeout:2s}") String requestTimeoutValue
+  ) {
+    this(
+        restBaseUrl,
+        newHttpClient(MarketDataDurations.parsePositive(requestTimeoutValue, Duration.ofSeconds(2))),
+        new ObjectMapper(),
+        Clock.systemUTC(),
+        MarketDataDurations.parsePositive(freshnessValue, Duration.ofSeconds(3)),
+        MarketDataDurations.parsePositive(requestTimeoutValue, Duration.ofSeconds(2)));
+  }
+
+  public BinanceSpotMarketDataProvider(String restBaseUrl) {
+    this(restBaseUrl, newHttpClient(Duration.ofSeconds(2)),
+        new ObjectMapper(), Clock.systemUTC(), Duration.ofSeconds(3), Duration.ofSeconds(2));
+  }
 
   public BinanceSpotMarketDataProvider(
-      @Value("${binance.rest-base-url:https://api.binance.com}") String restBaseUrl
+      String restBaseUrl,
+      HttpClient httpClient,
+      ObjectMapper objectMapper,
+      Clock clock,
+      Duration freshness
+  ) {
+    this(restBaseUrl, httpClient, objectMapper, clock, freshness, Duration.ofSeconds(2));
+  }
+
+  public BinanceSpotMarketDataProvider(
+      String restBaseUrl,
+      HttpClient httpClient,
+      ObjectMapper objectMapper,
+      Clock clock,
+      Duration freshness,
+      Duration requestTimeout
   ) {
     this.restBaseUrl = restBaseUrl;
-    this.httpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(5))
-        .build();
-    this.objectMapper = new ObjectMapper();
+    this.httpClient = httpClient;
+    this.objectMapper = objectMapper;
+    this.clock = clock;
+    this.freshness = MarketDataDurations.positive(freshness, Duration.ofSeconds(3));
+    this.requestTimeout = MarketDataDurations.positive(requestTimeout, Duration.ofSeconds(2));
   }
 
   @Override
@@ -89,6 +137,14 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
 
   @Override
   public Optional<QuoteResponse> fetchLatestQuote(String symbol, String providerSymbol) {
+    return fetchLatestQuote(symbol, providerSymbol, null);
+  }
+
+  private Optional<QuoteResponse> fetchLatestQuote(
+      String symbol,
+      String providerSymbol,
+      MarketRequestDeadline deadline
+  ) {
     if (!isConfigured()) {
       return Optional.empty();
     }
@@ -96,7 +152,7 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
     if (!ticker.endsWith("USDT")) {
       return Optional.empty();
     }
-    return sendJson(ticker24hUri(ticker)).flatMap(body -> parseTicker(symbol, body));
+    return sendJson(ticker24hUri(ticker), deadline).flatMap(body -> parseTicker(symbol, body));
   }
 
   @Override
@@ -159,6 +215,17 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
 
   @Override
   public List<CandleResponse> fetchCandles(String symbol, String providerSymbol, String timeframe, Instant from, Instant to) {
+    return fetchCandles(symbol, providerSymbol, timeframe, from, to, null);
+  }
+
+  private List<CandleResponse> fetchCandles(
+      String symbol,
+      String providerSymbol,
+      String timeframe,
+      Instant from,
+      Instant to,
+      MarketRequestDeadline deadline
+  ) {
     if (!isConfigured() || from == null || to == null || !from.isBefore(to)) {
       return List.of();
     }
@@ -166,29 +233,95 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
     if (!ticker.endsWith("USDT")) {
       return List.of();
     }
-    return sendJson(klinesUri(ticker, timeframe, from, to))
+    return sendJson(klinesUri(ticker, timeframe, from, to), deadline)
         .map(this::parseCandles)
         .orElse(List.of());
   }
 
   @Override
   public Optional<MarketDepthResponse> fetchOrderBook(String symbol, String providerSymbol) {
+    return fetchOrderBook(symbol, providerSymbol, null);
+  }
+
+  private Optional<MarketDepthResponse> fetchOrderBook(
+      String symbol,
+      String providerSymbol,
+      MarketRequestDeadline deadline
+  ) {
     if (!isConfigured()) {
       return Optional.empty();
     }
     String ticker = normalizeTicker(StrUtil.blankToDefault(providerSymbol, symbol));
-    return sendJson(depthUri(ticker)).map(body -> parseDepth(symbol, body));
+    return sendJson(depthUri(ticker), deadline).map(body -> parseDepth(symbol, body));
   }
 
   @Override
   public List<RecentTradeResponse> fetchRecentTrades(String symbol, String providerSymbol, int limit) {
+    return fetchRecentTrades(symbol, providerSymbol, limit, null);
+  }
+
+  private List<RecentTradeResponse> fetchRecentTrades(
+      String symbol,
+      String providerSymbol,
+      int limit,
+      MarketRequestDeadline deadline
+  ) {
     if (!isConfigured()) {
       return List.of();
     }
     String ticker = normalizeTicker(StrUtil.blankToDefault(providerSymbol, symbol));
-    return sendJson(tradesUri(ticker, limit))
+    return sendJson(tradesUri(ticker, limit), deadline)
         .map(body -> parseTrades(symbol, body))
         .orElse(List.of());
+  }
+
+  @Override
+  public Optional<SpotMarketBundle> fetchSpotBundle(
+      String platformSymbol,
+      String providerSymbol,
+      CandleRequest candleRequest
+  ) {
+    if (!configured() || candleRequest == null) {
+      return Optional.empty();
+    }
+    String ticker = normalizeTicker(StrUtil.blankToDefault(providerSymbol, platformSymbol));
+    MarketRequestDeadline deadline = MarketRequestDeadline.start(freshness);
+    Optional<QuoteResponse> quote = fetchLatestQuote(platformSymbol, ticker, deadline);
+    Instant quoteFetchedAt = clock.instant();
+    if (quote.isEmpty()) {
+      return Optional.empty();
+    }
+    Optional<MarketDepthResponse> depth = fetchOrderBook(platformSymbol, ticker, deadline);
+    Instant depthFetchedAt = clock.instant();
+    if (depth.isEmpty()) {
+      return Optional.empty();
+    }
+    List<RecentTradeResponse> trades = fetchRecentTrades(platformSymbol, ticker, 40, deadline);
+    Instant tradesFetchedAt = clock.instant();
+    if (trades.isEmpty()) {
+      return Optional.empty();
+    }
+    List<CandleResponse> candles = fetchCandles(
+        platformSymbol, ticker, candleRequest.timeframe(), candleRequest.from(), candleRequest.to(), deadline);
+    Instant candlesFetchedAt = clock.instant();
+    if (candles.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(MarketBundleAssembler.spot(
+        normalizeTicker(platformSymbol),
+        ticker,
+        code(),
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        quote.get(),
+        depth.get(),
+        trades,
+        candles,
+        MarketBundleAssembler.ComponentObservations.spot(
+            MarketBundleAssembler.snapshotObservedAt(quote.get().timestamp(), quoteFetchedAt),
+            MarketBundleAssembler.snapshotObservedAt(depth.get().timestamp(), depthFetchedAt),
+            tradesFetchedAt,
+            candlesFetchedAt),
+        freshness));
   }
 
   private URI ticker24hUri(String symbol) {
@@ -240,8 +373,18 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
   }
 
   private Optional<JsonNode> sendJson(URI uri) {
+    return sendJson(uri, null);
+  }
+
+  private Optional<JsonNode> sendJson(URI uri, MarketRequestDeadline deadline) {
+    Optional<Duration> timeout = deadline == null
+        ? Optional.of(requestTimeout)
+        : deadline.remainingTimeout(requestTimeout);
+    if (timeout.isEmpty()) {
+      return Optional.empty();
+    }
     HttpRequest request = HttpRequest.newBuilder(uri)
-        .timeout(Duration.ofSeconds(10))
+        .timeout(timeout.get())
         .header("Accept", "application/json")
         .GET()
         .build();
@@ -249,6 +392,9 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
     try {
       HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        return Optional.empty();
+      }
+      if (deadline != null && deadline.expired()) {
         return Optional.empty();
       }
       return Optional.of(objectMapper.readTree(response.body()));
@@ -260,8 +406,16 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
     }
   }
 
+  private static HttpClient newHttpClient(Duration timeout) {
+    return HttpClient.newBuilder().connectTimeout(timeout).build();
+  }
+
   private Optional<QuoteResponse> parseTicker(String requestedSymbol, JsonNode body) {
     if (!body.hasNonNull("bidPrice") || !body.hasNonNull("askPrice") || !body.hasNonNull("lastPrice")) {
+      return Optional.empty();
+    }
+    Optional<Long> observedAt = positiveEpochMillis(body, "closeTime");
+    if (observedAt.isEmpty()) {
       return Optional.empty();
     }
     BigDecimal bid = decimalValue(body, "bidPrice").orElse(BigDecimal.ZERO);
@@ -275,7 +429,7 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
         mid,
         ask.subtract(bid),
         "binance-spot",
-        body.path("closeTime").asLong(Instant.now().toEpochMilli()),
+        observedAt.get(),
         firstDecimal(body, "priceChangePercent").orElse(BigDecimal.ZERO),
         firstDecimal(body, "highPrice").orElse(mid),
         firstDecimal(body, "lowPrice").orElse(mid),
@@ -318,7 +472,7 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
   private MarketDepthResponse parseDepth(String requestedSymbol, JsonNode body) {
     return new MarketDepthResponse(
         normalizeTicker(requestedSymbol),
-        Instant.now().toEpochMilli(),
+        clock.instant().toEpochMilli(),
         parseDepthLevels(body.path("bids")),
         parseDepthLevels(body.path("asks")));
   }
@@ -334,6 +488,18 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
         .toList();
   }
 
+  private Optional<Long> positiveEpochMillis(JsonNode node, String field) {
+    if (!node.hasNonNull(field)) {
+      return Optional.empty();
+    }
+    try {
+      long value = Long.parseLong(node.path(field).asText());
+      return value > 0L ? Optional.of(value) : Optional.empty();
+    } catch (NumberFormatException ignored) {
+      return Optional.empty();
+    }
+  }
+
   private List<RecentTradeResponse> parseTrades(String requestedSymbol, JsonNode body) {
     if (!body.isArray()) {
       return List.of();
@@ -346,7 +512,7 @@ public class BinanceSpotMarketDataProvider implements MarketDataProviderAdapter 
             decimalText(row, "price"),
             decimalText(row, "qty"),
             row.path("isBuyerMaker").asBoolean(false) ? "SELL" : "BUY",
-            row.path("time").asLong(Instant.now().toEpochMilli())))
+            row.path("time").asLong(clock.instant().toEpochMilli())))
         .toList();
   }
 

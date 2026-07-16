@@ -7,11 +7,18 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Locale;
+import java.util.UUID;
 
 /**
  * SymbolRepository 通过 MyBatis-Plus 访问交易品种。
  */
 public interface SymbolRepository extends FxBaseMapper<SymbolEntity> {
+
+  default Optional<SymbolEntity> findByIdForUpdate(UUID id) {
+    return Optional.ofNullable(selectOne(new LambdaQueryWrapper<SymbolEntity>()
+        .eq(SymbolEntity::getId, id)
+        .last("FOR UPDATE")));
+  }
 
   /** 按品种代码查询唯一品种。 */
   default Optional<SymbolEntity> findBySymbol(String symbol) {

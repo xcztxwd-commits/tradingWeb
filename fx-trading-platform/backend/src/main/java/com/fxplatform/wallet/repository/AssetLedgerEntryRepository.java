@@ -4,11 +4,28 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.util.StringUtils;
 
 public interface AssetLedgerEntryRepository extends FxBaseMapper<AssetLedgerEntryEntity> {
+
+  default List<AssetLedgerEntryEntity> findByReferences(
+      UUID accountId,
+      String referenceType,
+      Collection<UUID> referenceIds
+  ) {
+    if (referenceIds == null || referenceIds.isEmpty()) {
+      return List.of();
+    }
+    return selectList(new LambdaQueryWrapper<AssetLedgerEntryEntity>()
+        .eq(AssetLedgerEntryEntity::getAccountId, accountId)
+        .eq(AssetLedgerEntryEntity::getReferenceType, referenceType)
+        .in(AssetLedgerEntryEntity::getReferenceId, referenceIds)
+        .orderByAsc(AssetLedgerEntryEntity::getCreatedAt)
+        .orderByAsc(AssetLedgerEntryEntity::getId));
+  }
 
   default AssetLedgerEntryEntity findByBusinessOperation(
       UUID accountId,
@@ -34,6 +51,19 @@ public interface AssetLedgerEntryRepository extends FxBaseMapper<AssetLedgerEntr
     return selectList(new LambdaQueryWrapper<AssetLedgerEntryEntity>()
         .eq(AssetLedgerEntryEntity::getAccountId, accountId)
         .orderByDesc(AssetLedgerEntryEntity::getCreatedAt));
+  }
+
+  default List<AssetLedgerEntryEntity> findByReference(
+      UUID accountId,
+      String referenceType,
+      UUID referenceId
+  ) {
+    return selectList(new LambdaQueryWrapper<AssetLedgerEntryEntity>()
+        .eq(AssetLedgerEntryEntity::getAccountId, accountId)
+        .eq(AssetLedgerEntryEntity::getReferenceType, referenceType)
+        .eq(AssetLedgerEntryEntity::getReferenceId, referenceId)
+        .orderByAsc(AssetLedgerEntryEntity::getCreatedAt)
+        .orderByAsc(AssetLedgerEntryEntity::getId));
   }
 
   default List<AssetLedgerEntryEntity> findByFilters(

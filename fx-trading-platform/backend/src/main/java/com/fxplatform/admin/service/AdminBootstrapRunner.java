@@ -13,9 +13,13 @@ import org.springframework.stereotype.Component;
 public class AdminBootstrapRunner implements ApplicationRunner {
 
   private final AdminBootstrapService adminBootstrapService;
+  private final AdminBootstrapProperties properties;
 
   @Override
   public void run(ApplicationArguments args) {
+    if (!properties.enabled()) {
+      return;
+    }
     adminBootstrapService.bootstrap();
   }
 }

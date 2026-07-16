@@ -185,11 +185,17 @@ public class AdminFinanceCommandService {
       }
     }
 
-    TradingAccountEntity account = accountRepository.findById(accountId)
+    TradingAccountEntity account = accountRepository.findByIdForUpdate(accountId)
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
     BigDecimal before = orZero(account.getBalance());
     BigDecimal after = before.add(signedAmount);
-    ensureFreeMarginRemainsAvailable(after, orZero(account.getUsedMargin()));
+    BigDecimal beforeEquity = account.getEquity() == null ? before : account.getEquity();
+    BigDecimal beforeFreeMargin = account.getFreeMargin() == null
+        ? beforeEquity.subtract(orZero(account.getUsedMargin()))
+        : account.getFreeMargin();
+    BigDecimal afterEquity = beforeEquity.add(signedAmount);
+    BigDecimal afterFreeMargin = beforeFreeMargin.add(signedAmount);
+    ensureBalanceAndFreeMarginRemainAvailable(after, afterFreeMargin);
 
     AdminFundOperationEntity operation = new AdminFundOperationEntity();
     operation.setAccountId(accountId);
@@ -210,8 +216,8 @@ public class AdminFinanceCommandService {
     }
 
     account.setBalance(after);
-    account.setEquity(after);
-    account.setFreeMargin(after.subtract(orZero(account.getUsedMargin())));
+    account.setEquity(afterEquity);
+    account.setFreeMargin(afterFreeMargin);
     accountRepository.save(account);
 
     ledgerService.recordAdminAdjustment(account, signedAmount, saved.getId(), reason);
@@ -265,8 +271,12 @@ public class AdminFinanceCommandService {
   /**
    * 防止后台出金或负向调整导致可用保证金为负。
    */
-  private void ensureFreeMarginRemainsAvailable(BigDecimal afterBalance, BigDecimal usedMargin) {
-    if (afterBalance.subtract(usedMargin).compareTo(BigDecimal.ZERO) < 0) {
+  private void ensureBalanceAndFreeMarginRemainAvailable(
+      BigDecimal afterBalance,
+      BigDecimal afterFreeMargin
+  ) {
+    if (afterBalance.compareTo(BigDecimal.ZERO) < 0
+        || afterFreeMargin.compareTo(BigDecimal.ZERO) < 0) {
       throw new BusinessException("INSUFFICIENT_FREE_MARGIN", "Insufficient free margin");
     }
   }

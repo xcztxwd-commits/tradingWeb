@@ -1,5 +1,5 @@
 import { ChevronDown, List, PanelRight, ShoppingBag } from 'lucide-react'
-import type { CSSProperties, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { formatMarketPrice } from '../../../features/market/tradingModels'
@@ -36,25 +36,19 @@ export function MobileTradingTerminal({
   const positive = quote.changePercent >= 0
   const directionClassName = positive ? styles.positive : styles.negative
   const spread = Math.max(quote.ask - quote.bid, 0)
-  const bidShare = positive ? 60 : 42
-  const askShare = 100 - bidShare
-  const bidAskStyle = { '--bid-percent': `${bidShare}%` } as CSSProperties
+  const productLabel = market.productType === 'LINEAR_PERP'
+    ? t('trading.perpetual')
+    : market.productType === 'CRYPTO_SPOT'
+      ? t('trading.spot')
+      : '--'
 
   return (
     <section className={styles.terminal} aria-label={t('trading.mobileTerminal')}>
-      <nav className={styles.marketTabs} aria-label={t('markets.title')}>
-        {['闪兑', '现货', '合约', 'DEX', '策略&跟单'].map((label) => (
-          <button key={label} type="button" className={label === '合约' ? styles.activeMarketTab : undefined}>
-            {label}
-          </button>
-        ))}
-      </nav>
-
       <header className={styles.contractHeader}>
         <button type="button" className={styles.symbolButton} onClick={onOpenMarkets}>
           <span>
             <strong>{market.symbol}</strong>
-            <small>永续</small>
+            <small>{productLabel}</small>
           </span>
           <ChevronDown size={16} aria-hidden="true" />
         </button>
@@ -87,49 +81,6 @@ export function MobileTradingTerminal({
       <div className={styles.marketDataStrip} data-tone={marketDataStatusView.tone} aria-live="polite">
         <strong>{marketDataStatusView.label}</strong>
         <span>{marketDataStatusView.detail}</span>
-      </div>
-
-      <section className={styles.orderSurface} aria-label={t('trading.trade')}>
-        <div className={styles.orderControls}>
-          <button type="button" className={styles.orderControlActive}>开仓</button>
-          <button type="button">平仓</button>
-          <button type="button">全仓</button>
-          <button type="button">100x</button>
-        </div>
-        <button type="button" className={styles.orderTypeButton} onClick={onOpenTrade}>
-          市价委托
-          <ChevronDown size={15} aria-hidden="true" />
-        </button>
-        <div className={styles.quantityField}>
-          <span>数量</span>
-          <strong>张</strong>
-        </div>
-        <div className={styles.positionHints}>
-          <span>可用</span>
-          <strong>7.34 {market.quote}</strong>
-        </div>
-        <div className={styles.stopRow}>
-          <span>止盈/止损</span>
-          <button type="button" onClick={onOpenTrade}>高级</button>
-        </div>
-        <div className={styles.triggerGrid}>
-          <span>止盈触发价</span>
-          <b>{market.quote}</b>
-          <span>止损触发价</span>
-          <b>{market.quote}</b>
-        </div>
-        <button type="button" className={styles.longButton} onClick={onOpenTrade}>
-          开多 100x
-        </button>
-        <button type="button" className={styles.shortButton} onClick={onOpenTrade}>
-          开空 100x
-        </button>
-      </section>
-
-      <div className={styles.bidAskRatio} style={bidAskStyle} aria-label={t('trading.depthSummary')}>
-        <span>B {bidShare}%</span>
-        <strong>{formatMarketPrice(market.symbol, quote.mid)}</strong>
-        <span>{askShare}% S</span>
       </div>
 
       <section className={styles.chartSection} aria-label={t('trading.chartTitle', { symbol: market.symbol })}>

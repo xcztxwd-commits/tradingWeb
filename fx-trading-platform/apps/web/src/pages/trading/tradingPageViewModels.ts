@@ -11,7 +11,11 @@ import type {
   TradingSplitDirection
 } from '../../stores/layoutStore'
 import type { AccountSummary, LedgerEntry, OrderPayload } from '../../types/trading'
+import type { OcoOrderPayload } from '../../types/trading'
+import type { AccountTransferResponse, BatchActionResponse, FundingSettlement, OcoOrderGroupResponse, Trade } from '@fx-platform/shared-types'
 import type { TradingMarketDataStatusView } from './tradingPageMarketDataStatus'
+import type { PerpetualTradingControlsModel } from './usePerpetualTradingControls'
+import type { TradingProduct } from '../../app/tradingRoutes'
 
 export type ChartThemeMode = 'dark' | 'light'
 
@@ -34,10 +38,15 @@ export type TradingAccountPanelData = {
   ledgerEntries: LedgerEntry[]
   loading: boolean
   orders: OrderResponse[]
+  trades: Trade[]
   positions: PositionResponse[]
   positionHistory: PositionResponse[]
+  fundingSettlements: FundingSettlement[]
+  transfers: AccountTransferResponse[]
   sessionReady: boolean
   onClosePosition: (position: PositionResponse) => Promise<unknown> | void
+  onCancelAllOrders: () => Promise<BatchActionResponse>
+  onCloseAllPositions: () => Promise<BatchActionResponse>
 }
 
 export type TradingWorkspaceLayoutControls = {
@@ -74,6 +83,7 @@ export type TradingTerminalViewProps = {
   onRetrySession: () => Promise<void> | void
   onSelectSymbol: (symbol: string) => void
   onFavorite: (symbol: string) => void
+  product: TradingProduct
   quote: TradingQuote
   quotes: Record<string, TradingQuote>
   sessionError?: string | null
@@ -81,6 +91,8 @@ export type TradingTerminalViewProps = {
   sessionStatusLabel: string
   sessionStatusText: string
   submitOrder: (payload: OrderPayload) => Promise<OrderResponse | void>
+  submitOco: (payload: OcoOrderPayload) => Promise<OcoOrderGroupResponse | void>
+  perpetualControls: PerpetualTradingControlsModel
   symbol: string
   tradeMinOrderAmount: number
   tradePricePrecision: number
@@ -90,8 +102,4 @@ export type TradingTerminalViewProps = {
   token: string | null
   tradePanelSessionMode: TradingSessionMode
   workspaceLayoutControls: TradingWorkspaceLayoutControls
-}
-
-export function shouldAllowChartMockFallback(market: TradingMarket) {
-  return !market.provider && market.category !== 'fx'
 }

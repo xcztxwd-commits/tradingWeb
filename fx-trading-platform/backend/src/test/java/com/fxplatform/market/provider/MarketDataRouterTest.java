@@ -2,7 +2,10 @@ package com.fxplatform.market.provider;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 
 import com.fxplatform.chart.dto.CandleResponse;
 import com.fxplatform.common.exception.BusinessException;
@@ -10,6 +13,9 @@ import com.fxplatform.market.dto.MarketDepthResponse;
 import com.fxplatform.market.dto.MarketDepthLevelResponse;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
+import com.fxplatform.market.model.MarketSourceMode;
+import com.fxplatform.market.model.PerpetualMarketBundle;
+import com.fxplatform.market.model.SpotMarketBundle;
 import com.fxplatform.market.entity.DataProviderEntity;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.entity.SymbolProviderBindingEntity;
@@ -17,8 +23,13 @@ import com.fxplatform.market.repository.DataProviderCapabilityRepository;
 import com.fxplatform.market.repository.DataProviderRepository;
 import com.fxplatform.market.repository.SymbolProviderBindingRepository;
 import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.trading.entity.FundingRateEntity;
+import com.fxplatform.trading.repository.FundingRateRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,6 +46,199 @@ class MarketDataRouterTest {
 
   @Mock
   private ProviderResolver providerResolver;
+
+  @Mock
+  private MarketBundleResolver marketBundleResolver;
+
+  @Mock
+  private FundingRateRepository fundingRateRepository;
+
+  @Test
+  void p0SpotComponentsAlwaysComeFromAuthoritativeWholeBundle() {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    SpotMarketBundle bundle = spotBundle(now);
+    when(providerResolver.requireEnabledSymbol("BTCUSDT")).thenReturn(enabledSymbol("BTCUSDT"));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(bundle);
+    MarketDataRouter router = new MarketDataRouter(
+        providerResolver, marketBundleResolver, Clock.fixed(now, ZoneOffset.UTC));
+
+    QuoteResponse quote = router.latestQuote("BTCUSDT");
+    MarketDepthResponse depth = router.orderBook("BTCUSDT");
+    List<RecentTradeResponse> trades = router.recentTrades("BTCUSDT", 10);
+    List<CandleResponse> candles = router.candles(
+        "BTCUSDT", "1m", now.minus(Duration.ofHours(1)), now);
+
+    assertThat(quote.providerCode()).isEqualTo("okx");
+    assertThat(quote.sourceMode()).isEqualTo(MarketSourceMode.PUBLIC_EXTERNAL);
+    assertThat(quote.asOf()).isEqualTo(bundle.asOf());
+    assertThat(depth).isSameAs(bundle.orderBook());
+    assertThat(trades).containsExactlyElementsOf(bundle.recentTrades());
+    assertThat(candles).containsExactlyElementsOf(bundle.candles());
+  }
+
+  @Test
+  void p0PerpetualReferenceKeepsMarkIndexAndSourceMetadata() {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    PerpetualMarketBundle bundle = perpBundle(now);
+    when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP")).thenReturn(enabledSymbol("BTCUSDT-PERP"));
+    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    MarketDataRouter router = new MarketDataRouter(
+        providerResolver, marketBundleResolver, Clock.fixed(now, ZoneOffset.UTC));
+
+    var reference = router.perpetualReference("BTCUSDT-PERP");
+
+    assertThat(reference.symbol()).isEqualTo("BTCUSDT-PERP");
+    assertThat(reference.providerSymbol()).isEqualTo("BTC-USDT-SWAP");
+    assertThat(reference.providerCode()).isEqualTo("okx-swap");
+    assertThat(reference.mark()).isEqualByComparingTo("100.2");
+    assertThat(reference.index()).isEqualByComparingTo("100.1");
+    assertThat(reference.stale()).isFalse();
+  }
+
+  @Test
+  void p0PerpetualReferenceProjectsLatestFundingCycleWithoutReplacingMarketSource() {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    Instant fundingTime = Instant.parse("2026-07-12T08:00:00Z");
+    Instant nextFundingTime = Instant.parse("2026-07-12T16:00:00Z");
+    PerpetualMarketBundle bundle = perpBundle(now);
+    FundingRateEntity funding = new FundingRateEntity();
+    funding.setSymbol("BTCUSDT-PERP");
+    funding.setFundingRate(new BigDecimal("-0.00025"));
+    funding.setFundingTime(fundingTime);
+    funding.setNextFundingTime(nextFundingTime);
+    funding.setProviderCode("fixed");
+    funding.setAsOf(Instant.parse("2026-07-12T00:00:00Z"));
+    when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP"))
+        .thenReturn(enabledSymbol("BTCUSDT-PERP"));
+    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    when(fundingRateRepository.findLatestBySymbol("BTCUSDT-PERP"))
+        .thenReturn(Optional.of(funding));
+    MarketDataRouter router = new MarketDataRouter(
+        providerResolver,
+        marketBundleResolver,
+        fundingRateRepository,
+        Clock.fixed(now, ZoneOffset.UTC));
+
+    var reference = router.perpetualReference("BTCUSDT-PERP");
+
+    assertThat(reference.providerCode()).isEqualTo("okx-swap");
+    assertThat(reference.sourceMode()).isEqualTo(MarketSourceMode.PUBLIC_EXTERNAL);
+    assertThat(reference.fundingRate()).isEqualByComparingTo("-0.00025");
+    assertThat(reference.fundingTime()).isEqualTo(fundingTime);
+    assertThat(reference.nextFundingTime()).isEqualTo(nextFundingTime);
+    assertThat(reference.fundingSource()).isEqualTo("fixed");
+    verify(fundingRateRepository).findLatestBySymbol("BTCUSDT-PERP");
+  }
+
+  @Test
+  void p0PerpetualReferenceHidesFundingCycleThatIsNoLongerActive() {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    PerpetualMarketBundle bundle = perpBundle(now);
+    FundingRateEntity funding = new FundingRateEntity();
+    funding.setSymbol("BTCUSDT-PERP");
+    funding.setFundingRate(new BigDecimal("0.0001"));
+    funding.setFundingTime(now);
+    funding.setNextFundingTime(now.plusSeconds(28_800));
+    funding.setProviderCode("okx-swap");
+    funding.setAsOf(now);
+    when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP"))
+        .thenReturn(enabledSymbol("BTCUSDT-PERP"));
+    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    when(fundingRateRepository.findLatestBySymbol("BTCUSDT-PERP"))
+        .thenReturn(Optional.of(funding));
+    MarketDataRouter router = new MarketDataRouter(
+        providerResolver,
+        marketBundleResolver,
+        fundingRateRepository,
+        Clock.fixed(now, ZoneOffset.UTC));
+
+    var reference = router.perpetualReference("BTCUSDT-PERP");
+
+    assertThat(reference.providerCode()).isEqualTo("okx-swap");
+    assertThat(reference.fundingRate()).isNull();
+    assertThat(reference.fundingTime()).isNull();
+    assertThat(reference.nextFundingTime()).isNull();
+    assertThat(reference.fundingSource()).isNull();
+  }
+
+  @Test
+  void p0PerpetualReferenceEvaluatesFreshnessAfterFundingLookup() {
+    Instant beforeLookup = Instant.parse("2026-07-12T00:00:09Z");
+    Instant afterLookup = Instant.parse("2026-07-12T00:00:15Z");
+    AtomicReference<Instant> currentTime = new AtomicReference<>(beforeLookup);
+    Clock advancingClock = org.mockito.Mockito.mock(Clock.class);
+    when(advancingClock.instant()).thenAnswer(ignored -> currentTime.get());
+    PerpetualMarketBundle bundle = perpBundle(beforeLookup);
+    FundingRateEntity funding = new FundingRateEntity();
+    funding.setSymbol("BTCUSDT-PERP");
+    funding.setFundingRate(new BigDecimal("0.0001"));
+    funding.setFundingTime(Instant.parse("2026-07-12T00:00:12Z"));
+    funding.setNextFundingTime(Instant.parse("2026-07-12T08:00:12Z"));
+    funding.setProviderCode("okx-swap");
+    funding.setAsOf(beforeLookup);
+    when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP"))
+        .thenReturn(enabledSymbol("BTCUSDT-PERP"));
+    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    when(fundingRateRepository.findLatestBySymbol("BTCUSDT-PERP"))
+        .thenAnswer(ignored -> {
+          currentTime.set(afterLookup);
+          return Optional.of(funding);
+        });
+    MarketDataRouter router = new MarketDataRouter(
+        providerResolver,
+        marketBundleResolver,
+        fundingRateRepository,
+        advancingClock);
+
+    var reference = router.perpetualReference("BTCUSDT-PERP");
+
+    assertThat(reference.stale()).isTrue();
+    assertThat(reference.fundingRate()).isNull();
+    assertThat(reference.fundingTime()).isNull();
+    assertThat(reference.nextFundingTime()).isNull();
+    assertThat(reference.fundingSource()).isNull();
+  }
+
+  @Test
+  void p0EndpointsPreserveQuoteChartAndOrderBookFeatureFlags() {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    SymbolEntity symbol = enabledSymbol("BTCUSDT");
+    when(providerResolver.requireEnabledSymbol("BTCUSDT")).thenReturn(symbol);
+    MarketDataRouter router = new MarketDataRouter(
+        providerResolver, marketBundleResolver, Clock.fixed(now, ZoneOffset.UTC));
+
+    symbol.setQuoteEnabled(false);
+    assertThatThrownBy(() -> router.latestQuote("BTCUSDT"))
+        .isInstanceOfSatisfying(BusinessException.class,
+            error -> assertThat(error.getCode()).isEqualTo("SYMBOL_QUOTE_DISABLED"));
+
+    symbol.setQuoteEnabled(true);
+    symbol.setChartEnabled(false);
+    assertThatThrownBy(() -> router.candles("BTCUSDT", "1m", now.minusSeconds(60), now))
+        .isInstanceOfSatisfying(BusinessException.class,
+            error -> assertThat(error.getCode()).isEqualTo("SYMBOL_CHART_DISABLED"));
+
+    symbol.setChartEnabled(true);
+    symbol.setOrderBookEnabled(false);
+    assertThatThrownBy(() -> router.orderBook("BTCUSDT"))
+        .isInstanceOfSatisfying(BusinessException.class,
+            error -> assertThat(error.getCode()).isEqualTo("SYMBOL_ORDER_BOOK_DISABLED"));
+  }
+
+  @Test
+  void p0TradesKeepLegacyEnabledSymbolSemanticsWithoutAnotherFeatureFlag() {
+    Instant now = Instant.parse("2026-07-12T00:00:10Z");
+    SymbolEntity symbol = enabledSymbol("BTCUSDT");
+    symbol.setQuoteEnabled(false);
+    symbol.setChartEnabled(false);
+    symbol.setOrderBookEnabled(false);
+    when(providerResolver.requireEnabledSymbol("BTCUSDT")).thenReturn(symbol);
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(spotBundle(now));
+    MarketDataRouter router = new MarketDataRouter(
+        providerResolver, marketBundleResolver, Clock.fixed(now, ZoneOffset.UTC));
+
+    assertThat(router.recentTrades("BTCUSDT", 10)).hasSize(1);
+  }
 
   @Test
   void latestQuoteRejectsQuoteDisabledSymbol() {
@@ -230,6 +434,52 @@ class MarketDataRouterTest {
         new BigDecimal("0.1"),
         source,
         1781462400000L);
+  }
+
+  private SymbolEntity enabledSymbol(String code) {
+    SymbolEntity symbol = symbol(true, true, true);
+    symbol.setSymbol(code);
+    return symbol;
+  }
+
+  private SpotMarketBundle spotBundle(Instant now) {
+    Instant expiresAt = now.plusSeconds(5);
+    MarketDepthResponse depth = new MarketDepthResponse(
+        "BTCUSDT", now.toEpochMilli(),
+        List.of(new MarketDepthLevelResponse(new BigDecimal("99"), BigDecimal.ONE)),
+        List.of(new MarketDepthLevelResponse(new BigDecimal("101"), BigDecimal.ONE)),
+        "okx", "BTC-USDT", MarketSourceMode.PUBLIC_EXTERNAL, now, expiresAt, false);
+    RecentTradeResponse trade = new RecentTradeResponse(
+        "1", "BTCUSDT", new BigDecimal("100"), BigDecimal.ONE, "BUY", now.toEpochMilli(),
+        "okx", "BTC-USDT", MarketSourceMode.PUBLIC_EXTERNAL, now, expiresAt, false);
+    CandleResponse candle = new CandleResponse(
+        now.minusSeconds(60).toEpochMilli(), new BigDecimal("100"), new BigDecimal("101"),
+        new BigDecimal("99"), new BigDecimal("100"), BigDecimal.ONE,
+        "okx", "BTC-USDT", MarketSourceMode.PUBLIC_EXTERNAL, now, expiresAt, false);
+    return new SpotMarketBundle(
+        "BTCUSDT", "BTC-USDT", "okx", MarketSourceMode.PUBLIC_EXTERNAL,
+        new BigDecimal("99"), new BigDecimal("101"), new BigDecimal("100"),
+        depth, List.of(trade), List.of(candle), now, expiresAt);
+  }
+
+  private PerpetualMarketBundle perpBundle(Instant now) {
+    SpotMarketBundle spot = spotBundle(now);
+    MarketDepthResponse depth = new MarketDepthResponse(
+        "BTCUSDT-PERP", spot.orderBook().timestamp(), spot.orderBook().bids(), spot.orderBook().asks(),
+        "okx-swap", "BTC-USDT-SWAP", MarketSourceMode.PUBLIC_EXTERNAL,
+        spot.asOf(), spot.expiresAt(), false);
+    RecentTradeResponse trade = new RecentTradeResponse(
+        "1", "BTCUSDT-PERP", new BigDecimal("100"), BigDecimal.ONE, "BUY", now.toEpochMilli(),
+        "okx-swap", "BTC-USDT-SWAP", MarketSourceMode.PUBLIC_EXTERNAL, now, spot.expiresAt(), false);
+    CandleResponse candle = new CandleResponse(
+        now.minusSeconds(60).toEpochMilli(), new BigDecimal("100"), new BigDecimal("101"),
+        new BigDecimal("99"), new BigDecimal("100"), BigDecimal.ONE,
+        "okx-swap", "BTC-USDT-SWAP", MarketSourceMode.PUBLIC_EXTERNAL, now, spot.expiresAt(), false);
+    return new PerpetualMarketBundle(
+        "BTCUSDT-PERP", "BTC-USDT-SWAP", "okx-swap", MarketSourceMode.PUBLIC_EXTERNAL,
+        new BigDecimal("99"), new BigDecimal("101"), new BigDecimal("100"),
+        new BigDecimal("100.2"), new BigDecimal("100.1"), depth,
+        List.of(trade), List.of(candle), now, spot.expiresAt());
   }
 
   private record RoutingAdapter(

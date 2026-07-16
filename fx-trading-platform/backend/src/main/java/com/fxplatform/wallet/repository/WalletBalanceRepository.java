@@ -6,6 +6,8 @@ import com.fxplatform.wallet.entity.WalletBalanceEntity;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 public interface WalletBalanceRepository extends FxBaseMapper<WalletBalanceEntity> {
 
@@ -30,4 +32,26 @@ public interface WalletBalanceRepository extends FxBaseMapper<WalletBalanceEntit
         .orderByAsc(WalletBalanceEntity::getWalletType)
         .orderByAsc(WalletBalanceEntity::getAsset));
   }
+
+  @Select("""
+      SELECT *
+      FROM core.wallet_balances
+      WHERE account_id = #{accountId}
+        AND wallet_type = #{walletType}
+        AND asset = #{asset}
+      FOR UPDATE
+      """)
+  Optional<WalletBalanceEntity> findByAccountIdAndWalletTypeAndAssetForUpdate(
+      @Param("accountId") UUID accountId,
+      @Param("walletType") String walletType,
+      @Param("asset") String asset);
+
+  @Select("""
+      SELECT *
+      FROM core.wallet_balances
+      WHERE account_id = #{accountId}
+      ORDER BY wallet_type, asset
+      FOR UPDATE
+      """)
+  List<WalletBalanceEntity> findByAccountIdForUpdate(@Param("accountId") UUID accountId);
 }

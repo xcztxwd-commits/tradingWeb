@@ -15,7 +15,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@TableName("market.symbol_provider_bindings")
+@TableName(value = "market.symbol_provider_bindings", autoResultMap = true)
 public class SymbolProviderBindingEntity {
 
   @TableId(value = "id", type = IdType.INPUT)

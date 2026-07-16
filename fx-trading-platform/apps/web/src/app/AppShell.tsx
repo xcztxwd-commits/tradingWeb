@@ -11,6 +11,7 @@ import { getSessionStatus } from '../services/authApi'
 import { AccountUserMenu } from './components/AccountUserMenu'
 import { TradingNavMenu } from './components/TradingNavMenu'
 import { authRoutes, authenticatedNavItems, guestNavItems, mobileNavItems, type AppNavItem } from './navigation'
+import { resolveMobileTradingPath } from './tradingRoutes'
 
 type AppShellProps = {
   children: ReactNode
@@ -18,7 +19,7 @@ type AppShellProps = {
 
 export function AppShell({ children }: AppShellProps) {
   const location = useLocation()
-  const isTerminalRoute = location.pathname === '/trading'
+  const isTerminalRoute = /^\/trade\/(spot|perpetual)(?:\/|$)/.test(location.pathname)
   const isAuthRoute = authRoutes.includes(location.pathname as (typeof authRoutes)[number])
   const { currentTheme, toggleTheme } = useTheme()
   const [session, setSession] = useState(() => ({
@@ -139,7 +140,7 @@ function TopNavLink({ item, pathname }: { item: AppNavItem; pathname: string }) 
     <NavLink
       end={item.to === '/'}
       to={item.to}
-      className={({ isActive }) => `app-topbar__link${isActive || item.activePaths?.includes(pathname) ? ' active' : ''}`}
+      className={({ isActive }) => `app-topbar__link${isActive || isConfiguredNavPathActive(item, pathname) ? ' active' : ''}`}
     >
       <span>{t(item.labelKey)}</span>
     </NavLink>
@@ -148,16 +149,21 @@ function TopNavLink({ item, pathname }: { item: AppNavItem; pathname: string }) 
 
 function MobileNavLink({ item, pathname }: { item: AppNavItem; pathname: string }) {
   const { t } = useTranslation()
-  const tradeClassName = item.to === '/trading' ? ' mobile-tab--trade' : ''
+  const tradeClassName = item.to.startsWith('/trade/') ? ' mobile-tab--trade' : ''
+  const target = item.to.startsWith('/trade/') ? resolveMobileTradingPath(pathname) : item.to
 
   return (
     <NavLink
-      end={item.to === '/'}
-      to={item.to}
-      className={({ isActive }) => `mobile-tab${tradeClassName}${isActive || item.activePaths?.includes(pathname) ? ' active' : ''}`}
+      end={target === '/'}
+      to={target}
+      className={({ isActive }) => `mobile-tab${tradeClassName}${isActive || isConfiguredNavPathActive(item, pathname) ? ' active' : ''}`}
     >
       <item.icon size={19} aria-hidden="true" />
       <span>{t(item.labelKey)}</span>
     </NavLink>
   )
+}
+
+function isConfiguredNavPathActive(item: AppNavItem, pathname: string) {
+  return item.activePaths?.some((path) => pathname === path || pathname.startsWith(`${path}/`)) ?? false
 }

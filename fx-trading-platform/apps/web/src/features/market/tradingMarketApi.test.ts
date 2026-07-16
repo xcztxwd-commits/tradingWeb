@@ -15,10 +15,12 @@ import {
   buildMarketSymbolRulesPath,
   buildMarketStatusPath,
   buildMarketSymbolsPath,
+  createTradingQuoteFromMarket,
   createTradingMarketPlaceholder,
   mapInstrumentRulesToTradingRules,
   mapOrderBookToMarketData,
   mapQuoteToTradingQuote,
+  mapRecentTradeBatchToMarketData,
   mapRecentTradesToMarketData,
   mapSymbolToTradingMarket,
   tradingMarketEndpoints
@@ -82,6 +84,7 @@ describe('trading market API adapters', () => {
 
   it('builds one backend request for batch quote hydration', () => {
     assert.equal(buildMarketQuotesPath(['eur-usd', 'BTCUSDT', 'EURUSD']), '/api/market/quotes?symbols=EURUSD%2CBTCUSDT')
+    assert.equal(buildMarketQuotesPath(['btc_usdt-perp']), '/api/market/quotes?symbols=BTCUSDT-PERP')
   })
 
   it('requests enough symbols to keep provider forex rows from being truncated by local seed rows', () => {
@@ -92,6 +95,8 @@ describe('trading market API adapters', () => {
   it('builds backend instrument rules endpoints by symbol', () => {
     assert.equal(buildMarketSymbolRulesPath('btcusdt'), '/api/market/symbols/BTCUSDT/rules')
     assert.equal(buildMarketSymbolRulesBatchPath(['btcusdt', 'ethusdt']), '/api/market/symbol-rules?symbols=BTCUSDT%2CETHUSDT')
+    assert.equal(buildMarketSymbolRulesPath('btc_usdt-perp'), '/api/market/symbols/BTCUSDT-PERP/rules')
+    assert.equal(buildMarketSymbolRulesBatchPath(['btc/usdt_perp']), '/api/market/symbol-rules?symbols=BTCUSDT-PERP')
   })
 
   it('maps backend instrument rules to numeric frontend rules', () => {
@@ -325,6 +330,50 @@ describe('trading market API adapters', () => {
     assert.equal(quote.volume, '12.35K')
   })
 
+  it('never turns a P0 symbol-list metric into an executable quote', () => {
+    const quote = createTradingQuoteFromMarket({
+      ...createTradingMarketPlaceholder('BTCUSDT'),
+      last: 60_000,
+      high24h: 61_000,
+      low24h: 59_000,
+      tradable: true,
+      quoteTimestamp: Date.now()
+    })
+
+    assert.equal(quote.mid, 0)
+    assert.equal(quote.timestamp, 0)
+    assert.equal(quote.tradable, false)
+  })
+
+  it('preserves authoritative quote source metadata and freshness', () => {
+    const quote = mapQuoteToTradingQuote({
+      type: 'quote',
+      symbol: 'BTCUSDT',
+      bid: '59999',
+      ask: '60001',
+      mid: '60000',
+      spread: '2',
+      source: 'binance',
+      timestamp: 1_784_000_000_000,
+      providerCode: 'binance',
+      providerSymbol: 'BTCUSDT',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      asOf: '2026-07-13T00:00:00.000Z',
+      expiresAt: '2026-07-13T00:00:05.000Z',
+      stale: false
+    }, undefined, Date.parse('2026-07-13T00:00:01.000Z'))
+
+    assert.deepEqual(quote.marketSource, {
+      providerCode: 'binance',
+      providerSymbol: 'BTCUSDT',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      asOf: '2026-07-13T00:00:00.000Z',
+      expiresAt: '2026-07-13T00:00:05.000Z',
+      stale: false
+    })
+    assert.equal(quote.tradable, true)
+  })
+
   it('maps backend order book rows to the market side panel snapshot shape', () => {
     const snapshot = mapOrderBookToMarketData({
       symbol: 'EURUSD',
@@ -337,6 +386,7 @@ describe('trading market API adapters', () => {
     })
 
     assert.deepEqual(snapshot, {
+      symbol: 'EURUSD',
       bids: [
         { price: 1.08318, amount: 2.5 },
         { price: 1.08317, amount: 1.25 }
@@ -371,5 +421,40 @@ describe('trading market API adapters', () => {
       { id: 'EURUSD-1', price: 1.0832, amount: 0.42, side: 'buy', time: 1_780_000_000_000 },
       { id: 'EURUSD-2', price: 1.08318, amount: 0.24, side: 'sell', time: 1_780_000_001_000 }
     ])
+  })
+
+  it('preserves one bundle source on depth and recent-trade batches', () => {
+    const depth = mapOrderBookToMarketData({
+      symbol: 'BTCUSDT',
+      timestamp: 1_784_000_000_000,
+      bids: [{ price: '59999', amount: '2' }],
+      asks: [{ price: '60001', amount: '3' }],
+      providerCode: 'binance',
+      providerSymbol: 'BTCUSDT',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      asOf: '2026-07-13T00:00:00.000Z',
+      expiresAt: '2026-07-13T00:00:05.000Z',
+      stale: false
+    })
+    const trades = mapRecentTradeBatchToMarketData([{
+      id: 't-1',
+      symbol: 'BTCUSDT',
+      price: '60000',
+      amount: '0.1',
+      side: 'buy',
+      timestamp: 1_784_000_000_000,
+      providerCode: 'binance',
+      providerSymbol: 'BTCUSDT',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      asOf: '2026-07-13T00:00:00.000Z',
+      expiresAt: '2026-07-13T00:00:05.000Z',
+      stale: false
+    }])
+
+    assert.equal(depth.symbol, 'BTCUSDT')
+    assert.equal(depth.source?.providerCode, 'binance')
+    assert.equal(trades.symbol, 'BTCUSDT')
+    assert.equal(trades.source?.providerCode, 'binance')
+    assert.equal(trades.recentTrades[0]?.id, 't-1')
   })
 })

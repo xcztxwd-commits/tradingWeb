@@ -1,0 +1,283 @@
+package com.fxplatform.market.adapter.binance;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fxplatform.market.model.CandleRequest;
+import com.fxplatform.market.model.MarketSourceMode;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+class BinanceUsdMMarketDataProviderTest {
+
+  private static final Instant NOW = Instant.parse("2026-07-12T00:00:10Z");
+  private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
+
+  @ParameterizedTest
+  @MethodSource("invalidVenueTimestamps")
+  void bundleRejectsInvalidVenueTimestamp(String component, String timestamp) throws IOException {
+    HttpServer server = completeServer(Map.of(component, timestamp));
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.start();
+    try {
+      assertThat(provider(server).fetchPerpetualBundle(
+          "BTCUSDT-PERP", "BTCUSDT",
+          new CandleRequest("1m", NOW.minusSeconds(60), NOW))).isEmpty();
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  private static Stream<Arguments> invalidVenueTimestamps() {
+    return Stream.of("ticker", "book", "reference", "depth")
+        .flatMap(component -> Stream.of("MISSING", "not-a-number", "0")
+            .map(timestamp -> Arguments.of(component, timestamp)));
+  }
+
+  @Test
+  void configuredPublicTimeoutStopsWholeBundleBeforeBookAndDownstreamRequests() throws IOException {
+    AtomicInteger downstreamRequests = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.createContext("/fapi/v1/ticker/24hr", exchange -> {
+      java.util.concurrent.locks.LockSupport.parkNanos(Duration.ofMillis(250).toNanos());
+      writeJson(exchange, "{\"lastPrice\":\"1.5\",\"closeTime\":1783814410000}");
+    });
+    for (String path : List.of(
+        "/fapi/v1/ticker/bookTicker", "/fapi/v1/premiumIndex", "/fapi/v1/depth",
+        "/fapi/v1/trades", "/fapi/v1/klines")) {
+      server.createContext(path, exchange -> {
+        downstreamRequests.incrementAndGet();
+        writeJson(exchange, "{}");
+      });
+    }
+    server.start();
+    try {
+      var provider = new BinanceUsdMMarketDataProvider(
+          "http://127.0.0.1:" + server.getAddress().getPort(),
+          HttpClient.newHttpClient(), new ObjectMapper(), CLOCK,
+          Duration.ofSeconds(5), Duration.ofMillis(50));
+
+      var bundle = provider.fetchPerpetualBundle(
+          "BTCUSDT-PERP", "BTCUSDT",
+          new CandleRequest("1m", NOW.minusSeconds(60), NOW));
+
+      assertThat(bundle).isEmpty();
+      assertThat(downstreamRequests).hasValue(0);
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void bundleFreshnessBoundsTheCumulativeCandidateRequestTime() throws IOException {
+    AtomicInteger requests = new AtomicInteger();
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    Duration responseDelay = Duration.ofMillis(70);
+    delayedJsonContext(server, requests, responseDelay, "/fapi/v1/ticker/24hr", """
+        {"lastPrice":"65000.15","closeTime":%d}
+        """.formatted(NOW.toEpochMilli()));
+    delayedJsonContext(server, requests, responseDelay, "/fapi/v1/ticker/bookTicker", """
+        {"bidPrice":"65000.10","askPrice":"65000.20","time":%d}
+        """.formatted(NOW.toEpochMilli()));
+    delayedJsonContext(server, requests, responseDelay, "/fapi/v1/premiumIndex", """
+        {"markPrice":"65000.25","indexPrice":"65000.05","time":%d}
+        """.formatted(NOW.toEpochMilli()));
+    delayedJsonContext(server, requests, responseDelay, "/fapi/v1/depth", """
+        {"E":%d,"bids":[["65000.10","1.2"]],"asks":[["65000.20","2.3"]]}
+        """.formatted(NOW.toEpochMilli()));
+    delayedJsonContext(server, requests, responseDelay, "/fapi/v1/trades", """
+        [{"id":10,"price":"65000.15","qty":"0.3","isBuyerMaker":false,"time":1700000000000}]
+        """);
+    delayedJsonContext(server, requests, responseDelay, "/fapi/v1/klines", """
+        [[1700000000000,"64000","65100","63900","65000","12.4"]]
+        """);
+    server.start();
+    try {
+      var provider = new BinanceUsdMMarketDataProvider(
+          "http://127.0.0.1:" + server.getAddress().getPort(),
+          HttpClient.newHttpClient(), new ObjectMapper(), CLOCK,
+          Duration.ofMillis(160), Duration.ofMillis(200));
+
+      long startedAt = System.nanoTime();
+      var bundle = provider.fetchPerpetualBundle(
+          "BTCUSDT-PERP", "BTCUSDT", new CandleRequest("1m", NOW.minusSeconds(60), NOW));
+      Duration elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
+
+      assertThat(bundle).isEmpty();
+      assertThat(requests.get()).isLessThan(6);
+      assertThat(elapsed).isLessThan(Duration.ofMillis(600));
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void fixtureBuildsCompleteCanonicalPerpetualBundleAndIgnoresHistoricalCandleTimeForFreshness()
+      throws IOException {
+    HttpServer server = completeServer();
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.start();
+    try {
+      BinanceUsdMMarketDataProvider provider = provider(server);
+
+      var bundle = provider.fetchPerpetualBundle(
+          "BTCUSDT-PERP",
+          "",
+          new CandleRequest("1m", NOW.minus(Duration.ofHours(1)), NOW));
+
+      assertThat(bundle).isPresent();
+      assertThat(bundle.get().platformSymbol()).isEqualTo("BTCUSDT-PERP");
+      assertThat(bundle.get().providerSymbol()).isEqualTo("BTCUSDT");
+      assertThat(bundle.get().providerCode()).isEqualTo("binance-usdm");
+      assertThat(bundle.get().sourceMode()).isEqualTo(MarketSourceMode.PUBLIC_EXTERNAL);
+      assertThat(bundle.get().mark()).isEqualByComparingTo("65000.25");
+      assertThat(bundle.get().index()).isEqualByComparingTo("65000.05");
+      assertThat(bundle.get().changePercent()).isEqualByComparingTo("1.25");
+      assertThat(bundle.get().high24h()).isEqualByComparingTo("66000");
+      assertThat(bundle.get().low24h()).isEqualByComparingTo("64000");
+      assertThat(bundle.get().volume24h()).isEqualByComparingTo("1234.5");
+      assertThat(bundle.get().asOf()).isEqualTo(NOW.minusSeconds(3));
+      assertThat(bundle.get().asOf()).isAfter(Instant.ofEpochMilli(1_700_000_000_000L));
+      assertThat(bundle.get().expiresAt()).isEqualTo(NOW.plusSeconds(2));
+      assertThat(bundle.get().orderBook().providerCode()).isEqualTo("binance-usdm");
+      assertThat(bundle.get().recentTrades()).allMatch(trade ->
+          "BTCUSDT".equals(trade.providerSymbol()) && bundle.get().asOf().equals(trade.asOf()));
+      assertThat(bundle.get().candles()).allMatch(candle ->
+          "binance-usdm".equals(candle.providerCode()) && bundle.get().asOf().equals(candle.asOf()));
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void missingMarkReferenceRejectsTheWholeBundle() throws IOException {
+    HttpServer server = completeServer();
+    server.removeContext("/fapi/v1/premiumIndex");
+    ExecutorService executor = daemonExecutor();
+    server.setExecutor(executor);
+    server.start();
+    try {
+      var bundle = provider(server).fetchPerpetualBundle(
+          "BTCUSDT-PERP",
+          "BTCUSDT",
+          new CandleRequest("1m", NOW.minusSeconds(60), NOW));
+
+      assertThat(bundle).isEmpty();
+    } finally {
+      server.stop(0);
+      executor.shutdownNow();
+    }
+  }
+
+  private BinanceUsdMMarketDataProvider provider(HttpServer server) {
+    return new BinanceUsdMMarketDataProvider(
+        "http://127.0.0.1:" + server.getAddress().getPort(),
+        HttpClient.newHttpClient(),
+        new ObjectMapper(),
+        CLOCK,
+        Duration.ofSeconds(5));
+  }
+
+  private HttpServer completeServer() throws IOException {
+    return completeServer(Map.of());
+  }
+
+  private HttpServer completeServer(Map<String, String> timestampOverrides) throws IOException {
+    HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+    long statisticsObservedAt = NOW.minusSeconds(3).toEpochMilli();
+    long bookObservedAt = NOW.minusSeconds(1).toEpochMilli();
+    long referenceObservedAt = NOW.minusSeconds(2).toEpochMilli();
+    long depthObservedAt = NOW.minusSeconds(1).toEpochMilli();
+    server.createContext("/fapi/v1/ticker/24hr", exchange -> writeJson(exchange, """
+        {"symbol":"BTCUSDT","lastPrice":"65000.15","priceChangePercent":"1.25",
+         "highPrice":"66000","lowPrice":"64000","volume":"1234.5"%s}
+        """.formatted(timestampField(
+            "closeTime", timestampOverrides.getOrDefault("ticker", Long.toString(statisticsObservedAt))))));
+    server.createContext("/fapi/v1/ticker/bookTicker", exchange -> writeJson(exchange, """
+        {"symbol":"BTCUSDT","bidPrice":"65000.10","bidQty":"1.2",
+         "askPrice":"65000.20","askQty":"2.3"%s}
+        """.formatted(timestampField(
+            "time", timestampOverrides.getOrDefault("book", Long.toString(bookObservedAt))))));
+    server.createContext("/fapi/v1/premiumIndex", exchange -> writeJson(exchange, """
+        {"symbol":"BTCUSDT","markPrice":"65000.25","indexPrice":"65000.05"%s}
+        """.formatted(timestampField(
+            "time", timestampOverrides.getOrDefault("reference", Long.toString(referenceObservedAt))))));
+    server.createContext("/fapi/v1/depth", exchange -> writeJson(exchange, """
+        {"lastUpdateId":1,"bids":[["65000.10","1.2"]],"asks":[["65000.20","2.3"]]%s}
+        """.formatted(timestampField(
+            "E", timestampOverrides.getOrDefault("depth", Long.toString(depthObservedAt))))));
+    server.createContext("/fapi/v1/trades", exchange -> writeJson(exchange, """
+        [{"id":10,"price":"65000.15","qty":"0.3","isBuyerMaker":false,"time":%d}]
+        """.formatted(bookObservedAt)));
+    server.createContext("/fapi/v1/klines", exchange -> writeJson(exchange, """
+        [[1700000000000,"64000","65100","63900","65000","12.4"]]
+        """));
+    return server;
+  }
+
+  private String timestampField(String field, String value) {
+    if ("MISSING".equals(value)) {
+      return "";
+    }
+    String jsonValue = value.chars().allMatch(Character::isDigit) ? value : "\"" + value + "\"";
+    return ",\"" + field + "\":" + jsonValue;
+  }
+
+  private void writeJson(HttpExchange exchange, String json) throws IOException {
+    byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+    exchange.getResponseHeaders().set("Content-Type", "application/json");
+    exchange.sendResponseHeaders(200, bytes.length);
+    exchange.getResponseBody().write(bytes);
+    exchange.close();
+  }
+
+  private ExecutorService daemonExecutor() {
+    return Executors.newCachedThreadPool(task -> {
+      Thread thread = new Thread(task);
+      thread.setDaemon(true);
+      return thread;
+    });
+  }
+
+  private void delayedJsonContext(
+      HttpServer server,
+      AtomicInteger requests,
+      Duration delay,
+      String path,
+      String json
+  ) {
+    server.createContext(path, exchange -> {
+      requests.incrementAndGet();
+      java.util.concurrent.locks.LockSupport.parkNanos(delay.toNanos());
+      writeJson(exchange, json);
+    });
+  }
+}

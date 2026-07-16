@@ -2,7 +2,6 @@ import { Star } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { allChartIntervals } from '../chartSettings'
 import type { ChartIntervalOption } from '../chartSettings'
 import type { TradingPeriod } from '../../../features/market/tradingModels'
 import styles from './ChartTopToolbar.module.css'
@@ -10,6 +9,7 @@ import styles from './ChartTopToolbar.module.css'
 type Props = {
   activeInterval: TradingPeriod
   favoriteIntervals: TradingPeriod[]
+  options: ChartIntervalOption[]
   open: boolean
   onClose: () => void
   onFavoriteIntervalToggle: (interval: TradingPeriod) => void
@@ -19,6 +19,7 @@ type Props = {
 export function IntervalDropdown({
   activeInterval,
   favoriteIntervals,
+  options,
   open,
   onClose,
   onFavoriteIntervalToggle,
@@ -66,7 +67,7 @@ export function IntervalDropdown({
       </div>
 
       <div className={styles.intervalGrid}>
-        {allChartIntervals.map((item) => {
+        {options.map((item) => {
           const favorite = favoriteIntervals.includes(item.value)
           const lockedFavorite = favorite && favoriteIntervals.length <= 1
           return (

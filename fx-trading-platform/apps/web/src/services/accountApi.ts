@@ -1,4 +1,10 @@
-import { apiGet, apiPost } from './apiClient'
+import { apiGet, apiPost } from './apiClient.ts'
+import type {
+  AccountTransferRequest,
+  AccountTransferResponse,
+  DemoResetRequest,
+  DemoResetResponse
+} from '@fx-platform/shared-types'
 import type { AccountSummary, AssetConversionPayload, AssetConversionResponse, AssetLedgerEntry, WalletBalance } from '../types/trading'
 
 export type AssetLedgerFilters = {
@@ -37,4 +43,16 @@ export function convertAsset(accountId: string, payload: AssetConversionPayload,
 
 export function createDemoAccount(token: string) {
   return apiPost<AccountSummary>('/api/accounts/demo', {}, token)
+}
+
+export function transferDemoFunds(
+  accountId: string,
+  payload: AccountTransferRequest,
+  token: string
+) {
+  return apiPost<AccountTransferResponse>(`/api/accounts/${accountId}/transfers`, payload, token)
+}
+
+export function resetDemoAccount(accountId: string, payload: DemoResetRequest, token: string) {
+  return apiPost<DemoResetResponse>(`/api/accounts/${accountId}/demo-reset`, payload, token)
 }

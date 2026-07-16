@@ -100,12 +100,14 @@ describe('trading session models', () => {
       symbol: 'BTCUSDT',
       side: 'BUY',
       orderType: 'LIMIT',
-      quantity: '0.02',
-      price: '60736.3',
+      quantity: 0.02,
+      price: 60736.3,
       clientOrderId: 'client_123',
-      lots: '0.02',
-      requestedPrice: '60736.3',
-      idempotencyKey: 'client_123'
+      idempotencyKey: 'client_123',
+      positionSide: 'BOTH',
+      quantityUnit: 'BASE',
+      marginMode: 'CASH',
+      reduceOnly: false
     }
 
     assert.deepEqual(createLocalPreviewOrder(payload, '2026-06-06T00:00:00.000Z'), {
@@ -114,49 +116,21 @@ describe('trading session models', () => {
       side: 'BUY',
       orderType: 'LIMIT',
       status: 'LOCAL_PREVIEW',
-      lots: '0.02',
+      lots: 0.02,
       executionPrice: null,
       createdAt: '2026-06-06T00:00:00.000Z'
     })
   })
 
-  it('derives terminal balances from account free margin and open positions', () => {
+  it('uses only Spot wallet balances for the Spot terminal', () => {
     const account: AccountSummary = {
       id: 'acct_1',
       accountType: 'DEMO',
       baseCurrency: 'USD',
-      balance: '10000',
-      equity: '10020',
+      balance: '75000',
+      equity: '75000',
       usedMargin: '120',
-      freeMargin: '9876.5',
-      marginLevel: null,
-      leverage: 100,
-      status: 'ACTIVE'
-    }
-    const positions: PositionResponse[] = [
-      makePosition({ id: 'pos_1', symbol: 'BTCUSDT', side: 'BUY', lots: '0.02' }),
-      makePosition({ id: 'pos_2', symbol: 'BTC-USDT', side: 'BUY', lots: '0.01' }),
-      makePosition({ id: 'pos_3', symbol: 'BTCUSDT', side: 'SELL', lots: '0.04' }),
-      makePosition({ id: 'pos_4', symbol: 'ETHUSDT', side: 'BUY', lots: '1.5' })
-    ]
-
-    const balances = deriveTradingBalances(account, positions, 'BTCUSDT')
-
-    assert.equal(balances.USD, 9876.5)
-    assert.equal(balances.USDT, 9876.5)
-    assert.equal(balances.BTC, 0.03)
-    assert.equal(balances.ETH, undefined)
-  })
-
-  it('prefers wallet balances over free margin and legacy position-derived inventory', () => {
-    const account: AccountSummary = {
-      id: 'acct_1',
-      accountType: 'DEMO',
-      baseCurrency: 'USD',
-      balance: '10000',
-      equity: '10020',
-      usedMargin: '120',
-      freeMargin: '9876.5',
+      freeMargin: '75000',
       marginLevel: null,
       leverage: 100,
       status: 'ACTIVE'
@@ -165,15 +139,45 @@ describe('trading session models', () => {
       makePosition({ id: 'pos_1', symbol: 'BTCUSDT', side: 'BUY', lots: '0.50' })
     ]
     const walletBalances: WalletBalance[] = [
-      walletBalance('USDT', '5000.00000000'),
-      walletBalance('BTC', '0.09990000')
+      walletBalance('USDT', '25000.00000000'),
+      walletBalance('BTC', '0.09990000'),
+      walletBalance('USDT', '75000.00000000', 'USDT_PERP')
     ]
 
-    const balances = deriveTradingBalances(account, positions, 'BTCUSDT', walletBalances)
+    const balances = deriveTradingBalances('spot', account, positions, 'BTCUSDT', walletBalances)
 
-    assert.equal(balances.USDT, 5000)
+    assert.equal(balances.USDT, 25000)
     assert.equal(balances.BTC, 0.0999)
     assert.equal(balances.USD, undefined)
+  })
+
+  it('uses Perpetual free margin even when Spot wallet balances exist', () => {
+    const account: AccountSummary = {
+      id: 'acct_1',
+      accountType: 'DEMO',
+      baseCurrency: 'USD',
+      balance: '75000',
+      equity: '75000',
+      usedMargin: '120',
+      freeMargin: '75000',
+      marginLevel: null,
+      leverage: 100,
+      status: 'ACTIVE'
+    }
+    const positions: PositionResponse[] = [
+      makePosition({ id: 'pos_1', symbol: 'BTCUSDT', side: 'BUY', lots: '0.50' })
+    ]
+    const walletBalances: WalletBalance[] = [
+      walletBalance('USDT', '25000.00000000'),
+      walletBalance('BTC', '0.09990000'),
+      walletBalance('USDT', '75000.00000000', 'USDT_PERP')
+    ]
+
+    const balances = deriveTradingBalances('perpetual', account, positions, 'BTCUSDT-PERP', walletBalances)
+
+    assert.equal(balances.USD, 75000)
+    assert.equal(balances.USDT, 75000)
+    assert.equal(balances.BTC, undefined)
   })
 
   it('reprices forex open positions from websocket quotes without touching history rows', () => {
@@ -247,6 +251,129 @@ describe('trading session models', () => {
 })
 
 describe('trading session submit mode', () => {
+  it('gives every batch action a unique request id, calls the API once, and returns its result', async () => {
+    const { runTradingBatchAction } = await import('./tradingSession.ts')
+    const payloads: Array<{ accountId: string; requestId: string }> = []
+    let refreshes = 0
+    const action = async (payload: { accountId: string; requestId: string }) => {
+      payloads.push(payload)
+      return { accountId: payload.accountId, requestId: payload.requestId, items: [] }
+    }
+    const refresh = async () => { refreshes += 1 }
+
+    const first = await runTradingBatchAction('acct_1', 'token_1', action, refresh)
+    const second = await runTradingBatchAction('acct_1', 'token_1', action, refresh)
+
+    assert.equal(payloads.length, 2)
+    assert.equal(new Set(payloads.map(({ requestId }) => requestId)).size, 2)
+    assert.deepEqual(first, { accountId: 'acct_1', requestId: payloads[0].requestId, items: [] })
+    assert.deepEqual(second, { accountId: 'acct_1', requestId: payloads[1].requestId, items: [] })
+    assert.equal(refreshes, 2)
+  })
+
+  it('refreshes account truth in finally when a batch action fails', async () => {
+    const { runTradingBatchAction } = await import('./tradingSession.ts')
+    let apiCalls = 0
+    let refreshes = 0
+
+    await assert.rejects(
+      () => runTradingBatchAction(
+        'acct_1',
+        'token_1',
+        async () => {
+          apiCalls += 1
+          throw new Error('batch failed')
+        },
+        async () => { refreshes += 1 }
+      ),
+      /batch failed/
+    )
+
+    assert.equal(apiCalls, 1)
+    assert.equal(refreshes, 1)
+  })
+
+  it('wires both authenticated batch callbacks through the shared session refresh path', () => {
+    const hookSource = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+
+    assert.match(hookSource, /cancelAllOrders: submitCancelAllOrders/)
+    assert.match(hookSource, /closeAllPositions: submitCloseAllPositions/)
+    assert.match(hookSource, /runTradingBatchAction\(\s*accountId,\s*token,\s*cancelAllTradingOrders/)
+    assert.match(hookSource, /runTradingBatchAction\(\s*accountId,\s*token,\s*closeAllTradingPositions/)
+  })
+
+  it('selects the active demo account from an unsorted mixed account list case-insensitively', async () => {
+    const { selectActiveDemoAccount } = await import('./tradingSession.ts')
+    const liveActive = accountSummary({ id: 'live-active', accountType: 'LIVE', status: 'ACTIVE' })
+    const demoDisabled = accountSummary({ id: 'demo-disabled', accountType: 'DEMO', status: 'DISABLED' })
+    const demoActive = accountSummary({ id: 'demo-active', accountType: 'dEmO', status: 'aCtIvE' })
+
+    assert.equal(selectActiveDemoAccount([liveActive, demoDisabled, demoActive]), demoActive)
+  })
+
+  it('reuses an active demo account without creating another one', async () => {
+    const originalFetch = globalThis.fetch
+    const requestedPaths: string[] = []
+    const demoActive = accountSummary({ id: 'demo-active', accountType: 'DEMO', status: 'ACTIVE' })
+    globalThis.fetch = async (input) => {
+      requestedPaths.push(String(input))
+      return jsonResponse([
+        accountSummary({ id: 'live-active', accountType: 'LIVE', status: 'ACTIVE' }),
+        accountSummary({ id: 'demo-disabled', accountType: 'DEMO', status: 'DISABLED' }),
+        demoActive
+      ])
+    }
+
+    try {
+      const { firstOrCreatedAccount } = await import('./tradingSession.ts')
+
+      assert.deepEqual(await firstOrCreatedAccount('token_1'), demoActive)
+      assert.deepEqual(requestedPaths, ['/api/accounts'])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('creates a demo account only when no active demo account exists', async () => {
+    const originalFetch = globalThis.fetch
+    const requestedPaths: string[] = []
+    const createdDemo = accountSummary({ id: 'demo-created', accountType: 'DEMO', status: 'ACTIVE' })
+    globalThis.fetch = async (input) => {
+      const path = String(input)
+      requestedPaths.push(path)
+      return jsonResponse(path === '/api/accounts/demo'
+        ? createdDemo
+        : [
+            accountSummary({ id: 'live-active', accountType: 'LIVE', status: 'ACTIVE' }),
+            accountSummary({ id: 'demo-disabled', accountType: 'DEMO', status: 'DISABLED' })
+          ])
+    }
+
+    try {
+      const { firstOrCreatedAccount } = await import('./tradingSession.ts')
+
+      assert.deepEqual(await firstOrCreatedAccount('token_1'), createdDemo)
+      assert.deepEqual(requestedPaths, ['/api/accounts', '/api/accounts/demo'])
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('routes only canonical position mutations and refreshes through the authenticated account session', () => {
+    const sessionSource = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
+    const hookSource = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+
+    assert.match(sessionSource, /export type PositionMutation =/)
+    assert.match(sessionSource, /type: 'PARTIAL_CLOSE'/)
+    assert.match(sessionSource, /type: 'FULL_CLOSE'/)
+    assert.match(sessionSource, /type: 'ADJUST_MARGIN'/)
+    assert.match(sessionSource, /type: 'CREATE_PROTECTIONS'/)
+    assert.match(sessionSource, /for \(const payload of payloads\)/)
+    assert.match(hookSource, /mutation: PositionMutation = \{ type: 'FULL_CLOSE' \}/)
+    assert.match(hookSource, /mutateTradingPosition\(accountId, position\.id, mutation, token\)/)
+    assert.match(hookSource, /finally \{[\s\S]*await refreshAccountData\(token, accountId\)\.catch\(\(\) => undefined\)/)
+  })
+
   it('rejects order submission without a backend token', async () => {
     const { submitTradingOrder } = await import('./tradingSession.ts')
 
@@ -339,29 +466,21 @@ describe('trading session submit mode', () => {
     assert.doesNotMatch(bootBlock, /setAccount\(undefined\)/)
   })
 
-  it('turns timed auth refresh failures into login-required instead of offline preview', async () => {
+  it('turns coordinated refresh auth failures into login-required instead of offline preview', async () => {
     const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
-    const pollingBlock = sourceBetween(source, 'const interval = window.setInterval', 'return () => {')
     const { getTradingSessionMode } = await import('./useTradingSession.ts')
 
     assert.equal(getTradingSessionMode({ sessionReady: false, token: null, sessionError: null, loginRequired: true }), 'login-required')
     assert.equal(getTradingSessionMode({ sessionReady: false, token: 'token-1', sessionError: 'poll failed' }), 'error')
-    assert.match(pollingBlock, /isAuthSessionFailure\(error\)/)
-    assert.match(pollingBlock, /requireLogin\(\)/)
-    assert.doesNotMatch(pollingBlock, /setOrders\(\[\]\)/)
+    assert.match(source, /createAccountRefreshCoordinator\(\{[\s\S]*onError:[\s\S]*isAuthSessionFailure\(error\)[\s\S]*requireLogin\(\)/)
   })
 
-  it('reduces REST polling frequency while the page is hidden', async () => {
+  it('uses the coordinator 15s visible fallback without a duplicate hook interval', () => {
     const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
-    const { getTradingSessionRefreshMs } = await import('./useTradingSession.ts')
 
-    assert.equal(getTradingSessionRefreshMs(2000, 'visible'), 2000)
-    assert.equal(getTradingSessionRefreshMs(2000, 'hidden'), 15000)
-    assert.equal(getTradingSessionRefreshMs(5000, 'hidden'), 30000)
-    assert.match(source, /document\.addEventListener\('visibilitychange',\s*syncVisibility\)/)
-    assert.match(source, /document\.removeEventListener\('visibilitychange',\s*syncVisibility\)/)
-    assert.match(source, /const effectiveRefreshMs = getTradingSessionRefreshMs\(refreshMs,\s*visibilityState\)/)
-    assert.match(source, /}, effectiveRefreshMs\)/)
+    assert.match(source, /useTradingSession\(\{ refreshMs = 15_000 \}/)
+    assert.match(source, /createAccountRefreshCoordinator\(\{[\s\S]*pollMs: refreshMs/)
+    assert.doesNotMatch(source, /window\.setInterval/)
   })
 
   it('refreshes the authoritative account snapshot after trading-session stream events', () => {
@@ -369,17 +488,18 @@ describe('trading session submit mode', () => {
     const streamSource = readFileSync(new URL('../../services/marketStream.ts', import.meta.url), 'utf8')
 
     assert.match(source, /subscribeTradingSessionEvents/)
-    assert.match(source, /subscribeTradingSessionEvents\(accountId,\s*token,\s*\(\) => \{/)
-    assert.match(source, /refreshAccountData\(token,\s*accountId,\s*\(\) => active\)/)
+    assert.match(source, /subscribeTradingSessionEvents\([\s\S]*coordinator\.notifyEvent\(\)[\s\S]*coordinator\.notifyReconnect\(\)/)
+    assert.match(source, /coordinator\.dispose\(\)/)
     assert.match(streamSource, /subscribeTradingSessionEvents/)
-    assert.match(streamSource, /`\/topic\/trading\/accounts\/\$\{accountId\}\/events`/)
+    assert.match(streamSource, /'\/user\/queue\/trading-events'/)
+    assert.doesNotMatch(streamSource, /\/topic\/trading\/accounts/)
   })
 
   it('uses backend position refresh as the authoritative open-position PnL source', () => {
     const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
 
-    assert.match(source, /setInterval/)
-    assert.match(source, /refreshAccountData\(token,\s*accountId/)
+    assert.match(source, /createAccountRefreshCoordinator/)
+    assert.match(source, /refresh: \(\) => refreshAccountData\(token, accountId/)
     assert.doesNotMatch(source, /subscribeQuote/)
     assert.doesNotMatch(source, /repriceOpenPositionsForQuote/)
     assert.doesNotMatch(source, /positionQuoteSymbolsKey/)
@@ -391,8 +511,57 @@ describe('trading session submit mode', () => {
     assert.match(source, /getLedgerEntries/)
     assert.match(source, /getAssetLedger/)
     assert.match(source, /assetLedgerEntries:\s*AssetLedgerEntry\[\]/)
-    assert.match(source, /return \{ account, orders, positions, positionHistory, ledgerEntries, assetLedgerEntries, walletBalances \}/)
+    assert.match(source, /return \{[\s\S]*ledgerEntries,[\s\S]*assetLedgerEntries,[\s\S]*walletBalances[\s\S]*\}/)
     assert.doesNotMatch(source, /mapAssetLedgerEntry/)
+  })
+
+  it('loads the initial account, order, trade, position, funding and transfer snapshot in parallel', () => {
+    const source = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
+    const loadBlock = sourceBetween(
+      source,
+      'export async function loadTradingAccountData',
+      'export async function submitTradingOrder'
+    )
+
+    assert.match(loadBlock, /Promise\.all\(\[/)
+    for (const request of [
+      'getAccountSummary',
+      'getOrders',
+      'getTrades',
+      'getPositions',
+      'getPositionHistory',
+      'getFundingSettlements',
+      'getAccountTransfers',
+      'getLedgerEntries',
+      'getAssetLedger',
+      'getWalletBalances'
+    ]) {
+      assert.match(loadBlock, new RegExp(`${request}\\(accountId, token\\)`))
+    }
+    assert.match(
+      loadBlock,
+      /return \{[\s\S]*account,[\s\S]*orders,[\s\S]*trades,[\s\S]*positions,[\s\S]*positionHistory,[\s\S]*fundingSettlements,[\s\S]*transfers,/
+    )
+  })
+
+  it('routes boot, public, event, order, OCO and position refreshes through one latest single-flight gate', () => {
+    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+    const refreshBlock = sourceBetween(
+      source,
+      'const refreshAccountData = useCallback',
+      'const clearSessionSnapshot = useCallback'
+    )
+
+    assert.match(source, /createLatestSingleFlightRefreshGate/)
+    assert.match(refreshBlock, /refreshGate\.request\(/)
+    assert.match(refreshBlock, /loadTradingAccountData\(accessToken, currentAccountId\)/)
+    assert.match(refreshBlock, /applyAccountData\(data\)/)
+    assert.equal((source.match(/loadTradingAccountData\(/g) ?? []).length, 1)
+    assert.match(source, /refresh: \(\) => refreshAccountData\(token, accountId/)
+    assert.match(source, /await refreshAccountData\(savedToken, account\.id, isActive\)/)
+    assert.match(source, /submitTradingOrder[\s\S]*await refreshAccountData\(token, accountId\)/)
+    assert.match(source, /submitTradingOco[\s\S]*await refreshAccountData\(token, accountId\)/)
+    assert.match(source, /mutateTradingPosition[\s\S]*await refreshAccountData\(token, accountId\)/)
   })
 })
 
@@ -430,16 +599,41 @@ function makePosition(patch: Partial<PositionResponse>): PositionResponse {
   }
 }
 
-function walletBalance(asset: string, available: string): WalletBalance {
+function walletBalance(asset: string, available: string, walletType = 'SPOT'): WalletBalance {
   return {
     id: `wallet-${asset}`,
     accountId: 'acct_1',
-    walletType: 'SPOT',
+    walletType,
     asset,
     total: available,
     available,
     locked: '0'
   }
+}
+
+function accountSummary(patch: Partial<AccountSummary> = {}): AccountSummary {
+  return {
+    id: 'acct_1',
+    accountType: 'DEMO',
+    baseCurrency: 'USD',
+    balance: '10000',
+    equity: '10000',
+    usedMargin: '0',
+    freeMargin: '10000',
+    marginLevel: null,
+    leverage: 100,
+    status: 'ACTIVE',
+    ...patch
+  }
+}
+
+function jsonResponse(data: unknown) {
+  return new Response(JSON.stringify({
+    success: true,
+    code: 'OK',
+    message: 'ok',
+    data
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 
 function quote(symbol: string, bid: string, ask: string): Quote {

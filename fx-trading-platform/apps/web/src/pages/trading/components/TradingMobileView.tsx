@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { BottomAccountPanel } from './BottomAccountPanel'
 import { ChartWorkspace } from './ChartWorkspace'
 import styles from '../TradingPage.module.css'
-import { shouldAllowChartMockFallback, type TradingTerminalViewProps } from '../tradingPageViewModels'
+import type { TradingTerminalViewProps } from '../tradingPageViewModels'
 
 const MobileTradingTerminal = lazy(() =>
   import('../mobile/MobileTradingTerminal').then((module) => ({ default: module.MobileTradingTerminal }))
@@ -49,7 +49,6 @@ export function TradingMobileView({
               token={token}
               orders={accountPanel.orders}
               positions={accountPanel.positions}
-              allowMockFallback={shouldAllowChartMockFallback(market)}
               onChartSettingsChange={chartCallbacks.onChartSettingsChange}
               onResetChartSettings={chartCallbacks.onResetChartSettings}
               onChartTypeChange={chartCallbacks.onChartTypeChange}
@@ -70,10 +69,15 @@ export function TradingMobileView({
               ledgerEntries={accountPanel.ledgerEntries}
               loading={accountPanel.loading}
               orders={accountPanel.orders}
+              trades={accountPanel.trades}
               positions={accountPanel.positions}
               positionHistory={accountPanel.positionHistory}
+              fundingSettlements={accountPanel.fundingSettlements}
+              transfers={accountPanel.transfers}
               sessionReady={accountPanel.sessionReady}
               currentSymbol={symbol}
+              onCancelAllOrders={accountPanel.onCancelAllOrders}
+              onCloseAllPositions={accountPanel.onCloseAllPositions}
               onClosePosition={accountPanel.onClosePosition}
             />
           }

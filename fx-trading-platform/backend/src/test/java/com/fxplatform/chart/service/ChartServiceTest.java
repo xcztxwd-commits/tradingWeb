@@ -2,6 +2,7 @@ package com.fxplatform.chart.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.fxplatform.chart.dto.CandleResponse;
 import com.fxplatform.chart.entity.CandleEntity;
@@ -46,6 +47,20 @@ class ChartServiceTest {
     List<CandleResponse> candles = service.candles("eur-usd", "5m", from, to);
 
     assertThat(candles).containsExactly(providerCandle);
+  }
+
+  @Test
+  void p0CandlesNeverOverlayDifferentProviderDatabaseCache() {
+    Instant from = Instant.parse("2026-07-12T00:00:00Z");
+    Instant to = Instant.parse("2026-07-12T01:00:00Z");
+    CandleResponse authoritative = providerCandle(from, "65000");
+    when(marketDataRouter.candles("BTCUSDT", "1m", from, to)).thenReturn(List.of(authoritative));
+
+    List<CandleResponse> result = new ChartService(candleRepository, marketDataRouter)
+        .candles("BTCUSDT", "1m", from, to);
+
+    assertThat(result).containsExactly(authoritative);
+    verifyNoInteractions(candleRepository);
   }
 
   @Test

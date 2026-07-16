@@ -2,6 +2,7 @@ package com.fxplatform.trading.repository;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fxplatform.common.mybatis.FxBaseMapper;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderStatus;
@@ -9,11 +10,32 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 /**
  * OrderRepository 通过 MyBatis-Plus 访问订单。
  */
 public interface OrderRepository extends FxBaseMapper<OrderEntity> {
+
+  default Page<OrderEntity> findPageByAccountId(
+      UUID accountId,
+      OrderStatus status,
+      String symbol,
+      Page<OrderEntity> page
+  ) {
+    LambdaQueryWrapper<OrderEntity> query = new LambdaQueryWrapper<OrderEntity>()
+        .eq(OrderEntity::getAccountId, accountId);
+    if (status != null) {
+      query.eq(OrderEntity::getStatus, status);
+    }
+    if (symbol != null && !symbol.isBlank()) {
+      query.eq(OrderEntity::getSymbol, symbol);
+    }
+    return selectPage(page, query
+        .orderByDesc(OrderEntity::getCreatedAt)
+        .orderByDesc(OrderEntity::getId));
+  }
 
   /** 按用户和幂等键查询订单，避免重复提交。 */
   default Optional<OrderEntity> findByUserIdAndIdempotencyKey(UUID userId, String idempotencyKey) {
@@ -53,6 +75,19 @@ public interface OrderRepository extends FxBaseMapper<OrderEntity> {
         .eq(OrderEntity::getStatus, status));
   }
 
+  /** Reads only bound protection carriers; a Task 9 internal close parent is not a protection. */
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE status = #{status}
+        AND parent_position_id IS NOT NULL
+        AND protection_type IS NOT NULL
+        AND product_type = 'LINEAR_PERP'
+        AND order_origin = 'PROTECTIVE'
+      ORDER BY created_at, id
+      """)
+  List<OrderEntity> findBoundProtectionsByStatus(@Param("status") OrderStatus status);
+
   default List<OrderEntity> findByAccountIdAndStatusIn(UUID accountId, List<OrderStatus> statuses) {
     return selectList(new LambdaQueryWrapper<OrderEntity>()
         .eq(OrderEntity::getAccountId, accountId)
@@ -63,6 +98,98 @@ public interface OrderRepository extends FxBaseMapper<OrderEntity> {
     return selectCount(new LambdaQueryWrapper<OrderEntity>()
         .ge(OrderEntity::getCreatedAt, createdAt));
   }
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE id = #{id}
+      FOR UPDATE
+      """)
+  Optional<OrderEntity> findByIdForUpdate(@Param("id") UUID id);
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE account_id = #{accountId}
+        AND status IN ('PENDING', 'WORKING')
+      ORDER BY id
+      FOR UPDATE
+      """)
+  List<OrderEntity> findPendingByAccountIdForUpdate(@Param("accountId") UUID accountId);
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE account_id = #{accountId}
+        AND status IN (
+          'RECEIVED', 'VALIDATING', 'ACCEPTED', 'PENDING_ACTIVATION', 'PENDING',
+          'WORKING', 'PARTIALLY_FILLED', 'CANCEL_PENDING'
+        )
+      ORDER BY id
+      FOR UPDATE
+      """)
+  List<OrderEntity> findActiveByAccountIdForUpdate(@Param("accountId") UUID accountId);
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE account_id = #{accountId}
+        AND product_type = 'LINEAR_PERP'
+        AND status IN (
+          'RECEIVED', 'VALIDATING', 'ACCEPTED', 'PENDING_ACTIVATION', 'PENDING',
+          'WORKING', 'PARTIALLY_FILLED', 'CANCEL_PENDING'
+        )
+      ORDER BY id
+      FOR UPDATE
+      """)
+  List<OrderEntity> findActiveLinearPerpByAccountIdForUpdate(@Param("accountId") UUID accountId);
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE account_id = #{accountId}
+        AND symbol = #{symbol}
+        AND product_type = 'LINEAR_PERP'
+        AND status IN (
+          'RECEIVED', 'VALIDATING', 'ACCEPTED', 'PENDING_ACTIVATION', 'PENDING',
+          'WORKING', 'PARTIALLY_FILLED', 'CANCEL_PENDING'
+        )
+      ORDER BY id
+      FOR UPDATE
+      """)
+  List<OrderEntity> findActiveLinearPerpBySymbolForUpdate(
+      @Param("accountId") UUID accountId,
+      @Param("symbol") String symbol);
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE parent_order_id = #{parentOrderId}
+        AND protection_type IS NOT NULL
+        AND product_type = 'LINEAR_PERP'
+        AND order_origin = 'PROTECTIVE'
+        AND status IN ('PENDING_ACTIVATION', 'PENDING', 'WORKING', 'CANCEL_PENDING')
+      ORDER BY created_at, id
+      FOR UPDATE
+      """)
+  List<OrderEntity> findProtectionsByParentOrderIdForUpdate(
+      @Param("parentOrderId") UUID parentOrderId);
+
+  default List<OrderEntity> findByContingencyGroupId(UUID contingencyGroupId) {
+    return selectList(new LambdaQueryWrapper<OrderEntity>()
+        .eq(OrderEntity::getContingencyGroupId, contingencyGroupId)
+        .orderByAsc(OrderEntity::getId));
+  }
+
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE contingency_group_id = #{contingencyGroupId}
+      ORDER BY id
+      FOR UPDATE
+      """)
+  List<OrderEntity> findByContingencyGroupIdForUpdate(
+      @Param("contingencyGroupId") UUID contingencyGroupId);
 
   /** 触价执行前先从 PENDING 抢占到 WORKING，避免多实例重复成交同一挂单。 */
   default int claimPending(UUID orderId) {

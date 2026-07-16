@@ -2,38 +2,45 @@ import { useCallback, useState } from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
-import { toOrderPayload } from '../services/orderAdapter'
+import { toOcoOrderPayload, toOrderPayload } from '../services/orderAdapter'
+import type { OrderAdapterSettings } from '../services/orderAdapter'
 import type { OrderValidationResult, TradeFormState, TradeMarket, TradeSide } from '../types/order'
 import type { OrderResponse } from '../../../components/tables/types'
 import { ApiClientError } from '../../../services/apiClient'
-import type { OrderPayload } from '../../../types/trading'
+import type { OcoOrderPayload, OrderPayload } from '../../../types/trading'
+import type { OcoOrderGroupResponse } from '@fx-platform/shared-types'
 
 type UseTradePanelSubmitArgs = {
   accountId?: string
   backendReady: boolean
   canTrade: boolean
-  leverage: number
+  adapterSettings: OrderAdapterSettings
   loginRequired: boolean
   market: TradeMarket
   onLoginRequired?: () => void
   onSubmitOrder?: (payload: OrderPayload) => Promise<OrderResponse | void>
+  onSubmitOco?: (payload: ReturnType<typeof toOcoOrderPayload>) => Promise<OcoOrderGroupResponse | void>
   sessionHasError: boolean
 }
 
 type SubmitOptions = {
   confirmed?: boolean
-  onConfirmRequired?: () => void
+  payload?: CanonicalSubmitPayload
+  onConfirmRequired?: (payload: CanonicalSubmitPayload) => void
 }
+
+export type CanonicalSubmitPayload = OrderPayload | OcoOrderPayload
 
 export function useTradePanelSubmit({
   accountId,
   backendReady,
   canTrade,
-  leverage,
+  adapterSettings,
   loginRequired,
   market,
   onLoginRequired,
   onSubmitOrder,
+  onSubmitOco,
   sessionHasError
 }: UseTradePanelSubmitArgs) {
   const { t } = useTranslation()
@@ -62,12 +69,6 @@ export function useTradePanelSubmit({
         return
       }
 
-      if (!options.confirmed) {
-        setNotice(t('trading.submitConfirmFirst'))
-        options.onConfirmRequired?.()
-        return
-      }
-
       setSubmittingSide(form.side)
       try {
         if (!backendReady || !accountId || !onSubmitOrder) {
@@ -75,11 +76,19 @@ export function useTradePanelSubmit({
           return
         }
 
-        const payload = toOrderPayload(accountId, form, market, leverage)
-        const response = await onSubmitOrder(payload)
+        const payload = options.payload ?? createCanonicalPayload(accountId, form, market, adapterSettings)
+        if (!options.confirmed) {
+          setNotice(t('trading.submitConfirmFirst'))
+          options.onConfirmRequired?.(payload)
+          return
+        }
+        const response = isOcoPayload(payload)
+          ? await submitOco(payload, onSubmitOco)
+          : await onSubmitOrder(payload)
         reset()
         setAttempted((current) => ({ ...current, [form.side]: false }))
-        setNotice(t('trading.backendOrderSuccess', { status: response?.status ?? t('trading.submitted') }))
+        const status = response && 'status' in response ? response.status : undefined
+        setNotice(t('trading.backendOrderSuccess', { status: status ?? t('trading.submitted') }))
       } catch (error) {
         const errorDetail = formatOrderError(error, t)
         setNotice(t('trading.backendOrderFailed', { error: errorDetail }))
@@ -87,10 +96,33 @@ export function useTradePanelSubmit({
         setSubmittingSide(null)
       }
     },
-    [accountId, backendReady, canTrade, leverage, loginRequired, market, onLoginRequired, onSubmitOrder, sessionHasError, t]
+    [accountId, adapterSettings, backendReady, canTrade, loginRequired, market, onLoginRequired, onSubmitOco, onSubmitOrder, sessionHasError, t]
   )
 
   return { attempted, handleSubmit, notice, setNotice, submittingSide }
+}
+
+function createCanonicalPayload(
+  accountId: string,
+  form: TradeFormState,
+  market: TradeMarket,
+  adapterSettings: OrderAdapterSettings
+) {
+  return form.strategyType === 'oco'
+    ? toOcoOrderPayload(accountId, form, market)
+    : toOrderPayload(accountId, form, market, adapterSettings)
+}
+
+function isOcoPayload(payload: CanonicalSubmitPayload): payload is OcoOrderPayload {
+  return 'limitPrice' in payload
+}
+
+async function submitOco(
+  payload: OcoOrderPayload,
+  onSubmitOco?: UseTradePanelSubmitArgs['onSubmitOco']
+) {
+  if (!onSubmitOco) throw new Error('OCO order submission is unavailable')
+  return onSubmitOco(payload)
 }
 
 function formatOrderError(error: unknown, t: TFunction) {

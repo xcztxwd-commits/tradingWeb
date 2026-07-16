@@ -1,8 +1,10 @@
 package com.fxplatform.market.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.entity.DataProviderEntity;
@@ -26,7 +28,6 @@ class ProviderHealthRecorderTest {
   void recordQuoteSuccessStoresLatencyAndQuoteFreshnessMetrics() {
     DataProviderEntity provider = provider("binance");
     QuoteResponse quote = quote("BTCUSDT", Instant.now().minusMillis(1250).toEpochMilli());
-    when(providerRepository.save(provider)).thenReturn(provider);
 
     new ProviderHealthRecorder(providerRepository).recordQuoteSuccess(provider, quote, 42);
 
@@ -36,7 +37,12 @@ class ProviderHealthRecorderTest {
     assertThat(provider.getLastHealthCheckAt()).isNotNull();
     assertThat(provider.getAvgLatencyMs()).isEqualTo(42);
     assertThat(provider.getQuoteStalenessMs()).isGreaterThanOrEqualTo(0);
-    verify(providerRepository).save(provider);
+    verify(providerRepository).updateQuoteSuccessHealth(
+        eq(provider.getId()),
+        any(Instant.class),
+        eq(42L),
+        eq(provider.getQuoteStalenessMs()));
+    verify(providerRepository, never()).save(any());
   }
 
   @Test
@@ -44,7 +50,6 @@ class ProviderHealthRecorderTest {
     DataProviderEntity provider = provider("okx");
     provider.setFailureCount(2L);
     provider.setAvgLatencyMs(100L);
-    when(providerRepository.save(provider)).thenReturn(provider);
 
     new ProviderHealthRecorder(providerRepository).recordFailure(provider, 300);
 
@@ -53,13 +58,14 @@ class ProviderHealthRecorderTest {
     assertThat(provider.getLastFailureAt()).isNotNull();
     assertThat(provider.getLastHealthCheckAt()).isNotNull();
     assertThat(provider.getAvgLatencyMs()).isEqualTo(150);
-    verify(providerRepository).save(provider);
+    verify(providerRepository).updateFailureHealth(
+        eq(provider.getId()), any(Instant.class), eq(300L));
+    verify(providerRepository, never()).save(any());
   }
 
   @Test
   void recordInstrumentSyncSuccessStoresSyncTimestamp() {
     DataProviderEntity provider = provider("massive");
-    when(providerRepository.save(provider)).thenReturn(provider);
 
     new ProviderHealthRecorder(providerRepository).recordInstrumentSyncSuccess(provider, 7);
 
@@ -67,7 +73,9 @@ class ProviderHealthRecorderTest {
     assertThat(provider.getLastSuccessAt()).isNotNull();
     assertThat(provider.getLastInstrumentSyncAt()).isNotNull();
     assertThat(provider.getLastInstrumentSyncCount()).isEqualTo(7);
-    verify(providerRepository).save(provider);
+    verify(providerRepository).updateInstrumentSyncSuccessHealth(
+        eq(provider.getId()), any(Instant.class), eq(7));
+    verify(providerRepository, never()).save(any());
   }
 
   private DataProviderEntity provider(String code) {

@@ -8,8 +8,9 @@ import { ChartWorkspace } from './ChartWorkspace'
 import { MarketSidebar } from './MarketSidebar'
 import { RightTradingPanel } from './RightTradingPanel'
 import { SymbolHeader } from './SymbolHeader'
+import { PerpetualTradingControls } from './PerpetualTradingControls'
 import styles from '../TradingPage.module.css'
-import { shouldAllowChartMockFallback, type TradingTerminalViewProps } from '../tradingPageViewModels'
+import type { TradingTerminalViewProps } from '../tradingPageViewModels'
 
 export function TradingDesktopView({
   accountId,
@@ -32,11 +33,14 @@ export function TradingDesktopView({
   onSelectPrice,
   onSelectSymbol,
   onFavorite,
+  product,
   quote,
   quotes,
   sessionError,
   sessionReady,
   submitOrder,
+  submitOco,
+  perpetualControls,
   symbol,
   terminalLoading,
   token,
@@ -69,7 +73,7 @@ export function TradingDesktopView({
           watchlist={<MarketSidebar markets={markets} quotes={quotes} favorites={favorites} selectedSymbol={symbol} onSelect={onSelectSymbol} onFavorite={onFavorite} />}
           header={
             <div className={styles.headerRow}>
-              <SymbolHeader market={market} quote={quote} onOpenMarkets={onOpenMarkets} onOpenQuote={onOpenQuote} />
+              <SymbolHeader market={market} marginMode={perpetualControls.marginMode} product={product} quote={quote} onOpenMarkets={onOpenMarkets} onOpenQuote={onOpenQuote} />
             </div>
           }
           chart={
@@ -81,7 +85,6 @@ export function TradingDesktopView({
               token={token}
               orders={accountPanel.orders}
               positions={accountPanel.positions}
-              allowMockFallback={shouldAllowChartMockFallback(market)}
               onChartSettingsChange={chartCallbacks.onChartSettingsChange}
               onResetChartSettings={chartCallbacks.onResetChartSettings}
               onChartTypeChange={chartCallbacks.onChartTypeChange}
@@ -99,26 +102,32 @@ export function TradingDesktopView({
           chartTitle={chartTitle}
           market={<RightTradingPanel symbol={symbol} token={token} loading={terminalLoading} onSelectPrice={onSelectPrice} />}
           trade={
-            <TradePanel
-              accountId={accountId}
-              balances={balances}
-              category={market.category}
-              productType={market.productType}
-              minOrderAmount={tradeMinOrderAmount}
-              pricePrecision={tradePricePrecision}
-              quantityPrecision={tradeQuantityPrecision}
-              pricePrefill={tradePricePrefill}
-              sessionReady={sessionReady}
-              sessionMode={tradePanelSessionMode}
-              sessionError={sessionError}
-              loginRequired={loginRequired}
-              leverage={market.leverage}
-              rules={market.rules}
-              symbol={symbol}
-              onLoginRequired={onLoginRequired}
-              onSubmitOrder={submitOrder}
-              onRetrySession={onRetrySession}
-            />
+            <div className={styles.tradeControlsStack}>
+              <PerpetualTradingControls controls={perpetualControls} />
+              <TradePanel
+                accountId={accountId}
+                adapterSettings={perpetualControls.adapterSettings}
+                settingsReady={perpetualControls.ready}
+                balances={balances}
+                category={market.category}
+                productType={market.productType}
+                minOrderAmount={tradeMinOrderAmount}
+                pricePrecision={tradePricePrecision}
+                quantityPrecision={tradeQuantityPrecision}
+                pricePrefill={tradePricePrefill}
+                sessionReady={sessionReady}
+                sessionMode={tradePanelSessionMode}
+                sessionError={sessionError}
+                loginRequired={loginRequired}
+                leverage={market.leverage}
+                rules={market.rules}
+                symbol={symbol}
+                onLoginRequired={onLoginRequired}
+                onSubmitOrder={submitOrder}
+                onSubmitOco={submitOco}
+                onRetrySession={onRetrySession}
+              />
+            </div>
           }
           bottom={
             <BottomAccountPanel
@@ -126,10 +135,15 @@ export function TradingDesktopView({
               ledgerEntries={accountPanel.ledgerEntries}
               loading={accountPanel.loading}
               orders={accountPanel.orders}
+              trades={accountPanel.trades}
               positions={accountPanel.positions}
               positionHistory={accountPanel.positionHistory}
+              fundingSettlements={accountPanel.fundingSettlements}
+              transfers={accountPanel.transfers}
               sessionReady={accountPanel.sessionReady}
               currentSymbol={symbol}
+              onCancelAllOrders={accountPanel.onCancelAllOrders}
+              onCloseAllPositions={accountPanel.onCloseAllPositions}
               onClosePosition={accountPanel.onClosePosition}
             />
           }

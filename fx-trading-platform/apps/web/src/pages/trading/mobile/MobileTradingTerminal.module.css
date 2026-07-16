@@ -4,7 +4,7 @@
   box-sizing: border-box;
   min-height: 100dvh;
   display: grid;
-  grid-template-rows: auto auto auto auto auto auto auto auto 1fr;
+  grid-template-rows: auto auto auto auto auto auto 1fr;
   gap: var(--space-2);
   padding:
     calc(env(safe-area-inset-top) + var(--space-2))
@@ -14,44 +14,6 @@
   color: var(--trading-text);
   font-family: var(--font-ui);
   overflow-x: hidden;
-}
-
-.marketTabs {
-  min-height: calc(var(--space-8) + var(--space-3));
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--space-1);
-  align-items: center;
-  border-bottom: 1px solid var(--trading-border-soft);
-  background: var(--trading-surface);
-  margin: calc(var(--space-2) * -1) calc(var(--space-2) * -1) 0;
-  padding: var(--space-1) var(--space-2) 0;
-}
-
-.marketTabs button {
-  min-width: 0;
-  min-height: calc(var(--space-8) + var(--space-1));
-  border: 0;
-  border-bottom: 3px solid transparent;
-  background: transparent;
-  color: var(--trading-muted);
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 800;
-  white-space: nowrap;
-  transition:
-    color var(--motion-base) var(--ease-standard),
-    border-color var(--motion-base) var(--ease-standard);
-}
-
-.marketTabs button:focus-visible {
-  outline: 2px solid rgb(31 122 31 / 0.22);
-  outline-offset: -2px;
-}
-
-.activeMarketTab {
-  border-color: var(--trading-accent) !important;
-  color: var(--trading-text-strong) !important;
 }
 
 .contractHeader {
@@ -194,160 +156,6 @@
   display: grid;
   gap: 1px;
   padding: var(--space-1) var(--space-2);
-}
-
-.orderSurface {
-  min-width: 0;
-  display: grid;
-  gap: var(--space-2);
-  border: 1px solid var(--trading-border-soft);
-  border-radius: var(--radius-4);
-  background: var(--trading-surface);
-  padding: var(--space-2);
-}
-
-.orderControls {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--space-1);
-}
-
-.orderControls button,
-.orderTypeButton,
-.quantityField,
-.triggerGrid,
-.longButton,
-.shortButton {
-  min-width: 0;
-  min-height: calc(var(--space-8) + var(--space-3));
-  border: 0;
-  border-radius: var(--radius-4);
-  font-weight: 900;
-}
-
-.orderControls button {
-  background: var(--trading-surface-3);
-  color: var(--trading-muted);
-}
-
-.orderControlActive {
-  background: var(--trading-accent) !important;
-  color: var(--trading-accent-text) !important;
-}
-
-.orderTypeButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--trading-surface-3);
-  color: var(--trading-text-strong);
-  padding: 0 var(--space-2);
-  text-align: left;
-}
-
-.quantityField,
-.triggerGrid {
-  display: grid;
-  align-items: center;
-  background: var(--trading-field-bg);
-  color: var(--trading-muted);
-  padding: 0 var(--space-2);
-}
-
-.quantityField {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.quantityField strong,
-.triggerGrid b {
-  color: var(--trading-text-strong);
-}
-
-.positionHints,
-.stopRow {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  color: var(--trading-muted);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.positionHints strong {
-  color: var(--trading-text-strong);
-}
-
-.stopRow button {
-  border: 0;
-  background: transparent;
-  color: var(--trading-text-strong);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.triggerGrid {
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--space-1) var(--space-2);
-  padding-top: var(--space-2);
-  padding-bottom: var(--space-2);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.longButton {
-  background: var(--trading-buy);
-  color: var(--trading-page-bg);
-  cursor: pointer;
-}
-
-.shortButton {
-  background: var(--trading-sell);
-  color: var(--trading-page-bg);
-  cursor: pointer;
-}
-
-.bidAskRatio {
-  --bid-percent: 60%;
-  min-width: 0;
-  min-height: calc(var(--space-8) + var(--space-1));
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: var(--space-2);
-  overflow: hidden;
-  border-radius: var(--radius-4);
-  background:
-    linear-gradient(90deg, var(--trading-buy) 0 var(--bid-percent), var(--trading-sell) var(--bid-percent) 100%);
-  padding: 0 var(--space-2);
-  color: var(--trading-page-bg);
-  font-family: var(--font-data);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 900;
-}
-
-:global(:root[data-theme='minimal-white']) .bidAskRatio,
-:global(:root[data-theme='minimal-white']) .longButton,
-:global(:root[data-theme='minimal-white']) .shortButton {
-  color: #ffffff;
-}
-
-:global(:root[data-theme='minimal-white']) .bidAskRatio span:last-child {
-  color: #ffffff;
-}
-
-.bidAskRatio strong {
-  border-radius: 999px;
-  background: var(--trading-surface);
-  padding: var(--space-1) var(--space-2);
-  color: var(--trading-buy);
-}
-
-.bidAskRatio span:last-child {
-  text-align: right;
-  color: var(--trading-sell);
 }
 
 .sessionStrip strong {
@@ -566,7 +374,6 @@
 .sessionStrip,
 .marketDataStrip,
 .depthPreview,
-.orderSurface,
 .chartSection {
   border-color: var(--trading-border-soft);
   border-radius: 8px;
@@ -575,33 +382,6 @@
 
 .metricStrip {
   gap: var(--space-1);
-}
-
-.orderControls button,
-.orderTypeButton,
-.quantityField,
-.triggerGrid,
-.longButton,
-.shortButton {
-  min-height: 40px;
-  border-radius: 7px;
-  font-size: 14px;
-}
-
-.orderControls button {
-  border-bottom: 2px solid transparent;
-  background: transparent;
-}
-
-.orderControlActive {
-  border-bottom-color: var(--trading-accent) !important;
-  background: transparent !important;
-  color: var(--trading-text-strong) !important;
-}
-
-.longButton,
-.shortButton {
-  min-height: 42px;
 }
 
 .actionBar {

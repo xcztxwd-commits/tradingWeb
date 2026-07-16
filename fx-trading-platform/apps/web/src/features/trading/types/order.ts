@@ -1,4 +1,10 @@
 import type { TradingInstrumentRules } from '../../market/tradingModels'
+import type {
+  CreateOrderRequest,
+  MarginMode,
+  PositionSide,
+  QuantityUnit
+} from '@fx-platform/shared-types'
 
 export type TradeSide = 'buy' | 'sell'
 
@@ -13,6 +19,7 @@ export type StrategyType =
   | 'tp_sl'
   | 'trailing_tp_sl'
   | 'trigger'
+  | 'oco'
   | 'advanced_limit'
   | 'split_order'
   | 'iceberg'
@@ -36,6 +43,7 @@ export type TradeMarket = {
   leverage?: number
   productType?: TradeProductType
   quoteTimestamp?: number
+  tradable?: boolean
   rules?: TradeInstrumentRules
 }
 
@@ -64,6 +72,11 @@ export type TradeFormState = {
   advancedLimitMode: AdvancedLimitMode
   timeInForce: TimeInForce
   clientOrderId: string
+  positionSide: PositionSide
+  marginMode: MarginMode
+  quantityUnit: QuantityUnit
+  reduceOnly: boolean
+  attachedProtections: NonNullable<CreateOrderRequest['attachedProtections']>
 }
 
 export type TradeField = keyof TradeFormState
@@ -80,6 +93,7 @@ export type OrderValidationErrorKey =
   | 'stopLossTriggerPrice'
   | 'trailingCallbackRatio'
   | 'triggerPrice'
+  | 'attachedProtections'
 
 export type OrderValidationResult = {
   errors: OrderValidationErrorKey[]
@@ -106,13 +120,8 @@ export type StrategyOption = {
 }
 
 export const strategyOptions: StrategyOption[] = [
-  { value: 'tp_sl', labelKey: 'trading.strategy.tpSl', available: true },
-  { value: 'trailing_tp_sl', labelKey: 'trading.strategy.trailingTpSl', available: true },
   { value: 'trigger', labelKey: 'trading.strategy.trigger', available: true },
-  { value: 'advanced_limit', labelKey: 'trading.strategy.advancedLimit', available: true },
-  { value: 'split_order', labelKey: 'trading.strategy.splitOrder', available: false },
-  { value: 'iceberg', labelKey: 'trading.strategy.iceberg', available: false },
-  { value: 'twap', labelKey: 'trading.strategy.twap', available: false }
+  { value: 'oco', labelKey: 'trading.strategy.oco', available: true }
 ]
 
 export const advancedLimitModes: Array<{ value: AdvancedLimitMode; labelKey: string }> = [

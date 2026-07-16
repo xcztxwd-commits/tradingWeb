@@ -1,4 +1,5 @@
 import { apiGet } from './apiClient'
+import type { PerpetualReferenceResponse } from '@fx-platform/shared-types'
 import type { Candle, Quote, SymbolItem } from '../types/trading'
 
 export function getSymbols() {
@@ -7,6 +8,12 @@ export function getSymbols() {
 
 export function getQuote(symbol: string) {
   return apiGet<Quote>(`/api/market/quotes/${symbol}`)
+}
+
+export function getPerpetualReference(symbol: string) {
+  return apiGet<PerpetualReferenceResponse>(
+    `/api/market/perpetuals/${encodeURIComponent(symbol.trim().toUpperCase())}/reference`
+  )
 }
 
 export function getCandles(symbol: string, timeframe: string) {

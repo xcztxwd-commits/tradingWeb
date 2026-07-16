@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 import {
   chartTimezoneOptions,
   chartTypeOptions,
+  getChartIntervalOptions,
   getIntervalByShortcutKey,
   indicatorConfigOptions,
   priceScaleModeOptions,
@@ -32,6 +33,7 @@ import { IntervalDropdown } from './IntervalDropdown'
 import styles from './ChartTopToolbar.module.css'
 
 type Props = {
+  symbol: string
   settings: ChartSettings
   indicators: string[]
   onChartSettingsChange: (settings: ChartSettings) => void
@@ -51,6 +53,7 @@ type Props = {
 }
 
 export function ChartTopToolbar({
+  symbol,
   settings,
   indicators,
   onChartSettingsChange,
@@ -78,7 +81,12 @@ export function ChartTopToolbar({
   const chartTypeMenuRef = useRef<HTMLDivElement | null>(null)
   const priceScaleMenuRef = useRef<HTMLDivElement | null>(null)
   const indicatorMenuRef = useRef<HTMLDivElement | null>(null)
-  const favoriteIntervals = useMemo(() => quickChartIntervals(settings), [settings.favoriteIntervals])
+  const intervalOptions = getChartIntervalOptions(symbol)
+  const favoriteIntervals = useMemo(
+    () => quickChartIntervals(settings, intervalOptions),
+    [intervalOptions, settings.favoriteIntervals]
+  )
+  const visibleFavoriteIntervals = favoriteIntervals.map((item) => item.value)
   const activeChartType = chartTypeOptions.find((item) => item.value === settings.chartType) ?? chartTypeOptions[0]
   const activePriceScaleMode =
     priceScaleModeOptions.find((item) => item.value === settings.axisSettings.priceScaleMode) ?? priceScaleModeOptions[0]
@@ -188,7 +196,8 @@ export function ChartTopToolbar({
             </button>
             <IntervalDropdown
               activeInterval={settings.interval}
-              favoriteIntervals={settings.favoriteIntervals}
+              favoriteIntervals={visibleFavoriteIntervals}
+              options={intervalOptions}
               open={intervalDropdownOpen}
               onClose={() => setIntervalDropdownOpen(false)}
               onFavoriteIntervalToggle={onFavoriteIntervalToggle}

@@ -8,7 +8,16 @@ public final class SymbolNormalizer {
   }
 
   public static String normalize(String symbol) {
-    return symbol.replace("-", "").replace("_", "").replace("/", "").toUpperCase(Locale.ROOT);
+    String upper = symbol.toUpperCase(Locale.ROOT);
+    if (upper.endsWith("-PERP") || upper.endsWith("_PERP") || upper.endsWith("/PERP")) {
+      String baseSymbol = upper.substring(0, upper.length() - "-PERP".length());
+      return stripSeparators(baseSymbol) + "-PERP";
+    }
+    return stripSeparators(upper);
+  }
+
+  private static String stripSeparators(String symbol) {
+    return symbol.replace("-", "").replace("_", "").replace("/", "");
   }
 
   public static String quoteTopic(String symbol) {
@@ -21,5 +30,13 @@ public final class SymbolNormalizer {
 
   public static String tradesTopic(String symbol) {
     return "/topic/market/trades/" + normalize(symbol);
+  }
+
+  public static String perpetualReferenceTopic(String symbol) {
+    return "/topic/market/perp-reference/" + normalize(symbol);
+  }
+
+  public static String sourceChangesTopic(String symbol) {
+    return "/topic/market/source-changes/" + normalize(symbol);
   }
 }

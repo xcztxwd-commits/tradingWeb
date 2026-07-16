@@ -6,5 +6,6 @@ package com.fxplatform.trading.enums;
 public enum OrderType {
   MARKET,
   LIMIT,
-  STOP
+  STOP,
+  STOP_MARKET
 }

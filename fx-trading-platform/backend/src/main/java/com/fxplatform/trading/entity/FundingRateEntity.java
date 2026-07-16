@@ -25,6 +25,11 @@ public class FundingRateEntity {
   private Instant fundingTime;
   private Instant nextFundingTime;
   private BigDecimal markPrice;
+  private String providerCode;
+  private String sourceMode;
+  private Instant asOf;
+  private Integer intervalMinutes;
+  private String rawPayloadHash;
 
   @TableField(fill = FieldFill.INSERT)
   private Instant createdAt;

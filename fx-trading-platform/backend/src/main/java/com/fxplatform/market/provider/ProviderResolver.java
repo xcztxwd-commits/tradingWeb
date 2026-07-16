@@ -11,6 +11,7 @@ import com.fxplatform.market.repository.SymbolProviderBindingRepository;
 import com.fxplatform.market.repository.SymbolRepository;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,21 +31,50 @@ public class ProviderResolver {
   private final ProviderRegistry providerRegistry;
 
   public ProviderResolution resolve(String symbol, MarketDataCapability capability) {
+    SymbolEntity platformSymbol = requireEnabledSymbol(symbol);
+    for (SymbolProviderBindingEntity binding
+        : bindingRepository.findEnabledBySymbolIdOrderByPriority(platformSymbol.getId())) {
+      ProviderResolution resolution = resolveBinding(platformSymbol, binding, capability);
+      if (resolution != null) {
+        return resolution;
+      }
+    }
+    throw noBindingSupports(capability);
+  }
+
+  public List<ProviderResolution> resolveCandidates(String symbol, MarketDataCapability capability) {
+    return resolveCandidates(symbol, Set.of(capability));
+  }
+
+  public List<ProviderResolution> resolveCandidates(
+      String symbol,
+      Set<MarketDataCapability> capabilities
+  ) {
+    SymbolEntity platformSymbol = requireEnabledSymbol(symbol);
+    Set<MarketDataCapability> requiredCapabilities = copyRequiredCapabilities(capabilities);
+
+    java.util.ArrayList<ProviderResolution> candidates = new java.util.ArrayList<>();
+    for (SymbolProviderBindingEntity binding : bindingRepository.findEnabledBySymbolIdOrderByPriority(platformSymbol.getId())) {
+      ProviderResolution resolution = resolveBinding(
+          platformSymbol, binding, requiredCapabilities);
+      if (resolution != null) {
+        candidates.add(resolution);
+      }
+    }
+    if (candidates.isEmpty()) {
+      throw noBindingSupports(requiredCapabilities);
+    }
+    return List.copyOf(candidates);
+  }
+
+  public SymbolEntity requireEnabledSymbol(String symbol) {
     String normalizedSymbol = SymbolNormalizer.normalize(symbol);
     SymbolEntity platformSymbol = symbolRepository.findBySymbol(normalizedSymbol)
         .orElseThrow(() -> new BusinessException("SYMBOL_NOT_FOUND", "Symbol not found"));
     if (!Boolean.TRUE.equals(platformSymbol.getEnabled())) {
       throw new BusinessException("SYMBOL_NOT_ENABLED", "Symbol is disabled");
     }
-
-    for (SymbolProviderBindingEntity binding : bindingRepository.findEnabledBySymbolIdOrderByPriority(platformSymbol.getId())) {
-      ProviderResolution resolution = resolveBinding(platformSymbol, binding, capability);
-      if (resolution != null) {
-        return resolution;
-      }
-    }
-
-    throw new BusinessException("MARKET_PROVIDER_BINDING_NOT_FOUND", "No enabled provider binding supports " + capability);
+    return platformSymbol;
   }
 
   public Map<String, ProviderResolution> resolveAll(Collection<String> symbols, MarketDataCapability capability) {
@@ -119,18 +149,50 @@ public class ProviderResolver {
       SymbolProviderBindingEntity binding,
       MarketDataCapability capability
   ) {
+    return resolveBinding(symbol, binding, Set.of(capability));
+  }
+
+  private ProviderResolution resolveBinding(
+      SymbolEntity symbol,
+      SymbolProviderBindingEntity binding,
+      Set<MarketDataCapability> capabilities
+  ) {
     DataProviderEntity provider = providerRepository.findById(binding.getProviderId()).orElse(null);
     if (provider == null || !Boolean.TRUE.equals(provider.getEnabled())) {
       return null;
     }
-    if (!capabilityRepository.existsEnabledCapability(provider.getId(), capability)) {
-      return null;
+    for (MarketDataCapability capability : capabilities) {
+      if (!capabilityRepository.existsEnabledCapability(provider.getId(), capability)) {
+        return null;
+      }
     }
     return providerRegistry.find(provider.getCode())
         .filter(MarketDataProviderAdapter::configured)
-        .filter(adapter -> adapter.supports(capability))
+        .filter(adapter -> supportsAll(adapter, capabilities))
         .map(adapter -> new ProviderResolution(symbol, provider, binding, adapter))
         .orElse(null);
+  }
+
+  private Set<MarketDataCapability> copyRequiredCapabilities(
+      Set<MarketDataCapability> capabilities
+  ) {
+    if (capabilities == null || capabilities.isEmpty()) {
+      throw new IllegalArgumentException("At least one market data capability is required");
+    }
+    return Collections.unmodifiableSet(EnumSet.copyOf(capabilities));
+  }
+
+  private boolean supportsAll(
+      MarketDataProviderAdapter adapter,
+      Set<MarketDataCapability> capabilities
+  ) {
+    return capabilities.stream().allMatch(adapter::supports);
+  }
+
+  private BusinessException noBindingSupports(Object capabilities) {
+    return new BusinessException(
+        "MARKET_PROVIDER_BINDING_NOT_FOUND",
+        "No enabled provider binding supports " + capabilities);
   }
 
   private ProviderResolution resolveFirstAvailableBinding(

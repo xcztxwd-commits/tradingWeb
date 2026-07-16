@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-
-import { formatTradingChartTitle, initialTradingSymbol, mergeWithMockMarkets, normalizeTradingSymbol } from './tradingPageMarketSelection'
+import { useNavigate, useParams } from 'react-router-dom'
+import { formatTradingChartTitle, getTradingMarketsForProduct, mergeWithLocalTradingMarkets } from './tradingPageMarketSelection'
 import { getTradingSessionStatusLabel, getTradingSessionStatusText } from './tradingPageSessionStatus'
 import { getTradeMinOrderAmount, getTradePricePrecision, getTradeQuantityPrecision, mergeMarketRules } from './tradingPageTradeRules'
 import type { TradingTerminalViewProps } from './tradingPageViewModels'
@@ -11,35 +10,38 @@ import { useMobileTerminalViewport } from './useMobileTerminalViewport'
 import { useTradingChartSettings } from './useTradingChartSettings'
 import { useResizableLayout } from '../../hooks/useResizableLayout'
 import { MarketSidebar } from './components/MarketSidebar'
-import { MobileDrawer, MobileOrderSheet } from './components/MobilePanels'
+import { MobileDrawer } from './components/MobilePanels'
 import { LoginPromptDialog } from './components/LoginPromptDialog'
 import { RightTradingPanel } from './components/RightTradingPanel'
 import { TradingDesktopView } from './components/TradingDesktopView'
 import { TradingMobileView } from './components/TradingMobileView'
-import { mockTradingMarkets } from '../../features/market/mockTradingData'
+import { MarketSourceChangeNotice } from './components/MarketSourceChangeNotice'
+import { usePerpetualTradingControls } from './usePerpetualTradingControls'
+import { TradingOrderSheet } from './components/TradingOrderSheet'
 import { hydrateMarketFavorites } from '../../features/market/marketFavorites'
 import { createTradingMarketPlaceholder, createTradingQuoteFromMarket } from '../../features/market/tradingMarketAdapters'
 import { fetchMarketSymbolRules, fetchMarketSymbols } from '../../features/market/tradingMarketApi'
+import { startQuoteMarketDataAdapter } from '../../features/market/quoteMarketDataAdapter'
 import { getRealtimeQuoteMarkets } from '../../features/market/tradingModels'
 import type { TradingInstrumentRules, TradingMarket } from '../../features/market/tradingModels'
 import { useMarketFavorites } from '../../features/market/useMarketFavorites'
 import { useTradingQuoteMap } from './useTradingQuotes'
-import { TradePanel } from '../../features/trading/components/TradePanel'
 import { deriveTradingBalances } from '../../features/trading-session/tradingSession'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
 import type { TradingSessionMode } from '../../features/trading-session/useTradingSession'
 import { useTheme } from '../../design-system/theme/ThemeProvider'
-import { normalizeTradingCategory, writeLastTradingSymbol } from '../../app/hooks/useLastTradingSymbol'
+import { resolveTradingPath, writeLastTradingSymbol } from '../../app/hooks/useLastTradingSymbol'
+import { defaultTradingSymbols, normalizeTradingProductSymbol, type TradingProduct } from '../../app/tradingRoutes'
 import styles from './TradingPage.module.css'
 
-export function TradingPage() {
+type TradingPageProps = { product: TradingProduct }
+export function TradingPage({ product }: TradingPageProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const querySymbol = searchParams.get('symbol')
-  const queryCategory = normalizeTradingCategory(searchParams.get('category'))
+  const { symbol: routeSymbol } = useParams<{ symbol?: string }>()
+  const routedSymbol = normalizeTradingProductSymbol(product, routeSymbol) ?? defaultTradingSymbols[product]
   const { currentTheme } = useTheme()
-  const [selectedSymbol, setSelectedSymbol] = useState(normalizeTradingSymbol(querySymbol) ?? initialTradingSymbol)
+  const [selectedSymbol, setSelectedSymbol] = useState(routedSymbol)
   const [markets, setMarkets] = useState<TradingMarket[]>([])
   const [marketDrawerOpen, setMarketDrawerOpen] = useState(false)
   const [quoteDrawerOpen, setQuoteDrawerOpen] = useState(false)
@@ -54,8 +56,11 @@ export function TradingPage() {
     account,
     accountId,
     orders,
+    trades,
     positions,
     positionHistory,
+    fundingSettlements,
+    transfers,
     ledgerEntries,
     walletBalances,
     sessionReady,
@@ -64,8 +69,7 @@ export function TradingPage() {
     sessionAuthStatus,
     loginRequired,
     retrySession,
-    submitOrder,
-    closePosition
+    submitOrder, submitOco, cancelAllOrders, closeAllPositions, closePosition
   } = useTradingSession()
   const { favorites: favoriteSymbols, toggleFavorite } = useMarketFavorites(token)
   const { layout, activePreset, applyPreset, beginSplitResize, resizeByDelta, endResize, movePanel, resetLayout } = useResizableLayout()
@@ -87,7 +91,7 @@ export function TradingPage() {
     () => getRealtimeQuoteMarkets(visibleMarkets, selectedSymbol),
     [selectedSymbol, visibleMarkets]
   )
-  const quotes = useTradingQuoteMap(quoteMarkets, token, handleQuoteStatus)
+  const { quotes, sourceNotice } = useTradingQuoteMap(quoteMarkets, token, handleQuoteStatus)
   const selectedQuote = quotes[selectedSymbol] ?? createTradingQuoteFromMarket(selectedMarketWithRules)
   const marketDataStatusView = getStatusView(selectedSymbol, selectedQuote.source)
   const { chartCallbacks, chartSettings, chartThemeMode, indicators } = useTradingChartSettings(
@@ -100,21 +104,32 @@ export function TradingPage() {
   const sessionStatusLabel = getTradingSessionStatusLabel(sessionMode, sessionAuthStatus, t)
   const sessionStatusText = getTradingSessionStatusText({ sessionMode, sessionAuthStatus, sessionError, loginRequired, t })
   const balances = useMemo(
-    () => deriveTradingBalances(account, positions, selectedSymbol, walletBalances),
-    [account, positions, selectedSymbol, walletBalances]
+    () => deriveTradingBalances(product, account, positions, selectedSymbol, walletBalances),
+    [account, positions, product, selectedSymbol, walletBalances]
   )
+  const perpetualControls = usePerpetualTradingControls({
+    accountId,
+    token,
+    market: selectedMarketWithRules,
+    enabled: product === 'perpetual',
+    expectedSource: selectedQuote.marketSource
+  })
   const tradeMinOrderAmount = getTradeMinOrderAmount(selectedMarketWithRules)
   const tradePricePrecision = getTradePricePrecision(selectedMarketWithRules)
   const tradeQuantityPrecision = getTradeQuantityPrecision(selectedMarketWithRules, tradeMinOrderAmount)
+  useEffect(() => startQuoteMarketDataAdapter(selectedSymbol, token), [selectedSymbol, token])
   useEffect(() => {
     setTradePricePrefill(null)
   }, [selectedSymbol])
 
   useEffect(() => {
-    const normalizedQuerySymbol = normalizeTradingSymbol(querySymbol)
-    writeLastTradingSymbol(queryCategory, normalizedQuerySymbol ?? selectedSymbol)
-    if (normalizedQuerySymbol) setSelectedSymbol(normalizedQuerySymbol)
-  }, [queryCategory, querySymbol, selectedSymbol])
+    if (routeSymbol !== undefined && normalizeTradingProductSymbol(product, routeSymbol) === null) {
+      navigate(resolveTradingPath(product), { replace: true })
+      return
+    }
+    writeLastTradingSymbol(product, routedSymbol)
+    setSelectedSymbol(routedSymbol)
+  }, [navigate, product, routeSymbol, routedSymbol])
 
   useEffect(() => {
     let active = true
@@ -122,21 +137,21 @@ export function TradingPage() {
     void fetchMarketSymbols()
       .then((nextMarkets) => {
         if (!active) return
-        const mergedMarkets = mergeWithMockMarkets(nextMarkets)
-        const normalizedQuerySymbol = normalizeTradingSymbol(querySymbol)
-        setMarkets(mergedMarkets)
+        const mergedMarkets = mergeWithLocalTradingMarkets(nextMarkets)
+        const productMarkets = getTradingMarketsForProduct(mergedMarkets, product)
+        setMarkets(productMarkets)
         setSelectedSymbol((current) =>
-          mergedMarkets.some((market) => market.symbol === current) ? current : normalizedQuerySymbol ?? initialTradingSymbol
+          productMarkets.some((market) => market.symbol === current) ? current : routedSymbol
         )
       })
       .catch(() => {
-        if (active) setMarkets(mockTradingMarkets)
+        if (active) setMarkets(getTradingMarketsForProduct(mergeWithLocalTradingMarkets([]), product))
       })
 
     return () => {
       active = false
     }
-  }, [querySymbol])
+  }, [product, routedSymbol])
 
   useEffect(() => {
     let active = true
@@ -160,13 +175,17 @@ export function TradingPage() {
   }, [loginRequired])
 
   const selectSymbol = useCallback((symbol: string) => {
-    setSelectedSymbol(symbol)
+    const normalized = normalizeTradingProductSymbol(product, symbol)
+    if (!normalized) return
+    setSelectedSymbol(normalized)
+    writeLastTradingSymbol(product, normalized)
+    navigate(resolveTradingPath(product, normalized))
     setMarketDrawerOpen(false)
-  }, [])
+  }, [navigate, product])
 
   const handleLoginRedirect = useCallback(() => {
-    navigate(`/login?redirect=${encodeURIComponent('/trading')}`)
-  }, [navigate])
+    navigate(`/login?redirect=${encodeURIComponent(resolveTradingPath(product, selectedSymbol))}`)
+  }, [navigate, product, selectedSymbol])
 
   const handleTradeLoginRequired = useCallback(() => {
     setOrderSheetOpen(false)
@@ -234,9 +253,14 @@ export function TradingPage() {
     ledgerEntries,
     loading: terminalLoading,
     orders,
+    trades,
     positions,
     positionHistory,
+    fundingSettlements,
+    transfers,
     sessionReady,
+    onCancelAllOrders: cancelAllOrders,
+    onCloseAllPositions: closeAllPositions,
     onClosePosition: closePosition
   }
   const viewProps: TradingTerminalViewProps = {
@@ -261,6 +285,7 @@ export function TradingPage() {
     onRetrySession: retrySession,
     onSelectSymbol: selectSymbol,
     onFavorite: toggleFavorite,
+    product,
     quote: selectedQuote,
     quotes,
     sessionError,
@@ -268,6 +293,8 @@ export function TradingPage() {
     sessionStatusLabel,
     sessionStatusText,
     submitOrder,
+    submitOco,
+    perpetualControls,
     symbol: selectedSymbol,
     tradeMinOrderAmount,
     tradePricePrecision,
@@ -281,6 +308,7 @@ export function TradingPage() {
 
   return (
     <div className={styles.page}>
+      <MarketSourceChangeNotice notice={sourceNotice} />
       {!isMobileTerminal ? <TradingDesktopView {...viewProps} /> : null}
       {isMobileTerminal ? <TradingMobileView {...viewProps} /> : null}
       <MobileDrawer open={marketDrawerOpen} side="left" title="Markets" onClose={() => setMarketDrawerOpen(false)}>
@@ -296,29 +324,7 @@ export function TradingPage() {
         />
       </MobileDrawer>
 
-      <MobileOrderSheet open={orderSheetOpen} title="Trade" onClose={() => setOrderSheetOpen(false)}>
-        <TradePanel
-          compact
-          accountId={accountId}
-          balances={balances}
-          category={selectedMarketWithRules.category}
-          productType={selectedMarketWithRules.productType}
-          sessionReady={sessionReady}
-          sessionMode={tradePanelSessionMode}
-          sessionError={sessionError}
-          loginRequired={loginRequired}
-          leverage={selectedMarketWithRules.leverage}
-          rules={selectedMarketWithRules.rules}
-          minOrderAmount={tradeMinOrderAmount}
-          pricePrecision={tradePricePrecision}
-          quantityPrecision={tradeQuantityPrecision}
-          pricePrefill={tradePricePrefill}
-          symbol={selectedSymbol}
-          onLoginRequired={handleTradeLoginRequired}
-          onSubmitOrder={submitOrder}
-          onRetrySession={retrySession}
-        />
-      </MobileOrderSheet>
+      <TradingOrderSheet open={orderSheetOpen} onClose={() => setOrderSheetOpen(false)} view={viewProps} />
 
       <LoginPromptDialog
         open={loginRequired && loginPromptRequested}

@@ -13,7 +13,7 @@ import org.springframework.stereotype.Service;
     prefix = "market.provider-instrument-sync",
     name = "enabled",
     havingValue = "true",
-    matchIfMissing = true
+    matchIfMissing = false
 )
 public class ProviderInstrumentSyncScheduler {
 

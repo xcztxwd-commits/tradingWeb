@@ -18,8 +18,27 @@ class ArchitectureRulesTest {
 
     assertThat(orderService).contains("RiskCheckService");
     assertThat(orderService).contains("ExecutionAdapter");
+    assertThat(orderService).contains("MarketBundleResolver");
+    assertThat(orderService).contains("FullFillCoordinator");
+    assertThat(orderService).contains("TradingTransactionExecutor");
     assertThat(orderService).doesNotContain("double ");
     assertThat(orderService).doesNotContain("float ");
+  }
+
+  @Test
+  void demoFullFillSeparatesMarketTruthFromQuantityIntent() throws Exception {
+    String adapter = Files.readString(Path.of(
+        "src/main/java/com/fxplatform/execution/SimulatedExecutionAdapter.java"));
+    String coordinator = Files.readString(Path.of(
+        "src/main/java/com/fxplatform/execution/FullFillCoordinator.java"));
+    String transactionExecutor = Files.readString(Path.of(
+        "src/main/java/com/fxplatform/trading/service/TradingTransactionExecutor.java"));
+
+    assertThat(adapter).doesNotContain("QuoteService");
+    assertThat(adapter).doesNotContain("SymbolRepository");
+    assertThat(adapter).doesNotContain("FEE_RATE");
+    assertThat(coordinator).contains("MAKER_FEE_RATE", "TAKER_FEE_RATE", "SLIPPAGE_RATE");
+    assertThat(transactionExecutor).contains("Propagation.REQUIRES_NEW");
   }
 
   @Test

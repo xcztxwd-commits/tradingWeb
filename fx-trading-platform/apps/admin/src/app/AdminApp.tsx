@@ -3,12 +3,15 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AdminLayout } from './AdminLayout'
 import { RequireAdmin } from './RequireAdmin'
 import { AccountsPage } from '../pages/AccountsPage'
+import { AccountDetailPage } from '../pages/AccountDetailPage'
 import { ArticlesPage } from '../pages/ArticlesPage'
 import { AuditLogsPage } from '../pages/AuditLogsPage'
 import { DashboardPage } from '../pages/DashboardPage'
 import { DataProvidersPage } from '../pages/DataProvidersPage'
 import { DictionariesPage } from '../pages/DictionariesPage'
 import { FeatureCrudPage } from '../pages/FeatureCrudPage'
+import { FundingConfigPage } from '../pages/FundingConfigPage'
+import { FundingSettlementsPage } from '../pages/FundingSettlementsPage'
 import { LedgerPage } from '../pages/LedgerPage'
 import { LoginPage } from '../pages/LoginPage'
 import { MarketStatusPage } from '../pages/MarketStatusPage'
@@ -67,13 +70,16 @@ export function AdminApp() {
 
           <Route path="/users" element={<Navigate to="/system/users" replace />} />
           <Route path="/accounts" element={<AccountsPage />} />
+          <Route path="/accounts/:accountId" element={<AccountDetailPage />} />
           <Route path="/trading/orders" element={<OrdersPage />} />
           <Route path="/trading/positions" element={<PositionsPage />} />
           <Route path="/trading/trades" element={<TradesPage />} />
+          <Route path="/trading/funding-settlements" element={<FundingSettlementsPage />} />
           <Route path="/legacy/finance/ledger" element={<LedgerPage />} />
           <Route path="/legacy/finance/payment-methods" element={<PaymentMethodsPage />} />
           <Route path="/market/symbols" element={<SymbolsPage />} />
           <Route path="/market/status" element={<MarketStatusPage />} />
+          <Route path="/market/funding-config" element={<FundingConfigPage />} />
           <Route path="/risk" element={<RiskPage />} />
           <Route path="/content/messages" element={<MessagesPage />} />
           <Route path="/legacy/content/articles" element={<ArticlesPage />} />

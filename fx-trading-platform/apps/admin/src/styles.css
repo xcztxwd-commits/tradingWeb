@@ -1304,6 +1304,59 @@ td button:active,
   padding: 10px 12px;
 }
 
+.operations-page {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.operations-page-link {
+  margin: -4px 0 14px;
+}
+
+.operation-section {
+  min-width: 0;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-lg);
+  padding: 16px;
+  background: var(--admin-surface);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.operation-section > header,
+.operation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.operation-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.operation-table-scroll table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+}
+
+.operation-table-scroll th,
+.operation-table-scroll td {
+  border-bottom: 1px solid var(--admin-border);
+  padding: 10px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.operation-table-scroll th {
+  color: var(--admin-muted);
+  background: var(--admin-surface-muted);
+  font-size: 12px;
+}
+
 @keyframes adminOverlayIn {
   from {
     opacity: 0;
@@ -1416,6 +1469,20 @@ td button:active,
 }
 
 @media (max-width: 620px) {
+  .operations-page {
+    gap: 10px;
+  }
+
+  .operation-section {
+    padding: 12px;
+  }
+
+  .operation-section > header,
+  .operation-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .admin-nav,
   .feature-filters,
   .feature-page-metrics,

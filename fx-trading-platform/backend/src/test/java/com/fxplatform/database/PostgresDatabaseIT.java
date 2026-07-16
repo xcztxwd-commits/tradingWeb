@@ -94,6 +94,86 @@ class PostgresDatabaseIT {
   }
 
   @Test
+  void springBootAppliesTheV46V47MigrationContract() {
+    assertThat(count("""
+        select count(*)
+        from information_schema.tables
+        where table_schema = 'trading' and table_name = 'account_symbol_settings'
+        """)).isEqualTo(1);
+    assertThat(count("""
+        select count(*)
+        from information_schema.columns
+        where table_schema = 'trading'
+          and table_name = 'orders'
+          and column_name in ('position_side', 'margin_mode', 'quantity_unit', 'order_origin')
+        """)).isEqualTo(4);
+    assertThat(count("""
+        select count(*)
+        from market.symbols
+        where tradable = true
+          and symbol in (
+            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
+            'BTCUSDT-PERP', 'ETHUSDT-PERP', 'BNBUSDT-PERP', 'SOLUSDT-PERP', 'XRPUSDT-PERP'
+          )
+        """)).isEqualTo(10);
+    assertThat(count("""
+        select count(*)
+        from market.symbols
+        where tradable = true
+          and product_type = 'LINEAR_PERP'
+          and fixed_funding_rate = 0.0001
+          and fixed_funding_interval_minutes = 480
+          and funding_source_priority = ARRAY['BINANCE', 'OKX', 'FIXED']::TEXT[]
+        """)).isEqualTo(5);
+    assertThat(count("""
+        select count(*)
+        from flyway_schema_history
+        where success = true and version = '47'
+        """)).isEqualTo(1);
+  }
+
+  @Test
+  void springBootAppliesTradingConcurrencyUniquenessGuards() {
+    assertThat(count("""
+        select count(*)
+        from pg_indexes
+        where schemaname = 'trading'
+          and indexname in (
+            'ux_trades_p0_order_full_fill',
+            'ux_positions_one_way_open_both',
+            'ux_positions_hedge_open_side',
+            'ux_orders_user_account_client_order_id'
+          )
+        """)).isEqualTo(4);
+    assertThat(count("""
+        select count(*)
+        from information_schema.table_constraints
+        where constraint_schema = 'trading'
+          and table_name = 'funding_settlements'
+          and constraint_name = 'uq_funding_settlements_position_time'
+          and constraint_type = 'UNIQUE'
+        """)).isEqualTo(1);
+    assertThat(count("""
+        select count(*)
+        from flyway_schema_history
+        where success = true and version = '52'
+        """)).isEqualTo(1);
+    String tradeGuardDefinition = jdbcTemplate.queryForObject("""
+        select pg_get_indexdef(index_relation.oid)
+        from pg_class index_relation
+        join pg_namespace namespace on namespace.oid = index_relation.relnamespace
+        join pg_index index_metadata on index_metadata.indexrelid = index_relation.oid
+        where namespace.nspname = 'trading'
+          and index_relation.relname = 'ux_trades_p0_order_full_fill'
+          and index_metadata.indisunique = true
+        """, String.class);
+    assertThat(tradeGuardDefinition)
+        .containsIgnoringCase("CREATE UNIQUE INDEX")
+        .containsIgnoringCase("ON trading.trades USING btree (order_id)")
+        .containsIgnoringCase("WHERE (canonical_full_fill = true)");
+  }
+
+  @Test
   void productTypeConstraintsRejectNullAndInvalidWrites() {
     String nullProductTypeSymbol = "PTN" + UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
     assertThatThrownBy(() -> insertSymbol(nullProductTypeSymbol, null))

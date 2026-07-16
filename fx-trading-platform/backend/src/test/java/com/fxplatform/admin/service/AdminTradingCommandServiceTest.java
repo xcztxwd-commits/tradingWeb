@@ -3,6 +3,7 @@ package com.fxplatform.admin.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -16,21 +17,28 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.risk.service.RiskCheckService;
-import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.entity.OrderEntity;
+import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.OrderSide;
+import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.repository.OrderRepository;
+import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.service.OrderEventService;
 import com.fxplatform.trading.service.PositionService;
+import com.fxplatform.trading.service.SystemCloseOrderService;
 import com.fxplatform.wallet.service.WalletService;
+import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import java.math.BigDecimal;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -53,6 +61,9 @@ class AdminTradingCommandServiceTest {
   private PositionService positionService;
 
   @Mock
+  private SystemCloseOrderService systemCloseOrderService;
+
+  @Mock
   private AuditLogService auditLogService;
 
   @Mock
@@ -61,18 +72,28 @@ class AdminTradingCommandServiceTest {
   @Mock
   private WalletService walletService;
 
-  @Test
-  void forceCloseRequiresConfirmationBeforeDelegatingToPositionService() {
-    AdminTradingCommandService service = new AdminTradingCommandService(
-        orderRepository,
-        accountRepository,
-        ledgerService,
-        walletService,
-        riskCheckService,
-        orderEventService,
-        positionService,
-        auditLogService);
+  @Mock
+  private PositionRepository positionRepository;
 
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  @Mock
+  private WalletBalanceRepository walletBalanceRepository;
+
+  @InjectMocks
+  private AdminTradingCommandService service;
+
+  @BeforeEach
+  void lockedRowsReuseTheReadFixtures() {
+    org.mockito.Mockito.lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+    org.mockito.Mockito.lenient().when(orderRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> orderRepository.findById(invocation.getArgument(0)));
+  }
+
+  @Test
+  void forceCloseRequiresConfirmationBeforeDelegatingToSystemCloseService() {
     assertThatThrownBy(() -> service.forceClosePosition(
             UUID.randomUUID(),
             UUID.randomUUID(),
@@ -81,7 +102,7 @@ class AdminTradingCommandServiceTest {
         .extracting("code")
         .isEqualTo("ADMIN_CONFIRMATION_REQUIRED");
 
-    verifyNoInteractions(positionService, auditLogService);
+    verifyNoInteractions(systemCloseOrderService, positionService, auditLogService);
   }
 
   @Test
@@ -95,16 +116,6 @@ class AdminTradingCommandServiceTest {
     order.setHoldCurrency("USD");
     when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
     when(accountRepository.findById(order.getAccountId())).thenReturn(Optional.of(account));
-
-    AdminTradingCommandService service = new AdminTradingCommandService(
-        orderRepository,
-        accountRepository,
-        ledgerService,
-        walletService,
-        riskCheckService,
-        orderEventService,
-        positionService,
-        auditLogService);
 
     var response = service.cancelOrder(actorUserId, order.getId(), new AdminCancelOrderRequest("client requested", "cancel-1"));
 
@@ -132,16 +143,6 @@ class AdminTradingCommandServiceTest {
     order.setStatus(OrderStatus.CANCELED);
     when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
 
-    AdminTradingCommandService service = new AdminTradingCommandService(
-        orderRepository,
-        accountRepository,
-        ledgerService,
-        walletService,
-        riskCheckService,
-        orderEventService,
-        positionService,
-        auditLogService);
-
     var response = service.cancelOrder(actorUserId, order.getId(), new AdminCancelOrderRequest("retry", "cancel-1"));
 
     assertThat(response.status()).isEqualTo("CANCELED");
@@ -150,58 +151,54 @@ class AdminTradingCommandServiceTest {
   }
 
   @Test
-  void forceClosePositionDelegatesToDomainServiceAndAudits() {
+  void forceClosePositionUsesAdminOriginAndPassesTheRequestIdToSystemClose() {
     UUID actorUserId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
     UUID positionId = UUID.randomUUID();
-    PositionResponse closed = new PositionResponse(
+    String requestId = "force-close-1";
+    OrderEntity closeOrder = new OrderEntity();
+    closeOrder.setId(UUID.randomUUID());
+    closeOrder.setOrderOrigin(OrderOrigin.ADMIN_FORCE_CLOSE);
+    closeOrder.setStatus(OrderStatus.FILLED);
+    PositionEntity position = new PositionEntity();
+    position.setId(positionId);
+    position.setAccountId(accountId);
+    TradingAccountEntity account = account(accountId);
+    when(systemCloseOrderService.closeWhole(
+        accountId,
         positionId,
-        "EURUSD",
-        "BUY",
-        "FOREX",
-        "CROSS",
-        100,
-        "LOT",
-        new BigDecimal("0.10"),
-        new BigDecimal("1.09000"),
-        new BigDecimal("1.09100"),
-        new BigDecimal("1.09100"),
-        null,
-        null,
-        new BigDecimal("1.09000"),
-        null,
-        null,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        new BigDecimal("1.00"),
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        null,
-        null,
-        null,
-        "CLOSED",
-        null,
-        null);
-    when(positionService.closeSystemPosition(accountId, positionId)).thenReturn(closed);
-
-    AdminTradingCommandService service = new AdminTradingCommandService(
-        orderRepository,
-        accountRepository,
-        ledgerService,
-        walletService,
-        riskCheckService,
-        orderEventService,
-        positionService,
-        auditLogService);
+        OrderOrigin.ADMIN_FORCE_CLOSE,
+        "risk threshold",
+        requestId))
+        .thenReturn(new SystemCloseOrderService.CloseResult(
+            closeOrder,
+            position,
+            account,
+            false));
 
     var response = service.forceClosePosition(
         actorUserId,
         positionId,
-        new AdminForceClosePositionRequest(accountId, "risk threshold", "force-close-1", "CONFIRM_FORCE_CLOSE"));
+        new AdminForceClosePositionRequest(
+            accountId,
+            "risk threshold",
+            requestId,
+            "CONFIRM_FORCE_CLOSE"));
 
-    assertThat(response.status()).isEqualTo("CLOSED");
-    verify(positionService).closeSystemPosition(accountId, positionId);
-    verify(auditLogService).record(eq(actorUserId), eq("ADMIN_POSITION_FORCE_CLOSE"), eq("POSITION"), eq(positionId.toString()), contains("risk threshold"));
+    assertThat(response).isNotNull();
+    verify(systemCloseOrderService).closeWhole(
+        accountId,
+        positionId,
+        OrderOrigin.ADMIN_FORCE_CLOSE,
+        "risk threshold",
+        requestId);
+    verifyNoInteractions(positionService);
+    verify(auditLogService).record(
+        eq(actorUserId),
+        eq("ADMIN_POSITION_FORCE_CLOSE"),
+        eq("POSITION"),
+        eq(positionId.toString()),
+        argThat(details -> details.contains("risk threshold") && details.contains(requestId)));
   }
 
   @Test
@@ -211,18 +208,10 @@ class AdminTradingCommandServiceTest {
     order.setSymbol("BTCUSDT");
     order.setHoldAmount(new BigDecimal("5000.00000000"));
     order.setHoldCurrency("USDT");
+    TradingAccountEntity account = account(order.getAccountId());
     when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+    when(accountRepository.findById(order.getAccountId())).thenReturn(Optional.of(account));
     when(riskCheckService.isSpotSymbol("BTCUSDT")).thenReturn(true);
-
-    AdminTradingCommandService service = new AdminTradingCommandService(
-        orderRepository,
-        accountRepository,
-        ledgerService,
-        walletService,
-        riskCheckService,
-        orderEventService,
-        positionService,
-        auditLogService);
 
     var response = service.cancelOrder(actorUserId, order.getId(), new AdminCancelOrderRequest("client requested", "cancel-spot-1"));
 
@@ -235,7 +224,11 @@ class AdminTradingCommandServiceTest {
         eq(order.getId()),
         eq("Admin canceled pending spot order"),
         eq("SPOT_ORDER_RELEASE"));
-    verify(accountRepository, never()).findById(order.getAccountId());
+    org.mockito.InOrder accountWalletOrder = org.mockito.Mockito.inOrder(
+        accountRepository, walletBalanceRepository, orderRepository);
+    accountWalletOrder.verify(accountRepository).findByIdForUpdate(order.getAccountId());
+    accountWalletOrder.verify(walletBalanceRepository).findByAccountIdForUpdate(order.getAccountId());
+    accountWalletOrder.verify(orderRepository).findByIdForUpdate(order.getId());
     verify(ledgerService, never()).recordOrderRelease(any(), any(), any(), any());
     verify(auditLogService).record(eq(actorUserId), eq("ADMIN_ORDER_CANCEL"), eq("ORDER"), eq(order.getId().toString()), contains("client requested"));
   }

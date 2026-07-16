@@ -1,4 +1,13 @@
 import type { Amount } from '../../types/trading'
+import type {
+  OrderOrigin,
+  PositionResponse as GeneratedPositionResponse,
+  ProductType,
+  ProtectionType,
+  QuantityUnit,
+  TriggerExecutionType,
+  TriggerPriceType
+} from '@fx-platform/shared-types'
 
 export type OrderResponse = {
   id: string
@@ -25,9 +34,21 @@ export type OrderResponse = {
   updatedAt?: string | null
   filledAt?: string | null
   canceledAt?: string | null
+  productType?: ProductType | null
+  origin?: OrderOrigin | null
+  orderOrigin?: OrderOrigin | null
+  protectionType?: ProtectionType | null
+  parentOrderId?: string | null
+  parentPositionId?: string | null
+  contingencyGroupId?: string | null
+  triggerPrice?: Amount | null
+  triggerPriceType?: TriggerPriceType | null
+  triggerExecutionType?: TriggerExecutionType | null
+  quantityUnit?: QuantityUnit | null
+  version?: number | null
 }
 
-export type PositionResponse = {
+type PositionResponseOverrides = {
   id: string
   symbol: string
   side: string
@@ -55,4 +76,7 @@ export type PositionResponse = {
   status: string
   openedAt?: string | null
   closedAt?: string | null
+  version?: number | null
 }
+
+export type PositionResponse = Omit<GeneratedPositionResponse, keyof PositionResponseOverrides> & PositionResponseOverrides

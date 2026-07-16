@@ -1,5 +1,6 @@
 import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import type { AccountTransferResponse, BatchActionResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
 
 import type { OrderResponse, PositionResponse } from '../../../components/tables/types'
 import type { AccountSummary, LedgerEntry } from '../../../types/trading'
@@ -8,10 +9,9 @@ import type { BottomAccountTab } from './bottomAccountTabs'
 import { getBottomAccountTabView, resolveBottomAccountPanelData } from './bottomAccountPanelData'
 import type { StrategyRow } from './bottomAccountPanelData'
 import { mergePositions, resolveAccountPanelSelection } from './bottomAccountPanelSelection'
-import { AssetView } from './BottomAccountAssetView'
-import { OrdersGrid } from './BottomAccountOrdersGrid'
-import { PositionsGrid } from './BottomAccountPositionsGrid'
-import { StrategiesGrid } from './BottomAccountStrategiesGrid'
+import { BottomAccountContent } from './BottomAccountContent'
+import { BottomAccountBatchAction } from './BottomAccountBatchAction'
+import type { PositionMutationHandler } from './BottomAccountPositionsGrid'
 import styles from './BottomAccountPanel.module.css'
 import { TableSkeleton } from './TerminalSkeleton'
 
@@ -20,12 +20,17 @@ type Props = {
   orders?: OrderResponse[]
   positions?: PositionResponse[]
   positionHistory?: PositionResponse[]
+  trades?: Trade[]
+  fundingSettlements?: FundingSettlement[]
+  transfers?: AccountTransferResponse[]
   ledgerEntries?: LedgerEntry[]
   strategies?: StrategyRow[]
   loading?: boolean
   sessionReady?: boolean
   currentSymbol?: string
-  onClosePosition?: (position: PositionResponse) => Promise<unknown> | void
+  onClosePosition?: PositionMutationHandler
+  onCancelAllOrders?: () => Promise<BatchActionResponse>
+  onCloseAllPositions?: () => Promise<BatchActionResponse>
 }
 
 export function BottomAccountPanel({
@@ -33,12 +38,17 @@ export function BottomAccountPanel({
   orders,
   positions,
   positionHistory,
+  trades,
+  fundingSettlements,
+  transfers,
   ledgerEntries,
   strategies,
   loading = false,
   sessionReady = false,
   currentSymbol,
-  onClosePosition
+  onClosePosition,
+  onCancelAllOrders,
+  onCloseAllPositions
 }: Props = {}) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<BottomAccountTab>('currentOrders')
@@ -48,6 +58,9 @@ export function BottomAccountPanel({
     account,
     orders,
     positions: mergePositions(positions, positionHistory),
+    trades,
+    fundingSettlements,
+    transfers,
     ledgerEntries,
     strategies
   })
@@ -83,29 +96,26 @@ export function BottomAccountPanel({
           {t('trading.onlyCurrentSymbol')}
           {currentSymbol ? <strong>{currentSymbol}</strong> : null}
         </label>
+        <BottomAccountBatchAction
+          activeTab={activeTab}
+          activeView={activeView}
+          sessionReady={sessionReady}
+          onCancelAllOrders={onCancelAllOrders}
+          onCloseAllPositions={onCloseAllPositions}
+        />
       </div>
 
       <div id={panelId} className={styles.body} role="tabpanel" aria-busy={loading}>
         {loading ? (
           <TableSkeleton />
         ) : (
-          <>
-            {activeView.kind === 'orders' ? <OrdersGrid emptyLabel={selection.orderEmptyLabel} orders={selection.orders} /> : null}
-            {activeView.kind === 'positions' ? (
-              <PositionsGrid
-                emptyLabel={selection.positionEmptyLabel}
-                mode={activeTab === 'historicalPositions' ? 'history' : 'current'}
-                positions={selection.positions}
-                onClosePosition={onClosePosition}
-              />
-            ) : null}
-            {activeView.kind === 'asset' ? (
-              <AssetView account={activeView.account} ledgerEntries={activeView.ledgerEntries} sessionReady={sessionReady} />
-            ) : null}
-            {activeView.kind === 'strategies' ? (
-              <StrategiesGrid emptyLabel={activeView.emptyLabel} strategies={activeView.strategies} />
-            ) : null}
-          </>
+          <BottomAccountContent
+            activeTab={activeTab}
+            activeView={activeView}
+            selection={selection}
+            sessionReady={sessionReady}
+            onClosePosition={onClosePosition}
+          />
         )}
       </div>
     </section>

@@ -2,20 +2,140 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { createPanelMarket } from '../components/tradePanelMarket.ts'
-import { mockMarket } from './useMockBalances.ts'
+import { testMarket as mockMarket } from './tradeFormTestFixtures.ts'
 import {
   createInitialTradeForm,
   deriveTradeForm,
   getOrderNotional,
   getRequiredMargin,
+  replaceAttachedProtections,
   validateOrder
 } from './useTradeForm.ts'
 
 describe('trade form sizing algorithms', () => {
+  it('rejects malformed or more than ten attached protections before confirmation', () => {
+    const perpetualMarket = createPanelMarket(
+      'BTCUSDT-PERP',
+      { bids: [{ price: 50_000 }], asks: [{ price: 50_001 }], lastPrice: 50_000 },
+      { productType: 'LINEAR_PERP', leverage: 10 }
+    )
+    const form = createInitialTradeForm('buy', perpetualMarket)
+    form.amount = '1'
+    form.attachedProtections = [{
+      protectionType: 'STOP_LOSS',
+      triggerPrice: 0,
+      triggerExecutionType: 'LIMIT',
+      price: 0,
+      quantity: 1,
+      quantityUnit: 'BASE'
+    }]
+
+    assert.equal(validateOrder(form, { balances: { USDT: 50_000 }, market: perpetualMarket, minAmount: 0, minNotional: 0 }).errors.includes('attachedProtections'), true)
+    form.attachedProtections = Array.from({ length: 11 }, (_, index) => ({
+      protectionType: 'TAKE_PROFIT' as const,
+      triggerPrice: 60_000 + index,
+      triggerExecutionType: 'MARKET' as const,
+      quantity: 0.05,
+      quantityUnit: 'BASE' as const
+    }))
+    assert.equal(validateOrder(form, { balances: { USDT: 50_000 }, market: perpetualMarket, minAmount: 0, minNotional: 0 }).errors.includes('attachedProtections'), true)
+  })
+
+  it('requires attached quantities and caps each protection type at the parent quantity', () => {
+    const perpetualMarket = createPanelMarket(
+      'BTCUSDT-PERP',
+      { bids: [{ price: 50_000 }], asks: [{ price: 50_001 }], lastPrice: 50_000 },
+      { productType: 'LINEAR_PERP', leverage: 10 }
+    )
+    const form = {
+      ...createInitialTradeForm('buy', perpetualMarket),
+      orderType: 'market' as const,
+      amount: '1',
+      total: '50000',
+      attachedProtections: [
+        { protectionType: 'TAKE_PROFIT' as const, triggerPrice: 60_000, triggerExecutionType: 'MARKET' as const, quantity: 0.4, quantityUnit: 'BASE' as const },
+        { protectionType: 'TAKE_PROFIT' as const, triggerPrice: 61_000, triggerExecutionType: 'MARKET' as const, quantity: 0.6, quantityUnit: 'BASE' as const },
+        { protectionType: 'STOP_LOSS' as const, triggerPrice: 45_000, triggerExecutionType: 'MARKET' as const, quantity: 1, quantityUnit: 'BASE' as const }
+      ]
+    }
+    const options = { balances: { USDT: 50_000 }, market: perpetualMarket, minAmount: 0, minNotional: 0 }
+
+    assert.equal(validateOrder(form, options).errors.includes('attachedProtections'), false)
+    assert.equal(validateOrder({
+      ...form,
+      attachedProtections: form.attachedProtections.map((protection, index) => index === 1 ? { ...protection, quantity: 0.7 } : protection)
+    }, options).errors.includes('attachedProtections'), true)
+    assert.equal(validateOrder({
+      ...form,
+      attachedProtections: [{ ...form.attachedProtections[0], quantity: undefined }]
+    }, options).errors.includes('attachedProtections'), true)
+  })
+  it('initializes canonical order controls for Spot and Perpetual forms', () => {
+    const spot = createPanelMarket(
+      'BTCUSDT',
+      { bids: [{ price: 60000 }], asks: [{ price: 60001 }], lastPrice: 60000 },
+      { productType: 'CRYPTO_SPOT' }
+    )
+    const perpetual = createPanelMarket(
+      'BTCUSDT-PERP',
+      { bids: [{ price: 60000 }], asks: [{ price: 60001 }], lastPrice: 60000 },
+      { productType: 'LINEAR_PERP' }
+    )
+
+    assert.deepEqual(
+      {
+        positionSide: createInitialTradeForm('buy', spot).positionSide,
+        marginMode: createInitialTradeForm('buy', spot).marginMode,
+        quantityUnit: createInitialTradeForm('buy', spot).quantityUnit,
+        reduceOnly: createInitialTradeForm('buy', spot).reduceOnly,
+        attachedProtections: createInitialTradeForm('buy', spot).attachedProtections
+      },
+      {
+        positionSide: 'BOTH',
+        marginMode: 'CASH',
+        quantityUnit: 'BASE',
+        reduceOnly: false,
+        attachedProtections: []
+      }
+    )
+    assert.deepEqual(
+      {
+        positionSide: createInitialTradeForm('sell', perpetual).positionSide,
+        marginMode: createInitialTradeForm('sell', perpetual).marginMode,
+        quantityUnit: createInitialTradeForm('sell', perpetual).quantityUnit
+      },
+      { positionSide: 'BOTH', marginMode: 'CROSS', quantityUnit: 'BASE' }
+    )
+  })
+
+  it('replaces multi-level attached protections without mutating the current form', () => {
+    const current = createInitialTradeForm('buy', mockMarket)
+    const protections = [
+      {
+        protectionType: 'TAKE_PROFIT' as const,
+        triggerPrice: 62000,
+        triggerExecutionType: 'LIMIT' as const,
+        price: 61950
+      },
+      {
+        protectionType: 'STOP_LOSS' as const,
+        triggerPrice: 58000,
+        triggerExecutionType: 'MARKET' as const
+      }
+    ]
+
+    const next = replaceAttachedProtections(current, protections)
+
+    assert.equal(current.attachedProtections.length, 0)
+    assert.notEqual(next, current)
+    assert.notEqual(next.attachedProtections, protections)
+    assert.deepEqual(next.attachedProtections, protections)
+  })
+
   it('treats forex market buy amount as lots instead of quote budget', () => {
     const market = createPanelMarket(
       'EURUSD',
-      { bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378 },
+      { symbol: 'EURUSD', bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378, tradable: true },
       { category: 'fx', leverage: 100 }
     )
     const form = deriveTradeForm(
@@ -35,7 +155,7 @@ describe('trade form sizing algorithms', () => {
   it('checks margin rather than base inventory for forex shorts', () => {
     const market = createPanelMarket(
       'EURUSD',
-      { bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378 },
+      { symbol: 'EURUSD', bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378, tradable: true },
       { category: 'fx', leverage: 100 }
     )
     const form = deriveTradeForm(

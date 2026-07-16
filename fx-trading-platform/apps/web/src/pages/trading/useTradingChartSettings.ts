@@ -1,14 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 import {
   defaultChartSettings,
   getEnabledIndicatorNames,
-  loadChartSettings,
+  loadChartSettingsForSymbol,
   saveChartSettings,
+  selectChartSettingsForSymbol,
   toggleFavoriteInterval,
   updateIndicatorEnabled
 } from './chartSettings'
-import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from './chartSettings'
+import type {
+  ChartSettings,
+  ChartType,
+  DrawingMagnetMode,
+  DrawingTool,
+  IndicatorSettings,
+  OwnedChartSettingsState
+} from './chartSettings'
 import type { ChartThemeMode, TradingChartCallbacks } from './tradingPageViewModels'
 import type { TradingPeriod } from '../../features/market/tradingModels'
 
@@ -23,18 +31,28 @@ export function useTradingChartSettings(
   selectedSymbol: string,
   colorScheme: string
 ): TradingChartSettingsState {
-  const [chartSettings, setChartSettings] = useState<ChartSettings>(() => loadChartSettings(selectedSymbol))
-
-  useEffect(() => {
-    setChartSettings(loadChartSettings(selectedSymbol))
-  }, [selectedSymbol])
+  const [chartSettingsState, setChartSettingsState] = useState<OwnedChartSettingsState>(() => ({
+    ownerSymbol: selectedSymbol,
+    settings: loadChartSettingsForSymbol(selectedSymbol)
+  }))
+  const selectedChartSettingsState = selectChartSettingsForSymbol(
+    chartSettingsState,
+    selectedSymbol
+  )
+  if (selectedChartSettingsState !== chartSettingsState) {
+    setChartSettingsState(selectedChartSettingsState)
+  }
 
   const updateChartSettings = useCallback(
     (updater: (current: ChartSettings) => ChartSettings) => {
-      setChartSettings((current) => {
-        const nextSettings = updater(current)
+      setChartSettingsState((current) => {
+        const selectedState = selectChartSettingsForSymbol(current, selectedSymbol)
+        const nextSettings = updater(selectedState.settings)
         saveChartSettings(selectedSymbol, nextSettings)
-        return nextSettings
+        return {
+          ownerSymbol: selectedSymbol,
+          settings: nextSettings
+        }
       })
     },
     [selectedSymbol]
@@ -115,13 +133,13 @@ export function useTradingChartSettings(
     [updateChartSettings]
   )
   const indicators = useMemo(
-    () => getEnabledIndicatorNames(chartSettings.indicatorSettings),
-    [chartSettings.indicatorSettings]
+    () => getEnabledIndicatorNames(selectedChartSettingsState.settings.indicatorSettings),
+    [selectedChartSettingsState.settings.indicatorSettings]
   )
 
   return {
     chartCallbacks,
-    chartSettings,
+    chartSettings: selectedChartSettingsState.settings,
     chartThemeMode: colorScheme === 'light' ? 'light' : 'dark',
     indicators
   }

@@ -3,11 +3,13 @@ package com.fxplatform.admin.controller;
 import com.fxplatform.admin.dto.AdminPageResponse;
 import com.fxplatform.admin.dto.request.AdminPriceAdjustmentCancelRequest;
 import com.fxplatform.admin.dto.request.AdminPriceAdjustmentRequest;
+import com.fxplatform.admin.dto.request.AdminFundingConfigRequest;
 import com.fxplatform.admin.dto.request.AdminReasonRequest;
 import com.fxplatform.admin.dto.request.AdminSymbolRequest;
 import com.fxplatform.admin.dto.request.AdminSymbolCategoryRequest;
 import com.fxplatform.admin.dto.request.AdminSymbolStatusRequest;
 import com.fxplatform.admin.dto.response.AdminPriceAdjustmentResponse;
+import com.fxplatform.admin.dto.response.AdminFundingConfigResponse;
 import com.fxplatform.admin.dto.response.AdminSymbolCategoryResponse;
 import com.fxplatform.admin.dto.response.AdminSymbolResponse;
 import com.fxplatform.admin.service.AdminFeaturePageQuery;
@@ -85,6 +87,25 @@ public class AdminMarketController {
       @Valid @RequestBody AdminSymbolRequest request
   ) {
     return ApiResponse.success(adminMarketCommandService.updateSymbol(principal.id(), symbolId, request));
+  }
+
+  @PreAuthorize("hasAuthority('market:symbol:update')")
+  @GetMapping("/symbols/{id}/funding-config")
+  public ApiResponse<AdminFundingConfigResponse> fundingConfig(
+      @PathVariable("id") UUID symbolId
+  ) {
+    return ApiResponse.success(adminMarketQueryService.fundingConfig(symbolId));
+  }
+
+  @PreAuthorize("hasAuthority('market:symbol:update')")
+  @PutMapping("/symbols/{id}/funding-config")
+  public ApiResponse<AdminFundingConfigResponse> updateFundingConfig(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @PathVariable("id") UUID symbolId,
+      @Valid @RequestBody AdminFundingConfigRequest request
+  ) {
+    return ApiResponse.success(
+        adminMarketCommandService.updateFundingConfig(principal.id(), symbolId, request));
   }
 
   /** 删除产品采用下架语义，避免破坏历史交易数据。 */

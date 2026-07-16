@@ -23,6 +23,9 @@ import com.fxplatform.risk.repository.RiskConfigRepository;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderType;
+import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.PositionSide;
+import com.fxplatform.trading.enums.QuantityUnit;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
@@ -112,6 +115,7 @@ class InstrumentRulesEngineTest {
 
     symbol.setTradable(true);
     symbol.setTickSize(new BigDecimal("0.10"));
+    symbol.setLotSize(new BigDecimal("0.001"));
     symbol.setMinLot(new BigDecimal("0.001"));
     symbol.setMaxLot(new BigDecimal("1"));
 
@@ -127,6 +131,7 @@ class InstrumentRulesEngineTest {
   @Test
   void demoQuoteFallbackMakesMarketOrdersTradableWithoutProviderResolution() {
     SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setLotSize(new BigDecimal("0.00001"));
     InstrumentRulesEngine engine = engine();
     ReflectionTestUtils.setField(engine, "demoQuotesEnabled", true);
 
@@ -177,6 +182,158 @@ class InstrumentRulesEngineTest {
     assertThat(rules.exists()).isFalse();
     assertThat(rules.enabled()).isFalse();
     assertThat(rules.orderEnabled()).isFalse();
+  }
+
+  @Test
+  void usesSeededSpotMinLotAsStepFallbackWhenBindingHasNoProviderInstrument() {
+    SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setLotSize(BigDecimal.ONE);
+    symbol.setMinLot(new BigDecimal("0.0001"));
+    SymbolProviderBindingEntity seededBinding = binding(
+        symbol.getId(), UUID.randomUUID(), null, "BTCUSDT");
+    when(bindingRepository.findEnabledBySymbolIdOrderByPriority(symbol.getId()))
+        .thenReturn(List.of(seededBinding));
+
+    InstrumentRulesEngine engine = engine();
+    InstrumentRules rules = engine.rules(symbol);
+
+    assertThat(rules.stepSize()).isEqualByComparingTo("0.0001");
+    assertThat(rules.minQty()).isEqualByComparingTo("0.0001");
+    assertThatCode(() -> engine.validateCanonicalOrder(
+        limitOrder("BTCUSDT", "0.1", "60000.00"),
+        symbol,
+        new BigDecimal("0.1"),
+        new BigDecimal("60000.00")))
+        .doesNotThrowAnyException();
+    assertThatThrownBy(() -> engine.validateCanonicalOrder(
+        limitOrder("BTCUSDT", "0.10005", "60000.00"),
+        symbol,
+        new BigDecimal("0.10005"),
+        new BigDecimal("60000.00")))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("QUANTITY_STEP_MISMATCH"));
+  }
+
+  @Test
+  void v47FiveSpotSymbolsUseMinLotFallbackWhenSeededBindingsHaveNoInstrumentId() {
+    InstrumentRulesEngine engine = engine();
+    java.util.Map<String, BigDecimal> expectedSteps = java.util.Map.of(
+        "BTCUSDT", new BigDecimal("0.0001"),
+        "ETHUSDT", new BigDecimal("0.0001"),
+        "BNBUSDT", new BigDecimal("0.001"),
+        "SOLUSDT", new BigDecimal("0.01"),
+        "XRPUSDT", BigDecimal.ONE);
+
+    expectedSteps.forEach((symbolCode, expectedStep) -> {
+      SymbolEntity symbol = cryptoSpotSymbol();
+      symbol.setId(UUID.randomUUID());
+      symbol.setSymbol(symbolCode);
+      symbol.setBaseCurrency(symbolCode.substring(0, symbolCode.length() - 4));
+      symbol.setLotSize(BigDecimal.ONE);
+      symbol.setMinLot(expectedStep);
+      SymbolProviderBindingEntity seededBinding = binding(
+          symbol.getId(), UUID.randomUUID(), null, symbolCode);
+      when(bindingRepository.findEnabledBySymbolIdOrderByPriority(symbol.getId()))
+          .thenReturn(List.of(seededBinding));
+
+      assertThat(engine.rules(symbol).stepSize()).isEqualByComparingTo(expectedStep);
+    });
+  }
+
+  @Test
+  void validatesCanonicalBaseAfterQuoteBudgetConversion() {
+    SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setLotSize(new BigDecimal("0.0001"));
+    symbol.setMinLot(new BigDecimal("0.0001"));
+    InstrumentRulesEngine engine = engine();
+    ReflectionTestUtils.setField(engine, "demoQuotesEnabled", true);
+    CreateOrderRequest quoteBudget = new CreateOrderRequest(
+        UUID.randomUUID(), "BTCUSDT", OrderSide.BUY, OrderType.MARKET,
+        null, null, null, null, "quote-budget", "quote-budget",
+        new BigDecimal("100"), null, 1, PositionSide.BOTH, QuantityUnit.QUOTE,
+        MarginMode.CASH, null, null, false, List.of());
+
+    assertThatCode(() -> engine.validateCanonicalOrder(
+        quoteBudget, symbol, new BigDecimal("0.0019"), new BigDecimal("50005")))
+        .doesNotThrowAnyException();
+    assertThatThrownBy(() -> engine.validateCanonicalOrder(
+        quoteBudget, symbol, new BigDecimal("0.00195"), new BigDecimal("50005")))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("QUANTITY_STEP_MISMATCH"));
+  }
+
+  @Test
+  void stopMarketValidatesTriggerTickButUsesCanonicalExecutionPriceForNotional() {
+    SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setTickSize(new BigDecimal("0.10"));
+    symbol.setLotSize(new BigDecimal("0.001"));
+    symbol.setMinLot(new BigDecimal("0.001"));
+    CreateOrderRequest badTrigger = stopMarketOrder("BTCUSDT", "0.100", "99.95");
+
+    assertThatThrownBy(() -> engine().validateCanonicalOrder(
+        badTrigger, symbol, new BigDecimal("0.100"), new BigDecimal("100.01")))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("PRICE_TICK_MISMATCH"));
+
+    CreateOrderRequest validTrigger = stopMarketOrder("BTCUSDT", "0.100", "99.90");
+    assertThatCode(() -> engine().validateCanonicalOrder(
+        validTrigger, symbol, new BigDecimal("0.100"), new BigDecimal("100.01")))
+        .doesNotThrowAnyException();
+  }
+
+  @Test
+  void stopMarketAppliesMinNotionalToCanonicalBaseAtProjectedExecutionPrice() {
+    SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setLotSize(new BigDecimal("0.001"));
+    symbol.setMinLot(new BigDecimal("0.001"));
+    SymbolProviderBindingEntity binding = binding(
+        symbol.getId(), UUID.randomUUID(), UUID.randomUUID(), "BTCUSDT");
+    ProviderInstrumentEntity instrument = providerInstrument(
+        binding.getProviderInstrumentId(), binding.getProviderId(), "BTCUSDT",
+        """
+        {"rules":{"minNotional":"5.00000000"}}
+        """);
+    when(bindingRepository.findEnabledBySymbolIdOrderByPriority(symbol.getId()))
+        .thenReturn(List.of(binding));
+    when(providerInstrumentRepository.findById(binding.getProviderInstrumentId()))
+        .thenReturn(Optional.of(instrument));
+
+    assertThatThrownBy(() -> engine().validateCanonicalOrder(
+        stopMarketOrder("BTCUSDT", "0.010", "99.90"),
+        symbol,
+        new BigDecimal("0.010"),
+        new BigDecimal("100.01")))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("ORDER_NOTIONAL_TOO_SMALL"));
+  }
+
+  @Test
+  void linearPerpetualCanonicalBaseNotionalDoesNotApplyContractSizeTwice() {
+    SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setSymbol("BTCUSDT-PERP");
+    symbol.setProductType(ProductType.LINEAR_PERP);
+    symbol.setAssetClass("LINEAR_PERP");
+    symbol.setContractSize(new BigDecimal("0.01"));
+    symbol.setContractMultiplier(new BigDecimal("10"));
+    symbol.setMinLot(new BigDecimal("0.0001"));
+    SymbolProviderBindingEntity binding = binding(
+        symbol.getId(), UUID.randomUUID(), UUID.randomUUID(), "BTCUSDT");
+    ProviderInstrumentEntity instrument = providerInstrument(
+        binding.getProviderInstrumentId(), binding.getProviderId(), "BTCUSDT",
+        """
+        {"rules":{"stepSize":"0.0001","minNotional":"5.00000000"}}
+        """);
+    when(bindingRepository.findEnabledBySymbolIdOrderByPriority(symbol.getId()))
+        .thenReturn(List.of(binding));
+    when(providerInstrumentRepository.findById(binding.getProviderInstrumentId()))
+        .thenReturn(Optional.of(instrument));
+
+    assertThatCode(() -> engine().validateCanonicalOrder(
+        limitOrder("BTCUSDT-PERP", "0.001", "5000"),
+        symbol,
+        new BigDecimal("0.001"),
+        new BigDecimal("5000")))
+        .doesNotThrowAnyException();
   }
 
   private InstrumentRulesEngine engine() {
@@ -273,5 +430,13 @@ class InstrumentRulesEngineTest {
         new BigDecimal(quantity),
         null,
         null);
+  }
+
+  private CreateOrderRequest stopMarketOrder(String symbol, String quantity, String triggerPrice) {
+    return new CreateOrderRequest(
+        UUID.randomUUID(), symbol, OrderSide.SELL, OrderType.STOP_MARKET,
+        null, null, null, null, "idem-stop-" + symbol, "client-stop-" + symbol,
+        new BigDecimal(quantity), null, 1, PositionSide.BOTH, QuantityUnit.BASE,
+        MarginMode.CASH, new BigDecimal(triggerPrice), null, false, List.of());
   }
 }

@@ -1,20 +1,28 @@
 import { ChevronDown, Radio } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import type { TradingProduct } from '../../../app/tradingRoutes'
 import { formatMarketPrice } from '../../../features/market/tradingModels'
 import type { TradingMarket, TradingQuote } from '../../../features/market/tradingModels'
 import styles from './SymbolHeader.module.css'
 
 type Props = {
   market: TradingMarket
+  marginMode: 'CROSS' | 'ISOLATED'
+  product: TradingProduct
   quote: TradingQuote
   onOpenMarkets: () => void
   onOpenQuote: () => void
 }
 
-export function SymbolHeader({ market, quote, onOpenMarkets, onOpenQuote }: Props) {
+export function SymbolHeader({ market, marginMode, product, quote, onOpenMarkets, onOpenQuote }: Props) {
   const { t } = useTranslation()
   const directionClass = quote.changePercent >= 0 ? styles.positive : styles.negative
+  const perpetual = product === 'perpetual'
+  const productModeKey = perpetual ? 'trading.perpetual' : 'trading.spot'
+  const marginModeKey = perpetual
+    ? marginMode === 'ISOLATED' ? 'trading.isolatedMargin' : 'trading.crossMargin'
+    : 'trading.cash'
 
   return (
     <header className={styles.header}>
@@ -27,8 +35,8 @@ export function SymbolHeader({ market, quote, onOpenMarkets, onOpenQuote }: Prop
       </button>
 
       <div className={styles.modeStrip} aria-label={t('trading.tradingMode')}>
-        <span>{t('trading.spot')}</span>
-        <span>{t('trading.cash')}</span>
+        <span>{t(productModeKey)}</span>
+        <span>{t(marginModeKey)}</span>
       </div>
 
       <dl className={styles.metrics}>

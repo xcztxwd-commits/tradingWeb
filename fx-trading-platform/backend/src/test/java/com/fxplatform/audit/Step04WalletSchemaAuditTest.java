@@ -77,7 +77,8 @@ class Step04WalletSchemaAuditTest {
   @Test
   void walletServiceCreatesBalanceAndWritesAssetLedgerEntry() {
     UUID accountId = UUID.randomUUID();
-    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "USDT"))
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT"))
         .thenReturn(Optional.empty());
     when(walletBalanceRepository.save(any(WalletBalanceEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
     when(assetLedgerEntryRepository.save(any(AssetLedgerEntryEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));

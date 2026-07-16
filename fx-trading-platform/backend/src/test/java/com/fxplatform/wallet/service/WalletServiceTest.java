@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -31,6 +32,81 @@ class WalletServiceTest {
 
   @Mock
   private AssetLedgerEntryRepository assetLedgerEntryRepository;
+
+  @BeforeEach
+  void rowLockLookupUsesTheSameFixtureBalance() {
+    org.mockito.Mockito.lenient().when(walletBalanceRepository
+            .findByAccountIdAndWalletTypeAndAssetForUpdate(
+                any(UUID.class), any(String.class), any(String.class)))
+        .thenAnswer(invocation -> walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(
+            invocation.getArgument(0), invocation.getArgument(1), invocation.getArgument(2)));
+  }
+
+  @Test
+  void walletMutationLocksTheBalanceRowBeforeDebit() {
+    UUID accountId = UUID.randomUUID();
+    WalletBalanceEntity balance = balance(
+        accountId, "USDT", "100.00000000", "100.00000000", "0.00000000");
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT")).thenReturn(Optional.of(balance));
+    org.mockito.Mockito.clearInvocations(walletBalanceRepository);
+
+    service().debitAvailable(
+        accountId,
+        "USDT",
+        new BigDecimal("10.00000000"),
+        "TEST",
+        UUID.randomUUID(),
+        "Serialized debit");
+
+    verify(walletBalanceRepository).findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT");
+  }
+
+  @Test
+  void requiredSpotWalletsAreCreatedAndLockedInAssetOrder() {
+    UUID accountId = UUID.randomUUID();
+    WalletBalanceEntity usdt = balance(
+        accountId, "USDT", "100.00000000", "100.00000000", "0.00000000");
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "BTC")).thenReturn(Optional.empty());
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT")).thenReturn(Optional.of(usdt));
+    when(walletBalanceRepository.save(any(WalletBalanceEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    service().lockBalancesInOrder(accountId, List.of("USDT", "btc", "BTC"));
+
+    org.mockito.InOrder assetOrder = org.mockito.Mockito.inOrder(walletBalanceRepository);
+    assetOrder.verify(walletBalanceRepository).findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "BTC");
+    assetOrder.verify(walletBalanceRepository).save(any(WalletBalanceEntity.class));
+    assetOrder.verify(walletBalanceRepository).findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT");
+  }
+
+  @Test
+  void heterogeneousWalletKeysUseTheSameWalletTypeThenAssetOrderAsReset() {
+    UUID accountId = UUID.randomUUID();
+    WalletBalanceEntity fxUsd = balance(
+        accountId, WalletType.FX_MARGIN, "USD", "0", "0", "0");
+    WalletBalanceEntity spotUsdt = balance(
+        accountId, WalletType.SPOT, "USDT", "50000", "50000", "0");
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.FX_MARGIN.code(), "USD")).thenReturn(Optional.of(fxUsd));
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT")).thenReturn(Optional.of(spotUsdt));
+
+    service().lockWalletsInOrder(accountId, List.of(
+        new WalletService.WalletKey(WalletType.SPOT, "USDT"),
+        new WalletService.WalletKey(WalletType.FX_MARGIN, "USD")));
+
+    org.mockito.InOrder order = org.mockito.Mockito.inOrder(walletBalanceRepository);
+    order.verify(walletBalanceRepository).findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.FX_MARGIN.code(), "USD");
+    order.verify(walletBalanceRepository).findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "USDT");
+  }
 
   @Test
   void walletTypeSeparatesSameAssetBalances() {
@@ -141,6 +217,67 @@ class WalletServiceTest {
 
     assertThat(balance.getTotal()).isEqualByComparingTo("100.00000000");
     assertThat(balance.getAvailable()).isEqualByComparingTo("100.00000000");
+    verify(assetLedgerEntryRepository, org.mockito.Mockito.times(1)).save(any(AssetLedgerEntryEntity.class));
+  }
+
+  @Test
+  void resetBalanceWritesTheExactDeltaAndRestoresAvailableTotalAndLocked() {
+    UUID accountId = UUID.randomUUID();
+    UUID requestId = UUID.randomUUID();
+    WalletBalanceEntity balance = balance(
+        accountId, "USDT", "70000.00000000", "60000.00000000", "10000.00000000");
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(
+        accountId, WalletType.SPOT.code(), "USDT")).thenReturn(Optional.of(balance));
+    when(walletBalanceRepository.save(any(WalletBalanceEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(assetLedgerEntryRepository.save(any(AssetLedgerEntryEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+
+    WalletBalanceEntity reset = service().resetBalance(
+        accountId,
+        WalletType.SPOT,
+        "USDT",
+        new BigDecimal("50000.00000000"),
+        requestId,
+        "Reset Demo Spot balance");
+
+    assertThat(reset.getTotal()).isEqualByComparingTo("50000.00000000");
+    assertThat(reset.getAvailable()).isEqualByComparingTo("50000.00000000");
+    assertThat(reset.getLocked()).isEqualByComparingTo("0.00000000");
+    ArgumentCaptor<AssetLedgerEntryEntity> entry = ArgumentCaptor.forClass(AssetLedgerEntryEntity.class);
+    verify(assetLedgerEntryRepository).save(entry.capture());
+    assertThat(entry.getValue().getAmount()).isEqualByComparingTo("-20000.00000000");
+    assertThat(entry.getValue().getBalanceAfter()).isEqualByComparingTo("50000.00000000");
+    assertThat(entry.getValue().getEntryType()).isEqualTo("DEMO_RESET");
+    assertThat(entry.getValue().getReferenceType()).isEqualTo("DEMO_RESET");
+    assertThat(entry.getValue().getReferenceId()).isEqualTo(requestId);
+  }
+
+  @Test
+  void resetBalanceIsIdempotentForTheSameRequestId() {
+    UUID accountId = UUID.randomUUID();
+    UUID requestId = UUID.randomUUID();
+    WalletBalanceEntity balance = balance(accountId, "BTC", "0.5", "0.5", "0");
+    List<AssetLedgerEntryEntity> saved = new ArrayList<>();
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(
+        accountId, WalletType.SPOT.code(), "BTC")).thenReturn(Optional.of(balance));
+    when(walletBalanceRepository.save(any(WalletBalanceEntity.class)))
+        .thenAnswer(invocation -> invocation.getArgument(0));
+    when(assetLedgerEntryRepository.findByBusinessOperation(
+        accountId, WalletType.SPOT.code(), "BTC", "DEMO_RESET", requestId, "DEMO_RESET"))
+        .thenAnswer(invocation -> saved.stream().findFirst().orElse(null));
+    when(assetLedgerEntryRepository.save(any(AssetLedgerEntryEntity.class)))
+        .thenAnswer(invocation -> {
+          AssetLedgerEntryEntity entry = invocation.getArgument(0);
+          saved.add(entry);
+          return entry;
+        });
+
+    WalletService service = service();
+    service.resetBalance(accountId, WalletType.SPOT, "BTC", BigDecimal.ZERO, requestId, "Reset asset");
+    service.resetBalance(accountId, WalletType.SPOT, "BTC", BigDecimal.ZERO, requestId, "Reset asset");
+
+    assertThat(balance.getTotal()).isEqualByComparingTo(BigDecimal.ZERO);
     verify(assetLedgerEntryRepository, org.mockito.Mockito.times(1)).save(any(AssetLedgerEntryEntity.class));
   }
 

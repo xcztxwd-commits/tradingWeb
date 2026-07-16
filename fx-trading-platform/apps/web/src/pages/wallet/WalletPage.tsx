@@ -1,6 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { FormEvent } from 'react'
 import { ArrowDownToLine, ArrowUpFromLine, BookUser, RefreshCcw, ShieldCheck, SlidersHorizontal, WalletCards } from 'lucide-react'
 import type { TFunction } from 'i18next'
+import type { AccountTransferDirection } from '@fx-platform/shared-types'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
 
@@ -9,9 +11,11 @@ import { DataTable, type DataTableColumn } from '../../components/user-page/Data
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { filterByStatus, formatApiError, toNumber } from '../../components/user-page/userPageModels'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
-import { convertAsset } from '../../services/accountApi'
+import { resetDemoAccount, transferDemoFunds } from '../../services/accountApi'
 import { createFundOrder, getFundOrders } from '../../services/financeApi'
 import type { Amount, AssetLedgerEntry, FundOrder, LedgerEntry, WalletBalance } from '../../types/trading'
+import { DemoResetDialog } from './DemoResetDialog'
+import { TransferDialog } from './TransferDialog'
 
 const fundOrderStatuses = ['ALL', 'PENDING_REVIEW', 'PENDING', 'APPROVED', 'REJECTED']
 const fundOrderTypes = ['ALL', 'RECHARGE', 'WITHDRAWAL']
@@ -42,7 +46,18 @@ export function WalletPage() {
   const [ledgerToDate, setLedgerToDate] = useState('')
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null)
   const [fundOrderType, setFundOrderType] = useState<'RECHARGE' | 'WITHDRAWAL'>('RECHARGE')
-  const [conversionLoading, setConversionLoading] = useState(false)
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferDirection, setTransferDirection] = useState<AccountTransferDirection>('SPOT_TO_PERP')
+  const [transferAmount, setTransferAmount] = useState('')
+  const [transferRequestId, setTransferRequestId] = useState('')
+  const [transferPending, setTransferPending] = useState(false)
+  const [transferError, setTransferError] = useState<string | null>(null)
+  const [resetOpen, setResetOpen] = useState(false)
+  const [resetRequestId, setResetRequestId] = useState('')
+  const [resetPending, setResetPending] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
+  const transferInFlight = useRef(false)
+  const resetInFlight = useRef(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [apiError, setApiError] = useState<ReturnType<typeof formatApiError> | null>(null)
 
@@ -56,6 +71,10 @@ export function WalletPage() {
     [fundOrders]
   )
   const frozenAmount = (toNumber(account?.usedMargin) ?? 0) + pendingWithdrawalAmount
+  const spotAvailable =
+    walletBalances.find((balance) => balance.walletType === 'SPOT' && balance.asset === 'USDT')?.available ?? 0
+  const perpAvailable = account?.freeMargin ?? 0
+  const transferAvailable = transferDirection === 'SPOT_TO_PERP' ? spotAvailable : perpAvailable
   const visibleFundOrders = useMemo(() => {
     return filterByStatus(fundOrders, statusFilter).filter((order) => typeFilter === 'ALL' || order.orderType === typeFilter)
   }, [fundOrders, statusFilter, typeFilter])
@@ -131,33 +150,81 @@ export function WalletPage() {
     }
   }
 
-  const handleConversionSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!token || !accountId) return
-    const formElement = event.currentTarget
-    const form = new FormData(formElement)
+  const openTransfer = () => {
+    setTransferAmount('')
+    setTransferRequestId(crypto.randomUUID())
+    setTransferError(null)
+    setTransferOpen(true)
+  }
+
+  const handleTransferDirectionChange = (direction: AccountTransferDirection) => {
+    setTransferDirection(direction)
+    setTransferAmount('')
+    setTransferRequestId(crypto.randomUUID())
+    setTransferError(null)
+  }
+
+  const handleTransferAmountChange = (amount: string) => {
+    setTransferAmount(amount)
+    setTransferRequestId(crypto.randomUUID())
+    setTransferError(null)
+  }
+
+  const handleTransfer = async () => {
+    const amount = Number(transferAmount)
+    const available = Number(transferAvailable)
+    if (!token || !accountId || transferInFlight.current) return
+    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(available) || amount > available) {
+      setTransferError('Transfer amount must not exceed the available source balance.')
+      return
+    }
     setNotice(null)
-    setApiError(null)
-    setConversionLoading(true)
+    setTransferError(null)
+    transferInFlight.current = true
+    setTransferPending(true)
     try {
-      const conversion = await convertAsset(
+      const transfer = await transferDemoFunds(
         accountId,
         {
-          fromWalletType: 'USDT_PERP',
-          fromAsset: 'USDT',
-          toWalletType: 'FX_MARGIN',
-          toAsset: 'USD',
-          amount: String(form.get('amount') ?? '')
+          direction: transferDirection,
+          amount,
+          requestId: transferRequestId
         },
         token
       )
-      setNotice(`${conversion.fromAmount} ${conversion.fromAsset} -> ${conversion.toAmount} ${conversion.toAsset}`)
       await refreshAccountData(token, accountId)
-      formElement.reset()
+      setNotice(`Transferred ${transfer.amount ?? amount} USDT (${transfer.direction ?? transferDirection}).`)
+      setTransferOpen(false)
     } catch (error) {
-      setApiError(formatApiError(error))
+      setTransferError(formatApiError(error).message)
     } finally {
-      setConversionLoading(false)
+      transferInFlight.current = false
+      setTransferPending(false)
+    }
+  }
+
+  const openReset = () => {
+    setResetRequestId(crypto.randomUUID())
+    setResetError(null)
+    setResetOpen(true)
+  }
+
+  const handleReset = async () => {
+    if (!token || !accountId || resetInFlight.current) return
+    setNotice(null)
+    setResetError(null)
+    resetInFlight.current = true
+    setResetPending(true)
+    try {
+      await resetDemoAccount(accountId, { requestId: resetRequestId }, token)
+      await refreshAccountData(token, accountId)
+      setNotice('Demo account reset completed.')
+      setResetOpen(false)
+    } catch (error) {
+      setResetError(formatApiError(error).message)
+    } finally {
+      resetInFlight.current = false
+      setResetPending(false)
     }
   }
 
@@ -272,11 +339,24 @@ export function WalletPage() {
           emptyAction={{ label: t('assets.goDeposit'), href: '/wallet' }}
           pageSize={5}
         />
-        <AssetConversionPanel
-          disabled={!token || !accountId || conversionLoading}
-          loading={conversionLoading}
-          onSubmit={handleConversionSubmit}
-        />
+        <div className="user-page__actions">
+          <button
+            type="button"
+            className="table-action table-action--primary"
+            disabled={!token || !accountId}
+            onClick={openTransfer}
+          >
+            Transfer Spot / Perpetual
+          </button>
+          <button
+            type="button"
+            className="table-action table-action--danger"
+            disabled={!token || !accountId}
+            onClick={openReset}
+          >
+            Reset Demo account
+          </button>
+        </div>
         {selectedAssetRow ? (
           <div className="wallet-asset-detail" aria-label={t('assets.singleAssetDetail')}>
             <div>
@@ -483,6 +563,27 @@ export function WalletPage() {
       </section>
         </div>
       </div>
+      <TransferDialog
+        open={transferOpen}
+        direction={transferDirection}
+        amount={transferAmount}
+        available={transferAvailable}
+        requestId={transferRequestId}
+        pending={transferPending}
+        error={transferError}
+        onDirectionChange={handleTransferDirectionChange}
+        onAmountChange={handleTransferAmountChange}
+        onClose={() => setTransferOpen(false)}
+        onConfirm={() => void handleTransfer()}
+      />
+      <DemoResetDialog
+        open={resetOpen}
+        requestId={resetRequestId}
+        pending={resetPending}
+        error={resetError}
+        onClose={() => setResetOpen(false)}
+        onConfirm={() => void handleReset()}
+      />
     </section>
   )
 
@@ -544,36 +645,6 @@ function createAssetColumns(setSelectedAsset: (currency: string) => void, t: TFu
       )
     }
   ]
-}
-
-function AssetConversionPanel({
-  disabled,
-  loading,
-  onSubmit
-}: {
-  disabled: boolean
-  loading: boolean
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
-}) {
-  return (
-    <form className="user-page__form wallet-conversion-form" onSubmit={onSubmit}>
-      <label>
-        <span>From</span>
-        <input value="USDT_PERP · USDT" readOnly />
-      </label>
-      <label>
-        <span>To</span>
-        <input value="FX_MARGIN · USD" readOnly />
-      </label>
-      <label>
-        <span>Amount</span>
-        <input name="amount" type="number" min="0.00000001" step="0.00000001" required />
-      </label>
-      <button type="submit" className="table-action table-action--primary" disabled={disabled}>
-        {loading ? 'Converting' : 'Convert'}
-      </button>
-    </form>
-  )
 }
 
 function createLedgerColumns(t: TFunction): Array<DataTableColumn<LedgerEntry>> {

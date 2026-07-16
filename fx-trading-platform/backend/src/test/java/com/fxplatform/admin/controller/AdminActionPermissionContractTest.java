@@ -3,9 +3,12 @@ package com.fxplatform.admin.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fxplatform.admin.dto.request.AdminBalanceAdjustmentRequest;
+import com.fxplatform.admin.dto.request.AdminAccountCleanupRequest;
 import com.fxplatform.admin.dto.request.AdminCancelOrderRequest;
 import com.fxplatform.admin.dto.request.AdminDataProviderRequest;
 import com.fxplatform.admin.dto.request.AdminForceClosePositionRequest;
+import com.fxplatform.admin.dto.request.AdminDemoResetRequest;
+import com.fxplatform.admin.dto.request.AdminFundingConfigRequest;
 import com.fxplatform.admin.dto.request.AdminFundOrderReviewRequest;
 import com.fxplatform.admin.dto.request.AdminReasonRequest;
 import com.fxplatform.admin.dto.request.AdminSymbolRequest;
@@ -21,6 +24,23 @@ class AdminActionPermissionContractTest {
 
   @Test
   void highRiskAdminActionsDeclareActionLevelAuthorities() throws Exception {
+    PreAuthorize accountControllerRole = AdminAccountController.class.getAnnotation(PreAuthorize.class);
+    assertThat(accountControllerRole).isNotNull();
+    assertThat(accountControllerRole.value()).contains("hasRole('ADMIN')");
+    assertPreAuthorizeContains(
+        AdminAccountController.class,
+        "forceCleanup",
+        "trading:account:force-cleanup",
+        UserPrincipal.class,
+        UUID.class,
+        AdminAccountCleanupRequest.class);
+    assertPreAuthorizeContains(
+        AdminAccountController.class,
+        "resetDemo",
+        "trading:account:demo-reset",
+        UserPrincipal.class,
+        UUID.class,
+        AdminDemoResetRequest.class);
     assertPreAuthorizeContains(
         AdminFinanceController.class,
         "adjustBalance",
@@ -78,6 +98,18 @@ class AdminActionPermissionContractTest {
         UserPrincipal.class,
         UUID.class,
         AdminSymbolStatusRequest.class);
+    assertPreAuthorizeContains(
+        AdminMarketController.class,
+        "fundingConfig",
+        "market:symbol:update",
+        UUID.class);
+    assertPreAuthorizeContains(
+        AdminMarketController.class,
+        "updateFundingConfig",
+        "market:symbol:update",
+        UserPrincipal.class,
+        UUID.class,
+        AdminFundingConfigRequest.class);
     assertPreAuthorizeContains(
         AdminMarketDataProviderController.class,
         "updateProvider",

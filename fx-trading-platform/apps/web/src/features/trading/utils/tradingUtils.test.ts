@@ -7,6 +7,7 @@ import { parseSymbolAssets } from './symbols.ts'
 describe('trading pure utilities', () => {
   it('parses common trading symbols with separators and JPY quotes', () => {
     assert.deepEqual(parseSymbolAssets('ETH-USDT'), { baseAsset: 'ETH', quoteAsset: 'USDT' })
+    assert.deepEqual(parseSymbolAssets('BTCUSDT-PERP'), { baseAsset: 'BTC', quoteAsset: 'USDT' })
     assert.deepEqual(parseSymbolAssets('EUR/USD'), { baseAsset: 'EUR', quoteAsset: 'USD' })
     assert.deepEqual(parseSymbolAssets('USDJPY'), { baseAsset: 'USD', quoteAsset: 'JPY' })
   })

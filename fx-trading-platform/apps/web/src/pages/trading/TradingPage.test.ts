@@ -10,6 +10,7 @@ const source = readFileSync(join(currentDir, 'TradingPage.tsx'), 'utf8')
 const sourceLines = source.split(/\r?\n/)
 const desktopSource = readFileSync(join(currentDir, 'components', 'TradingDesktopView.tsx'), 'utf8')
 const mobileSource = readFileSync(join(currentDir, 'components', 'TradingMobileView.tsx'), 'utf8')
+const orderSheetSource = readFileSync(join(currentDir, 'components', 'TradingOrderSheet.tsx'), 'utf8')
 const marketSidebarSource = readFileSync(join(currentDir, 'components', 'MarketSidebar.tsx'), 'utf8')
 const settingsDialogPath = join(currentDir, 'components', 'TradingSettingsDialog.tsx')
 const marketSelectionSource = readFileSync(join(currentDir, 'tradingPageMarketSelection.ts'), 'utf8')
@@ -56,18 +57,19 @@ describe('TradingPage terminal viewport', () => {
 
   it('wires the TradePanel to the real trading session submit path', () => {
     assert.match(desktopSource, /trade=\{[\s\S]*<TradePanel[\s\S]*symbol=\{symbol\}/)
-    assert.match(source, /<MobileOrderSheet[\s\S]*<TradePanel[\s\S]*compact[\s\S]*symbol=\{selectedSymbol\}/)
+    assert.match(source, /<TradingOrderSheet/)
+    assert.match(orderSheetSource, /<MobileOrderSheet[\s\S]*<TradePanel[\s\S]*compact[\s\S]*symbol=\{view\.symbol\}/)
     assert.match(desktopSource, /category=\{market\.category\}/)
-    assert.match(source, /category=\{selectedMarketWithRules\.category\}/)
+    assert.match(orderSheetSource, /category=\{view\.market\.category\}/)
     assert.match(desktopSource, /leverage=\{market\.leverage\}/)
-    assert.match(source, /leverage=\{selectedMarketWithRules\.leverage\}/)
+    assert.match(orderSheetSource, /leverage=\{view\.market\.leverage\}/)
     assert.match(desktopSource, /rules=\{market\.rules\}/)
-    assert.match(source, /rules=\{selectedMarketWithRules\.rules\}/)
-    assert.match(source, /accountId=\{accountId\}/)
-    assert.match(source, /balances=\{balances\}/)
-    assert.match(source, /sessionReady=\{sessionReady\}/)
-    assert.match(source, /sessionMode=\{tradePanelSessionMode\}/)
-    assert.match(source, /sessionError=\{sessionError\}/)
+    assert.match(orderSheetSource, /rules=\{view\.market\.rules\}/)
+    assert.match(orderSheetSource, /accountId=\{view\.accountId\}/)
+    assert.match(orderSheetSource, /balances=\{view\.balances\}/)
+    assert.match(orderSheetSource, /sessionReady=\{view\.sessionReady\}/)
+    assert.match(orderSheetSource, /sessionMode=\{view\.tradePanelSessionMode\}/)
+    assert.match(orderSheetSource, /sessionError=\{view\.sessionError\}/)
     assert.doesNotMatch(desktopSource, /orderError=\{lastOrderError\}/)
     assert.match(desktopSource, /onSubmitOrder=\{submitOrder\}/)
     assert.match(desktopSource, /onRetrySession=\{onRetrySession\}/)
@@ -80,7 +82,7 @@ describe('TradingPage terminal viewport', () => {
     assert.match(desktopSource, /onSelectPrice=\{onSelectPrice\}/)
     assert.match(desktopSource, /pricePrefill=\{tradePricePrefill\}/)
     assert.match(source, /<MobileDrawer[\s\S]*title="Quote"[\s\S]*onSelectPrice=\{handleSelectPrice\}/)
-    assert.match(source, /pricePrefill=\{tradePricePrefill\}/)
+    assert.match(orderSheetSource, /pricePrefill=\{view\.tradePricePrefill\}/)
   })
 
   it('keeps TradingPage as an orchestration shell with extracted views', () => {
@@ -101,11 +103,11 @@ describe('TradingPage terminal viewport', () => {
     assert.match(desktopSource, /onClosePosition=\{accountPanel\.onClosePosition\}/)
   })
 
-  it('selects the initial trading symbol from the markets query parameter', () => {
-    assert.match(source, /useSearchParams/)
-    assert.match(source, /const querySymbol = searchParams\.get\('symbol'\)/)
-    assert.match(source, /normalizeTradingSymbol\(querySymbol\) \?\? initialTradingSymbol/)
-    assert.match(source, /setSelectedSymbol\(normalizedQuerySymbol\)/)
+  it('selects the initial trading symbol from the canonical product route', () => {
+    assert.match(source, /useParams/)
+    assert.match(source, /export function TradingPage\(\{ product \}: TradingPageProps\)/)
+    assert.match(source, /normalizeTradingProductSymbol\(product, routeSymbol\) \?\? defaultTradingSymbols\[product\]/)
+    assert.match(source, /getTradingMarketsForProduct\(mergedMarkets, product\)/)
   })
 
   it('keeps first-paint terminal regions in loading state until the session resolves', () => {
@@ -135,7 +137,7 @@ describe('TradingPage terminal viewport', () => {
 
   it('waits for backend market capabilities before seeding the full mock watchlist', () => {
     assert.match(source, /useState<TradingMarket\[\]>\(\[\]\)/)
-    assert.match(source, /catch\(\(\) => \{[\s\S]*setMarkets\(mockTradingMarkets\)/)
+    assert.match(source, /catch\(\(\) => \{[\s\S]*setMarkets\(getTradingMarketsForProduct\(mergeWithLocalTradingMarkets\(\[\]\), product\)\)/)
   })
 
   it('shares market favorites between the trading watchlist and market self-selection', () => {
@@ -174,10 +176,10 @@ describe('TradingPage terminal viewport', () => {
     assert.match(source, /setLoginPromptRequested\(true\)/)
     assert.match(source, /open=\{loginRequired && loginPromptRequested\}/)
     assert.match(source, /handleLoginRedirect/)
-    assert.match(source, /navigate\(`\/login\?redirect=\$\{encodeURIComponent\('\/trading'\)\}`\)/)
+    assert.match(source, /navigate\(`\/login\?redirect=\$\{encodeURIComponent\(resolveTradingPath\(product, selectedSymbol\)\)\}`\)/)
     assert.match(source, /onClose=\{\(\) => setLoginPromptRequested\(false\)\}/)
-    assert.match(source, /loginRequired=\{loginRequired\}/)
-    assert.match(source, /onLoginRequired=\{handleTradeLoginRequired\}/)
+    assert.match(orderSheetSource, /loginRequired=\{view\.loginRequired\}/)
+    assert.match(orderSheetSource, /onLoginRequired=\{view\.onLoginRequired\}/)
     assert.doesNotMatch(source, /loginRequired && !loginPromptDismissed/)
     assert.doesNotMatch(source, /onLoginRequired=\{handleLoginRedirect\}/)
   })
@@ -221,13 +223,10 @@ describe('TradingPage terminal viewport', () => {
     assert.match(styles, /--trading-chart-grid-horizontal:/)
   })
 
-  it('does not use local mock chart history for forex markets', () => {
-    assert.match(viewModelsSource, /function shouldAllowChartMockFallback\(market: TradingMarket\)/)
-    assert.match(viewModelsSource, /return !market\.provider && market\.category !== 'fx'/)
-    assert.match(desktopSource, /allowMockFallback=\{shouldAllowChartMockFallback\(market\)\}/)
-    assert.match(mobileSource, /allowMockFallback=\{shouldAllowChartMockFallback\(market\)\}/)
-    assert.doesNotMatch(desktopSource, /allowMockFallback=\{!market\.provider\}/)
-    assert.doesNotMatch(mobileSource, /allowMockFallback=\{!market\.provider\}/)
+  it('does not use generated chart history on any trading route', () => {
+    assert.doesNotMatch(viewModelsSource, /shouldAllowChartMockFallback/)
+    assert.doesNotMatch(desktopSource, /allowMockFallback/)
+    assert.doesNotMatch(mobileSource, /allowMockFallback/)
   })
 
   it('shows explicit market data source and failure status on the trading page', () => {
@@ -244,6 +243,30 @@ describe('TradingPage terminal viewport', () => {
     assert.match(marketStatusSource, /Massive/)
     assert.match(marketStatusSource, /Demo quote/)
     assert.match(marketStatusSource, /QUOTE_PROVIDER_UNAVAILABLE/)
+  })
+
+  it('starts the authoritative quote-depth-trades bundle before the mobile quote drawer opens', () => {
+    assert.match(source, /startQuoteMarketDataAdapter/)
+    assert.match(source, /useEffect\(\(\) => startQuoteMarketDataAdapter\(selectedSymbol, token\), \[selectedSymbol, token\]\)/)
+  })
+
+  it('shows a testable source transition notice on desktop and mobile until its timer expires', () => {
+    const noticePath = join(currentDir, 'components', 'MarketSourceChangeNotice.tsx')
+
+    assert.match(source, /const \{ quotes, sourceNotice \} = useTradingQuoteMap/)
+    assert.match(source, /<MarketSourceChangeNotice notice=\{sourceNotice\} \/>/)
+    assert.equal(existsSync(noticePath), true)
+
+    const noticeSource = readFileSync(noticePath, 'utf8')
+    assert.match(noticeSource, /data-testid="market-source-change-notice"/)
+    assert.match(noticeSource, /data-market-source-change="true"/)
+    assert.match(noticeSource, /data-previous-provider=\{previousProvider\}/)
+    assert.match(noticeSource, /data-current-provider=\{notice\.providerCode\}/)
+    assert.match(noticeSource, /data-previous-source=\{previousSource\}/)
+    assert.match(noticeSource, /data-current-source=\{notice\.sourceMode\}/)
+    assert.match(noticeSource, /role="status"/)
+    assert.match(noticeSource, /aria-live="polite"/)
+    assert.match(styles, /\.marketSourceNotice\s*\{[\s\S]*position:\s*fixed;[\s\S]*z-index:\s*var\(--z-toast\)/)
   })
 
   it('keeps TradingPage below the orchestration size budget', () => {

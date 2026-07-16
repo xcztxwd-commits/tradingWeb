@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Insert;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 /**
@@ -27,6 +29,67 @@ public interface TradingAccountRepository extends FxBaseMapper<TradingAccountEnt
         .eq(TradingAccountEntity::getId, id)
         .eq(TradingAccountEntity::getUserId, userId)));
   }
+
+  default Optional<TradingAccountEntity> findActiveDemoByUserId(UUID userId) {
+    return Optional.ofNullable(selectOne(new LambdaQueryWrapper<TradingAccountEntity>()
+        .eq(TradingAccountEntity::getUserId, userId)
+        .eq(TradingAccountEntity::getAccountType, com.fxplatform.account.enums.AccountType.DEMO)
+        .in(
+            TradingAccountEntity::getStatus,
+            com.fxplatform.account.enums.AccountStatus.ACTIVE,
+            com.fxplatform.account.enums.AccountStatus.RISK_REDUCTION_PENDING,
+            com.fxplatform.account.enums.AccountStatus.ISOLATED_LIQUIDATION_PENDING,
+            com.fxplatform.account.enums.AccountStatus.LIQUIDATION_PENDING)));
+  }
+
+  default List<TradingAccountEntity> findDemoLiquidationScanCandidates() {
+    return selectList(new LambdaQueryWrapper<TradingAccountEntity>()
+        .eq(TradingAccountEntity::getAccountType,
+            com.fxplatform.account.enums.AccountType.DEMO)
+        .in(
+            TradingAccountEntity::getStatus,
+            com.fxplatform.account.enums.AccountStatus.ACTIVE,
+            com.fxplatform.account.enums.AccountStatus.ISOLATED_LIQUIDATION_PENDING,
+            com.fxplatform.account.enums.AccountStatus.LIQUIDATION_PENDING)
+        .orderByAsc(TradingAccountEntity::getId));
+  }
+
+  @Insert("""
+      INSERT INTO core.trading_accounts (
+        id, user_id, account_type, base_currency, balance, equity, used_margin,
+        free_margin, leverage, status, position_mode, demo_generation
+      ) VALUES (
+        #{id}, #{userId}, 'DEMO', 'USDT', 50000, 50000, 0,
+        50000, 10, 'ACTIVE', 'ONE_WAY', 1
+      )
+      ON CONFLICT (user_id)
+        WHERE account_type = 'DEMO'
+          AND status IN (
+            'ACTIVE', 'RISK_REDUCTION_PENDING',
+            'ISOLATED_LIQUIDATION_PENDING', 'LIQUIDATION_PENDING'
+          )
+      DO NOTHING
+      """)
+  int insertActiveDemoIfAbsent(@Param("id") UUID id, @Param("userId") UUID userId);
+
+  @Select("""
+      SELECT *
+      FROM core.trading_accounts
+      WHERE id = #{id}
+      FOR UPDATE
+      """)
+  Optional<TradingAccountEntity> findByIdForUpdate(@Param("id") UUID id);
+
+  @Select("""
+      SELECT *
+      FROM core.trading_accounts
+      WHERE id = #{id}
+        AND user_id = #{userId}
+      FOR UPDATE
+      """)
+  Optional<TradingAccountEntity> findByIdAndUserIdForUpdate(
+      @Param("id") UUID id,
+      @Param("userId") UUID userId);
 
   @Update("""
       UPDATE core.trading_accounts

@@ -212,6 +212,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/market/symbols/{id}/funding-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["fundingConfig"];
+        put: operations["updateFundingConfig"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/market/data-providers/{providerId}": {
         parameters: {
             query?: never;
@@ -308,7 +324,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/trading/positions/{positionId}/close": {
+    "/api/trading/positions/{positionId}/margin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["adjustPositionMargin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trading/positions/{id}/protections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createProtection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trading/positions/{id}/close": {
         parameters: {
             query?: never;
             header?: never;
@@ -318,6 +366,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["closePosition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trading/positions/close-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["closeAllPositions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -340,7 +404,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/trading/orders/{orderId}/cancel": {
+    "/api/trading/orders/{id}/cancel": {
         parameters: {
             query?: never;
             header?: never;
@@ -350,6 +414,38 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["cancelOrder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trading/orders/cancel-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancelAllOrders"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trading/oco": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createOco"];
         delete?: never;
         options?: never;
         head?: never;
@@ -708,6 +804,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/market/test-control/overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["override"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/market/symbols": {
         parameters: {
             query?: never;
@@ -996,6 +1108,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/accounts/{id}/force-cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["forceCleanup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/accounts/{id}/demo-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resetDemo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{id}/transfers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["transferHistory"];
+        put?: never;
+        post: operations["transfer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{id}/demo-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resetDemo_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/accounts/{accountId}/asset-conversions": {
         parameters: {
             query?: never;
@@ -1028,6 +1204,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/trading/protections/{orderId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["cancelProtection"];
+        options?: never;
+        head?: never;
+        patch: operations["updateProtection"];
+        trace?: never;
+    };
     "/api/trading/positions/{positionId}/protection": {
         parameters: {
             query?: never;
@@ -1044,7 +1236,7 @@ export interface paths {
         patch: operations["updatePositionProtection"];
         trace?: never;
     };
-    "/api/trading/orders/{orderId}": {
+    "/api/trading/orders/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1124,6 +1316,54 @@ export interface paths {
         patch: operations["updatePaymentMethod"];
         trace?: never;
     };
+    "/api/accounts/{accountId}/symbols/{symbol}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updateSymbolSettings"];
+        trace?: never;
+    };
+    "/api/accounts/{accountId}/position-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["updatePositionMode"];
+        trace?: never;
+    };
+    "/api/trading/trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["trades"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/trading/positions": {
         parameters: {
             query?: never;
@@ -1156,7 +1396,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/trading/orders/{orderId}/events": {
+    "/api/trading/orders/{id}/events": {
         parameters: {
             query?: never;
             header?: never;
@@ -1164,6 +1404,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["orderEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/trading/funding/settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["fundingSettlements"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1195,7 +1451,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["trades"];
+        get: operations["trades_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1292,6 +1548,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["quote"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/perpetuals/{symbol}/reference": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["perpetualReference"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1451,7 +1723,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["trades_1"];
+        get: operations["trades_2"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1548,6 +1820,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["status_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/market/realtime/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status_2"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1700,6 +1988,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/accounts/{id}/wallet-balances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["walletBalances"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/accounts/{id}/funding-settlements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["fundingSettlements_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/accounts/{id}/asset-ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["assetLedger"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/accounts/{accountId}/ledger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["ledger_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/accounts": {
         parameters: {
             query?: never;
@@ -1723,7 +2075,23 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["walletBalances"];
+        get: operations["walletBalances_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/accounts/{accountId}/trading-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1755,10 +2123,26 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["assetLedger"];
+        get: operations["assetLedger_1"];
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/market/test-control/overrides/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["endOverride"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2155,6 +2539,41 @@ export interface components {
             /** Format: int32 */
             displayOrder?: number;
         };
+        AdminFundingConfigRequest: {
+            fundingSourcePriority: string[];
+            fixedFundingRate: number;
+            /** Format: int32 */
+            fixedFundingIntervalMinutes: number;
+            /** Format: int32 */
+            fundingStaleSeconds: number;
+            reason: string;
+        };
+        AdminFundingConfigResponse: {
+            /** Format: uuid */
+            symbolId?: string;
+            symbol?: string;
+            fundingSourcePriority?: string[];
+            fixedFundingRate?: number;
+            /** Format: int32 */
+            fixedFundingIntervalMinutes?: number;
+            /** Format: int32 */
+            fundingStaleSeconds?: number;
+            actualSource?: string;
+            fallbackReason?: string;
+            sourceMode?: string;
+            /** Format: date-time */
+            asOf?: string;
+            /** Format: date-time */
+            nextFundingTime?: string;
+        };
+        ApiResponseAdminFundingConfigResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["AdminFundingConfigResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
         AdminDataProviderRequest: {
             code: string;
             name: string;
@@ -2385,6 +2804,144 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
+        AdjustPositionMarginRequest: {
+            /** @enum {string} */
+            action: "ADD" | "REDUCE";
+            amount: number;
+            /** Format: int64 */
+            expectedVersion: number;
+        };
+        AdjustPositionMarginResponse: {
+            /** Format: uuid */
+            accountId?: string;
+            /** Format: uuid */
+            positionId?: string;
+            symbol?: string;
+            /** @enum {string} */
+            positionSide?: "BOTH" | "LONG" | "SHORT";
+            /** @enum {string} */
+            marginMode?: "CASH" | "CROSS" | "ISOLATED";
+            /** @enum {string} */
+            action?: "ADD" | "REDUCE";
+            amount?: number;
+            initialMargin?: number;
+            positionMargin?: number;
+            isolatedEquity?: number;
+            maintenanceMargin?: number;
+            estimatedCloseFee?: number;
+            estimatedLiquidationPrice?: number;
+            accountUsedMargin?: number;
+            accountFreeMargin?: number;
+            /** Format: int64 */
+            version?: number;
+        };
+        ApiResponseAdjustPositionMarginResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["AdjustPositionMarginResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        CreateProtectionRequest: {
+            /** @enum {string} */
+            protectionType: "TAKE_PROFIT" | "STOP_LOSS";
+            quantity: number;
+            /** @enum {string} */
+            quantityUnit: "BASE" | "QUOTE" | "CONTRACTS";
+            triggerPrice: number;
+            /** @enum {string} */
+            triggerExecutionType: "MARKET" | "LIMIT";
+            price?: number;
+            clientOrderId: string;
+        };
+        ApiResponseOrderResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["OrderResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        OrderResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            accountId?: string;
+            symbol?: string;
+            side?: string;
+            orderType?: string;
+            /** Format: int32 */
+            leverage?: number;
+            /** @enum {string} */
+            status?: "RECEIVED" | "VALIDATING" | "ACCEPTED" | "WORKING" | "PARTIALLY_FILLED" | "PENDING_ACTIVATION" | "PENDING" | "FILLED" | "CANCEL_PENDING" | "CANCELED" | "CANCELLED" | "REJECTED" | "EXPIRED" | "FAILED";
+            lots?: number;
+            quantity?: number;
+            price?: number;
+            executionPrice?: number;
+            filledQuantity?: number;
+            remainingQuantity?: number;
+            avgFillPrice?: number;
+            fee?: number;
+            slippage?: number;
+            holdAmount?: number;
+            holdCurrency?: string;
+            rejectCode?: string;
+            rejectMessage?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            /** Format: date-time */
+            filledAt?: string;
+            /** Format: date-time */
+            canceledAt?: string;
+            /** @enum {string} */
+            productType?: "FX_MARGIN" | "CRYPTO_SPOT" | "LINEAR_PERP" | "INVERSE_PERP";
+            /** @enum {string} */
+            positionMode?: "ONE_WAY" | "HEDGE";
+            /** @enum {string} */
+            positionSide?: "BOTH" | "LONG" | "SHORT";
+            /** @enum {string} */
+            marginMode?: "CASH" | "CROSS" | "ISOLATED";
+            /** @enum {string} */
+            quantityUnit?: "BASE" | "QUOTE" | "CONTRACTS";
+            originalQuantity?: number;
+            baseQuantity?: number;
+            /** @enum {string} */
+            timeInForce?: "GTC";
+            reduceOnly?: boolean;
+            /** @enum {string} */
+            origin?: "USER" | "PROTECTIVE" | "LIQUIDATION" | "ADMIN_FORCE_CLOSE" | "BATCH_CLOSE" | "OCO";
+            systemReason?: string;
+            feeAsset?: string;
+            /** @enum {string} */
+            liquidityRole?: "MAKER" | "TAKER";
+            triggerPrice?: number;
+            /** @enum {string} */
+            triggerPriceType?: "LAST_PRICE" | "MARK_PRICE";
+            /** @enum {string} */
+            triggerExecutionType?: "MARKET" | "LIMIT";
+            /** @enum {string} */
+            protectionType?: "TAKE_PROFIT" | "STOP_LOSS";
+            /** Format: uuid */
+            parentOrderId?: string;
+            /** Format: uuid */
+            parentPositionId?: string;
+            /** Format: uuid */
+            contingencyGroupId?: string;
+            /** Format: uuid */
+            holdOwnerOrderId?: string;
+            /** Format: int64 */
+            version?: number | null;
+        };
+        ClosePositionRequest: {
+            quantity: number;
+            /** @enum {string} */
+            quantityUnit: "BASE" | "QUOTE" | "CONTRACTS";
+            clientOrderId: string;
+            empty?: boolean;
+        };
         ApiResponsePositionResponse: {
             success?: boolean;
             code?: string;
@@ -2407,6 +2964,7 @@ export interface components {
             openPrice?: number;
             markPrice?: number;
             currentPrice?: number;
+            notional?: number;
             liquidationPrice?: number;
             breakEvenPrice?: number;
             stopLoss?: number;
@@ -2414,6 +2972,7 @@ export interface components {
             floatingPnl?: number;
             floatingPnlRatio?: number;
             realizedPnl?: number;
+            fundingPnl?: number;
             marginHeld?: number;
             maintenanceMargin?: number;
             maintenanceMarginRate?: number;
@@ -2424,15 +2983,66 @@ export interface components {
             openedAt?: string;
             /** Format: date-time */
             closedAt?: string;
+            /** @enum {string} */
+            productType?: "FX_MARGIN" | "CRYPTO_SPOT" | "LINEAR_PERP" | "INVERSE_PERP";
+            /** @enum {string} */
+            positionMode?: "ONE_WAY" | "HEDGE";
+            /** @enum {string} */
+            positionSide?: "BOTH" | "LONG" | "SHORT";
+            /** Format: int64 */
+            version?: number;
+        };
+        BatchActionRequest: {
+            /** Format: uuid */
+            accountId: string;
+            /** Format: uuid */
+            requestId: string;
+        };
+        ApiResponseBatchActionResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["BatchActionResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        BatchActionResponse: {
+            /** Format: uuid */
+            accountId?: string;
+            requestId?: string;
+            items?: components["schemas"]["Item"][];
+        };
+        Item: {
+            /** Format: uuid */
+            positionId?: string;
+            /** Format: uuid */
+            orderId?: string;
+            status?: string;
+            errorCode?: string;
+            message?: string;
+        };
+        AttachedProtectionRequest: {
+            /** @enum {string} */
+            protectionType: "TAKE_PROFIT" | "STOP_LOSS";
+            triggerPrice: number;
+            /** @enum {string} */
+            triggerPriceType?: "LAST_PRICE" | "MARK_PRICE";
+            /** @enum {string} */
+            triggerExecutionType: "MARKET" | "LIMIT";
+            price?: number;
+            quantity?: number;
+            /** @enum {string} */
+            quantityUnit?: "BASE" | "QUOTE" | "CONTRACTS";
         };
         CreateOrderRequest: {
             /** Format: uuid */
             accountId: string;
+            /** @example BTCUSDT-PERP */
             symbol: string;
             /** @enum {string} */
             side: "BUY" | "SELL";
             /** @enum {string} */
-            orderType: "MARKET" | "LIMIT" | "STOP";
+            orderType: "MARKET" | "LIMIT" | "STOP_MARKET";
             lots?: number;
             requestedPrice?: number;
             stopLoss?: number;
@@ -2443,47 +3053,47 @@ export interface components {
             price?: number;
             /** Format: int32 */
             leverage?: number;
+            /** @enum {string} */
+            positionSide: "BOTH" | "LONG" | "SHORT";
+            /** @enum {string} */
+            quantityUnit: "BASE" | "QUOTE" | "CONTRACTS";
+            /** @enum {string} */
+            marginMode: "CASH" | "CROSS" | "ISOLATED";
+            triggerPrice?: number;
+            /** @enum {string} */
+            triggerPriceType?: "LAST_PRICE" | "MARK_PRICE";
+            reduceOnly: boolean;
+            attachedProtections?: components["schemas"]["AttachedProtectionRequest"][];
         };
-        ApiResponseOrderResponse: {
+        CreateOcoOrderRequest: {
+            /** Format: uuid */
+            accountId: string;
+            symbol: string;
+            /** @enum {string} */
+            side: "BUY" | "SELL";
+            quantity: number;
+            /** @enum {string} */
+            quantityUnit: "BASE" | "QUOTE" | "CONTRACTS";
+            limitPrice: number;
+            stopTriggerPrice: number;
+            /** @enum {string} */
+            triggerPriceType?: "LAST_PRICE" | "MARK_PRICE";
+            idempotencyKey?: string;
+            clientOrderId?: string;
+        };
+        ApiResponseOcoOrderGroupResponse: {
             success?: boolean;
             code?: string;
             message?: string;
-            data?: components["schemas"]["OrderResponse"];
+            data?: components["schemas"]["OcoOrderGroupResponse"];
             /** Format: date-time */
             timestamp?: string;
         };
-        OrderResponse: {
+        OcoOrderGroupResponse: {
             /** Format: uuid */
-            id?: string;
-            /** Format: uuid */
-            accountId?: string;
-            symbol?: string;
-            side?: string;
-            orderType?: string;
-            /** Format: int32 */
-            leverage?: number;
-            status?: string;
-            lots?: number;
-            quantity?: number;
-            price?: number;
-            executionPrice?: number;
-            filledQuantity?: number;
-            remainingQuantity?: number;
-            avgFillPrice?: number;
-            fee?: number;
-            slippage?: number;
-            holdAmount?: number;
-            holdCurrency?: string;
-            rejectCode?: string;
-            rejectMessage?: string;
-            /** Format: date-time */
-            createdAt?: string;
-            /** Format: date-time */
-            updatedAt?: string;
-            /** Format: date-time */
-            filledAt?: string;
-            /** Format: date-time */
-            canceledAt?: string;
+            contingencyGroupId?: string;
+            limitOrder?: components["schemas"]["OrderResponse"];
+            stopOrder?: components["schemas"]["OrderResponse"];
         };
         FundOrderRequest: {
             /** Format: uuid */
@@ -2837,6 +3447,45 @@ export interface components {
             status: string;
             reason: string;
         };
+        MarketTestControlRequest: {
+            symbol?: string;
+            bid?: number;
+            ask?: number;
+            ttl?: string;
+        };
+        ApiResponseQuoteResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["QuoteResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        QuoteResponse: {
+            type?: string;
+            symbol?: string;
+            bid?: number;
+            ask?: number;
+            mid?: number;
+            markPrice?: number;
+            spread?: number;
+            source?: string;
+            /** Format: int64 */
+            timestamp?: number;
+            changePercent?: number;
+            high24h?: number;
+            low24h?: number;
+            volume24h?: number;
+            /** @enum {string} */
+            sourceMode?: "PUBLIC_EXTERNAL" | "LOCAL_SIMULATED";
+            providerCode?: string;
+            providerSymbol?: string;
+            /** Format: date-time */
+            asOf?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            stale?: boolean;
+        };
         AdminPriceAdjustmentRequest: {
             mode: string;
             adjustmentType: string;
@@ -3070,6 +3719,74 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
+        AdminAccountCleanupRequest: {
+            reason: string;
+            /** Format: uuid */
+            requestId: string;
+            confirmationText: string;
+        };
+        AdminDemoResetRequest: {
+            reason: string;
+            /** Format: uuid */
+            requestId: string;
+            confirmationText: string;
+        };
+        ApiResponseDemoResetResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["DemoResetResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        DemoResetResponse: {
+            /** Format: uuid */
+            accountId?: string;
+            /** Format: uuid */
+            requestId?: string;
+            /** Format: int64 */
+            demoGeneration?: number;
+            spotAvailable?: number;
+            perpBalance?: number;
+            perpFreeMargin?: number;
+            /** Format: date-time */
+            resetAt?: string;
+            replayed?: boolean;
+        };
+        AccountTransferRequest: {
+            /** @enum {string} */
+            direction: "SPOT_TO_PERP" | "PERP_TO_SPOT";
+            amount: number;
+            /** Format: uuid */
+            requestId: string;
+        };
+        AccountTransferResponse: {
+            /** Format: uuid */
+            accountId?: string;
+            /** Format: uuid */
+            transferId?: string;
+            /** @enum {string} */
+            direction?: "SPOT_TO_PERP" | "PERP_TO_SPOT";
+            amount?: number;
+            spotAvailable?: number;
+            perpBalance?: number;
+            perpFreeMargin?: number;
+            replayed?: boolean;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        ApiResponseAccountTransferResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["AccountTransferResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        DemoResetRequest: {
+            /** Format: uuid */
+            requestId: string;
+        };
         AssetConversionRequest: {
             fromWalletType: string;
             fromAsset: string;
@@ -3129,6 +3846,17 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
+        UpdateProtectionRequest: {
+            quantity?: number;
+            /** @enum {string} */
+            quantityUnit?: "BASE" | "QUOTE" | "CONTRACTS";
+            triggerPrice?: number;
+            /** @enum {string} */
+            triggerExecutionType?: "MARKET" | "LIMIT";
+            price?: number;
+            /** Format: int64 */
+            expectedVersion: number;
+        };
         UpdatePositionProtectionRequest: {
             stopLoss?: number;
             takeProfit?: number;
@@ -3155,21 +3883,133 @@ export interface components {
             reason: string;
             confirmationText?: string;
         };
-        ApiResponseListPositionResponse: {
+        UpdateSymbolSettingsRequest: {
+            /** Format: int32 */
+            leverage?: number;
+            /** @enum {string} */
+            marginMode?: "CASH" | "CROSS" | "ISOLATED";
+            /** @enum {string} */
+            quantityUnit?: "BASE" | "QUOTE" | "CONTRACTS";
+            /** Format: int64 */
+            expectedVersion: number;
+        };
+        ApiResponseTradingSettingsResponse: {
             success?: boolean;
             code?: string;
             message?: string;
-            data?: components["schemas"]["PositionResponse"][];
+            data?: components["schemas"]["TradingSettingsResponse"];
             /** Format: date-time */
             timestamp?: string;
         };
-        ApiResponseListOrderResponse: {
+        SymbolSettings: {
+            symbol?: string;
+            /** Format: int32 */
+            leverage?: number;
+            /** @enum {string} */
+            marginMode?: "CASH" | "CROSS" | "ISOLATED";
+            /** @enum {string} */
+            quantityUnit?: "BASE" | "QUOTE" | "CONTRACTS";
+            /** Format: int64 */
+            version?: number;
+            /** Format: int32 */
+            maxLeverage?: number;
+        };
+        TradingSettingsResponse: {
+            /** Format: uuid */
+            accountId?: string;
+            /** @enum {string} */
+            positionMode?: "ONE_WAY" | "HEDGE";
+            symbols?: components["schemas"]["SymbolSettings"][];
+        };
+        UpdatePositionModeRequest: {
+            /** @enum {string} */
+            positionMode: "ONE_WAY" | "HEDGE";
+        };
+        ApiResponseTradingPageResponseTradeResponse: {
             success?: boolean;
             code?: string;
             message?: string;
-            data?: components["schemas"]["OrderResponse"][];
+            data?: components["schemas"]["TradingPageResponseTradeResponse"];
             /** Format: date-time */
             timestamp?: string;
+        };
+        TradeResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            orderId?: string;
+            /** Format: uuid */
+            accountId?: string;
+            symbol?: string;
+            /** @enum {string} */
+            productType?: "FX_MARGIN" | "CRYPTO_SPOT" | "LINEAR_PERP" | "INVERSE_PERP";
+            /** @enum {string} */
+            positionSide?: "BOTH" | "LONG" | "SHORT";
+            /** @enum {string} */
+            marginMode?: "CASH" | "CROSS" | "ISOLATED";
+            /** @enum {string} */
+            side?: "BUY" | "SELL";
+            lots?: number;
+            price?: number;
+            realizedPnl?: number;
+            fee?: number;
+            feeAsset?: string;
+            /** @enum {string} */
+            liquidityRole?: "MAKER" | "TAKER";
+            systemReason?: string;
+            sourceMode?: string;
+            providerCode?: string;
+            /** Format: date-time */
+            executedAt?: string;
+        };
+        TradingPageResponseTradeResponse: {
+            items?: components["schemas"]["TradeResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        ApiResponseTradingPageResponsePositionResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingPageResponsePositionResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingPageResponsePositionResponse: {
+            items?: components["schemas"]["PositionResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        ApiResponseTradingPageResponseOrderResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingPageResponseOrderResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingPageResponseOrderResponse: {
+            items?: components["schemas"]["OrderResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
         };
         ApiResponseListOrderEventResponse: {
             success?: boolean;
@@ -3191,6 +4031,52 @@ export interface components {
             message?: string;
             /** Format: date-time */
             createdAt?: string;
+        };
+        ApiResponseTradingPageResponseFundingSettlementResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingPageResponseFundingSettlementResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        FundingSettlementResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            positionId?: string;
+            /** Format: uuid */
+            accountId?: string;
+            symbol?: string;
+            /** Format: date-time */
+            fundingTime?: string;
+            fundingRate?: number;
+            amount?: number;
+            asset?: string;
+            /** Format: uuid */
+            ledgerEntryId?: string;
+            /** @enum {string} */
+            positionSide?: "BOTH" | "LONG" | "SHORT";
+            /** @enum {string} */
+            marginMode?: "CASH" | "CROSS" | "ISOLATED";
+            markPrice?: number;
+            source?: string;
+            balanceAfter?: number;
+            isolatedMarginAfter?: number;
+            shortfall?: number;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        TradingPageResponseFundingSettlementResponse: {
+            items?: components["schemas"]["FundingSettlementResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
         };
         ApiResponseHomeCountersResponse: {
             success?: boolean;
@@ -3232,6 +4118,15 @@ export interface components {
             side?: string;
             /** Format: int64 */
             timestamp?: number;
+            providerCode?: string;
+            providerSymbol?: string;
+            /** @enum {string} */
+            sourceMode?: "PUBLIC_EXTERNAL" | "LOCAL_SIMULATED";
+            /** Format: date-time */
+            asOf?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            stale?: boolean;
         };
         ApiResponseListSymbolResponse: {
             success?: boolean;
@@ -3358,29 +4253,36 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
-        QuoteResponse: {
-            type?: string;
-            symbol?: string;
-            bid?: number;
-            ask?: number;
-            mid?: number;
-            markPrice?: number;
-            spread?: number;
-            source?: string;
-            /** Format: int64 */
-            timestamp?: number;
-            changePercent?: number;
-            high24h?: number;
-            low24h?: number;
-            volume24h?: number;
-        };
-        ApiResponseQuoteResponse: {
+        ApiResponsePerpetualReferenceResponse: {
             success?: boolean;
             code?: string;
             message?: string;
-            data?: components["schemas"]["QuoteResponse"];
+            data?: components["schemas"]["PerpetualReferenceResponse"];
             /** Format: date-time */
             timestamp?: string;
+        };
+        PerpetualReferenceResponse: {
+            symbol?: string;
+            providerSymbol?: string;
+            providerCode?: string;
+            /** @enum {string} */
+            sourceMode?: "PUBLIC_EXTERNAL" | "LOCAL_SIMULATED";
+            bid?: number;
+            ask?: number;
+            last?: number;
+            mark?: number;
+            index?: number;
+            /** Format: date-time */
+            asOf?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            stale?: boolean;
+            fundingRate?: number;
+            /** Format: date-time */
+            fundingTime?: string;
+            /** Format: date-time */
+            nextFundingTime?: string;
+            fundingSource?: string;
         };
         ApiResponseMarketDepthResponse: {
             success?: boolean;
@@ -3400,6 +4302,15 @@ export interface components {
             timestamp?: number;
             bids?: components["schemas"]["MarketDepthLevelResponse"][];
             asks?: components["schemas"]["MarketDepthLevelResponse"][];
+            providerCode?: string;
+            providerSymbol?: string;
+            /** @enum {string} */
+            sourceMode?: "PUBLIC_EXTERNAL" | "LOCAL_SIMULATED";
+            /** Format: date-time */
+            asOf?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            stale?: boolean;
         };
         ApiResponseBinanceMarketOverviewSourceResponse: {
             success?: boolean;
@@ -3488,6 +4399,15 @@ export interface components {
             low?: number;
             close?: number;
             volume?: number;
+            providerCode?: string;
+            providerSymbol?: string;
+            /** @enum {string} */
+            sourceMode?: "PUBLIC_EXTERNAL" | "LOCAL_SIMULATED";
+            /** Format: date-time */
+            asOf?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            stale?: boolean;
         };
         ApiResponseSessionStatusResponse: {
             success?: boolean;
@@ -3780,6 +4700,42 @@ export interface components {
             data?: components["schemas"]["AdminSymbolProviderBindingResponse"][];
             /** Format: date-time */
             timestamp?: string;
+        };
+        ApiResponseMarketRealtimeStatus: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["MarketRealtimeStatus"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        MarketRealtimeStatus: {
+            enabled?: boolean;
+            provider?: string;
+            connected?: boolean;
+            /** Format: int64 */
+            connectedAt?: number;
+            /** Format: int64 */
+            lastMessageAt?: number;
+            activeSymbols?: string[];
+            /** Format: int32 */
+            desiredStreamCount?: number;
+            /** Format: int64 */
+            processedCount?: number;
+            /** Format: int64 */
+            cacheFailureCount?: number;
+            /** Format: int64 */
+            candleFailureCount?: number;
+            /** Format: int64 */
+            publishFailureCount?: number;
+            /** Format: int64 */
+            backfillSuccessCount?: number;
+            /** Format: int64 */
+            backfillFailureCount?: number;
+            /** Format: int32 */
+            reconnectAttempt?: number;
+            /** Format: int64 */
+            rejectedSymbolCount?: number;
         };
         ApiResponseListAdminPriceAdjustmentResponse: {
             success?: boolean;
@@ -4174,14 +5130,6 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
-        ApiResponseListAccountResponse: {
-            success?: boolean;
-            code?: string;
-            message?: string;
-            data?: components["schemas"]["AccountResponse"][];
-            /** Format: date-time */
-            timestamp?: string;
-        };
         ApiResponseListWalletBalanceResponse: {
             success?: boolean;
             code?: string;
@@ -4200,6 +5148,14 @@ export interface components {
             total?: number;
             available?: number;
             locked?: number;
+        };
+        ApiResponseListFundingSettlementResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["FundingSettlementResponse"][];
+            /** Format: date-time */
+            timestamp?: string;
         };
         ApiResponseListAssetLedgerEntryResponse: {
             success?: boolean;
@@ -4225,6 +5181,33 @@ export interface components {
             description?: string;
             /** Format: date-time */
             createdAt?: string;
+        };
+        ApiResponseListAccountResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["AccountResponse"][];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        ApiResponseTradingPageResponseAccountTransferResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingPageResponseAccountTransferResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingPageResponseAccountTransferResponse: {
+            items?: components["schemas"]["AccountTransferResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
         };
     };
     responses: never;
@@ -5292,6 +6275,108 @@ export interface operations {
             };
         };
     };
+    fundingConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseAdminFundingConfigResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    updateFundingConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminFundingConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseAdminFundingConfigResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
     updateProvider: {
         parameters: {
             query?: never;
@@ -5822,6 +6907,112 @@ export interface operations {
             };
         };
     };
+    adjustPositionMargin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                positionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdjustPositionMarginRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseAdjustPositionMarginResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    createProtection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProtectionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
     closePosition: {
         parameters: {
             query: {
@@ -5829,11 +7020,15 @@ export interface operations {
             };
             header?: never;
             path: {
-                positionId: string;
+                id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ClosePositionRequest"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -5873,9 +7068,66 @@ export interface operations {
             };
         };
     };
-    orders: {
+    closeAllPositions: {
         parameters: {
             query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBatchActionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    orders: {
+        parameters: {
+            query: {
+                accountId: string;
+                status?: "RECEIVED" | "VALIDATING" | "ACCEPTED" | "WORKING" | "PARTIALLY_FILLED" | "PENDING_ACTIVATION" | "PENDING" | "FILLED" | "CANCEL_PENDING" | "CANCELED" | "CANCELLED" | "REJECTED" | "EXPIRED" | "FAILED";
+                symbol?: string;
+                page?: number;
+                size?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5888,7 +7140,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ApiResponseListOrderResponse"];
+                    "*/*": components["schemas"]["ApiResponseTradingPageResponseOrderResponse"];
                 };
             };
             /** @description Bad Request */
@@ -5976,7 +7228,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orderId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -5989,6 +7241,108 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    cancelAllOrders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBatchActionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    createOco: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOcoOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOcoOrderGroupResponse"];
                 };
             };
             /** @description Bad Request */
@@ -7523,6 +8877,57 @@ export interface operations {
             };
         };
     };
+    override: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketTestControlRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseQuoteResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
     symbols: {
         parameters: {
             query: {
@@ -8930,6 +10335,271 @@ export interface operations {
             };
         };
     };
+    forceCleanup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminAccountCleanupRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseBatchActionResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    resetDemo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminDemoResetRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseDemoResetResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    transferHistory: {
+        parameters: {
+            query?: {
+                direction?: "SPOT_TO_PERP" | "PERP_TO_SPOT";
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingPageResponseAccountTransferResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    transfer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountTransferRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseAccountTransferResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    resetDemo_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DemoResetRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseDemoResetResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
     convertAsset: {
         parameters: {
             query?: never;
@@ -9030,6 +10700,108 @@ export interface operations {
             };
         };
     };
+    cancelProtection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    updateProtection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                orderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProtectionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
     updatePositionProtection: {
         parameters: {
             query: {
@@ -9090,7 +10862,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orderId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -9403,10 +11175,120 @@ export interface operations {
             };
         };
     };
-    positions: {
+    updateSymbolSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: string;
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSymbolSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    updatePositionMode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePositionModeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingSettingsResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    trades: {
         parameters: {
             query: {
                 accountId: string;
+                symbol?: string;
+                page?: number;
+                size?: number;
             };
             header?: never;
             path?: never;
@@ -9420,7 +11302,59 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ApiResponseListPositionResponse"];
+                    "*/*": components["schemas"]["ApiResponseTradingPageResponseTradeResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    positions: {
+        parameters: {
+            query: {
+                accountId: string;
+                symbol?: string;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingPageResponsePositionResponse"];
                 };
             };
             /** @description Bad Request */
@@ -9456,6 +11390,9 @@ export interface operations {
         parameters: {
             query: {
                 accountId: string;
+                symbol?: string;
+                page?: number;
+                size?: number;
             };
             header?: never;
             path?: never;
@@ -9469,7 +11406,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ApiResponseListPositionResponse"];
+                    "*/*": components["schemas"]["ApiResponseTradingPageResponsePositionResponse"];
                 };
             };
             /** @description Bad Request */
@@ -9506,7 +11443,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                orderId: string;
+                id: string;
             };
             cookie?: never;
         };
@@ -9519,6 +11456,58 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListOrderEventResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    fundingSettlements: {
+        parameters: {
+            query: {
+                accountId: string;
+                symbol?: string;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingPageResponseFundingSettlementResponse"];
                 };
             };
             /** @description Bad Request */
@@ -9597,7 +11586,7 @@ export interface operations {
             };
         };
     };
-    trades: {
+    trades_1: {
         parameters: {
             query?: {
                 limit?: number;
@@ -9910,6 +11899,55 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseQuoteResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    perpetualReference: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePerpetualReferenceResponse"];
                 };
             };
             /** @description Bad Request */
@@ -10379,7 +12417,7 @@ export interface operations {
             };
         };
     };
-    trades_1: {
+    trades_2: {
         parameters: {
             query: {
                 page?: number;
@@ -10708,6 +12746,53 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseMarketStatusResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    status_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMarketRealtimeStatus"];
                 };
             };
             /** @description Bad Request */
@@ -11185,6 +13270,209 @@ export interface operations {
             };
         };
     };
+    walletBalances: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListWalletBalanceResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    fundingSettlements_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListFundingSettlementResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    assetLedger: {
+        parameters: {
+            query?: {
+                walletType?: string;
+                asset?: string;
+                entryType?: string;
+                referenceId?: string;
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListAssetLedgerEntryResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    ledger_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseListLedgerEntryResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
     accounts_1: {
         parameters: {
             query?: never;
@@ -11232,7 +13520,7 @@ export interface operations {
             };
         };
     };
-    walletBalances: {
+    walletBalances_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -11250,6 +13538,55 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListWalletBalanceResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                accountId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingSettingsResponse"];
                 };
             };
             /** @description Bad Request */
@@ -11330,7 +13667,7 @@ export interface operations {
             };
         };
     };
-    assetLedger: {
+    assetLedger_1: {
         parameters: {
             query?: {
                 walletType?: string;
@@ -11355,6 +13692,55 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListAssetLedgerEntryResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    endOverride: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
             /** @description Bad Request */

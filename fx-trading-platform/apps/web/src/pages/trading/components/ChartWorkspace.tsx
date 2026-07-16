@@ -6,7 +6,7 @@ import { isChartFullscreenShortcut, shouldIgnoreChartFullscreenShortcut } from '
 import { KLineChartPanel } from './KLineChartPanel'
 import type { ChartActionRequest } from './KLineChartPanel'
 import { buildChartTradeMarkers } from '../chartTradeMarkers'
-import { getDrawingShortcutAction, shouldIgnoreDrawingShortcut } from '../chartSettings'
+import { getDrawingShortcutAction, normalizeChartInterval, shouldIgnoreDrawingShortcut } from '../chartSettings'
 import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from '../chartSettings'
 import type { OrderResponse, PositionResponse } from '../../../components/tables/types'
 import type { TradingPeriod } from '../../../features/market/tradingModels'
@@ -26,7 +26,6 @@ type Props = {
   orders: OrderResponse[]
   positions: PositionResponse[]
   themeMode: 'dark' | 'light'
-  allowMockFallback?: boolean
   settings: ChartSettings
   indicators: string[]
   onChartSettingsChange: (settings: ChartSettings) => void
@@ -49,7 +48,6 @@ export function ChartWorkspace({
   orders,
   positions,
   themeMode,
-  allowMockFallback = false,
   settings,
   indicators,
   onChartSettingsChange,
@@ -83,6 +81,8 @@ export function ChartWorkspace({
     () => buildChartTradeMarkers(symbol, orders, positions),
     [orders, positions, symbol]
   )
+  const activeInterval = normalizeChartInterval(symbol, settings.interval)
+  const activeSettings = activeInterval === settings.interval ? settings : { ...settings, interval: activeInterval }
 
   const handleClearDrawings = useCallback(() => {
     setDrawingClearRequest((request) => request + 1)
@@ -215,8 +215,9 @@ export function ChartWorkspace({
   return (
     <section ref={workspaceRef} className={workspaceClassName}>
       <ChartTopToolbar
+        symbol={symbol}
         indicators={indicators}
-        settings={settings}
+        settings={activeSettings}
         fullscreenActive={fullscreen || fallbackFullscreen}
         onChartSettingsChange={onChartSettingsChange}
         onResetChartSettings={onResetChartSettings}
@@ -259,11 +260,10 @@ export function ChartWorkspace({
           tradeMarkers={tradeMarkers}
           indicatorsVisible={!indicatorsHidden}
           indicatorSettings={settings.indicatorSettings}
-          allowMockFallback={allowMockFallback}
           onCandlePriceSelect={onSelectPrice}
           onDrawingComplete={handleDrawingComplete}
           fullscreenActive={fullscreen || fallbackFullscreen}
-          period={settings.interval}
+          period={activeInterval}
           symbol={symbol}
           themeMode={themeMode}
           token={token}

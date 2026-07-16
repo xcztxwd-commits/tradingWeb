@@ -3,11 +3,15 @@ package com.fxplatform.ledger.service;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.AuthorizationException;
+import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.ledger.dto.LedgerEntryResponse;
 import com.fxplatform.ledger.entity.LedgerEntryEntity;
 import com.fxplatform.ledger.enums.LedgerEntryType;
 import com.fxplatform.ledger.repository.LedgerEntryRepository;
 import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
+import com.fxplatform.account.dto.AccountTransferRequest.Direction;
+import java.time.Instant;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -21,6 +25,142 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class LedgerService {
+
+  public record TransferRecord(Direction direction, BigDecimal amount, Instant createdAt) {
+  }
+
+  public record TransferHistoryRecord(
+      UUID transferId,
+      Direction direction,
+      BigDecimal amount,
+      BigDecimal spotBalanceAfter,
+      BigDecimal perpBalanceAfter,
+      Instant createdAt
+  ) {
+  }
+
+  public List<TransferHistoryRecord> transferRecords(UUID accountId) {
+    if (assetLedgerEntryRepository == null) {
+      return List.of();
+    }
+    List<TransferHistoryRecord> records = new ArrayList<>();
+    java.util.Set<UUID> seen = new java.util.HashSet<>();
+    for (LedgerEntryEntity cashEntry : ledgerEntryRepository.findByAccountIdOrderByCreatedAtDesc(accountId)) {
+      UUID transferId = cashEntry.getReferenceId();
+      if (!"TRANSFER".equals(cashEntry.getReferenceType())
+          || transferId == null
+          || !seen.add(transferId)) {
+        continue;
+      }
+      TransferRecord transfer = findTransfer(accountId, transferId).orElseThrow();
+      com.fxplatform.wallet.entity.AssetLedgerEntryEntity assetEntry =
+          assetLedgerEntryRepository.findByReference(accountId, "TRANSFER", transferId).getFirst();
+      records.add(new TransferHistoryRecord(
+          transferId,
+          transfer.direction(),
+          transfer.amount(),
+          assetEntry.getBalanceAfter(),
+          cashEntry.getBalanceAfter(),
+          transfer.createdAt()));
+    }
+    return records;
+  }
+
+  public java.util.Optional<TransferRecord> findTransfer(UUID accountId, UUID requestId) {
+    List<LedgerEntryEntity> cash = ledgerEntryRepository.findByReference(
+        accountId, "TRANSFER", requestId);
+    List<com.fxplatform.wallet.entity.AssetLedgerEntryEntity> asset =
+        assetLedgerEntryRepository == null
+            ? List.of()
+            : assetLedgerEntryRepository.findByReference(accountId, "TRANSFER", requestId);
+    if (cash.isEmpty() && asset.isEmpty()) {
+      return java.util.Optional.empty();
+    }
+    if (cash.size() != 1 || asset.size() != 1) {
+      throw transferConflict();
+    }
+    LedgerEntryEntity cashEntry = cash.getFirst();
+    com.fxplatform.wallet.entity.AssetLedgerEntryEntity assetEntry = asset.getFirst();
+    Direction direction;
+    if (LedgerEntryType.TRANSFER_IN.name().equals(cashEntry.getOperationType())
+        && LedgerEntryType.TRANSFER_OUT.name().equals(assetEntry.getOperationType())) {
+      direction = Direction.SPOT_TO_PERP;
+    } else if (LedgerEntryType.TRANSFER_OUT.name().equals(cashEntry.getOperationType())
+        && LedgerEntryType.TRANSFER_IN.name().equals(assetEntry.getOperationType())) {
+      direction = Direction.PERP_TO_SPOT;
+    } else {
+      throw transferConflict();
+    }
+    BigDecimal cashAmount = cashEntry.getAmount().abs();
+    BigDecimal assetAmount = assetEntry.getAmount().abs();
+    if (cashAmount.compareTo(assetAmount) != 0) {
+      throw transferConflict();
+    }
+    Instant createdAt = cashEntry.getCreatedAt() == null
+        ? assetEntry.getCreatedAt()
+        : cashEntry.getCreatedAt();
+    return java.util.Optional.of(new TransferRecord(direction, cashAmount, createdAt));
+  }
+
+  public LedgerEntryEntity recordTransfer(
+      TradingAccountEntity account,
+      LedgerEntryType type,
+      BigDecimal amount,
+      UUID requestId,
+      String description
+  ) {
+    if (type != LedgerEntryType.TRANSFER_IN && type != LedgerEntryType.TRANSFER_OUT) {
+      throw new IllegalArgumentException("Transfer ledger type required");
+    }
+    return saveIdempotent(
+        account,
+        type,
+        amount,
+        account.getBalance(),
+        "TRANSFER",
+        requestId,
+        description);
+  }
+
+  public LedgerEntryEntity recordDemoInit(TradingAccountEntity account, BigDecimal amount) {
+    return saveIdempotent(
+        account,
+        LedgerEntryType.DEMO_INIT,
+        amount,
+        account.getBalance(),
+        "DEMO_ACCOUNT",
+        account.getId(),
+        "Initialize Demo perpetual balance");
+  }
+
+  public java.util.Optional<LedgerEntryEntity> findDemoReset(UUID accountId, UUID requestId) {
+    return java.util.Optional.ofNullable(ledgerEntryRepository.findByBusinessOperation(
+        accountId,
+        "DEMO_RESET",
+        requestId,
+        LedgerEntryType.DEMO_RESET.name()));
+  }
+
+  public LedgerEntryEntity recordDemoReset(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID requestId
+  ) {
+    return saveIdempotent(
+        account,
+        LedgerEntryType.DEMO_RESET,
+        amount,
+        account.getBalance(),
+        "DEMO_RESET",
+        requestId,
+        "Reset Demo perpetual balance");
+  }
+
+  private static BusinessException transferConflict() {
+    return new BusinessException(
+        ErrorCode.TRANSFER_REQUEST_CONFLICT,
+        "Transfer ledger pair is incomplete or inconsistent");
+  }
 
   /** 资金流水仓储，用于保存和查询账务流水。 */
   private final LedgerEntryRepository ledgerEntryRepository;
@@ -135,6 +275,22 @@ public class LedgerService {
     return saveIdempotent(account, LedgerEntryType.FUNDING_FEE, amount, account.getBalance(), "FUNDING_SETTLEMENT", settlementId, description);
   }
 
+  public LedgerEntryEntity recordFundingBankruptcyShortfall(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID settlementId,
+      String description
+  ) {
+    return saveIdempotent(
+        account,
+        LedgerEntryType.BANKRUPTCY_SHORTFALL,
+        amount,
+        account.getBalance(),
+        "FUNDING_SETTLEMENT",
+        settlementId,
+        description);
+  }
+
   public LedgerEntryEntity recordLiquidationFee(
       TradingAccountEntity account,
       BigDecimal amount,
@@ -142,6 +298,38 @@ public class LedgerService {
       String description
   ) {
     return save(account, LedgerEntryType.LIQUIDATION_FEE, amount.negate(), account.getBalance(), "POSITION", positionId, description);
+  }
+
+  public LedgerEntryEntity recordBankruptcyShortfall(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID liquidationOrderId,
+      String description
+  ) {
+    return saveIdempotent(
+        account,
+        LedgerEntryType.BANKRUPTCY_SHORTFALL,
+        amount,
+        account.getBalance(),
+        "LIQUIDATION_ORDER",
+        liquidationOrderId,
+        description);
+  }
+
+  public LedgerEntryEntity recordCrossLiquidationShortfall(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID settlementId,
+      String description
+  ) {
+    return saveIdempotent(
+        account,
+        LedgerEntryType.BANKRUPTCY_SHORTFALL,
+        amount,
+        account.getBalance(),
+        "CROSS_LIQUIDATION_SETTLEMENT",
+        settlementId,
+        description);
   }
 
   public LedgerEntryEntity recordFinancing(

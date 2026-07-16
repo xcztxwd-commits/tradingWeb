@@ -39,7 +39,9 @@ describe('prototype markets page', () => {
     assert.match(markets, /LoadingState/)
     assert.match(markets, /ApiErrorState/)
     assert.match(markets, /formatApiError/)
-    assert.match(markets, /mockTradingMarkets/)
+    assert.match(markets, /useState<TradingMarket\[\]>\(\[\]\)/)
+    assert.match(markets, /const nextMarkets = initialMarkets/)
+    assert.doesNotMatch(markets, /mockTradingData/)
     assert.match(markets, /marketPageTabs/)
     assert.match(markets, /overview/)
     assert.match(markets, /trading-data/)
@@ -144,12 +146,11 @@ describe('prototype markets page', () => {
     assert.match(markets, /zone === 'payments'[\s\S]*market\.symbol === 'XRPUSDT'/)
   })
 
-  it('connects market rows to category-aware trading routes and last-symbol memory', () => {
-    assert.match(markets, /writeLastTradingSymbol/)
-    assert.match(markets, /resolveTradingPath/)
+  it('connects only canonical P0 market rows to product-aware trading routes', () => {
+    assert.match(markets, /resolveMarketTradingTarget/)
+    assert.match(markets, /isMarketTradingEnabled/)
     assert.match(markets, /onOpenMarket/)
-    assert.match(markets, /category=\$\{category\}/)
-    assert.match(markets, /symbol=\$\{encodeURIComponent\(market\.symbol\)\}/)
+    assert.match(markets, /navigate\(target\)/)
   })
 
   it('recreates the Binance futures trading-data chart surface without copying page assets', () => {
@@ -284,18 +285,25 @@ describe('prototype auth and account center', () => {
     assert.match(accountPages, /ledgerEntries/)
     assert.match(accountPages, /orders/)
     assert.match(accountPages, /positions/)
-    assert.match(accountPages, /refreshAccountData/)
     assert.doesNotMatch(accountPages, /const ledgers =/)
     assert.doesNotMatch(accountPages, /const tradeOrders =/)
     assert.doesNotMatch(accountPages, /rows=\{ledgers\.map/)
     assert.doesNotMatch(accountPages, /rows=\{tradeOrders\.map/)
   })
 
+  it('routes account asset operations to the shared Demo Spot and Perpetual controls', () => {
+    assert.match(accountPages, /\/wallet#wallet-assets/)
+    assert.match(accountPages, /Spot and Perpetual/)
+    assert.doesNotMatch(accountPages, /AssetConversionPanel/)
+    assert.doesNotMatch(accountPages, /convertAsset/)
+    assert.doesNotMatch(accountPages, /USDT_PERP/)
+  })
+
   it('keeps account pages scoped to assets, ledgers, trade orders, KYC and preferences', () => {
     assert.match(accountPages, /createAssetColumns/)
     assert.match(accountPages, /createLedgerColumns/)
     assert.match(accountPages, /createTradeOrderColumns/)
-    assert.match(accountPages, /AssetConversionPanel/)
+    assert.match(accountPages, /DemoWalletOperationsLink/)
     assert.match(accountPages, /RecentLedgerPanel/)
     assert.match(accountPages, /AssetAccountCards/)
     assert.match(accountPages, /Funding records/)
@@ -404,6 +412,18 @@ describe('user order page automation hooks', () => {
   it('keeps order actions addressable by backend order identity', () => {
     assert.match(orders, /data-order-id=\{order\.id\}/)
     assert.match(orders, /data-order-status=\{order\.status\}/)
+  })
+
+  it('dispatches normal and protective order actions without legacy TP or SL fields', () => {
+    assert.match(orders, /policy\.cancelVia === 'PROTECTION'/)
+    assert.match(orders, /policy\.modifyVia === 'PROTECTION'/)
+    assert.match(orders, /cancelProtection\(order\.id, token\)/)
+    assert.match(orders, /updateProtection\(editingOrder\.id, payload, token\)/)
+    assert.match(orders, /buildNormalOrderUpdatePayload/)
+    assert.doesNotMatch(orders, /form\.get\('stopLoss'\)/)
+    assert.doesNotMatch(orders, /form\.get\('takeProfit'\)/)
+    assert.doesNotMatch(orders, /<input name="stopLoss"/)
+    assert.doesNotMatch(orders, /<input name="takeProfit"/)
   })
 
   it('keeps position actions addressable by backend position identity', () => {

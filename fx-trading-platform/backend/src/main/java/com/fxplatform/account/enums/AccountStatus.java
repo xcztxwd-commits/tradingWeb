@@ -5,6 +5,9 @@ package com.fxplatform.account.enums;
  */
 public enum AccountStatus {
   ACTIVE,
+  RISK_REDUCTION_PENDING,
+  ISOLATED_LIQUIDATION_PENDING,
+  LIQUIDATION_PENDING,
   FROZEN,
   CLOSED
 }

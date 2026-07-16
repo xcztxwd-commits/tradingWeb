@@ -1,6 +1,7 @@
 package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -10,15 +11,23 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
+import com.fxplatform.account.enums.AccountType;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.ExecutionResult;
+import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.market.model.MarketSourceMode;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
+import com.fxplatform.trading.enums.LiquidityRole;
+import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
@@ -31,6 +40,7 @@ import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,6 +49,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class OrderFillServiceTest {
@@ -66,6 +77,9 @@ class OrderFillServiceTest {
 
   @Mock
   private AssetLedgerEntryRepository assetLedgerEntryRepository;
+
+  @Mock
+  private ApplicationEventPublisher accountMutationPublisher;
 
   @BeforeEach
   void setUpWalletRepositories() {
@@ -136,7 +150,6 @@ class OrderFillServiceTest {
     TradingAccountEntity account = account(accountId);
     OrderEntity order = order(accountId);
 
-    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol("BTCUSDT", "SPOT", "BTC", "USDT")));
     SpotSettlementService spotSettlementService = org.mockito.Mockito.mock(SpotSettlementService.class);
 
     OrderFillService service = new OrderFillService(
@@ -175,7 +188,6 @@ class OrderFillServiceTest {
     OrderEntity order = order(accountId);
     order.setSide(OrderSide.SELL);
 
-    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol("BTCUSDT", "SPOT", "BTC", "USDT")));
     SpotSettlementService spotSettlementService = org.mockito.Mockito.mock(SpotSettlementService.class);
 
     OrderFillService service = new OrderFillService(
@@ -206,15 +218,18 @@ class OrderFillServiceTest {
   }
 
   @Test
-  void spotPartialPendingFillClearsOrderHoldAfterSettlementReleasesRemainder() {
+  void spotPartialPendingFillIsRejectedBeforeAnyMutation() {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(accountId);
     OrderEntity order = order(accountId);
     order.setStatus(OrderStatus.PENDING);
+    order.setLots(new BigDecimal("0.10"));
+    order.setQuantity(new BigDecimal("0.10"));
+    order.setBaseQuantity(new BigDecimal("0.10"));
+    order.setRemainingQuantity(new BigDecimal("0.10"));
     order.setHoldAmount(new BigDecimal("5000.00000000"));
     order.setHoldCurrency("USDT");
 
-    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(symbol("BTCUSDT", "SPOT", "BTC", "USDT")));
     SpotSettlementService spotSettlementService = org.mockito.Mockito.mock(SpotSettlementService.class);
 
     OrderFillService service = new OrderFillService(
@@ -226,7 +241,7 @@ class OrderFillServiceTest {
         symbolRepository,
         spotSettlementService);
 
-    service.fill(
+    assertThatThrownBy(() -> service.fill(
         order,
         account,
         new ExecutionResult(
@@ -239,19 +254,323 @@ class OrderFillServiceTest {
             null,
             null),
         order.getHoldAmount(),
-        "Spot pending wallet hold");
+        "Spot pending wallet hold"))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("PARTIAL_FILL_NOT_SUPPORTED"));
 
-    assertThat(order.getStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
-    assertThat(order.getRemainingQuantity()).isEqualByComparingTo("0.06");
-    assertThat(order.getHoldAmount()).isEqualByComparingTo("0");
-    verify(spotSettlementService).settleBuyFill(
-        eq(order),
-        any(ExecutionResult.class),
-        any(SymbolEntity.class),
-        eq(account),
-        any(UUID.class));
+    assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(order.getRemainingQuantity()).isEqualByComparingTo("0.10");
+    assertThat(order.getHoldAmount()).isEqualByComparingTo("5000.00000000");
+    verify(orderRepository, never()).save(any(OrderEntity.class));
+    verify(tradeRepository, never()).save(any());
+    verify(spotSettlementService, never()).settleBuyFill(
+        any(), any(), any(), any(), any());
     verify(positionRepository, never()).save(any(PositionEntity.class));
     verify(accountRepository, never()).reserveMarginIfAvailable(eq(accountId), any());
+  }
+
+  @Test
+  void completedSpotFillPublishesOneTradeAndOneBalanceRefreshHint() {
+    UUID accountId = UUID.randomUUID();
+    UUID userId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    account.setUserId(userId);
+    OrderEntity order = order(accountId);
+    order.setUserId(userId);
+    order.setVersion(4L);
+    SpotSettlementService spotSettlementService = org.mockito.Mockito.mock(SpotSettlementService.class);
+    OrderFillService service = new OrderFillService(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        spotSettlementService);
+    service.setAccountMutationPublisher(accountMutationPublisher);
+
+    service.fill(
+        order,
+        account,
+        new ExecutionResult(
+            new BigDecimal("50000.00000000"),
+            Instant.parse("2026-07-13T01:00:00Z"),
+            new BigDecimal("0.20"),
+            BigDecimal.ZERO,
+            new BigDecimal("10.00000000"),
+            BigDecimal.ZERO,
+            null,
+            null),
+        null,
+        "Spot fill");
+
+    ArgumentCaptor<Object> events = ArgumentCaptor.forClass(Object.class);
+    verify(accountMutationPublisher, times(2)).publishEvent(events.capture());
+    assertThat(events.getAllValues())
+        .allSatisfy(event -> assertThat(event).isInstanceOf(TradingAccountMutationEvent.class));
+    assertThat(events.getAllValues().stream()
+        .map(TradingAccountMutationEvent.class::cast)
+        .map(TradingAccountMutationEvent::type))
+        .containsExactly("TRADE_CREATED", "BALANCE_UPDATED");
+    assertThat(events.getAllValues().stream()
+        .map(TradingAccountMutationEvent.class::cast))
+        .allSatisfy(event -> {
+          assertThat(event.userId()).isEqualTo(userId);
+          assertThat(event.accountId()).isEqualTo(accountId);
+          assertThat(event.version()).isEqualTo(4L);
+        });
+  }
+
+  @Test
+  void canonicalPerpetualPositionUpdatePublishesExactlyOneUpdatedHint() {
+    PositionEntity position = new PositionEntity();
+    position.setId(UUID.randomUUID());
+    position.setStatus(PositionStatus.OPEN);
+    position.setVersion(6L);
+
+    List<TradingAccountMutationEvent> events = fillCanonicalPerpetual(
+        new PositionEngine.PositionUpdateResult(position));
+
+    assertThat(events.stream().map(TradingAccountMutationEvent::type))
+        .containsExactly("TRADE_CREATED", "BALANCE_UPDATED", "POSITION_UPDATED");
+    assertThat(events.stream().filter(event -> "POSITION_UPDATED".equals(event.type())))
+        .singleElement()
+        .satisfies(event -> {
+          assertThat(event.resourceId()).isEqualTo(position.getId());
+          assertThat(event.version()).isEqualTo(6L);
+        });
+  }
+
+  @Test
+  void canonicalPerpetualPositionClosePublishesExactlyOneClosedHint() {
+    PositionEntity position = new PositionEntity();
+    position.setId(UUID.randomUUID());
+    position.setStatus(PositionStatus.CLOSED);
+    position.setVersion(7L);
+    PositionEngine.PositionUpdateResult closed = new PositionEngine.PositionUpdateResult(position)
+        .withReduction(position.getId(), new BigDecimal("0.20"), BigDecimal.ZERO);
+
+    List<TradingAccountMutationEvent> events = fillCanonicalPerpetual(closed);
+
+    assertThat(events.stream().map(TradingAccountMutationEvent::type))
+        .containsExactly("TRADE_CREATED", "BALANCE_UPDATED", "POSITION_CLOSED");
+    assertThat(events.stream().filter(event -> "POSITION_CLOSED".equals(event.type())))
+        .singleElement()
+        .satisfies(event -> {
+          assertThat(event.resourceId()).isEqualTo(position.getId());
+          assertThat(event.version()).isEqualTo(7L);
+        });
+  }
+
+  @Test
+  void canonicalFullFillMarksOnlyDemoP0TradeAndCopiesExecutionMetadata() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    OrderEntity order = order(accountId);
+    order.setProductType(ProductType.CRYPTO_SPOT);
+    order.setBaseQuantity(new BigDecimal("0.20"));
+    SpotSettlementService spotSettlementService = org.mockito.Mockito.mock(SpotSettlementService.class);
+    when(symbolRepository.findBySymbol("BTCUSDT"))
+        .thenReturn(Optional.of(symbol("BTCUSDT", "SPOT", "BTC", "USDT")));
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(tradeRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    Instant filledAt = Instant.parse("2026-07-12T02:00:00Z");
+    FullFillResult fill = new FullFillResult(
+        new BigDecimal("50005.00000000"),
+        filledAt,
+        new BigDecimal("0.20"),
+        BigDecimal.ZERO,
+        new BigDecimal("0.0005"),
+        new BigDecimal("0.00010000"),
+        "BTC",
+        LiquidityRole.TAKER,
+        new BigDecimal("5.00000000"),
+        MarketSourceMode.LOCAL_SIMULATED,
+        "local-spot",
+        "BTCUSDT",
+        filledAt.minusSeconds(1),
+        filledAt.plusSeconds(2));
+    OrderFillService service = new OrderFillService(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        spotSettlementService);
+
+    service.fill(order, account, fill, BigDecimal.ZERO, "canonical fill");
+    TradingAccountEntity liveAccount = account(UUID.randomUUID());
+    liveAccount.setAccountType(AccountType.LIVE);
+    OrderEntity liveOrder = order(liveAccount.getId());
+    liveOrder.setProductType(ProductType.CRYPTO_SPOT);
+    liveOrder.setBaseQuantity(new BigDecimal("0.20"));
+    service.fill(liveOrder, liveAccount, fill, BigDecimal.ZERO, "legacy live fill");
+
+    assertThat(order.getStatus()).isEqualTo(OrderStatus.FILLED);
+    assertThat(order.getFee()).isEqualByComparingTo(fill.fee());
+    assertThat(order.getFeeAsset()).isEqualTo("BTC");
+    assertThat(order.getLiquidityRole()).isEqualTo(LiquidityRole.TAKER);
+    ArgumentCaptor<com.fxplatform.trading.entity.TradeEntity> tradeCaptor =
+        ArgumentCaptor.forClass(com.fxplatform.trading.entity.TradeEntity.class);
+    verify(tradeRepository, times(2)).save(tradeCaptor.capture());
+    var demoTrade = tradeCaptor.getAllValues().get(0);
+    var legacyLiveTrade = tradeCaptor.getAllValues().get(1);
+    assertThat(demoTrade.getFee()).isEqualByComparingTo(fill.fee());
+    assertThat(demoTrade.getFeeAsset()).isEqualTo("BTC");
+    assertThat(demoTrade.getLiquidityRole()).isEqualTo(LiquidityRole.TAKER);
+    assertThat(demoTrade.getProductType()).isEqualTo(ProductType.CRYPTO_SPOT);
+    assertThat(demoTrade.getCanonicalFullFill()).isTrue();
+    assertThat(demoTrade.getSourceMode()).isEqualTo("LOCAL_SIMULATED");
+    assertThat(demoTrade.getProviderCode()).isEqualTo("local-spot");
+    assertThat(legacyLiveTrade.getCanonicalFullFill()).isFalse();
+  }
+
+  @Test
+  void nonOwnerOcoFillPassesSharedHoldOwnerToSettlementAndClearsOnlyOwnerHold() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    OrderEntity order = order(accountId);
+    order.setProductType(ProductType.CRYPTO_SPOT);
+    order.setBaseQuantity(new BigDecimal("0.20"));
+    order.setHoldAmount(BigDecimal.ZERO);
+    OrderEntity holdOwner = order(accountId);
+    holdOwner.setHoldAmount(new BigDecimal("10010.00000000"));
+    holdOwner.setHoldCurrency("USDT");
+    order.setHoldOwnerOrderId(holdOwner.getId());
+    SpotSettlementService settlement = org.mockito.Mockito.mock(SpotSettlementService.class);
+    when(symbolRepository.findBySymbol("BTCUSDT"))
+        .thenReturn(Optional.of(symbol("BTCUSDT", "SPOT", "BTC", "USDT")));
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+    when(tradeRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+    Instant filledAt = Instant.parse("2026-07-12T02:00:00Z");
+    FullFillResult fill = new FullFillResult(
+        new BigDecimal("50005"), filledAt, new BigDecimal("0.20"), BigDecimal.ZERO,
+        new BigDecimal("0.0005"), new BigDecimal("0.0001"), "BTC",
+        LiquidityRole.TAKER, new BigDecimal("5"), MarketSourceMode.LOCAL_SIMULATED,
+        "local-spot", "BTCUSDT", filledAt.minusSeconds(1), filledAt.plusSeconds(2));
+    OrderFillService service = new OrderFillService(
+        orderRepository, tradeRepository, positionRepository, accountRepository,
+        ledgerService, symbolRepository, settlement);
+
+    service.fill(order, holdOwner, account, fill, holdOwner.getHoldAmount(), "OCO fill");
+
+    verify(settlement).settleBuyFill(
+        eq(order), eq(holdOwner), any(ExecutionResult.class), any(SymbolEntity.class),
+        eq(account), any(UUID.class));
+    assertThat(order.getHoldAmount()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(holdOwner.getHoldAmount()).isEqualByComparingTo(BigDecimal.ZERO);
+  }
+
+  @Test
+  void finalFillBoundaryRejectsLowerGreaterNullAndNonZeroRemainingQuantities() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    OrderFillService service = new OrderFillService(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService);
+    Instant filledAt = Instant.parse("2026-07-12T02:00:00Z");
+    List<ExecutionResult> invalid = List.of(
+        execution("0.10", "0"),
+        execution("0.30", "0"),
+        new ExecutionResult(
+            new BigDecimal("100"), filledAt, null, BigDecimal.ZERO,
+            BigDecimal.ZERO, null, BigDecimal.ZERO, null, null),
+        execution("0.20", "0.01"));
+
+    for (ExecutionResult execution : invalid) {
+      OrderEntity order = order(accountId);
+      order.setBaseQuantity(new BigDecimal("0.20"));
+      assertThatThrownBy(() -> service.fill(order, account, execution, BigDecimal.ZERO, "invalid"))
+          .isInstanceOfSatisfying(BusinessException.class,
+              exception -> assertThat(exception.getCode()).isEqualTo("PARTIAL_FILL_NOT_SUPPORTED"));
+    }
+
+    verify(orderRepository, never()).save(any());
+    verify(tradeRepository, never()).save(any());
+    verify(positionRepository, never()).save(any());
+  }
+
+  private static ExecutionResult execution(String filled, String remaining) {
+    return new ExecutionResult(
+        new BigDecimal("100"),
+        Instant.parse("2026-07-12T02:00:00Z"),
+        new BigDecimal(filled),
+        new BigDecimal(remaining),
+        BigDecimal.ZERO,
+        null,
+        BigDecimal.ZERO,
+        null,
+        null);
+  }
+
+  private List<TradingAccountMutationEvent> fillCanonicalPerpetual(
+      PositionEngine.PositionUpdateResult positionUpdate
+  ) {
+    UUID accountId = UUID.randomUUID();
+    UUID userId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId);
+    account.setUserId(userId);
+    OrderEntity order = order(accountId);
+    order.setUserId(userId);
+    order.setProductType(ProductType.LINEAR_PERP);
+    order.setVersion(4L);
+    PositionEngine positionEngine = org.mockito.Mockito.mock(PositionEngine.class);
+    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(perpSymbol(
+        "BTCUSDT",
+        "LINEAR_PERPETUAL",
+        "BTC",
+        "USDT",
+        "1",
+        "1",
+        "0.005",
+        "USDT",
+        "USDT")));
+    when(positionEngine.applyPerpetualFill(
+        any(), any(), any(), any(), any(), org.mockito.ArgumentMatchers.anyInt(), any()))
+        .thenReturn(positionUpdate);
+    OrderFillService service = new OrderFillService(
+        orderRepository,
+        tradeRepository,
+        positionRepository,
+        accountRepository,
+        ledgerService,
+        symbolRepository,
+        null,
+        positionEngine);
+    service.setAccountMutationPublisher(accountMutationPublisher);
+    Instant filledAt = Instant.parse("2026-07-13T02:00:00Z");
+
+    service.fillPerpetual(
+        order,
+        account,
+        new FullFillResult(
+            new BigDecimal("50000.00000000"),
+            filledAt,
+            new BigDecimal("0.20"),
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            "USDT",
+            LiquidityRole.TAKER,
+            BigDecimal.ZERO,
+            MarketSourceMode.LOCAL_SIMULATED,
+            "local-perp",
+            "BTCUSDT",
+            filledAt.minusSeconds(1),
+            filledAt),
+        new BigDecimal("50000.00000000"),
+        20,
+        "Canonical perpetual fill");
+
+    ArgumentCaptor<Object> captured = ArgumentCaptor.forClass(Object.class);
+    verify(accountMutationPublisher, times(3)).publishEvent(captured.capture());
+    return captured.getAllValues().stream()
+        .map(TradingAccountMutationEvent.class::cast)
+        .toList();
   }
 
   @Test
@@ -335,7 +654,8 @@ class OrderFillServiceTest {
       return position;
     });
     when(accountRepository.reserveMarginIfAvailable(eq(accountId), any(BigDecimal.class))).thenReturn(1);
-    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(accountId, WalletType.SPOT.code(), "BTC"))
+    when(walletBalanceRepository.findByAccountIdAndWalletTypeAndAssetForUpdate(
+        accountId, WalletType.SPOT.code(), "BTC"))
         .thenReturn(Optional.of(btcBalance));
 
     OrderFillService service = new OrderFillService(

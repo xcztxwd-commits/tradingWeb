@@ -20,6 +20,23 @@ describe('OKX-style order book panel', () => {
     assert.doesNotMatch(sidePanelSource, /\.\.\/\.\.\/pages\/trading/)
   })
 
+  it('renders explicit unavailable/stale and empty-trade states instead of an endless ready-looking book', () => {
+    assert.match(sidePanelSource, /snapshot\.status === 'loading'/)
+    assert.match(sidePanelSource, /snapshot\.status === 'stale'/)
+    assert.match(sidePanelSource, /trading\.marketDataUnavailable/)
+    assert.match(sidePanelSource, /trading\.marketDataStale/)
+    assert.match(sidePanelSource, /role="status"/)
+    assert.match(recentTradesSource, /snapshot\.recentTrades\.length === 0/)
+    assert.match(recentTradesSource, /trading\.noRecentTrades/)
+  })
+
+  it('shows the one authoritative source shared by quote, depth and trades', () => {
+    assert.match(sidePanelSource, /MarketSourceBadge/)
+    assert.match(sidePanelSource, /snapshot\.source\.sourceMode/)
+    assert.match(sidePanelSource, /providerCode=\{snapshot\.source\.providerCode\}/)
+    assert.match(sidePanelSource, /stale=\{snapshot\.status === 'stale'\}/)
+  })
+
   it('does not import loading skeletons from page-owned trading modules', () => {
     assert.doesNotMatch(sidePanelSource, /pages\/trading/)
     assert.doesNotMatch(sidePanelSource, /\.\.\/\.\.\/pages\/trading/)
@@ -29,7 +46,8 @@ describe('OKX-style order book panel', () => {
   it('lets the trading page hold the right quote and order book area in startup loading', () => {
     assert.match(sidePanelSource, /loading\?: boolean/)
     assert.match(sidePanelSource, /loading = false/)
-    assert.match(sidePanelSource, /activeTab === 'orderbook' && \(loading \|\| isInitialMarketSnapshot\)/)
+    assert.match(sidePanelSource, /const marketLoading = loading \|\| snapshot\.status === 'loading'/)
+    assert.match(sidePanelSource, /activeTab === 'orderbook' && marketLoading/)
   })
 
   it('renders spread and buy/sell pressure labels near the book footer', () => {

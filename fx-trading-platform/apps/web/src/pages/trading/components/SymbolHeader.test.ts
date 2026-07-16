@@ -7,12 +7,21 @@ import { describe, it } from 'node:test'
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(currentDir, 'SymbolHeader.tsx'), 'utf8')
 const styles = readFileSync(join(currentDir, 'SymbolHeader.module.css'), 'utf8')
+const desktopSource = readFileSync(join(currentDir, 'TradingDesktopView.tsx'), 'utf8')
+const pageSource = readFileSync(join(currentDir, '..', 'TradingPage.tsx'), 'utf8')
 
 describe('OKX-style symbol header', () => {
-  it('shows spot trading mode, cash mode, and richer 24h market metrics', () => {
+  it('shows product-aware trading and margin modes with richer 24h market metrics', () => {
     assert.match(source, /modeStrip/)
-    assert.match(source, /trading\.spot/)
-    assert.match(source, /trading\.cash/)
+    assert.match(source, /product: TradingProduct/)
+    assert.match(source, /product === 'perpetual'/)
+    assert.match(source, /const productModeKey = perpetual \? 'trading\.perpetual' : 'trading\.spot'/)
+    assert.match(source, /const marginModeKey = perpetual\s*\? marginMode === 'ISOLATED' \? 'trading\.isolatedMargin' : 'trading\.crossMargin'\s*: 'trading\.cash'/)
+    assert.match(source, /<span>\{t\(productModeKey\)\}<\/span>/)
+    assert.match(source, /<span>\{t\(marginModeKey\)\}<\/span>/)
+    assert.match(pageSource, /const viewProps: TradingTerminalViewProps = \{[\s\S]*?\n    product,/)
+    assert.match(desktopSource, /product=\{product\}/)
+    assert.match(desktopSource, /marginMode=\{perpetualControls\.marginMode\}/)
     assert.match(source, /markets\.volume24h/)
     assert.match(source, /markets\.estimatedValue/)
   })

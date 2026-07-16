@@ -20,6 +20,8 @@ public final class AdminPermissionCatalog {
   public static final String TRADING_ORDER_READ = "trading:order:read";
   public static final String TRADING_ORDER_CANCEL = "trading:order:cancel";
   public static final String TRADING_POSITION_FORCE_CLOSE = "trading:position:force-close";
+  public static final String TRADING_ACCOUNT_FORCE_CLEANUP = "trading:account:force-cleanup";
+  public static final String TRADING_ACCOUNT_DEMO_RESET = "trading:account:demo-reset";
 
   public static final String USER_READ = "user:read";
   public static final String USER_UPDATE = "user:update";

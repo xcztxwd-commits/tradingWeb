@@ -12,6 +12,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.ExecutionAdapter;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.dto.QuoteResponse;
@@ -37,12 +38,17 @@ import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
+import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -84,6 +90,27 @@ class TradingWorkflowRegressionProtectionTest {
   @Mock
   private SpotSettlementService spotSettlementService;
 
+  @Mock
+  private SpotPositionService spotPositionService;
+
+  @Mock
+  private DemoExecutionGuard demoExecutionGuard;
+
+  @Mock
+  private WalletBalanceRepository walletBalanceRepository;
+
+  @BeforeEach
+  void rowLockQueriesReturnTheSameFixtureRows() {
+    org.mockito.Mockito.lenient()
+        .when(accountRepository.findByIdAndUserIdForUpdate(any(UUID.class), any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findByIdAndUserId(
+            invocation.getArgument(0), invocation.getArgument(1)));
+    org.mockito.Mockito.lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+    org.mockito.Mockito.lenient().when(positionRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> positionRepository.findById(invocation.getArgument(0)));
+  }
+
   @Test
   void forexMarketBuyCreatesFilledOrderOpenPositionAndMarginLedgerEntries() {
     UUID userId = UUID.randomUUID();
@@ -105,8 +132,8 @@ class TradingWorkflowRegressionProtectionTest {
     when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(
         new BigDecimal("1.10020"),
         filledAt,
-        null,
-        null,
+        new BigDecimal("0.10"),
+        BigDecimal.ZERO,
         expectedFee,
         BigDecimal.ZERO,
         null,
@@ -116,14 +143,14 @@ class TradingWorkflowRegressionProtectionTest {
 
     OrderResponse response = orderService().createOrder(principal, request);
 
-    assertThat(response.status()).isIn(OrderStatus.FILLED.name(), OrderStatus.PARTIALLY_FILLED.name());
+    assertThat(response.status()).isEqualTo(OrderStatus.FILLED.name());
     assertThat(response.executionPrice()).isEqualByComparingTo("1.10020");
     assertThat(account.getUsedMargin()).isEqualByComparingTo(expectedMargin);
     assertThat(account.getFreeMargin()).isLessThan(new BigDecimal("10000.00000000"));
 
     ArgumentCaptor<OrderEntity> orderCaptor = ArgumentCaptor.forClass(OrderEntity.class);
     verify(orderRepository, atLeastOnce()).save(orderCaptor.capture());
-    assertThat(orderCaptor.getAllValues().getLast().getStatus()).isIn(OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED);
+    assertThat(orderCaptor.getAllValues().getLast().getStatus()).isEqualTo(OrderStatus.FILLED);
 
     ArgumentCaptor<PositionEntity> positionCaptor = ArgumentCaptor.forClass(PositionEntity.class);
     verify(positionRepository).save(positionCaptor.capture());
@@ -185,7 +212,14 @@ class TradingWorkflowRegressionProtectionTest {
         .thenReturn(Optional.of(wallet(accountId, "USDT", "20000.00000000")));
     when(executionAdapter.execute(any(CreateOrderRequest.class))).thenReturn(new ExecutionResult(
         new BigDecimal("50000.00000000"),
-        Instant.parse("2026-06-16T01:05:00Z")));
+        Instant.parse("2026-06-16T01:05:00Z"),
+        new BigDecimal("0.20"),
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        null,
+        BigDecimal.ZERO,
+        null,
+        null));
     when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> withOrderId(invocation.getArgument(0)));
 
     OrderResponse order = orderService().createOrder(principal, request);
@@ -201,6 +235,95 @@ class TradingWorkflowRegressionProtectionTest {
         eq(account),
         any(UUID.class));
     verify(positionRepository, never()).save(any(PositionEntity.class));
+  }
+
+  @Test
+  void crossFlowMutationsPreserveGlobalLockOrder() throws IOException {
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/account/service/AccountTransferService.java",
+        "private AccountTransferResponse transferLocked",
+        "accountRepository.findByIdAndUserIdForUpdate",
+        "walletService.lockBalancesInOrder",
+        "positionRepository.findOpenLinearPerpByAccountIdForUpdate",
+        "orderRepository.findActiveLinearPerpByAccountIdForUpdate",
+        "ledgerService.recordTransfer");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/PendingOrderExecutionProcessor.java",
+        "private boolean processLocked",
+        "accountRepository.findByIdForUpdate",
+        "walletBalanceRepository.findByAccountIdForUpdate",
+        "spotPositionService.lockExisting",
+        "orderRepository.findByIdForUpdate");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/CancelAllOrderService.java",
+        "private BatchActionResponse cancelLocked",
+        "accountRepository.findByIdForUpdate",
+        "walletBalanceRepository.findByAccountIdForUpdate",
+        "positionRepository.findOpenByAccountIdForUpdate",
+        "orderRepository.findActive");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/FundingService.java",
+        "public FundingSettlementOutcome settleFundingForPositionOutcome",
+        "accountRepository.findByIdForUpdate",
+        "positionRepository.findByIdForUpdate",
+        "settleLockedPosition");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/LiquidationService.java",
+        "private LockedRisk projectFresh",
+        "accountRepository.findByIdForUpdate",
+        "positionRepository.findOpenLinearPerpByAccountIdForUpdate",
+        "orderRepository.findActiveLinearPerpByAccountIdForUpdate");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/SystemCloseOrderService.java",
+        "private CloseResult persist(CloseIntent intent, PreparedClose prepared)",
+        "accountRepository.findByIdForUpdate",
+        "settingRepository",
+        "findByAccountIdAndSymbolForUpdate",
+        "positionRepository.findOpenLinearPerpBySymbolForUpdate",
+        "orderRepository.findActiveLinearPerpBySymbolForUpdate");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/OcoOrderService.java",
+        "private OcoOrderGroupResponse cancelLocked",
+        "requireOwnedAccount(userId, accountId, true)",
+        "lockExistingState(accountId)",
+        "orderRepository.findByContingencyGroupIdForUpdate",
+        "walletService.releaseLockedWithEntryType",
+        "orderRepository.save",
+        "orderEventService.record");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/OcoOrderService.java",
+        "private void lockExistingState",
+        "walletBalanceRepository.findByAccountIdForUpdate",
+        "spotPositionService.lockExisting");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/ProtectionOrderService.java",
+        "private OrderResponse updateLocked",
+        "lockAccount",
+        "lockSetting",
+        "lockPosition",
+        "orderRepository.findActiveLinearPerpBySymbolForUpdate",
+        "orderRepository.updateById",
+        "orderEventService.record");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/OrderService.java",
+        "private OrderResponse persistP0Perpetual",
+        "accountRepository.findByIdAndUserIdForUpdate",
+        "accountSymbolSettingRepository",
+        "findByAccountIdAndSymbolForUpdate",
+        "positionRepository",
+        "findOpenLinearPerpByAccountIdForUpdate",
+        "orderRepository",
+        "findActiveLinearPerpByAccountIdForUpdate",
+        "ledgerService.recordOrderHold",
+        "orderFillService.fillPerpetual",
+        "orderEventService.record");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/TradingSettingsService.java",
+        "private TradingSettingsResponse updateSymbolSettingsLocked",
+        "requireOwnedAccountForUpdate",
+        "settingRepository.findByAccountIdAndSymbolForUpdate",
+        "positionRepository.findOpenLinearPerpByAccountIdForUpdate",
+        "orderRepository.findActiveLinearPerpByAccountIdForUpdate");
   }
 
   private OrderService orderService() {
@@ -229,7 +352,11 @@ class TradingWorkflowRegressionProtectionTest {
         new OrderCommandFactory(),
         new OrderEntityFactory(),
         new OrderResponseMapper(),
-        new OrderStatusPolicy());
+        new OrderStatusPolicy(),
+        demoExecutionGuard,
+        walletBalanceRepository,
+        positionRepository,
+        spotPositionService);
   }
 
   private PositionService positionService() {
@@ -240,7 +367,8 @@ class TradingWorkflowRegressionProtectionTest {
         quoteService,
         new PnLCalculator(engine),
         ledgerService,
-        symbolRepository);
+        symbolRepository,
+        demoExecutionGuard);
   }
 
   private static CreateOrderRequest marketOrder(
@@ -361,5 +489,38 @@ class TradingWorkflowRegressionProtectionTest {
       position.setId(UUID.randomUUID());
     }
     return position;
+  }
+
+  private static void assertTokensInOrder(String sourcePath, String... tokens) throws IOException {
+    String source = Files.readString(Path.of(sourcePath));
+    int methodStart = source.indexOf(tokens[0]);
+    assertThat(methodStart)
+        .as("%s should contain target method %s", sourcePath, tokens[0])
+        .isGreaterThanOrEqualTo(0);
+    int bodyStart = source.indexOf('{', methodStart);
+    assertThat(bodyStart).as("%s target method should have a body", sourcePath).isPositive();
+    int bodyEnd = matchingBrace(source, bodyStart);
+    String methodBody = source.substring(methodStart, bodyEnd + 1);
+    int cursor = 0;
+    for (String token : tokens) {
+      int next = methodBody.indexOf(token, cursor);
+      assertThat(next)
+          .as("%s should contain %s after the preceding lock-order token", sourcePath, token)
+          .isGreaterThanOrEqualTo(cursor);
+      cursor = next + token.length();
+    }
+  }
+
+  private static int matchingBrace(String source, int openingBrace) {
+    int depth = 0;
+    for (int index = openingBrace; index < source.length(); index++) {
+      char character = source.charAt(index);
+      if (character == '{') {
+        depth++;
+      } else if (character == '}' && --depth == 0) {
+        return index;
+      }
+    }
+    throw new AssertionError("Target method body has unbalanced braces");
   }
 }

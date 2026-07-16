@@ -9,6 +9,8 @@ import com.fxplatform.market.dto.MarketDepthResponse;
 import com.fxplatform.market.dto.MarketStatusResponse;
 import com.fxplatform.market.dto.QuoteResponse;
 import com.fxplatform.market.dto.RecentTradeResponse;
+import com.fxplatform.market.dto.PerpetualReferenceResponse;
+import com.fxplatform.market.model.MarketBundleProducts;
 import com.fxplatform.market.dto.SymbolResponse;
 import com.fxplatform.market.dto.UserFavoriteSymbolRequest;
 import com.fxplatform.market.provider.MarketDataRouter;
@@ -99,6 +101,9 @@ public class MarketController {
    */
   @GetMapping("/order-book/{symbol}")
   public ApiResponse<MarketDepthResponse> orderBook(@PathVariable String symbol) {
+    if (MarketBundleProducts.isP0(symbol)) {
+      return ApiResponse.success(marketDataRouter.orderBook(symbol));
+    }
     return ApiResponse.success(realtimeCache.orderBook(symbol)
         .orElseGet(() -> marketDataRouter.orderBook(symbol)));
   }
@@ -111,8 +116,16 @@ public class MarketController {
       @PathVariable String symbol,
       @RequestParam(defaultValue = "40") int limit
   ) {
+    if (MarketBundleProducts.isP0(symbol)) {
+      return ApiResponse.success(marketDataRouter.recentTrades(symbol, limit));
+    }
     List<RecentTradeResponse> cached = realtimeCache.recentTrades(symbol, limit);
     return ApiResponse.success(cached.isEmpty() ? marketDataRouter.recentTrades(symbol, limit) : cached);
+  }
+
+  @GetMapping("/perpetuals/{symbol}/reference")
+  public ApiResponse<PerpetualReferenceResponse> perpetualReference(@PathVariable String symbol) {
+    return ApiResponse.success(marketDataRouter.perpetualReference(symbol));
   }
 
   /**

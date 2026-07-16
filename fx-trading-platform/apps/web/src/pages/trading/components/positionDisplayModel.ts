@@ -1,11 +1,13 @@
 import type { PositionResponse } from '../../../components/tables/types'
 import type { Amount } from '../../../types/trading'
+import type { QuantityUnit } from '@fx-platform/shared-types'
 
 export type PositionPnlTone = 'positive' | 'negative' | 'neutral'
 
 export type PositionDisplayRow = {
   id: string
   instrument: string
+  positionSide: string
   leverage: string
   quantity: string
   markPrice: string
@@ -40,6 +42,7 @@ export function createPositionDisplayRow(position: PositionResponse, t: Translat
   return {
     id: position.id,
     instrument: formatInstrument(position, t),
+    positionSide: formatPositionSide(position),
     leverage: formatLeverage(position.leverage),
     quantity: `${formatDecimal(position.lots)} ${unitLabel(position.positionUnit, t)}`,
     markPrice: formatDecimal(position.markPrice ?? position.currentPrice),
@@ -62,6 +65,24 @@ export function createPositionDisplayRow(position: PositionResponse, t: Translat
     status: position.status,
     canClose
   }
+}
+
+export function resolvePositionQuantityUnit(
+  position: Pick<PositionResponse, 'positionUnit' | 'productType' | 'instrumentType'>
+): QuantityUnit {
+  const positionUnit = position.positionUnit?.trim().toUpperCase()
+  if (positionUnit === 'CONTRACT' || positionUnit === 'CONTRACTS') return 'CONTRACTS'
+  if (positionUnit === 'QUOTE' || positionUnit === 'USDT' || positionUnit === 'USD') return 'QUOTE'
+  if (positionUnit === 'BASE') return 'BASE'
+  if (position.productType === 'LINEAR_PERP' || position.instrumentType?.toUpperCase() === 'SWAP') return 'CONTRACTS'
+  return 'BASE'
+}
+
+function formatPositionSide(position: PositionResponse) {
+  if (position.positionMode !== 'HEDGE') return position.positionSide === 'LONG' || position.positionSide === 'SHORT'
+    ? position.positionSide
+    : '--'
+  return position.positionSide === 'LONG' || position.positionSide === 'SHORT' ? position.positionSide : '--'
 }
 
 function formatInstrument(position: PositionResponse, t: Translate) {

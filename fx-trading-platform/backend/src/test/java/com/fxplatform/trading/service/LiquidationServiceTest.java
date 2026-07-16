@@ -1,425 +1,239 @@
 package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.dto.AccountSnapshot;
 import com.fxplatform.account.entity.TradingAccountEntity;
-import com.fxplatform.account.service.AccountSnapshotService;
-import com.fxplatform.ledger.service.LedgerService;
-import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.account.enums.AccountStatus;
 import com.fxplatform.account.repository.TradingAccountRepository;
-import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.account.service.AccountSnapshotService;
+import com.fxplatform.execution.DemoExecutionGuard;
+import com.fxplatform.execution.ExecutableMarketSnapshot;
+import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
+import com.fxplatform.market.model.MarketSourceMode;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.QuoteService;
-import com.fxplatform.risk.entity.RiskConfigEntity;
 import com.fxplatform.risk.repository.RiskConfigRepository;
+import com.fxplatform.risk.service.PerpMarginCalculator;
+import com.fxplatform.risk.service.PerpetualRiskService;
+import com.fxplatform.risk.service.PerpetualRiskService.PositionRisk;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.annotation.Transactional;
 
 @ExtendWith(MockitoExtension.class)
 class LiquidationServiceTest {
 
-  @Mock
-  private AccountSnapshotService accountSnapshotService;
+  private static final BigDecimal MAINTENANCE_MARGIN_RATE = new BigDecimal("0.005");
+  private static final Instant NOW = Instant.parse("2026-07-12T10:00:00Z");
 
-  @Mock
-  private TradingAccountRepository accountRepository;
+  @Mock AccountSnapshotService accountSnapshotService;
+  @Mock TradingAccountRepository accountRepository;
+  @Mock PositionRepository positionRepository;
+  @Mock PositionService positionService;
+  @Mock SymbolRepository symbolRepository;
+  @Mock RiskConfigRepository riskConfigRepository;
+  @Mock LedgerService ledgerService;
+  @Mock QuoteService quoteService;
+  @Mock WalletService walletService;
+  @Mock DemoExecutionGuard demoExecutionGuard;
+  @Mock TradingTransactionExecutor transactionExecutor;
 
-  @Mock
-  private PositionRepository positionRepository;
+  private final PerpetualRiskService perpetualRiskService =
+      new PerpetualRiskService(new PerpMarginCalculator());
 
-  @Mock
-  private PositionService positionService;
-
-  @Mock
-  private SymbolRepository symbolRepository;
-
-  @Mock
-  private RiskConfigRepository riskConfigRepository;
-
-  @Mock
-  private LedgerService ledgerService;
-
-  @Mock
-  private QuoteService quoteService;
-
-  @Mock
-  private WalletService walletService;
+  @BeforeEach
+  void setUpCompatibilityPath() {
+    lenient().when(accountRepository.findById(any(UUID.class)))
+        .thenAnswer(invocation -> Optional.of(account(invocation.getArgument(0), "10000")));
+    lenient().when(accountRepository.findByIdForUpdate(any(UUID.class)))
+        .thenAnswer(invocation -> accountRepository.findById(invocation.getArgument(0)));
+    lenient().when(riskConfigRepository.findFirstEnabledWithStopOutLevel())
+        .thenReturn(Optional.empty());
+    lenient().when(transactionExecutor.execute(any()))
+        .thenAnswer(invocation -> ((java.util.function.Supplier<?>) invocation.getArgument(0)).get());
+  }
 
   @Test
-  void fxAccountBelowStopOutClosesOpenPositionsByLargestLossFirst() {
-    UUID accountId = UUID.randomUUID();
-    PositionEntity smallerLoss = openPosition(accountId, UUID.randomUUID(), "EURUSD", "-25.00000000");
-    PositionEntity biggerLoss = openPosition(accountId, UUID.randomUUID(), "GBPUSD", "-80.00000000");
+  void exactMaintenancePlusEstimatedTakerFeeBoundaryIsLiquidatable() {
+    PositionRisk risk = isolatedRisk("5.52250000", "95");
 
-    when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
-    when(accountSnapshotService.snapshot(accountId)).thenReturn(snapshot(accountId, "480.00000000", "1000.00000000", BigDecimal.ZERO));
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
+    assertThat(risk.maintenanceMargin()).isEqualByComparingTo("0.47500000");
+    assertThat(risk.estimatedCloseTakerFee()).isEqualByComparingTo("0.04750000");
+    assertThat(risk.isolatedEquity()).isEqualByComparingTo(risk.liquidationThreshold());
+    assertThat(risk.liquidatable()).isTrue();
+  }
+
+  @Test
+  void oneMinimalMoneyUnitAboveMaintenanceAndTakerFeeIsSafe() {
+    PositionRisk risk = isolatedRisk("5.52250001", "95");
+
+    assertThat(risk.isolatedEquity().subtract(risk.liquidationThreshold()))
+        .isEqualByComparingTo("0.00000001");
+    assertThat(risk.liquidatable()).isFalse();
+  }
+
+  @Test
+  void liquidationFeeRateNeverChangesTheTrigger() {
+    SymbolEntity zeroFee = linearPerpSymbol(BigDecimal.ZERO);
+    SymbolEntity extremeFee = linearPerpSymbol(new BigDecimal("0.50000000"));
+
+    PositionRisk zeroFeeRisk = isolatedRisk(zeroFee, "5.52250000", "95");
+    PositionRisk extremeFeeRisk = isolatedRisk(extremeFee, "5.52250000", "95");
+
+    assertThat(zeroFeeRisk.liquidationThreshold())
+        .isEqualByComparingTo(extremeFeeRisk.liquidationThreshold());
+    assertThat(zeroFeeRisk.liquidatable()).isEqualTo(extremeFeeRisk.liquidatable()).isTrue();
+  }
+
+  @Test
+  void markPriceRatherThanLastOrMidDrivesPerpetualRisk() {
+    ExecutableMarketSnapshot bundle = new ExecutableMarketSnapshot(
+        "BTCUSDT-PERP",
+        ProductType.LINEAR_PERP,
+        "binance-usdm",
+        "BTCUSDT",
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        decimal("104"),
+        decimal("106"),
+        decimal("105"),
+        decimal("95"),
+        decimal("96"),
+        NOW.minusSeconds(1),
+        NOW.plusSeconds(30));
+
+    PositionRisk markRisk = isolatedRisk("5.52250000", bundle.mark().toPlainString());
+    PositionRisk lastRisk = isolatedRisk("5.52250000", bundle.last().toPlainString());
+
+    assertThat(markRisk.liquidatable()).isTrue();
+    assertThat(lastRisk.liquidatable()).isFalse();
+  }
+
+  @Test
+  void fxStopOutCompatibilityStillClosesLargestLossFirst() {
+    UUID accountId = UUID.randomUUID();
+    PositionEntity smallerLoss = forexPosition(accountId, "EURUSD", "-25");
+    PositionEntity biggerLoss = forexPosition(accountId, "GBPUSD", "-80");
+
+    when(accountSnapshotService.snapshot(accountId))
+        .thenReturn(snapshot(accountId, "480", "1000"));
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN))
         .thenReturn(List.of(smallerLoss, biggerLoss));
     when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(forexSymbol("EURUSD")));
     when(symbolRepository.findBySymbol("GBPUSD")).thenReturn(Optional.of(forexSymbol("GBPUSD")));
-    when(positionService.closeSystemPosition(accountId, biggerLoss.getId(), "FX_MARGIN_STOP_OUT")).thenAnswer(invocation -> {
-      biggerLoss.setStatus(PositionStatus.CLOSED);
-      return null;
-    });
-    when(positionService.closeSystemPosition(accountId, smallerLoss.getId(), "FX_MARGIN_STOP_OUT")).thenAnswer(invocation -> {
-      smallerLoss.setStatus(PositionStatus.CLOSED);
-      return null;
-    });
+    when(positionService.closeSystemPosition(
+        accountId, biggerLoss.getId(), LiquidationService.FX_MARGIN_STOP_OUT))
+        .thenAnswer(invocation -> {
+          biggerLoss.setStatus(PositionStatus.CLOSED);
+          return null;
+        });
+    when(positionService.closeSystemPosition(
+        accountId, smallerLoss.getId(), LiquidationService.FX_MARGIN_STOP_OUT))
+        .thenAnswer(invocation -> {
+          smallerLoss.setStatus(PositionStatus.CLOSED);
+          return null;
+        });
 
-    int closed = service().scanAccount(accountId);
+    assertThat(service().scanAccount(accountId)).isEqualTo(2);
 
-    assertThat(closed).isEqualTo(2);
-    assertThat(biggerLoss.getStatus()).isEqualTo(PositionStatus.CLOSED);
-    assertThat(smallerLoss.getStatus()).isEqualTo(PositionStatus.CLOSED);
     InOrder order = inOrder(positionService);
-    order.verify(positionService).closeSystemPosition(accountId, biggerLoss.getId(), "FX_MARGIN_STOP_OUT");
-    order.verify(positionService).closeSystemPosition(accountId, smallerLoss.getId(), "FX_MARGIN_STOP_OUT");
+    order.verify(positionService).closeSystemPosition(
+        accountId, biggerLoss.getId(), LiquidationService.FX_MARGIN_STOP_OUT);
+    order.verify(positionService).closeSystemPosition(
+        accountId, smallerLoss.getId(), LiquidationService.FX_MARGIN_STOP_OUT);
   }
 
   @Test
-  void fxStopOutUsesRiskConfigWhenConfigured() {
-    UUID accountId = UUID.randomUUID();
-    PositionEntity position = openPosition(accountId, UUID.randomUUID(), "EURUSD", "-30.00000000");
-    RiskConfigEntity riskConfig = new RiskConfigEntity();
-    riskConfig.setStopOutLevel(new BigDecimal("60"));
+  void accountScanFailureDoesNotPreventTheNextAccountFromBeingScanned() {
+    UUID failedAccountId = UUID.randomUUID();
+    UUID healthyAccountId = UUID.randomUUID();
+    when(accountRepository.findDemoLiquidationScanCandidates()).thenReturn(List.of(
+        account(failedAccountId, "1000"),
+        account(healthyAccountId, "1000")));
+    when(accountSnapshotService.snapshot(failedAccountId))
+        .thenThrow(new IllegalStateException("provider unavailable"));
+    when(accountSnapshotService.snapshot(healthyAccountId))
+        .thenReturn(snapshot(healthyAccountId, "1000", "1000"));
 
-    when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.of(riskConfig));
-    when(accountSnapshotService.snapshot(accountId)).thenReturn(snapshot(accountId, "550.00000000", "1000.00000000", BigDecimal.ZERO));
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(position));
-    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(forexSymbol("EURUSD")));
-
-    int closed = service().scanAccount(accountId);
-
-    assertThat(closed).isEqualTo(1);
-    verify(positionService).closeSystemPosition(accountId, position.getId(), "FX_MARGIN_STOP_OUT");
+    assertThat(service().scanAllAccounts()).isZero();
+    verify(accountSnapshotService).snapshot(healthyAccountId);
   }
 
   @Test
-  void perpScanRecomputesRiskFromLatestMarkPriceInsteadOfStoredFields() {
-    UUID accountId = UUID.randomUUID();
-    TradingAccountEntity account = account(accountId, "1002.00000000");
-    PositionEntity position = openPerpPosition(accountId, UUID.randomUUID(), "BTCUSDT", "1.00000000", "0.00000000");
-    position.setLots(BigDecimal.ONE);
-    position.setOpenPrice(new BigDecimal("2000.00000000"));
-    position.setNotional(new BigDecimal("1.00000000"));
+  void scanEntryPointsDoNotHoldOneTransactionAcrossFreshMarketCalls() throws Exception {
+    assertThat(LiquidationService.class.getMethod("scanAccount", UUID.class)
+        .isAnnotationPresent(Transactional.class)).isFalse();
+    assertThat(LiquidationService.class.getMethod("scanAllAccounts")
+        .isAnnotationPresent(Transactional.class)).isFalse();
+  }
 
-    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
-    when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
+  @Test
+  void safeFxAccountDoesNotClosePositions() {
+    UUID accountId = UUID.randomUUID();
+    PositionEntity position = forexPosition(accountId, "EURUSD", "-10");
     when(accountSnapshotService.snapshot(accountId))
-        .thenReturn(snapshot(accountId, "1002.00000000", "1000.00000000", new BigDecimal("1.00000000")));
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(position));
-    when(symbolRepository.findBySymbol("BTCUSDT"))
-        .thenReturn(Optional.of(linearPerpSymbol("BTCUSDT", BigDecimal.ZERO)));
-    when(quoteService.freshQuote("BTCUSDT"))
-        .thenReturn(quote("BTCUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-    when(positionService.closeSystemPosition(accountId, position.getId(), "PERP_MAINTENANCE_MARGIN"))
-        .thenAnswer(invocation -> {
-          position.setStatus(PositionStatus.CLOSED);
-          return null;
-        });
+        .thenReturn(snapshot(accountId, "2500", "1000"));
 
-    int closed = service().scanAccount(accountId);
-
-    assertThat(closed).isEqualTo(1);
-    assertThat(position.getMarkPrice()).isEqualByComparingTo("1000.00000000");
-    assertThat(position.getFloatingPnl()).isEqualByComparingTo("-1000.00000000");
-    assertThat(position.getNotional()).isEqualByComparingTo("1000.00000000");
-    assertThat(position.getMaintenanceMargin()).isEqualByComparingTo("5.00000000");
-    verify(positionService).closeSystemPosition(accountId, position.getId(), "PERP_MAINTENANCE_MARGIN");
-  }
-
-  @Test
-  void perpLiquidationStopsAfterOneCloseWhenFreshRescanIsSafe() {
-    UUID accountId = UUID.randomUUID();
-    TradingAccountEntity account = account(accountId, "1005.00000000");
-    PositionEntity unsafe = openPerpPosition(accountId, UUID.randomUUID(), "BTCUSDT", "1.00000000", "0.00000000");
-    unsafe.setLots(BigDecimal.ONE);
-    unsafe.setOpenPrice(new BigDecimal("2000.00000000"));
-    PositionEntity stillOpen = openPerpPosition(accountId, UUID.randomUUID(), "ETHUSDT", "1.00000000", "0.00000000");
-    stillOpen.setLots(BigDecimal.ONE);
-    stillOpen.setOpenPrice(new BigDecimal("1000.00000000"));
-
-    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
-    when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
-    when(accountSnapshotService.snapshot(accountId))
-        .thenReturn(snapshot(accountId, "5.00000000", "1000.00000000", new BigDecimal("2.00000000")));
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(stillOpen, unsafe))
-        .thenReturn(List.of(stillOpen));
-    when(symbolRepository.findBySymbol("BTCUSDT"))
-        .thenReturn(Optional.of(linearPerpSymbol("BTCUSDT", BigDecimal.ZERO)));
-    when(symbolRepository.findBySymbol("ETHUSDT"))
-        .thenReturn(Optional.of(linearPerpSymbol("ETHUSDT", BigDecimal.ZERO)));
-    when(quoteService.freshQuote("BTCUSDT"))
-        .thenReturn(quote("BTCUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-    when(quoteService.freshQuote("ETHUSDT"))
-        .thenReturn(quote("ETHUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-    when(positionService.closeSystemPosition(accountId, unsafe.getId(), "PERP_MAINTENANCE_MARGIN"))
-        .thenAnswer(invocation -> {
-          unsafe.setStatus(PositionStatus.CLOSED);
-          return null;
-        });
-
-    int closed = service().scanAccount(accountId);
-
-    assertThat(closed).isEqualTo(1);
-    verify(positionService).closeSystemPosition(accountId, unsafe.getId(), "PERP_MAINTENANCE_MARGIN");
-    verify(positionService, never()).closeSystemPosition(accountId, stillOpen.getId(), "PERP_MAINTENANCE_MARGIN");
-  }
-
-  @Test
-  void liquidationFeeDebitsAccountBalanceAndWritesLedger() {
-    UUID accountId = UUID.randomUUID();
-    TradingAccountEntity account = account(accountId, "25.00000000");
-    PositionEntity position = openPerpPosition(accountId, UUID.randomUUID(), "BTCUSDT", "0.00000000", "0.00000000");
-    position.setLots(BigDecimal.ONE);
-    position.setOpenPrice(new BigDecimal("1000.00000000"));
-
-    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
-    when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
-    when(accountSnapshotService.snapshot(accountId))
-        .thenReturn(snapshot(accountId, "25.00000000", "1000.00000000", BigDecimal.ZERO));
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(position));
-    when(symbolRepository.findBySymbol("BTCUSDT"))
-        .thenReturn(Optional.of(linearPerpSymbol("BTCUSDT", new BigDecimal("0.02000000"))));
-    when(quoteService.freshQuote("BTCUSDT"))
-        .thenReturn(quote("BTCUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-    when(positionService.closeSystemPosition(accountId, position.getId(), "PERP_MAINTENANCE_MARGIN"))
-        .thenAnswer(invocation -> {
-          position.setStatus(PositionStatus.CLOSED);
-          return null;
-        });
-
-    int closed = service().scanAccount(accountId);
-
-    assertThat(closed).isEqualTo(1);
-    assertThat(account.getBalance()).isEqualByComparingTo("5.00000000");
-    verify(accountRepository).save(account);
-    verify(ledgerService).recordLiquidationFee(account, new BigDecimal("20.00000000"), position.getId(), "Liquidation fee charged");
-  }
-
-  @Test
-  void inversePerpLiquidationFeeUsesSettlementAsset() {
-    UUID accountId = UUID.randomUUID();
-    TradingAccountEntity account = account(accountId, "2.00050000");
-    PositionEntity position = openPerpPosition(accountId, UUID.randomUUID(), "BTCUSD", "0.00000000", "0.00000000");
-    position.setLots(BigDecimal.ONE);
-    position.setOpenPrice(new BigDecimal("1000.00000000"));
-    position.setSettlementAsset("BTC");
-
-    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
-    when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
-    when(accountSnapshotService.snapshot(accountId))
-        .thenReturn(snapshot(accountId, "2.00050000", "1000.00000000", BigDecimal.ZERO));
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(position));
-    when(symbolRepository.findBySymbol("BTCUSD"))
-        .thenReturn(Optional.of(inversePerpSymbol("BTCUSD", new BigDecimal("0.02000000"))));
-    when(quoteService.freshQuote("BTCUSD"))
-        .thenReturn(quote("BTCUSD", "999.00000000", "1001.00000000", "1000.00000000"));
-    when(positionService.closeSystemPosition(accountId, position.getId(), "PERP_MAINTENANCE_MARGIN"))
-        .thenAnswer(invocation -> {
-          position.setStatus(PositionStatus.CLOSED);
-          return null;
-        });
-
-    service().scanAccount(accountId);
-
-    verify(walletService).debitAvailableWithEntryType(
-        accountId,
-        "BTC",
-        new BigDecimal("2.00000000"),
-        "POSITION",
-        position.getId(),
-        "Liquidation fee charged",
-        "LIQUIDATION_FEE");
-  }
-
-  @Test
-  void secondScanDoesNotLiquidatePositionAlreadyClosedByFirstScan() {
-    UUID accountId = UUID.randomUUID();
-    TradingAccountEntity account = account(accountId, "25.00000000");
-    PositionEntity position = openPerpPosition(accountId, UUID.randomUUID(), "BTCUSDT", "0.00000000", "0.00000000");
-    position.setLots(BigDecimal.ONE);
-    position.setOpenPrice(new BigDecimal("1000.00000000"));
-
-    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
-    when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
-    when(accountSnapshotService.snapshot(accountId))
-        .thenReturn(snapshot(accountId, "25.00000000", "1000.00000000", BigDecimal.ZERO));
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(position));
-    when(symbolRepository.findBySymbol("BTCUSDT"))
-        .thenReturn(Optional.of(linearPerpSymbol("BTCUSDT", new BigDecimal("0.02000000"))));
-    when(quoteService.freshQuote("BTCUSDT"))
-        .thenReturn(quote("BTCUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-    when(positionService.closeSystemPosition(accountId, position.getId(), "PERP_MAINTENANCE_MARGIN"))
-        .thenAnswer(invocation -> {
-          position.setStatus(PositionStatus.CLOSED);
-          return null;
-        });
-
-    assertThat(service().scanAccount(accountId)).isEqualTo(1);
     assertThat(service().scanAccount(accountId)).isZero();
-    verify(positionService, times(1)).closeSystemPosition(accountId, position.getId(), "PERP_MAINTENANCE_MARGIN");
+    verify(positionService, never()).closeSystemPosition(
+        accountId, position.getId(), LiquidationService.FX_MARGIN_STOP_OUT);
   }
 
   @Test
-  void perpAccountBelowMaintenanceMarginClosesHighestRiskContributionFirst() {
+  void adminRiskReductionGateSkipsConcurrentLiquidationScan() {
     UUID accountId = UUID.randomUUID();
-    PositionEntity lowerRisk = openPerpPosition(accountId, UUID.randomUUID(), "ETHUSDT", "60.00000000", "-5.00000000");
-    PositionEntity higherRisk = openPerpPosition(accountId, UUID.randomUUID(), "BTCUSDT", "100.00000000", "-75.00000000");
-    lowerRisk.setLots(BigDecimal.ONE);
-    lowerRisk.setOpenPrice(new BigDecimal("2000.00000000"));
-    higherRisk.setLots(BigDecimal.ONE);
-    higherRisk.setOpenPrice(new BigDecimal("3000.00000000"));
+    TradingAccountEntity gated = account(accountId, "1000");
+    gated.setStatus(AccountStatus.RISK_REDUCTION_PENDING);
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(gated));
 
-    when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
-    when(accountSnapshotService.snapshot(accountId)).thenReturn(snapshot(accountId, "100.00000000", "1000.00000000", new BigDecimal("160.00000000")));
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(lowerRisk, higherRisk));
-    when(symbolRepository.findBySymbol("ETHUSDT")).thenReturn(Optional.of(linearPerpSymbol("ETHUSDT", BigDecimal.ZERO)));
-    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(linearPerpSymbol("BTCUSDT", BigDecimal.ZERO)));
-    when(quoteService.freshQuote("ETHUSDT"))
-        .thenReturn(quote("ETHUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-    when(quoteService.freshQuote("BTCUSDT"))
-        .thenReturn(quote("BTCUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-    when(positionService.closeSystemPosition(accountId, higherRisk.getId(), "PERP_MAINTENANCE_MARGIN")).thenAnswer(invocation -> {
-      higherRisk.setStatus(PositionStatus.CLOSED);
-      return null;
-    });
-    when(positionService.closeSystemPosition(accountId, lowerRisk.getId(), "PERP_MAINTENANCE_MARGIN")).thenAnswer(invocation -> {
-      lowerRisk.setStatus(PositionStatus.CLOSED);
-      return null;
-    });
+    assertThat(service().scanAccount(accountId)).isZero();
 
-    int closed = service().scanAccount(accountId);
-
-    assertThat(closed).isEqualTo(2);
-    InOrder order = inOrder(positionService);
-    order.verify(positionService).closeSystemPosition(accountId, higherRisk.getId(), "PERP_MAINTENANCE_MARGIN");
-    order.verify(positionService).closeSystemPosition(accountId, lowerRisk.getId(), "PERP_MAINTENANCE_MARGIN");
+    verify(accountSnapshotService, never()).snapshot(accountId);
+    verify(positionRepository, never()).findOpenLinearPerpByAccountId(accountId);
   }
 
-  @Test
-  void perpLiquidationIncludesLiquidationFeeBuffer() {
-    UUID accountId = UUID.randomUUID();
-    TradingAccountEntity account = account(accountId, "25.00000000");
-    PositionEntity position = openPerpPosition(accountId, UUID.randomUUID(), "BTCUSDT", "100.00000000", "0.00000000");
-    position.setLots(BigDecimal.ONE);
-    position.setOpenPrice(new BigDecimal("1000.00000000"));
-    position.setNotional(new BigDecimal("1000.00000000"));
-
-    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
-    when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
-    when(accountSnapshotService.snapshot(accountId)).thenReturn(snapshot(accountId, "25.00000000", "1000.00000000", new BigDecimal("100.00000000")));
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(position));
-    when(symbolRepository.findBySymbol("BTCUSDT")).thenReturn(Optional.of(linearPerpSymbol("BTCUSDT", new BigDecimal("0.02000000"))));
-    when(quoteService.freshQuote("BTCUSDT"))
-        .thenReturn(quote("BTCUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-    when(positionService.closeSystemPosition(accountId, position.getId(), "PERP_MAINTENANCE_MARGIN"))
-        .thenAnswer(invocation -> {
-          position.setStatus(PositionStatus.CLOSED);
-          return null;
-        });
-
-    int closed = service().scanAccount(accountId);
-
-    assertThat(closed).isEqualTo(1);
-    verify(positionService).closeSystemPosition(accountId, position.getId(), "PERP_MAINTENANCE_MARGIN");
+  private PositionRisk isolatedRisk(String marginHeld, String markPrice) {
+    return isolatedRisk(linearPerpSymbol(BigDecimal.ZERO), marginHeld, markPrice);
   }
 
-  @Test
-  void shouldLiquidateUsesFreshPerpRiskIncludingLiquidationFeeBuffer() {
-    UUID accountId = UUID.randomUUID();
-    TradingAccountEntity account = account(accountId, "25.00000000");
-    PositionEntity position = openPerpPosition(accountId, UUID.randomUUID(), "BTCUSDT", "0.00000000", "0.00000000");
-    position.setLots(BigDecimal.ONE);
-    position.setOpenPrice(new BigDecimal("1000.00000000"));
-
-    lenient().when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
-    lenient().when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
-    lenient().when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(position));
-    lenient().when(symbolRepository.findBySymbol("BTCUSDT"))
-        .thenReturn(Optional.of(linearPerpSymbol("BTCUSDT", new BigDecimal("0.02000000"))));
-    lenient().when(quoteService.freshQuote("BTCUSDT"))
-        .thenReturn(quote("BTCUSDT", "999.00000000", "1001.00000000", "1000.00000000"));
-
-    AccountSnapshot staleSnapshot = snapshot(accountId, "25.00000000", "10.00000000", BigDecimal.ZERO);
-
-    assertThat(service().shouldLiquidate(staleSnapshot)).isTrue();
-  }
-
-  @Test
-  void accountAboveRiskThresholdDoesNotClosePositions() {
-    UUID accountId = UUID.randomUUID();
-    PositionEntity position = openPosition(accountId, UUID.randomUUID(), "EURUSD", "-10.00000000");
-
-    when(riskConfigRepository.findFirstEnabledWithStopOutLevel()).thenReturn(Optional.empty());
-    when(accountSnapshotService.snapshot(accountId)).thenReturn(snapshot(accountId, "2500.00000000", "1000.00000000", BigDecimal.ZERO));
-    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
-        .thenReturn(List.of(position));
-    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(forexSymbol("EURUSD")));
-
-    int closed = service().scanAccount(accountId);
-
-    assertThat(closed).isZero();
-    verify(positionService, never()).closeSystemPosition(accountId, position.getId(), "FX_MARGIN_STOP_OUT");
-  }
-
-  @Test
-  void samePositionIsNotLiquidatedTwiceAfterItLeavesOpenStatus() {
-    UUID accountId = UUID.randomUUID();
-    UUID positionId = UUID.randomUUID();
-    PositionEntity position = openPosition(accountId, positionId, "EURUSD", "-100.00000000");
-    when(positionService.closeSystemPosition(accountId, positionId, "FX_MARGIN_STOP_OUT")).thenAnswer(invocation -> {
-      position.setStatus(PositionStatus.CLOSED);
-      return null;
-    });
-
-    LiquidationService service = service();
-
-    assertThat(service.liquidatePosition(position, "FX_MARGIN_STOP_OUT")).isTrue();
-    assertThat(service.liquidatePosition(position, "FX_MARGIN_STOP_OUT")).isFalse();
-    verify(positionService, times(1)).closeSystemPosition(accountId, positionId, "FX_MARGIN_STOP_OUT");
-  }
-
-  @Test
-  void alreadyClaimedPositionDoesNotCountAsLiquidated() {
-    UUID accountId = UUID.randomUUID();
-    UUID positionId = UUID.randomUUID();
-    PositionEntity position = openPosition(accountId, positionId, "EURUSD", "-100.00000000");
-    when(positionService.closeSystemPosition(accountId, positionId, "FX_MARGIN_STOP_OUT"))
-        .thenThrow(new BusinessException("POSITION_NOT_OPEN", "Position is no longer open"));
-
-    boolean liquidated = service().liquidatePosition(position, "FX_MARGIN_STOP_OUT");
-
-    assertThat(liquidated).isFalse();
+  private PositionRisk isolatedRisk(
+      SymbolEntity symbol,
+      String marginHeld,
+      String markPrice
+  ) {
+    return perpetualRiskService.positionRisk(
+        OrderSide.BUY,
+        BigDecimal.ONE,
+        decimal("100"),
+        decimal(markPrice),
+        10,
+        decimal(marginHeld),
+        BigDecimal.ZERO,
+        symbol.getMaintenanceMarginRate());
   }
 
   private LiquidationService service() {
@@ -432,114 +246,74 @@ class LiquidationServiceTest {
         riskConfigRepository,
         ledgerService,
         quoteService,
-        walletService);
+        walletService,
+        demoExecutionGuard,
+        transactionExecutor);
   }
 
   private static TradingAccountEntity account(UUID accountId, String balance) {
     TradingAccountEntity account = new TradingAccountEntity();
     account.setId(accountId);
-    account.setBaseCurrency("USD");
-    account.setBalance(new BigDecimal(balance));
-    account.setEquity(new BigDecimal(balance));
-    account.setUsedMargin(new BigDecimal("1000.00000000"));
-    account.setFreeMargin(new BigDecimal(balance).subtract(account.getUsedMargin()));
+    account.setBalance(decimal(balance));
+    account.setEquity(decimal(balance));
+    account.setUsedMargin(decimal("1000"));
+    account.setFreeMargin(decimal(balance).subtract(account.getUsedMargin()));
     account.setLeverage(10);
     return account;
   }
 
-  private static AccountSnapshot snapshot(
-      UUID accountId,
-      String equity,
-      String usedMargin,
-      BigDecimal maintenanceMargin
-  ) {
-    BigDecimal equityValue = new BigDecimal(equity);
-    BigDecimal usedMarginValue = new BigDecimal(usedMargin);
+  private static AccountSnapshot snapshot(UUID accountId, String equity, String usedMargin) {
+    BigDecimal equityValue = decimal(equity);
+    BigDecimal usedMarginValue = decimal(usedMargin);
     return new AccountSnapshot(
         accountId,
-        new BigDecimal("1000.00000000"),
+        decimal("1000"),
         BigDecimal.ZERO,
         equityValue,
         usedMarginValue,
-        maintenanceMargin,
+        BigDecimal.ZERO,
         equityValue.subtract(usedMarginValue),
-        equityValue.multiply(new BigDecimal("100")).divide(usedMarginValue, 8, java.math.RoundingMode.HALF_UP),
-        "USD");
+        equityValue.multiply(decimal("100")).divide(usedMarginValue, 8, RoundingMode.HALF_UP),
+        "USDT");
   }
 
-  private static PositionEntity openPosition(UUID accountId, UUID positionId, String symbol, String floatingPnl) {
+  private static PositionEntity forexPosition(UUID accountId, String symbol, String floatingPnl) {
     PositionEntity position = new PositionEntity();
-    position.setId(positionId);
+    position.setId(UUID.randomUUID());
     position.setAccountId(accountId);
     position.setSymbol(symbol);
+    position.setProductType(ProductType.FX_MARGIN);
     position.setSide(OrderSide.BUY);
-    position.setLots(new BigDecimal("0.10"));
-    position.setOpenPrice(new BigDecimal("1.10000"));
-    position.setFloatingPnl(new BigDecimal(floatingPnl));
+    position.setLots(decimal("0.10"));
+    position.setOpenPrice(decimal("1.10"));
+    position.setFloatingPnl(decimal(floatingPnl));
     position.setStatus(PositionStatus.OPEN);
-    return position;
-  }
-
-  private static PositionEntity openPerpPosition(
-      UUID accountId,
-      UUID positionId,
-      String symbol,
-      String maintenanceMargin,
-      String floatingPnl
-  ) {
-    PositionEntity position = openPosition(accountId, positionId, symbol, floatingPnl);
-    position.setMaintenanceMargin(new BigDecimal(maintenanceMargin));
-    position.setNotional(new BigDecimal("50000.00000000"));
-    position.setLeverage(10);
     return position;
   }
 
   private static SymbolEntity forexSymbol(String symbolCode) {
     SymbolEntity symbol = new SymbolEntity();
     symbol.setSymbol(symbolCode);
+    symbol.setProductType(ProductType.FX_MARGIN);
     symbol.setAssetClass("FOREX");
     symbol.setBaseCurrency(symbolCode.substring(0, 3));
     symbol.setQuoteCurrency(symbolCode.substring(3));
     return symbol;
   }
 
-  private static SymbolEntity linearPerpSymbol(String symbolCode, BigDecimal liquidationFeeRate) {
+  private static SymbolEntity linearPerpSymbol(BigDecimal liquidationFeeRate) {
     SymbolEntity symbol = new SymbolEntity();
-    symbol.setSymbol(symbolCode);
-    symbol.setAssetClass("LINEAR_PERPETUAL");
-    symbol.setBaseCurrency(symbolCode.substring(0, 3));
-    symbol.setQuoteCurrency("USDT");
-    symbol.setLotSize(BigDecimal.ONE);
-    symbol.setMaintenanceMarginRate(new BigDecimal("0.005"));
+    symbol.setSymbol("BTCUSDT-PERP");
+    symbol.setProductType(ProductType.LINEAR_PERP);
+    symbol.setAssetClass("CRYPTO_PERPETUAL");
+    symbol.setMaintenanceMarginRate(MAINTENANCE_MARGIN_RATE);
     symbol.setLiquidationFeeRate(liquidationFeeRate);
+    symbol.setSettlementAsset("USDT");
+    symbol.setMarginAsset("USDT");
     return symbol;
   }
 
-  private static SymbolEntity inversePerpSymbol(String symbolCode, BigDecimal liquidationFeeRate) {
-    SymbolEntity symbol = new SymbolEntity();
-    symbol.setSymbol(symbolCode);
-    symbol.setAssetClass("INVERSE_PERPETUAL");
-    symbol.setBaseCurrency("BTC");
-    symbol.setQuoteCurrency("USD");
-    symbol.setLotSize(new BigDecimal("100"));
-    symbol.setContractSize(new BigDecimal("100"));
-    symbol.setContractMultiplier(BigDecimal.ONE);
-    symbol.setSettlementAsset("BTC");
-    symbol.setMarginAsset("BTC");
-    symbol.setMaintenanceMarginRate(new BigDecimal("0.005"));
-    symbol.setLiquidationFeeRate(liquidationFeeRate);
-    return symbol;
-  }
-
-  private static QuoteResponse quote(String symbol, String bid, String ask, String mid) {
-    return new QuoteResponse(
-        "quote",
-        symbol,
-        new BigDecimal(bid),
-        new BigDecimal(ask),
-        new BigDecimal(mid),
-        new BigDecimal(ask).subtract(new BigDecimal(bid)),
-        "test",
-        1L);
+  private static BigDecimal decimal(String value) {
+    return new BigDecimal(value);
   }
 }

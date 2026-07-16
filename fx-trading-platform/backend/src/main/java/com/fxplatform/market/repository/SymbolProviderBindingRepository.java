@@ -18,6 +18,15 @@ public interface SymbolProviderBindingRepository extends FxBaseMapper<SymbolProv
         .orderByAsc(SymbolProviderBindingEntity::getProviderSymbol));
   }
 
+  default List<SymbolProviderBindingEntity> findEnabledBySymbolIdForUpdate(UUID symbolId) {
+    return selectList(new LambdaQueryWrapper<SymbolProviderBindingEntity>()
+        .eq(SymbolProviderBindingEntity::getSymbolId, symbolId)
+        .eq(SymbolProviderBindingEntity::getEnabled, true)
+        .orderByAsc(SymbolProviderBindingEntity::getPriority)
+        .orderByAsc(SymbolProviderBindingEntity::getProviderSymbol)
+        .last("FOR UPDATE"));
+  }
+
   default List<SymbolProviderBindingEntity> findEnabledBySymbolIdsOrderByPriority(Collection<UUID> symbolIds) {
     if (symbolIds == null || symbolIds.isEmpty()) {
       return List.of();

@@ -1,4 +1,3 @@
-import { makeMockCandles } from '../../features/market/tradingModels.ts'
 import type { TradingCandle, TradingPeriod } from '../../features/market/tradingModels.ts'
 
 export const historicalCandleBatchSize = 220
@@ -10,7 +9,6 @@ type CandleFetcherOptions = {
 }
 type CandleFetcher = (symbol: string, period: TradingPeriod, options?: CandleFetcherOptions) => Promise<TradingCandle[]>
 type LoadChartCandlesOptions = {
-  allowMockFallback?: boolean
   count?: number
 }
 
@@ -30,13 +28,9 @@ export async function loadChartCandles(
     const candles = await fetcher(symbol, period, { endTime, count: options.count })
     if (candles.length > 0 && hasUsableCandleScale(symbol, candles)) return candles
   } catch {
-    // Keep the local terminal visually useful when the backend is offline.
+    // Provider failures remain explicit; never synthesize a front-end market series.
   }
-
-  if (options.allowMockFallback !== true) {
-    return []
-  }
-  return makeMockCandles(symbol, period, 180, endTime)
+  return []
 }
 
 export function resolveHistoricalCandleEndTime(type: HistoricalLoadType, timestamp: number | null, now = Date.now()) {

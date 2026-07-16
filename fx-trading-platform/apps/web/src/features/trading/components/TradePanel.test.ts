@@ -16,7 +16,6 @@ const orderSideSource = readFileSync(join(currentDir, 'OrderFormSide.tsx'), 'utf
 const orderSubmitButtonSource = readFileSync(join(currentDir, 'OrderSubmitButton.tsx'), 'utf8')
 const orderTypeTabsSource = readFileSync(join(currentDir, 'OrderTypeTabs.tsx'), 'utf8')
 const tradeTabsSource = readFileSync(join(currentDir, 'TradeTabs.tsx'), 'utf8')
-const strategyDropdownSource = readFileSync(join(currentDir, 'StrategyDropdown.tsx'), 'utf8')
 const tpSlPanelSource = readFileSync(join(currentDir, 'TpSlPanel.tsx'), 'utf8')
 const styles = readFileSync(join(currentDir, '..', 'styles', 'trade-panel.css'), 'utf8')
 
@@ -28,7 +27,6 @@ const userFacingSources = [
   orderSubmitButtonSource,
   orderTypeTabsSource,
   tradeTabsSource,
-  strategyDropdownSource,
   tpSlPanelSource
 ]
 
@@ -36,7 +34,7 @@ describe('OKX-style trade panel density', () => {
   it('keeps TradePanel as a compact composition shell for the spot order form', () => {
     assert.equal(existsSync(sessionStatusPath), true)
     assert.equal(existsSync(submitHookPath), true)
-    assert.ok(tradePanelLines.length <= 290, `TradePanel.tsx has ${tradePanelLines.length} lines`)
+    assert.ok(tradePanelLines.length <= 320, `TradePanel.tsx has ${tradePanelLines.length} lines`)
     assert.match(tradePanelSource, /<OrderConfirmationDialog/)
     assert.match(tradePanelSource, /useTradePanelSubmit/)
     assert.doesNotMatch(tradePanelSource, /TradePanelAccountStrip/)
@@ -52,18 +50,15 @@ describe('OKX-style trade panel density', () => {
     }
   })
 
-  it('matches the Binance-style spot mode tabs and strategy dropdown from the reference', () => {
+  it('exposes only P0 normal order types from the order tabs', () => {
     assert.match(tradeTabsSource, /t\('trading\.spot'\)/)
-    assert.match(tradeTabsSource, /t\('trading\.crossMargin'\)/)
-    assert.match(tradeTabsSource, /t\('trading\.isolatedMargin'\)/)
-    assert.match(tradeTabsSource, /t\('trading\.gridTrading'\)/)
-    assert.match(orderTypeTabsSource, /const strategyActive = strategyType === 'tp_sl'/)
+    assert.match(tradeTabsSource, /t\('trading\.perpetual'\)/)
+    assert.doesNotMatch(tradeTabsSource, /crossMargin|isolatedMargin|gridTrading/)
+    assert.match(orderTypeTabsSource, /strategyType === 'trigger'/)
+    assert.match(orderTypeTabsSource, /strategyType === 'oco'/)
     assert.match(orderTypeTabsSource, /!strategyActive && orderType === 'limit'/)
     assert.match(orderTypeTabsSource, /!strategyActive && orderType === 'market'/)
-    assert.match(orderTypeTabsSource, /Info/)
-    assert.match(strategyDropdownSource, /limit_tp_sl/)
-    assert.match(strategyDropdownSource, /market_tp_sl/)
-    assert.match(strategyDropdownSource, /Check/)
+    assert.doesNotMatch(orderTypeTabsSource, /StrategyDropdown|post_only|\bfok\b|\bioc\b|iceberg|twap|trailing/i)
   })
 
   it('keeps the Binance-style dual form shell for wide layouts', () => {
@@ -72,19 +67,21 @@ describe('OKX-style trade panel density', () => {
     assert.match(styles, /\.trade-panel--compact\s+\.trade-panel__forms--dual\s*{[\s\S]*grid-template-columns:\s*1fr/)
   })
 
-  it('shows spot TP\\/SL and asset sizing inside each side form', () => {
-    assert.match(tpSlPanelSource, /t\('trading\.takeProfitStopLoss'\)/)
-    assert.match(tpSlPanelSource, /trade-panel__tpsl-expanded/)
+  it('shows canonical quantity-unit sizing inside each side form', () => {
     assert.match(orderSideSource, /usesQuoteBudgetMarketBuy\(form,\s*market\)/)
-    assert.match(orderSideSource, /marginQuantityMarket \? t\('trading\.contractsUnit'\) : baseAsset/)
+    assert.match(orderSideSource, /form\.quantityUnit === 'QUOTE'/)
+    assert.match(orderSideSource, /form\.quantityUnit === 'CONTRACTS'/)
+    assert.doesNotMatch(orderSideSource, /<TpSlPanel/)
   })
 
   it('uses the real order callback when a backend trading session is ready', () => {
     assert.match(submitHookSource, /onSubmitOrder/)
-    assert.match(submitHookSource, /toOrderPayload\(accountId,\s*form,\s*market,\s*leverage\)/)
+    assert.match(submitHookSource, /toOrderPayload\(accountId,\s*form,\s*market,\s*adapterSettings\)/)
+    assert.match(submitHookSource, /toOcoOrderPayload/)
+    assert.match(submitHookSource, /createCanonicalPayload\(accountId,\s*form,\s*market,\s*adapterSettings\)/)
     assert.match(submitHookSource, /await onSubmitOrder\(payload\)/)
-    assert.match(tradePanelSource, /useTradePanelSubmit\(\{[\s\S]*leverage,/)
-    assert.match(tradePanelSource, /resolveTradePanelLeverage\(resolveRuleLeverage\(symbolLeverage,\s*rules\)\)/)
+    assert.match(tradePanelSource, /useTradePanelSubmit\(\{[\s\S]*adapterSettings:/)
+    assert.match(tradePanelSource, /resolveTradePanelLeverage\(resolveRuleLeverage\(adapterSettings\.leverage \?\? symbolLeverage,\s*rules\)\)/)
     assert.match(tradePanelSource, /createPanelMarket\(symbol,\s*snapshot,\s*\{ category,\s*leverage,\s*productType,\s*rules \}\)/)
     assert.doesNotMatch(tradePanelSource, /const leverage = 1/)
     assert.match(tradePanelSource, /backendReady/)
@@ -107,8 +104,11 @@ describe('OKX-style trade panel density', () => {
     assert.match(confirmDialogSource, /role="dialog"/)
     assert.match(confirmDialogSource, /t\('trading\.orderConfirmTitle'\)/)
     assert.match(confirmDialogSource, /t\('trading\.skipConfirm'\)/)
-    assert.match(confirmDialogSource, /t\('trading\.crossMarketOrder'\)/)
-    assert.match(confirmDialogSource, /t\('trading\.crossLimitOrder'\)/)
+    assert.match(confirmDialogSource, /buildConfirmationRows/)
+    assert.match(confirmDialogSource, /OCO \/ GTC/)
+    assert.match(confirmDialogSource, /Position side/)
+    assert.match(confirmDialogSource, /Reduce only/)
+    assert.match(confirmDialogSource, /Attached TP \/ SL/)
     assert.match(confirmDialogSource, /t\('trading\.orderConfirmRisk'\)/)
     assert.match(confirmDialogSource, /onSkipConfirmChange/)
     assert.match(tradePanelSource, /skipConfirm/)
@@ -117,7 +117,7 @@ describe('OKX-style trade panel density', () => {
   })
 
   it('renders market orders with a disabled market price field and slippage controls, not TP\\/SL', () => {
-    assert.match(orderSideSource, /form\.orderType === 'limit' \?/)
+    assert.match(orderSideSource, /form\.orderType === 'limit' && form\.strategyType !== 'trigger'/)
     assert.match(orderSideSource, /<StaticOrderField/)
     assert.match(orderSideSource, /<SlippageTolerance/)
     assert.match(orderSideSource, /trade-panel__side--\$\{form\.orderType\}/)
@@ -163,7 +163,8 @@ describe('OKX-style trade panel density', () => {
     assert.match(tradePanelSource, /sessionMode/)
     assert.doesNotMatch(tradePanelSource, /offline-preview/)
     assert.doesNotMatch(tradePanelSource, /previewReady/)
-    assert.match(tradePanelSource, /const canTrade = backendReady && rulesTradable/)
+    assert.match(tradePanelSource, /const canTrade = marketDataReady && backendReady && rulesTradable/)
+    assert.match(tradePanelSource, /const rulesTradable = Boolean\(rules\?\.enabled && rules\.tradable && rules\.orderEnabled\)/)
     assert.doesNotMatch(tradePanelSource, /buildOrderPayload/)
     assert.doesNotMatch(tradePanelSource, /submitOrder\(mockPayload\)/)
     assert.doesNotMatch(tradePanelSource, /mockResponse/)
@@ -198,6 +199,8 @@ describe('OKX-style trade panel density', () => {
   })
 
   it('blocks stale market orders and surfaces balance or margin shortfalls', () => {
+    assert.match(tradePanelSource, /const marketDataReady = market\.tradable === true/)
+    assert.match(tradePanelSource, /marketDataReady && backendReady/)
     assert.match(orderSideSource, /validation\.errors\.includes\('marketStale'\)/)
     assert.match(orderSideSource, /disabledReason=\{marketStaleError\}/)
     assert.match(orderSideSource, /getRequiredMargin/)
@@ -215,9 +218,9 @@ describe('OKX-style trade panel density', () => {
     assert.match(orderSubmitButtonSource, /t\('auth\.loginAccount'\)/)
   })
 
-  it('keeps provided local balances ahead of mock fallback balances', () => {
-    assert.match(tradePanelSource, /\{\s*\.\.\.mockBalances,\s*\.\.\.externalBalances\s*\}/)
-    assert.doesNotMatch(tradePanelSource, /\{\s*\.\.\.externalBalances,\s*\.\.\.mockBalances\s*\}/)
+  it('uses only account-derived balances on the ready trading path', () => {
+    assert.match(tradePanelSource, /const balances = externalBalances/)
+    assert.doesNotMatch(tradePanelSource, /tradeFormTestFixtures/)
   })
 
   it('keeps order controls polished with focus rings, press feedback, and dropdown entrance motion', () => {

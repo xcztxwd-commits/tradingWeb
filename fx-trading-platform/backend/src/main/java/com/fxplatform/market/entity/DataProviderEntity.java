@@ -18,7 +18,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@TableName("market.data_providers")
+@TableName(value = "market.data_providers", autoResultMap = true)
 public class DataProviderEntity {
 
   @TableId(value = "id", type = IdType.INPUT)

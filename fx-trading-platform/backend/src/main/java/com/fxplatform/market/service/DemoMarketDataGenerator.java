@@ -26,8 +26,14 @@ public class DemoMarketDataGenerator {
     BigDecimal halfSpread = profile.spread().divide(TWO, profile.priceScale(), RoundingMode.HALF_UP);
     BigDecimal bid = scale(mid.subtract(halfSpread), profile.priceScale());
     BigDecimal ask = scale(mid.add(halfSpread), profile.priceScale());
+    BigDecimal dailyRange = profile.spread().multiply(BigDecimal.valueOf(100));
+    BigDecimal high24h = scale(mid.add(dailyRange), profile.priceScale());
+    BigDecimal low24h = scale(mid.subtract(dailyRange).max(profile.tickSize()), profile.priceScale());
+    BigDecimal volume24h = profile.amountBase().multiply(BigDecimal.valueOf(10_000));
 
-    return new QuoteResponse("quote", symbol, bid, ask, mid, ask.subtract(bid), "demo-realtime", now.toEpochMilli());
+    return new QuoteResponse(
+        "quote", symbol, bid, ask, mid, ask.subtract(bid), "demo-realtime", now.toEpochMilli(),
+        BigDecimal.ZERO, high24h, low24h, volume24h);
   }
 
   public MarketDepthResponse depth(String symbol, QuoteResponse quote) {
@@ -82,9 +88,16 @@ public class DemoMarketDataGenerator {
   }
 
   private Profile profile(String symbol) {
-    return switch (symbol) {
+    String normalized = symbol == null ? "" : symbol.trim().toUpperCase(java.util.Locale.ROOT);
+    if (normalized.endsWith("-PERP")) {
+      normalized = normalized.substring(0, normalized.length() - "-PERP".length());
+    }
+    return switch (normalized) {
       case "BTCUSDT" -> new Profile(new BigDecimal("67240"), new BigDecimal("4.2"), new BigDecimal("0.1"), new BigDecimal("0.24"), 10);
       case "ETHUSDT" -> new Profile(new BigDecimal("3420"), new BigDecimal("0.9"), new BigDecimal("0.1"), new BigDecimal("2.8"), 10);
+      case "BNBUSDT" -> new Profile(new BigDecimal("612.4"), new BigDecimal("0.18"), new BigDecimal("0.01"), new BigDecimal("18"), 10);
+      case "SOLUSDT" -> new Profile(new BigDecimal("152.6"), new BigDecimal("0.08"), new BigDecimal("0.01"), new BigDecimal("42"), 10);
+      case "XRPUSDT" -> new Profile(new BigDecimal("0.5246"), new BigDecimal("0.0004"), new BigDecimal("0.0001"), new BigDecimal("4200"), 10);
       case "XAUUSD" -> new Profile(new BigDecimal("2348.4"), new BigDecimal("0.28"), new BigDecimal("0.1"), new BigDecimal("12"), 10);
       case "US100" -> new Profile(new BigDecimal("18924.6"), new BigDecimal("1.2"), new BigDecimal("0.1"), new BigDecimal("4.4"), 10);
       case "GBPUSD" -> new Profile(new BigDecimal("1.27120"), new BigDecimal("0.00005"), new BigDecimal("0.00001"), new BigDecimal("140"), 10);

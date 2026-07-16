@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { getValidAdminToken } from '../services/adminToken'
 import type { AdminPage } from '../types'
@@ -12,28 +12,39 @@ export function useAdminData<T>(loader: (token: string) => Promise<T>, deps: unk
   const [data, setData] = useState<T>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const generationRef = useRef(0)
 
   const reload = async () => {
+    const generation = ++generationRef.current
     const token = getValidAdminToken()
     if (!token) {
+      if (generation !== generationRef.current) return
+      setData(undefined)
       setError('登录状态已失效，请重新登录')
       setLoading(false)
       return
     }
 
+    setData(undefined)
     setLoading(true)
     setError('')
     try {
-      setData(await loader(token))
+      const next = await loader(token)
+      if (generation !== generationRef.current) return
+      setData(next)
     } catch (err) {
+      if (generation !== generationRef.current) return
       setError(err instanceof Error ? err.message : '数据加载失败')
     } finally {
-      setLoading(false)
+      if (generation === generationRef.current) setLoading(false)
     }
   }
 
   useEffect(() => {
     void reload()
+    return () => {
+      generationRef.current += 1
+    }
   }, deps)
 
   return { data, loading, error, reload }
@@ -70,7 +81,7 @@ export function DataTable<T>({
   emptyText: string
 }) {
   return (
-    <section className="admin-table">
+    <section className="admin-table operation-table-scroll">
       <table>
         <thead>
           <tr>

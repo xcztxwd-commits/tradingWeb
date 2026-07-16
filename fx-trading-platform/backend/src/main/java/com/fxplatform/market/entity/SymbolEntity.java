@@ -5,9 +5,11 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fxplatform.common.mybatis.TextArrayTypeHandler;
 import com.fxplatform.market.model.ProductType;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -19,7 +21,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@TableName("market.symbols")
+@TableName(value = "market.symbols", autoResultMap = true)
 public class SymbolEntity {
 
   @TableId(value = "id", type = IdType.INPUT)
@@ -46,6 +48,13 @@ public class SymbolEntity {
   private BigDecimal maintenanceMarginRate = BigDecimal.ZERO;
   private BigDecimal liquidationFeeRate = BigDecimal.ZERO;
   private String markPriceSource;
+  private BigDecimal fixedFundingRate = new BigDecimal("0.0001");
+  private Integer fixedFundingIntervalMinutes = 480;
+
+  @TableField(typeHandler = TextArrayTypeHandler.class)
+  private List<String> fundingSourcePriority = List.of("BINANCE", "OKX", "FIXED");
+
+  private Integer fundingStaleSeconds = 900;
   private Boolean enabled = true;
   private String iconUrl;
   private UUID iconAssetId;

@@ -12,15 +12,22 @@ import com.fxplatform.admin.dto.response.AdminOrderResponse;
 import com.fxplatform.audit.service.AuditDetailsBuilder;
 import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.market.model.ProductType;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.response.PositionResponse;
 import com.fxplatform.trading.entity.OrderEntity;
+import com.fxplatform.trading.entity.PositionEntity;
+import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.repository.OrderRepository;
+import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.service.OrderEventService;
 import com.fxplatform.trading.service.PositionService;
+import com.fxplatform.trading.service.SystemCloseOrderService;
 import com.fxplatform.wallet.service.WalletService;
+import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.EnumSet;
@@ -57,6 +64,10 @@ public class AdminTradingCommandService {
   private final OrderEventService orderEventService;
   /** 持仓领域服务，用于复用现有平仓结算链路。 */
   private final PositionService positionService;
+  private final SystemCloseOrderService systemCloseOrderService;
+  private final PositionRepository positionRepository;
+  private final DemoExecutionGuard demoExecutionGuard;
+  private final WalletBalanceRepository walletBalanceRepository;
   /** 审计服务，用于记录后台交易写操作。 */
   private final AuditLogService auditLogService;
 
@@ -65,20 +76,45 @@ public class AdminTradingCommandService {
    */
   @Transactional
   public AdminOrderResponse cancelOrder(UUID actorUserId, UUID orderId, AdminCancelOrderRequest request) {
-    OrderEntity order = findOrder(orderId);
-    if (isCanceled(order.getStatus())) {
+    OrderEntity orderSnapshot = findOrder(orderId);
+    if (isCanceled(orderSnapshot.getStatus())) {
       auditLogService.record(
           actorUserId,
           "ADMIN_ORDER_CANCEL_IDEMPOTENT",
           "ORDER",
           orderId.toString(),
-          details(request.reason(), order.getStatus().name(), order.getStatus().name(), request.idempotencyKey()));
+          details(
+              request.reason(),
+              orderSnapshot.getStatus().name(),
+              orderSnapshot.getStatus().name(),
+              request.idempotencyKey()));
+      return AdminOrderResponse.from(orderSnapshot);
+    }
+    requireCancelable(orderSnapshot.getStatus());
+
+    TradingAccountEntity accountSnapshot = accountRepository.findById(orderSnapshot.getAccountId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    ProductType productType = requestedProduct(orderSnapshot.getSymbol());
+    boolean spotWalletHold = riskCheckService.isSpotSymbol(orderSnapshot.getSymbol());
+    demoExecutionGuard.requireDemo(accountSnapshot, productType, orderSnapshot.getSymbol());
+
+    TradingAccountEntity account = accountRepository.findByIdForUpdate(orderSnapshot.getAccountId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(account, productType, orderSnapshot.getSymbol());
+    if (spotWalletHold) {
+      walletBalanceRepository.findByAccountIdForUpdate(account.getId());
+    } else {
+      positionRepository.findOpenByAccountIdForUpdate(account.getId());
+    }
+    OrderEntity order = orderRepository.findByIdForUpdate(orderId)
+        .orElseThrow(() -> new BusinessException("ORDER_NOT_FOUND", "Order not found"));
+    if (isCanceled(order.getStatus())) {
       return AdminOrderResponse.from(order);
     }
     requireCancelable(order.getStatus());
 
     OrderStatus before = order.getStatus();
-    releasePendingOrderHold(order);
+    releasePendingOrderHold(order, account, spotWalletHold);
     order.setStatus(OrderStatus.CANCELED);
     order.setCanceledAt(DateUtil.date().toInstant());
     order.setRemainingQuantity(BigDecimal.ZERO);
@@ -102,14 +138,19 @@ public class AdminTradingCommandService {
   /**
    * 强制平仓并记录后台审计。
    */
-  @Transactional
   public PositionResponse forceClosePosition(
       UUID actorUserId,
       UUID positionId,
       AdminForceClosePositionRequest request
   ) {
     AdminActionConfirmation.require(request.confirmationText(), AdminActionConfirmation.CONFIRM_FORCE_CLOSE);
-    PositionResponse response = positionService.closeSystemPosition(request.accountId(), positionId);
+    SystemCloseOrderService.CloseResult result = systemCloseOrderService.closeWhole(
+        request.accountId(),
+        positionId,
+        OrderOrigin.ADMIN_FORCE_CLOSE,
+        request.reason(),
+        request.idempotencyKey());
+    PositionResponse response = adminPositionResponse(result);
     auditLogService.record(
         actorUserId,
         "ADMIN_POSITION_FORCE_CLOSE",
@@ -117,6 +158,51 @@ public class AdminTradingCommandService {
         positionId.toString(),
         details(request.reason(), null, response.status(), request.idempotencyKey()));
     return response;
+  }
+
+  private PositionResponse adminPositionResponse(SystemCloseOrderService.CloseResult result) {
+    if (result == null || result.position() == null) {
+      throw new BusinessException("POSITION_NOT_FOUND", "Position close result is unavailable");
+    }
+    PositionEntity position = result.position();
+    ProductType productType = position.getProductType();
+    boolean perpetual = productType == ProductType.LINEAR_PERP
+        || productType == ProductType.INVERSE_PERP;
+    Integer leverage = position.getLeverage() != null
+        ? position.getLeverage()
+        : result.account() == null ? null : result.account().getLeverage();
+    return new PositionResponse(
+        position.getId(),
+        position.getSymbol(),
+        position.getSide() == null ? null : position.getSide().name(),
+        perpetual ? "SWAP" : productType == ProductType.CRYPTO_SPOT ? "SPOT" : "FOREX",
+        position.getMarginMode() == null ? null : position.getMarginMode().name(),
+        leverage,
+        perpetual ? "CONTRACT" : productType == ProductType.CRYPTO_SPOT ? null : "LOT",
+        position.getLots(),
+        position.getOpenPrice(),
+        position.getMarkPrice() == null ? position.getCurrentPrice() : position.getMarkPrice(),
+        position.getCurrentPrice(),
+        position.getNotional(),
+        null,
+        position.getOpenPrice(),
+        position.getStopLoss(),
+        position.getTakeProfit(),
+        position.getFloatingPnl(),
+        null,
+        position.getRealizedPnl(),
+        position.getFundingPnl(),
+        position.getMarginHeld(),
+        position.getMaintenanceMargin(),
+        null,
+        null,
+        position.getStatus() == null ? null : position.getStatus().name(),
+        position.getOpenedAt(),
+        position.getClosedAt(),
+        productType,
+        position.getPositionMode(),
+        position.getPositionSide(),
+        position.getVersion());
   }
 
   /**
@@ -143,12 +229,16 @@ public class AdminTradingCommandService {
     }
   }
 
-  private void releasePendingOrderHold(OrderEntity order) {
+  private void releasePendingOrderHold(
+      OrderEntity order,
+      TradingAccountEntity account,
+      boolean spotWalletHold
+  ) {
     BigDecimal holdAmount = orZero(order.getHoldAmount());
     if (holdAmount.compareTo(BigDecimal.ZERO) <= 0) {
       return;
     }
-    if (riskCheckService.isSpotSymbol(order.getSymbol())) {
+    if (spotWalletHold) {
       walletService.releaseLockedWithEntryType(
           order.getAccountId(),
           order.getHoldCurrency(),
@@ -160,12 +250,14 @@ public class AdminTradingCommandService {
       order.setHoldAmount(BigDecimal.ZERO);
       return;
     }
-    TradingAccountEntity account = accountRepository.findById(order.getAccountId())
-        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
     account.setUsedMargin(orZero(account.getUsedMargin()).subtract(holdAmount).max(BigDecimal.ZERO));
     account.setFreeMargin(accountEquity(account).subtract(account.getUsedMargin()));
     accountRepository.save(account);
     ledgerService.recordOrderRelease(account, holdAmount, order.getId(), "Admin canceled pending order");
+  }
+
+  private ProductType requestedProduct(String canonicalSymbol) {
+    return canonicalSymbol.endsWith("-PERP") ? ProductType.LINEAR_PERP : ProductType.CRYPTO_SPOT;
   }
 
   /**

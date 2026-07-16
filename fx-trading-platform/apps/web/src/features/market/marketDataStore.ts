@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 
+import { unavailableSnapshot } from './authoritativeMarketSnapshot.ts'
 import type { MarketDataSnapshot, OrderBookLevel, OrderBookSide, TradeItem } from './marketDataTypes'
 
 type Listener = () => void
@@ -9,14 +10,7 @@ type MarketDataStoreOptions = {
   flushMs?: number
 }
 
-const emptySnapshot: MarketDataSnapshot = {
-  asks: [],
-  bids: [],
-  lastPrice: 0,
-  lastPriceDirection: 'flat',
-  recentTrades: [],
-  updatedAt: undefined
-}
+const emptySnapshot: MarketDataSnapshot = unavailableSnapshot('loading')
 
 class MarketDataStore {
   private readonly flushMs: number
@@ -24,9 +18,14 @@ class MarketDataStore {
   private readonly bidsMap = new Map<number, number>()
   private readonly asksMap = new Map<number, number>()
   private recentTrades: TradeItem[] = []
+  private symbol: string | undefined
   private lastPrice = 0
   private lastPriceDirection: MarketDataSnapshot['lastPriceDirection'] = 'flat'
   private updatedAt: number | undefined
+  private source: MarketDataSnapshot['source']
+  private componentSources: MarketDataSnapshot['componentSources']
+  private status: MarketDataSnapshot['status'] = 'loading'
+  private tradable = false
   private snapshot = emptySnapshot
   private flushTimer: ReturnType<typeof globalThis.setTimeout> | undefined
 
@@ -48,9 +47,14 @@ class MarketDataStore {
     this.bidsMap.clear()
     this.asksMap.clear()
     this.recentTrades = state.recentTrades?.slice(0, 100) ?? []
+    this.symbol = state.symbol
     this.lastPrice = state.lastPrice ?? 0
     this.lastPriceDirection = state.lastPriceDirection ?? 'flat'
     this.updatedAt = state.updatedAt
+    this.source = state.source
+    this.componentSources = state.componentSources
+    this.status = state.status ?? 'unavailable'
+    this.tradable = state.tradable ?? false
     this.writeLevels('bid', state.bids ?? [])
     this.writeLevels('ask', state.asks ?? [])
     this.commitSnapshot()
@@ -120,12 +124,17 @@ class MarketDataStore {
 
   private commitSnapshot() {
     this.snapshot = {
+      symbol: this.symbol,
       asks: mapToLevels(this.asksMap, 'ask'),
       bids: mapToLevels(this.bidsMap, 'bid'),
       lastPrice: this.lastPrice,
       lastPriceDirection: this.lastPriceDirection,
       recentTrades: this.recentTrades,
-      updatedAt: this.updatedAt
+      updatedAt: this.updatedAt,
+      source: this.source,
+      componentSources: this.componentSources,
+      status: this.status,
+      tradable: this.tradable
     }
     this.listeners.forEach((listener) => listener())
   }

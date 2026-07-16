@@ -8,6 +8,7 @@ import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.market.dto.MarketStatusResponse;
 import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.market.model.MarketBundleProducts;
 import com.fxplatform.market.provider.MarketDataRouter;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -41,6 +42,12 @@ public class QuoteService {
   public QuoteResponse latestQuote(String symbol) {
     String normalizedSymbol = SymbolNormalizer.normalize(symbol);
 
+    if (MarketBundleProducts.isP0(normalizedSymbol)) {
+      QuoteResponse quote = fetchLatest(normalizedSymbol);
+      cacheAuthoritative(quote);
+      return quote;
+    }
+
     QuoteResponse cached = readCached(normalizedSymbol);
     if (cached != null && canUseCachedForDisplay(cached)) {
       return cached;
@@ -57,6 +64,16 @@ public class QuoteService {
     ArrayList<String> missingSymbols = new ArrayList<>();
 
     for (String symbol : normalizedSymbols) {
+      if (MarketBundleProducts.isP0(symbol)) {
+        try {
+          QuoteResponse quote = marketDataRouter.latestQuote(symbol);
+          cacheAuthoritative(quote);
+          quotes.put(symbol, quote);
+        } catch (BusinessException ignored) {
+          // Keep batch display behavior: omit unavailable symbols.
+        }
+        continue;
+      }
       QuoteResponse cached = readCached(symbol);
       if (cached != null && canUseCachedForDisplay(cached)) {
         quotes.put(symbol, cached);
@@ -82,6 +99,13 @@ public class QuoteService {
 
   public QuoteResponse freshQuote(String symbol) {
     String normalizedSymbol = SymbolNormalizer.normalize(symbol);
+    if (MarketBundleProducts.isP0(normalizedSymbol)) {
+      QuoteResponse quote = fetchLatest(normalizedSymbol);
+      if (isStale(quote)) {
+        throw new BusinessException("QUOTE_STALE", "Quote is stale");
+      }
+      return quote;
+    }
     QuoteResponse cached = readCached(normalizedSymbol);
     if (cached != null && !isStale(cached)) {
       return cached;
@@ -99,6 +123,14 @@ public class QuoteService {
       redisTemplate.opsForValue().set(key(quote.symbol()), objectMapper.writeValueAsString(quote));
     } catch (JsonProcessingException ex) {
       throw new BusinessException("QUOTE_CACHE_ERROR", ex.getMessage());
+    }
+  }
+
+  private void cacheAuthoritative(QuoteResponse quote) {
+    try {
+      cache(quote);
+    } catch (RuntimeException ignored) {
+      // Redis is only a display cache for P0 bundles; a cache write must not hide valid market data.
     }
   }
 
@@ -135,7 +167,7 @@ public class QuoteService {
       }
       return quote;
     } catch (BusinessException ex) {
-      if (!demoQuotesEnabled || !allowsDemoFallback(ex.getCode())) {
+      if (MarketBundleProducts.isP0(symbol) || !demoQuotesEnabled || !allowsDemoFallback(ex.getCode())) {
         throw ex;
       }
       return mockQuote(symbol);
@@ -148,6 +180,12 @@ public class QuoteService {
   }
 
   private boolean isStale(QuoteResponse quote) {
+    if (quote.stale()) {
+      return true;
+    }
+    if (quote.expiresAt() != null) {
+      return !DateUtil.date().toInstant().isBefore(quote.expiresAt());
+    }
     long ageMs = DateUtil.date().toInstant().toEpochMilli() - quote.timestamp();
     return ageMs > quoteStaleMs;
   }
