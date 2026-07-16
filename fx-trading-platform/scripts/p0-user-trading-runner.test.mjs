@@ -14400,6 +14400,9 @@ test('strict artifact CLI requires canonical started-at UTC instant', (t) => {
   }
 
   const output = join(root, 'canonical.json')
+  writeSurefireSuite(reports, 'TEST-started-at.xml', {
+    name: 'com.fxplatform.StartedAtCliIT'
+  })
   const startedAt = new Date(Date.now() - 5_000).toISOString()
   const execution = spawnSync(process.execPath, [
     artifactsScript,

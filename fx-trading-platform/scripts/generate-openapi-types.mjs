@@ -43,7 +43,7 @@ if (checkOnly) {
   const generated = readFileSync(targetPath, 'utf8')
   const current = existsSync(outputPath) ? readFileSync(outputPath, 'utf8') : ''
   rmSync(dirname(targetPath), { recursive: true, force: true })
-  if (generated !== current) {
+  if (generated.replaceAll('\r\n', '\n') !== current.replaceAll('\r\n', '\n')) {
     console.error(`Generated OpenAPI types are out of date: ${outputPath}`)
     process.exit(1)
   }
