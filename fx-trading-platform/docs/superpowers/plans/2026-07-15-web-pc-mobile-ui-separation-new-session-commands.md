@@ -1,229 +1,172 @@
-# Web PC/Mobile 拆分：新会话命令集
+# Web PC/Mobile UI 整理：Codex 总目标与恢复命令集
 
-> 使用方式：每次只复制一段到一个新 Codex 会话。严格按编号顺序执行；一个会话只完成一个任务或一个计划，不自动继续下一段。
+这是一组可直接粘贴给 Codex 的任务指令，不是需要在 PowerShell 中执行的脚本。
 
 权威文档：
 
 - 设计规格：`fx-trading-platform/docs/superpowers/specs/2026-07-15-web-pc-mobile-ui-separation-design.md`
-- 第一阶段实施计划：`fx-trading-platform/docs/superpowers/plans/2026-07-15-web-pc-mobile-ui-separation-implementation.md`
+- 实施计划：`fx-trading-platform/docs/superpowers/plans/2026-07-15-web-pc-mobile-ui-separation-implementation.md`
+- 仓库规则：`C:\workspace\tradingWeb\AGENTS.md`
 
-当前特别说明：2026-07-15 的工作区存在大量与前端重叠的未提交改动。命令 0 是强制门禁；在这些改动形成安全基线前，不得执行命令 1。
+推荐第一次只使用“命令 M”。如果任务被中断，优先使用“命令 A”自动判断恢复点；只有已明确知道中断阶段时才使用 R0–R11。
 
-## 命令 0：只读基线检查
+## 固定执行原则
+
+所有命令都隐含以下不可覆盖规则：
+
+- 目标是完成实施计划 Task 1–16 和严格 DoD，不是只生成新计划。
+- 只有 `apps/web`、`packages/ui`、`packages/frontend-core`、前端验证脚本和对应文档在范围内；不改 `apps/admin`、backend 业务代码。
+- 当前 worktree（包括未提交前端改动）是基线。遇到重叠先读 diff、调用链和测试，再自动语义合并；不得因 dirty 直接停止。
+- 优先保留现有业务行为、API 合同、用户改动和测试。不得 reset、checkout、stash、覆盖或删除无关改动。
+- 已知 `orderAdapter.ts` 及测试中的独立随机 `idempotencyKey` 行为必须保留。
+- `smoke-visual-qa.mjs` 必须在现有用户 diff 上扩展，不能替换成旧版本。
+- 每个任务先写失败测试，执行相关验证，只暂存计划路径中的任务 hunks 并独立提交；同文件的无关既有 hunks 留在工作树。
+- 每一阶段完成后自动进入下一阶段，不等待人工确认；只有外部业务合同将被改变、会产生不可逆数据影响或缺少必要外部权限时才请求用户。
+- 不自动 push，不创建 PR，不连接真实 broker/FIX/LP。
+
+## 命令 M：建立总体目标并执行到全部完成
 
 ```text
-在 C:\workspace\tradingWeb 工作。本会话只做只读基线检查，不修改、暂存、提交或删除任何文件。
+在 C:\workspace\tradingWeb 工作。建立或继续一个总体目标：完整实施 apps/web 的 PC/Mobile 双 UI、@fx-platform/ui、@fx-platform/frontend-core 和全部严格验收；不得只完成公共基础层，也不得在阶段之间等待确认。
 
-先完整读取：
+开始前完整读取：
 1. C:\workspace\tradingWeb\AGENTS.md
 2. fx-trading-platform/docs/superpowers/specs/2026-07-15-web-pc-mobile-ui-separation-design.md
 3. fx-trading-platform/docs/superpowers/plans/2026-07-15-web-pc-mobile-ui-separation-implementation.md
 
-然后执行 git status --short、git diff --name-only、git diff --cached --name-only，并把结果与实施计划的 Preflight Gate 路径逐项比对。
+使用 superpowers:executing-plans 或 superpowers:subagent-driven-development 执行计划；每个实现任务使用 superpowers:test-driven-development；每次声称阶段或总体完成前使用 superpowers:verification-before-completion。严格按 Task 1 到 Task 16 顺序工作并更新计划检查状态。
 
-如果有任何重叠，停止，不要 stash、reset、checkout、commit 或创建 worktree；只输出：
-- 重叠文件清单；
-- staged / unstaged / untracked 分类；
-- 为什么现在不能安全迁移；
-- 需要用户先决定如何保存现有改动。
+当前实际 worktree 是执行基线。先运行计划中的 Worktree Reconciliation Protocol。对计划路径中的现有改动逐文件读 git diff、调用链和测试后，在当前内容上做语义合并；不因 dirty 停止，不 stash/reset/checkout，不覆盖用户代码。非重叠的 backend/admin/文档/脚本改动不暂存、不提交。若架构建议与业务链路冲突，自动调整架构并保留业务行为、API 合同、用户改动和现有测试。
 
-如果没有重叠，再运行 web:test、web:build、verify:architecture，记录每条命令的退出码和结果。最终只给出 READY 或 BLOCKED 结论，不实施 Task 1。
+特别保留 apps/web/src/features/trading/services/orderAdapter.ts 及测试中独立 UUID idempotencyKey 与 clientOrderId 分离的行为；迁移该文件时先增加/保留标准订单和 OCO 回归测试。处理 scripts/smoke-visual-qa.mjs 时先读当前 diff并语义合并。
+
+每个 Task 必须：先观察失败测试；做最小实现；运行计划列出的目标验证；运行包边界检查；对 dirty 重叠文件使用 hunk 级暂存；确认 staged diff 不含无关文件或 hunks；使用计划规定的 commit subject。阶段完成后直接继续下一 Task。若会话被压缩或中断，使用 git log、测试结果和计划 checkpoint 判断最后一个真实完成任务，从未完成的最小步骤继续，不重做已完成工作。
+
+最终必须达到计划 Strict Definition of Done：全部内容 URL 有 PC/Mobile view 并共用 Controller，redirect/fallback 两端目标一致，900/901 和运行时 resize 正确；旧实现/re-export/重复逻辑/非法依赖清零；styles.css 收敛；UI/core/web/architecture/bundle/large-file 全绿；全路由视觉矩阵、账户钱包和 demo 交易链路通过。不得放宽测试、包体或行数阈值。完成后输出阶段提交表、最终文件所有权、所有验证命令与实际结果、视觉报告路径、仍存在的范围外用户改动；不要 push 或创建 PR。
 ```
 
-## 命令 1：实施依赖边界守卫
+## 命令 A：中断后自动判断并续跑到完成
 
 ```text
-在 C:\workspace\tradingWeb 工作。使用 superpowers:executing-plans、superpowers:test-driven-development 和 superpowers:verification-before-completion。
+在 C:\workspace\tradingWeb 恢复“Web PC/Mobile UI 整理”总体目标，并持续执行到严格 DoD 全部满足。
 
-完整读取 AGENTS.md、设计规格和实施计划。只执行实施计划中的 Task 1: Add Enforced Frontend Dependency Boundaries，不执行 Task 2。
+完整读取 AGENTS.md、设计规格和实施计划。先执行 git status --short、git diff --name-status、git diff --cached --name-status、git log -20 --oneline，再运行与最近 checkpoint 对应的最小验证。依据实施计划的 Phase Checkpoint Map 判断：
+- 已有规定 commit 且该阶段验证仍通过：视为已完成，不重做；
+- 有未提交部分实现：从该 Task 的第一个未满足测试/步骤继续；
+- commit 存在但验证失败：先用 systematic-debugging 查明回归，再继续；
+- worktree 有重叠用户改动：按 Worktree Reconciliation Protocol 语义合并，不因 dirty 停止。
 
-开始前重新执行 Preflight Gate；若 Task 1 涉及文件有未提交重叠，立即停止并报告。严格先写失败测试，再实现 verify-frontend-boundaries，运行计划列出的三组验证。不要放宽规则，不修改业务代码。
+使用 superpowers:executing-plans、test-driven-development 和 verification-before-completion。从真实未完成的最早 Task 开始，按 Task 1–16 顺序自动完成余下所有阶段；每阶段按计划验证和提交，不等待确认。保持业务链路/API/测试优先，保留 orderAdapter 独立 idempotencyKey 和 smoke-visual-qa 当前改动，不触碰范围外 backend/admin 文件。最终执行完整静态、视觉、账户钱包和 demo 交易验收；不 push、不建 PR。
 
-验证通过后只提交 Task 1 文件，提交信息使用：test: enforce frontend package boundaries
-
-最终输出：修改文件、失败测试证据、通过的测试命令及结果、提交 hash、Task 2 是否已具备执行条件。不要继续下一任务。
+最终输出恢复点判断证据、完成的阶段提交、全部验证实际结果和严格 DoD 对照。
 ```
 
-## 命令 2：创建 UI 包并迁移主题
+## 命令 R0：从 Phase 0 基线与依赖守卫恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。使用 superpowers:executing-plans、superpowers:test-driven-development 和 superpowers:verification-before-completion。
+在 C:\workspace\tradingWeb 恢复总体目标，从实施计划 Task 1 / Phase 0 开始。完整读取 AGENTS.md、设计规格、实施计划，使用 executing-plans、test-driven-development、verification-before-completion。
 
-完整读取 AGENTS.md、设计规格和实施计划，确认 Task 1 的提交存在且 verify:frontend-boundaries 通过。只执行 Task 2: Create @fx-platform/ui and Move the Theme System。
-
-开始前检查 Task 2 全部文件的 git 状态；存在用户改动重叠就停止。严格保留现有主题 token 值、ThemeProvider 行为和 Provider 层级，只改变所有权与 import。使用 package-lock-only --ignore-scripts 更新锁文件。
-
-执行计划中的 ui:test、ui:typecheck、web:test、web:build、verify:architecture。验证通过后提交：refactor: extract shared theme package
-
-最终输出修改文件、测试结果、提交 hash；不要迁移 SelectField，不执行 Task 3。
+重新测量 web:test、web:build、verify:architecture 以及已知 bundle/large-file 债务；创建并测试 verify-frontend-boundaries；建立 ui/frontend-core 最小 package/tsconfig/export/test 骨架与 `frontend:check`；整合架构检查和文档。当前 worktree 是基线，重叠时语义合并，不因 dirty 停止，不触碰范围外文件。完成并验证 commit `test(frontend): enforce target dependency boundaries` 后，自动继续 Task 2–16，直到严格 DoD 全部完成。不要 push。
 ```
 
-## 命令 3：迁移首个公共组件 SelectField
+## 命令 R1：从 Phase 1 UI 主题包恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。使用 superpowers:executing-plans、superpowers:test-driven-development 和 superpowers:verification-before-completion。
+在 C:\workspace\tradingWeb 恢复总体目标。先确认 Task 1 checkpoint 和验证真实通过；然后从 Task 2 / Phase 1 的 @fx-platform/ui 与主题迁移继续。
 
-读取 AGENTS.md、设计规格和实施计划。确认 @fx-platform/ui 的主题任务已提交并通过。只执行 Task 3: Move SelectField as the First Shared UI Component。
-
-开始前检查 Task 3 文件是否 dirty；重叠就停止。保持 SelectField 的受控 props、键盘操作、ARIA listbox/option 语义和当前视觉。基础 CSS 归 UI 包，LanguageSwitcher 和 market sort 的消费方覆盖仍留在 apps/web。不要顺手迁移 DataTable、PageState 或其他组件。
-
-运行 ui:test、ui:typecheck、web:test、web:build。通过后提交：refactor: move select field into ui package
-
-最终报告 CSS 从哪里移到哪里、消费者 import、测试命令与提交 hash。不要执行 Task 4。
+按实施计划先迁移行为测试，再移动当前 worktree 的 theme 实现，保持 token、storage key、Provider 层级和视觉不变；更新 workspace/lockfile并运行 UI、web、边界验证。语义合并现有改动，不覆盖或暂存范围外文件。完成 commit `refactor(ui): extract shared theme package` 后自动执行余下 Task 3–16，直到总验收通过。不要 push。
 ```
 
-## 命令 4：创建 frontend-core 并迁移模型、认证存储与 API
+## 命令 R2：从 Phase 2 公共 UI 组件恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。使用 superpowers:executing-plans、superpowers:test-driven-development 和 superpowers:verification-before-completion。
+在 C:\workspace\tradingWeb 恢复总体目标。验证 Task 2 checkpoint 后，从实施计划 Task 3 开始，连续完成 Task 3–4。
 
-完整读取 AGENTS.md、设计规格和实施计划。只执行 Task 4: Create @fx-platform/frontend-core and Move Models, Auth Storage, and API Clients。
-
-这是高重叠任务。开始前必须确认 apps/web/src/services、types/trading.ts、components/tables/types.ts、tradingSessionStorage.ts 及所有计划列出的消费者没有未提交改动；任何重叠都停止，不能自行合并用户改动。
-
-严格采用移动而非复制：endpoint、storage key、refresh retry、ApiClientError、STOMP topic 和 payload type 均不得改变。更新所有消费者到 @fx-platform/frontend-core/api、/auth、/models；完成后旧 services/types 实现必须消失。同步更新 source-reading tests 与 verify-architecture 路径。
-
-运行 frontend-core:test、frontend-core:typecheck、web:test、web:build、verify:architecture。通过后提交：refactor: extract frontend api and models
-
-最终输出所有移动映射、rg 零匹配证据、测试结果和提交 hash。不要执行 market 迁移。
+只抽取已有多消费者证据的 SelectField、IconButton、StateSurface、Skeleton、DataTable/DataCardList、Dialog 和已有 market/quote 两个调用点的 Drawer；品牌 `ExchangeLoading` 留在应用。MobileOrderSheet 只有一个消费者，也先留在应用。先补行为/ARIA/键盘测试，使用 CSS Modules，UI 包不得依赖业务、router 或 i18n。短期 app adapter 可以存在到对应页面迁移，但不得复制算法。完成 `refactor(ui): extract shared state data and dialog primitives` checkpoint 后自动继续 Task 5–16，直到严格 DoD。保持 dirty 语义合并策略，不 push。
 ```
 
-## 命令 5：迁移共享行情运行时
+## 命令 R3：从 Phase 3 API/Auth/Market Core 恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。使用 superpowers:executing-plans、superpowers:test-driven-development 和 superpowers:verification-before-completion。
+在 C:\workspace\tradingWeb 恢复总体目标。确认 UI 阶段验证后，从 Task 5 开始连续完成 Task 5–6。
 
-读取 AGENTS.md、设计规格和实施计划。确认 frontend-core 的 API/auth/models 已提交并且边界检查通过。只执行 Task 5: Move the Shared Market Runtime into frontend-core。
-
-开始前检查整个 apps/web/src/features/market 及计划列出的消费者是否 dirty；有重叠就停止。整体 git mv 该目录，不复制实现。只修正四类跨模块 import，所有行情模型、snapshot、favorites、provider status、HTTP/STOMP 和 fallback 语义保持不变。
-
-把所有应用消费者改为 @fx-platform/frontend-core/market，更新五个测试类型 import、userPages source path 和 verify-architecture。用 rg 证明 core 不反向依赖 app、app 不再引用 features/market。
-
-运行 frontend-core:test、frontend-core:typecheck、web:test、web:build、verify:architecture。通过后提交：refactor: move market runtime into frontend core
-
-最终输出移动文件数、非法依赖扫描、测试结果和提交 hash。不要处理交易表单或 PC/Mobile 页面。
+创建 @fx-platform/frontend-core；先迁移测试，再移动 API、auth storage、模型、纯表格函数和完整 market runtime。保持 endpoint、HTTP payload、401 refresh、requestId、storage key、legacy token、行情来源/fallback/STOMP/reconnect 完全不变。Core 禁止 app、router、i18n、CSS。用 rg 证明旧 import/re-export 消失。完成 `refactor(core): move market runtime into frontend core` 后自动继续 Task 7–16。现有改动语义合并，不 push。
 ```
 
-## 命令 6：抽离纯表格模型
+## 命令 R4：从 Phase 4 Account/Wallet Core 恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。使用 superpowers:executing-plans、superpowers:test-driven-development 和 superpowers:verification-before-completion。
+在 C:\workspace\tradingWeb 恢复总体目标，从 Task 7 / Phase 4 继续。先验证最近 checkpoint 和当前 worktree，再写账户/钱包 Controller 失败测试。
 
-读取 AGENTS.md、设计规格和实施计划。只执行 Task 6: Extract Pure Table Models and Close the First Public-Core Slice。
-
-开始前检查 userPageModels.ts/test 和 frontend-core models 是否 dirty；重叠就停止。只移动 SortDirection、filterByStatus、sortRows、paginateRows、toNumber 及其私有比较函数。formatApiError、ApiErrorView 和 i18n 必须留在应用层。
-
-运行 frontend-core:test、frontend-core:typecheck、web:test、web:build。通过后提交：refactor: extract shared table models
-
-最终输出移动的函数、测试职责拆分和提交 hash。不要继续 Task 7。
+抽离 refresh coordinator、account models/operations/hooks 和 wallet controller；core 返回 message descriptor，不依赖 i18n/router/CSS。重点验证 wallet balance、asset ledger、account summary 在 transfer/reset 后一致刷新，以及 guest/loading/error/ready 行为。完成 `refactor(core): extract account and wallet controllers` 后自动继续 Task 8–16。按语义合并策略保护用户改动与业务链路，不 push。
 ```
 
-## 命令 7：关闭公共基础层阶段
+## 命令 R5：从 Phase 5 Trading Controller 恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。使用 superpowers:executing-plans、superpowers:test-driven-development 和 superpowers:verification-before-completion。
+在 C:\workspace\tradingWeb 恢复总体目标，从 Task 8 开始连续完成 Task 8–9。使用 TDD 先冻结当前订单 payload、表单校验、session、STOMP、批量动作和 position protection 行为。
 
-读取 AGENTS.md、设计规格和实施计划。只执行 Task 7: Add the Unified Frontend Gate and Document the New Foundation。
-
-开始前检查 package.json、architecture.md 和验证脚本是否 dirty；重叠就停止。先写 frontend:check 的失败断言，再添加统一命令。架构文档必须准确描述已经落地的 package 所有权，并明确 PC/Mobile runtime 尚未启用。
-
-运行 frontend:check、admin:build、web:bundle-budget、audit:large-files，以及计划中的三组 rg 依赖扫描。任何失败都必须修正根因，不能删除检查。
-
-验证通过后提交：docs: close shared frontend foundation
-
-最终逐项核对 Foundation Definition of Done，报告所有命令与结果、提交 hash，并明确下一步是交易 controller 抽离计划。不要直接开始下一子项目。
+迁移 orderAdapter 时必须保留当前未提交改动中的独立随机 UUID idempotencyKey，且标准订单/OCO 都有测试、不得与 clientOrderId 复用。移除 core 对 i18n 的依赖，使用 message descriptor。建立一个供两端复用的 TradingRouteModel 和 Controller，但暂不拆终端布局。完成 `refactor(core): extract trading session controller` 后自动继续 Task 10–16。不要触碰 backend/admin，不 push。
 ```
 
-## 命令 8：生成交易 Controller 抽离的独立计划
-
-仅在命令 7 完成后使用。
+## 命令 R6：从 Phase 6 自适应运行时恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。本会话只分析和写计划，不实现代码。
+在 C:\workspace\tradingWeb 恢复总体目标，从 Task 10 / Phase 6 继续。先写 899/900/901、matchMedia listener cleanup 和 Controller 不重建测试。
 
-使用 superpowers:brainstorming 与 superpowers:writing-plans。读取 AGENTS.md、PC/Mobile 双 UI 设计规格、已完成的 shared foundation 实施计划和当前代码。
-
-聚焦一个子项目：把 features/trading-session、features/trading/hooks、features/trading/services、features/trading/types、纯 trading view-model 抽入 @fx-platform/frontend-core；React 组件和 CSS 留在 apps/web。必须先消除 core 对 react-i18next、页面组件和应用 services/types 的依赖：公共 controller 返回错误 key/command，翻译与展示留在应用层。
-
-计划必须包含失败测试、精确文件移动、公共接口、兼容步骤、消费者更新、交易回归，并验证 login gate、行情 snapshot、submit dedupe、orders、positions、wallet balance、asset ledger、account summary、demo/live 隔离。
-
-保存到 fx-trading-platform/docs/superpowers/plans/2026-07-15-trading-controller-extraction-implementation.md。自检占位词、接口一致性和范围后，只提交计划文档，不执行实现。
+建立唯一 `(max-width: 900px)` DeviceClassProvider 与 PlatformView；AppShell 继续稳定持有 session/main，PC topbar 与 Mobile tabs 只作为 chrome 切换。删除交易局部 768px hook，增加 data-platform-view 标记和 901->900->899->901 连续 resize 验证。完成 `refactor(web): add stable pc mobile runtime` 后自动继续 Task 11–16。语义合并 dirty 文件，不 push。
 ```
 
-## 命令 9：生成单应用双 UI 运行时计划
-
-仅在交易 Controller 抽离完成后使用。
+## 命令 R7：从 Phase 7 Home/Auth 双 UI 恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。本会话只分析和写计划，不实现代码。
+在 C:\workspace\tradingWeb 恢复总体目标，从 Task 11 / Phase 7 继续。为 `/`、`/login`、`/register`、`/forgot-password`、`/two-factor-help` 建立常驻 route controller 和独立 PC/Mobile views。
 
-使用 superpowers:brainstorming 与 superpowers:writing-plans。读取 AGENTS.md、双 UI 设计规格、shared foundation 计划、trading controller 计划及当前代码。
-
-聚焦一个子项目：保持单一 apps/web 与一份 AppRoutes，新增 useDeviceClass（max-width: 900px）、PlatformView、route adapter、PC Shell、Mobile Shell 和动态 import。公共 Provider、route controller、认证、行情订阅和交易 session 必须位于平台选择之上；不能同时挂载两套 UI 再用 CSS 隐藏。
-
-计划必须验证 1440x900、390x844、899px、901px、运行时跨断点、刷新、深链、前进后退、query 参数、lazy chunks 和订阅不重复。
-
-保存到 fx-trading-platform/docs/superpowers/plans/2026-07-15-adaptive-web-runtime-implementation.md。自检后只提交计划文档，不实施页面迁移。
+PC 1440x900 与 Mobile 390x844 保持当前内容、表单、链接、认证和 redirect 语义；视图不直接调用 API/storage。把旧响应式 DOM 与 CSS 按平台归属移动，仅在两个真实消费者完全相同时创建 shared widget。完成 `refactor(web): split home and auth platform views` 后自动继续 Task 12–16，并跑计划 viewport 验证。不要重设计、不 push。
 ```
 
-## 命令 10A：规划 Auth 与 Home 双 UI
+## 命令 R8：从 Phase 8 Account/Settings 双 UI 恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。读取 AGENTS.md、双 UI 设计规格、shared foundation 计划、trading controller 计划、adaptive runtime 计划和当前代码。
+在 C:\workspace\tradingWeb 恢复总体目标，从 Task 12 / Phase 8 继续。迁移 dashboard、account overview/assets/funding/trades/KYC/settings、security 和 settings 的全部路由。
 
-本会话只处理 login、register、forgot-password、two-factor-help 和 home。先使用 superpowers:brainstorming 确认 PC/Mobile 信息层级与交互差异，再使用 superpowers:writing-plans 生成独立实施计划；用户确认后才能实现。
-
-route controller 和业务 command 共用；PC 与 Mobile view 不互相 import；UI package 只接收无业务组件；不修改后端或认证语义。每个路由同时覆盖 loading、error、unauthenticated 和 ready。
-
-计划保存为 fx-trading-platform/docs/superpowers/plans/2026-07-15-auth-home-pc-mobile-ui-implementation.md。不要处理其他路由。
+每个路由使用一个 Controller 和独立 PC/Mobile view；PC 显式使用 table，Mobile 显式使用 card list，不用 CSS 在同一 DOM 中隐藏另一套结构。保持 guest redirect、loading/error/empty、account/KYC/settings 行为。完成 `refactor(web): split account and settings platform views` 后自动继续 Task 13–16。运行 guest/auth 与 899/900/901 验证，不 push。
 ```
 
-## 命令 10B：规划 Account 与 Settings 双 UI
+## 命令 R9：从 Phase 9 数据页面双 UI 恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。读取 AGENTS.md、双 UI 设计规格、shared foundation 计划、trading controller 计划、adaptive runtime 计划和当前代码。
+在 C:\workspace\tradingWeb 恢复总体目标，从 Task 13 开始连续完成 Task 13–14：Markets、Orders、Positions、Wallet。
 
-本会话只处理 dashboard、account、security 和 settings。先使用 superpowers:brainstorming 确认 PC/Mobile 信息层级与交互差异，再使用 superpowers:writing-plans 生成独立实施计划；用户确认后才能实现。
-
-route controller 和业务 command 共用；PC 与 Mobile view 不互相 import；UI package 只接收无业务组件；不修改后端、账户数据或权限语义。每个路由同时覆盖 loading、empty、error、unauthenticated 和 ready。
-
-计划保存为 fx-trading-platform/docs/superpowers/plans/2026-07-15-account-settings-pc-mobile-ui-implementation.md。不要处理其他路由。
+先冻结 market filter/sort/favorite/source/navigation、order cancel/batch payload、position close/protection、wallet transfer/reset/ledger/requestId 合同。每页一个 Controller、两套 view；resize 中 Controller 和 pending 操作保持，不重复订阅/提交。仅抽取真实共享 widget。完成 `refactor(web): split orders positions and wallet views` 后自动继续 Task 15–16，并执行相关 core/web/visual/user-core-pages 验证。语义合并现有改动，不 push。
 ```
 
-## 命令 10C：规划 Markets、Orders、Positions 与 Wallet 双 UI
+## 命令 R10：从 Phase 10 Trading Terminal 双 UI 恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。读取 AGENTS.md、双 UI 设计规格、shared foundation 计划、trading controller 计划、adaptive runtime 计划和当前代码。
+在 C:\workspace\tradingWeb 恢复总体目标，从 Task 15 / Phase 10 继续。Trading 最后迁移，先运行全部 trading/session/market/orderAdapter 回归并写 Controller 连续性、订阅唯一性、form/pending/resize 测试。
 
-本会话只处理 markets、orders、positions 和 wallet。先使用 superpowers:brainstorming 确认 PC/Mobile 信息层级与交互差异，再使用 superpowers:writing-plans 生成独立实施计划；用户确认后才能实现。
-
-route controller 和业务 command 共用；PC 与 Mobile view 不互相 import；不修改后端、API、风控、钱包或行情语义。计划必须验证 wallet balance、asset ledger、account summary、orders、positions、provider status 和 quote。
-
-计划保存为 fx-trading-platform/docs/superpowers/plans/2026-07-15-market-account-data-pc-mobile-ui-implementation.md。不要处理 trading terminal 或其他路由。
+把 desktop terminal 移到 pc，把 mobile terminal/drawer/order sheet 移到 mobile，公共 chart/quote/account widget 只在两端真正复用时抽取。TradingRoute Controller 常驻并 lazy-load 两端 view；删除 TradingPage、768px hook 和旧包装。保持所有 canonical route、chart、行情、订单/OCO/TP-SL、批量动作和 position protection 行为。更新 bundle/large-file 检查时不得放宽阈值；已知两项债务必须通过。完成 `refactor(web): split trading terminal platform views` 后自动继续 Task 16。不要连接真实 broker，不 push。
 ```
 
-## 命令 10D：规划 Trading Terminal 双 UI
+## 命令 R11：从 Phase 11 清理与总验收恢复
 
 ```text
-在 C:\workspace\tradingWeb 工作。读取 AGENTS.md、双 UI 设计规格、shared foundation 计划、trading controller 计划、adaptive runtime 计划和当前代码。
+在 C:\workspace\tradingWeb 恢复总体目标，从 Task 16 / Phase 11 继续。先读当前全部 diff，特别是 scripts/smoke-visual-qa.mjs 的用户改动，在当前版本上语义扩展。
 
-本会话只处理 trading terminal。先使用 superpowers:brainstorming 确认 PC/Mobile 信息层级与交互差异，再使用 superpowers:writing-plans 生成独立实施计划；用户确认后才能实现。
+删除零消费者兼容层、旧页面、旧 re-export、重复逻辑和非法跨端 import；styles.css 只保留 <=400 行基础样式且无 route selector。扩展并保留现有 visual smoke：1440x900、390x844、899x844、900x844、901x844，执行同页 901->900->899->901，覆盖全部 Route Contract URL 的适用 guest/auth 状态。
 
-复用同一个 trading controller、selected market、snapshot、balances、orders、positions、validation 和 submit command；PC 保留分栏/resize/桌面工具栏，Mobile 保留触屏导航/sheet/drawer。不得改变后端风控、行情 fallback、下单语义或 demo/live 隔离。
+执行实施计划 Task 16 的全部静态门禁、visual QA、smoke:user-core-pages、web:smoke:trading、acceptance:p0-user-trading。任何失败都先使用 systematic-debugging 查根因并修复，不删测试、不放宽阈值。用 rg 完成非法依赖/placeholder/兼容层审计。所有结果真实通过后提交 `refactor(web): complete pc mobile ui separation`。
 
-计划保存为 fx-trading-platform/docs/superpowers/plans/2026-07-15-trading-terminal-pc-mobile-ui-implementation.md。不要处理其他路由。
+最终逐条对照 Strict Definition of Done，输出所有阶段 commit hash、测试命令与实际结果、视觉报告路径、范围外未提交改动。不要 push 或创建 PR。
 ```
 
-## 命令 11：最终清理与总验收计划
+## 完成判定
 
-仅在四个路由组全部完成后使用。
+只有同时满足以下条件，Codex 才能结束总体目标：
 
-```text
-在 C:\workspace\tradingWeb 工作。本会话先审计、再写最终清理计划，不直接删除文件。
-
-读取 AGENTS.md、双 UI 设计规格和全部已完成实施计划。审计旧 re-export、旧页面、重复 API/hook/type、apps/web/src/styles.css 中的页面/平台布局、跨平台 import、未使用依赖和同时进入首屏的 PC/Mobile chunk。
-
-使用 superpowers:writing-plans 生成 legacy-web-ui-cleanup-implementation.md。计划必须包含可证明的删除清单、每项引用扫描、frontend:check、bundle budget、PC/Mobile visual QA、用户核心页面 smoke、交易登录门禁、钱包 balance/asset ledger/account summary、provider sync/symbol binding/quote/candles 和 demo/live 隔离验收。
-
-只提交计划文档，等待用户确认后实施。
-```
+1. 实施计划 Task 1–16 全部完成，R0–R11 checkpoint 均可在 Git 历史中验证。
+2. 所有内容路由都有 PC/Mobile view 并共用 Controller，redirect/fallback 两端一致；900/901 与动态 resize 通过。
+3. UI/core 边界、旧路径清理、CSS 归属、bundle 和 large-file 门禁通过。
+4. 全部静态测试、全路由视觉矩阵、账户/钱包与 demo 交易 smoke 实际通过。
+5. 没有混入范围外 backend/admin 改动，没有自动 push，没有连接真实交易设施。
