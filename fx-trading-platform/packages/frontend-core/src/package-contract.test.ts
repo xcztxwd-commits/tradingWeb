@@ -37,5 +37,6 @@ describe('@fx-platform/frontend-core package contract', () => {
     assert.match(indexSource, /export \* from '\.\/models\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/storage\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/market\/index\.ts'/u)
+    assert.match(indexSource, /export \* from '\.\/account\/index\.ts'/u)
   })
 })

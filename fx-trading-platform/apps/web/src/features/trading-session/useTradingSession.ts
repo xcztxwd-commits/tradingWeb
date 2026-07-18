@@ -1,13 +1,9 @@
-import { useCallback, useState } from 'react'
-import { useEffect } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
   cancelAllTradingOrders,
   closeAllTradingPositions,
-  firstOrCreatedAccount,
-  isAuthSessionFailure,
-  loadTradingAccountData,
   mutateTradingPosition,
   runTradingBatchAction,
   submitTradingOco,
@@ -16,26 +12,14 @@ import {
 } from './tradingSession'
 import type { PositionMutation } from './tradingSession'
 import {
-  createAccountRefreshCoordinator,
-  createLatestSingleFlightRefreshGate
-} from './accountRefreshCoordinator'
-import { subscribeTradingSessionEvents } from '@fx-platform/frontend-core'
-import type { AccountTransferResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
-import {
-  clearStoredAuthToken,
-  getSessionStatus,
-  readStoredAuthToken,
-  type AccountSummary,
-  type AssetLedgerEntry,
-  type LedgerEntry,
+  useAccountData,
   type OcoOrderPayload,
   type OrderPayload,
   type OrderResponse,
   type PositionResponse,
-  type SessionAuthStatus,
-  type UpdatePositionProtectionPayload,
-  type WalletBalance
+  type UpdatePositionProtectionPayload
 } from '@fx-platform/frontend-core'
+import { translateCoreMessage } from '../../routes/shared/translateCoreMessage'
 
 type Options = {
   refreshMs?: number
@@ -78,180 +62,39 @@ export function formatTradingSessionError(error: unknown, t: Translate = default
 
 export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
   const { t } = useTranslation()
-  const [token, setToken] = useState<string | null>(null)
-  const [account, setAccount] = useState<AccountSummary>()
-  const [orders, setOrders] = useState<OrderResponse[]>([])
-  const [trades, setTrades] = useState<Trade[]>([])
-  const [positions, setPositions] = useState<PositionResponse[]>([])
-  const [positionHistory, setPositionHistory] = useState<PositionResponse[]>([])
-  const [fundingSettlements, setFundingSettlements] = useState<FundingSettlement[]>([])
-  const [transfers, setTransfers] = useState<AccountTransferResponse[]>([])
-  const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([])
-  const [assetLedgerEntries, setAssetLedgerEntries] = useState<AssetLedgerEntry[]>([])
-  const [walletBalances, setWalletBalances] = useState<WalletBalance[]>([])
-  const [sessionReady, setSessionReady] = useState(false)
-  const [sessionError, setSessionError] = useState<string | null>(null)
-  const [sessionAuthStatus, setSessionAuthStatus] = useState<SessionAuthStatus>('guest')
+  const accountData = useAccountData({ refreshMs })
+  const {
+    token,
+    account,
+    accountId,
+    trades,
+    positions,
+    positionHistory,
+    fundingSettlements,
+    transfers,
+    ledgerEntries,
+    assetLedgerEntries,
+    walletBalances,
+    sessionReady,
+    sessionAuthStatus,
+    loginRequired,
+    retrySession
+  } = accountData
+  const sessionError = translateCoreMessage(accountData.sessionError, t)
+  const [submittedOrders, setSubmittedOrders] = useState<OrderResponse[]>([])
   const [lastOrderError, setLastOrderError] = useState<unknown>(null)
-  const [loginRequired, setLoginRequired] = useState(false)
-  const [refreshGate] = useState(() =>
-    createLatestSingleFlightRefreshGate<Awaited<ReturnType<typeof loadTradingAccountData>>>()
+  const orders = useMemo(
+    () => [
+      ...accountData.orders,
+      ...submittedOrders.filter((submitted) => !accountData.orders.some((order) => order.id === submitted.id))
+    ],
+    [accountData.orders, submittedOrders]
   )
-  const accountId = account?.id
-
-  const markSessionError = useCallback((error: unknown) => {
-    setSessionError(formatTradingSessionError(error, t))
-    setSessionReady(false)
-  }, [t])
-
-  const applyAccountData = useCallback((data: Awaited<ReturnType<typeof loadTradingAccountData>>) => {
-    setAccount(data.account)
-    setOrders(data.orders)
-    setTrades(data.trades)
-    setPositions(data.positions)
-    setPositionHistory(data.positionHistory)
-    setFundingSettlements(data.fundingSettlements)
-    setTransfers(data.transfers)
-    setLedgerEntries(data.ledgerEntries)
-    setAssetLedgerEntries(data.assetLedgerEntries)
-    setWalletBalances(data.walletBalances)
-    setSessionError(null)
-  }, [])
 
   const refreshAccountData = useCallback(
-    async (accessToken = token, currentAccountId = accountId, isActive: () => boolean = () => true) => {
-      if (!accessToken || !currentAccountId) return
-      await refreshGate.request(
-        () => loadTradingAccountData(accessToken, currentAccountId),
-        (data) => {
-          if (isActive()) applyAccountData(data)
-        }
-      )
-    },
-    [accountId, applyAccountData, refreshGate, token]
+    async (_accessToken = token, _currentAccountId = accountId) => accountData.refreshAccountData(),
+    [accountData.refreshAccountData, accountId, token]
   )
-
-  const clearSessionSnapshot = useCallback(() => {
-    refreshGate.invalidate()
-    setToken(null)
-    setAccount(undefined)
-    setOrders([])
-    setTrades([])
-    setPositions([])
-    setPositionHistory([])
-    setFundingSettlements([])
-    setTransfers([])
-    setLedgerEntries([])
-    setAssetLedgerEntries([])
-    setWalletBalances([])
-    setSessionReady(false)
-  }, [refreshGate])
-
-  const requireLogin = useCallback((authStatus: SessionAuthStatus = 'guest') => {
-    clearStoredAuthToken()
-    clearSessionSnapshot()
-    setSessionError(null)
-    setSessionAuthStatus(authStatus)
-    setLoginRequired(true)
-  }, [clearSessionSnapshot])
-
-  const loadSessionSnapshot = useCallback(
-    async (isActive: () => boolean = () => true) => {
-      refreshGate.invalidate()
-      setSessionError(null)
-      setSessionReady(false)
-      setLoginRequired(false)
-
-      const savedToken = readStoredAuthToken()
-      const status = await getSessionStatus(savedToken)
-      if (status.status === 'invalid_token') {
-        if (isActive()) requireLogin('invalid_token')
-        return
-      }
-      if (!savedToken || status.status === 'guest' || !status.authenticated) {
-        if (isActive()) requireLogin('guest')
-        return
-      }
-
-      const account = await firstOrCreatedAccount(savedToken)
-      if (!isActive()) return
-
-      setToken(savedToken)
-      setSessionAuthStatus('valid_token')
-      setAccount(account)
-      await refreshAccountData(savedToken, account.id, isActive)
-      if (isActive()) setSessionReady(true)
-    },
-    [refreshAccountData, refreshGate, requireLogin]
-  )
-
-  const retrySession = useCallback(async () => {
-    try {
-      await loadSessionSnapshot()
-    } catch (error) {
-      if (isAuthSessionFailure(error)) {
-        requireLogin()
-        return
-      }
-      markSessionError(error)
-    }
-  }, [loadSessionSnapshot, markSessionError, requireLogin])
-
-  useEffect(() => {
-    return () => refreshGate.invalidate()
-  }, [refreshGate])
-
-  useEffect(() => {
-    let active = true
-
-    async function bootSession() {
-      try {
-        await loadSessionSnapshot(() => active)
-      } catch (error) {
-        if (!active) return
-        if (isAuthSessionFailure(error)) {
-          requireLogin()
-          return
-        }
-        markSessionError(error)
-      }
-    }
-
-    void bootSession()
-    return () => {
-      active = false
-    }
-  }, [loadSessionSnapshot, markSessionError, requireLogin])
-
-  useEffect(() => {
-    if (!token || !accountId || !sessionReady) return
-    let active = true
-
-    const coordinator = createAccountRefreshCoordinator({
-      refresh: () => refreshAccountData(token, accountId, () => active),
-      pollMs: refreshMs,
-      onError: (error) => {
-        if (!active) return
-        if (isAuthSessionFailure(error)) {
-          requireLogin()
-          return
-        }
-        markSessionError(error)
-      }
-    })
-    coordinator.start()
-    const unsubscribe = subscribeTradingSessionEvents(
-      token,
-      () => coordinator.notifyEvent(),
-      () => coordinator.notifyReconnect()
-    )
-
-    return () => {
-      active = false
-      unsubscribe()
-      coordinator.dispose()
-    }
-  }, [accountId, markSessionError, refreshAccountData, refreshMs, requireLogin, sessionReady, token])
 
   const submitOrder = useCallback(
     async (payload: OrderPayload) => {
@@ -265,7 +108,7 @@ export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
         }
         const response = await submitTradingOrder(accountId ? { ...payload, accountId } : payload, token)
 
-        setOrders((current) => [response, ...current.filter((order) => order.id !== response.id)])
+        setSubmittedOrders((current) => [response, ...current.filter((order) => order.id !== response.id)])
 
         if (token && accountId) {
           await refreshAccountData(token, accountId).catch(() => undefined)

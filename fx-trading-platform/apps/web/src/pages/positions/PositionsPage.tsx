@@ -7,7 +7,8 @@ import { AssetMark } from '../../components/asset/AssetMark'
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'
-import { useTradingSession } from '../../features/trading-session/useTradingSession'
+import { mutateTradingPosition, updateTradingPositionProtection } from '../../features/trading-session/tradingSession'
+import { useTranslatedAccountData } from '../../routes/shared/useTranslatedAccountData'
 import type { PositionResponse, UpdatePositionProtectionPayload } from '@fx-platform/frontend-core'
 import {
   canUseLegacyPositionProtection,
@@ -40,9 +41,26 @@ export function PositionsPage() {
     sessionError,
     loginRequired,
     retrySession,
-    closePosition,
-    updatePositionProtection
-  } = useTradingSession()
+    refreshAccountData,
+    token,
+    accountId
+  } = useTranslatedAccountData()
+  const closePosition = useCallback(async (position: PositionResponse) => {
+    if (!token || !accountId) return
+    try {
+      await mutateTradingPosition(accountId, position.id, { type: 'FULL_CLOSE' }, token)
+    } finally {
+      await refreshAccountData().catch(() => undefined)
+    }
+  }, [accountId, refreshAccountData, token])
+  const updatePositionProtection = useCallback(async (
+    position: PositionResponse,
+    payload: UpdatePositionProtectionPayload
+  ) => {
+    if (!token || !accountId) return
+    await updateTradingPositionProtection(accountId, position.id, payload, token)
+    await refreshAccountData()
+  }, [accountId, refreshAccountData, token])
   const [view, setView] = useState<PositionView>('CURRENT')
   const [symbol, setSymbol] = useState('')
   const [editingPosition, setEditingPosition] = useState<PositionResponse | null>(null)

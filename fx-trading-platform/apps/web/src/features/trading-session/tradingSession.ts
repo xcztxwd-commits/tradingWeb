@@ -1,65 +1,39 @@
 import {
-  ApiClientError,
   adjustPositionMargin,
   cancelAllOrders,
   closePosition,
   closeAllPositions,
-  createDemoAccount,
   createOcoOrder,
   createOrder,
   createPositionProtection,
-  getAccounts,
-  getAccountSummary,
-  getAccountTransfers,
-  getAssetLedger,
-  getFundingSettlements,
-  getLedgerEntries,
-  getOrders,
-  getPositionHistory,
-  getPositions,
-  getTrades,
-  getWalletBalances,
+  deriveTradingBalances,
+  firstOrCreatedAccount,
+  isAuthSessionFailure,
+  loadAccountData,
   updatePositionProtection,
+  type AccountSessionData,
   type AccountSummary,
-  type AssetLedgerEntry,
-  type LedgerEntry,
   type OcoOrderPayload,
   type OrderPayload,
-  type OrderResponse,
-  type PositionResponse,
   type UpdatePositionProtectionPayload,
-  type WalletBalance
+  type TradingBalances
 } from '@fx-platform/frontend-core'
 import type {
-  AccountTransferResponse,
   AdjustPositionMarginRequest,
   BatchActionRequest,
   BatchActionResponse,
   ClosePositionRequest,
-  CreateProtectionRequest,
-  FundingSettlement,
-  Trade
+  CreateProtectionRequest
 } from '@fx-platform/shared-types'
-export { deriveTradingBalances } from './tradingSessionModels'
-export type { TradingBalances } from './tradingSessionModels'
+export { deriveTradingBalances, firstOrCreatedAccount, isAuthSessionFailure }
+export type { TradingBalances }
 
 export type DemoTradingSession = {
   token: string
   account: AccountSummary
 }
 
-export type TradingAccountData = {
-  account: AccountSummary
-  orders: OrderResponse[]
-  trades: Trade[]
-  positions: PositionResponse[]
-  positionHistory: PositionResponse[]
-  fundingSettlements: FundingSettlement[]
-  transfers: AccountTransferResponse[]
-  ledgerEntries: LedgerEntry[]
-  assetLedgerEntries: AssetLedgerEntry[]
-  walletBalances: WalletBalance[]
-}
+export type TradingAccountData = AccountSessionData
 
 export type PositionMutation =
   | { type: 'FULL_CLOSE' }
@@ -67,48 +41,7 @@ export type PositionMutation =
   | { type: 'ADJUST_MARGIN'; payload: AdjustPositionMarginRequest }
   | { type: 'CREATE_PROTECTIONS'; payloads: CreateProtectionRequest[] }
 
-export function isAuthSessionFailure(error: unknown) {
-  return error instanceof ApiClientError && (error.status === 401 || error.status === 403)
-}
-
-export async function loadTradingAccountData(token: string, accountId: string): Promise<TradingAccountData> {
-  const [
-    account,
-    orders,
-    trades,
-    positions,
-    positionHistory,
-    fundingSettlements,
-    transfers,
-    ledgerEntries,
-    assetLedgerEntries,
-    walletBalances
-  ] = await Promise.all([
-    getAccountSummary(accountId, token),
-    getOrders(accountId, token),
-    getTrades(accountId, token),
-    getPositions(accountId, token),
-    getPositionHistory(accountId, token),
-    getFundingSettlements(accountId, token),
-    getAccountTransfers(accountId, token),
-    getLedgerEntries(accountId, token),
-    getAssetLedger(accountId, token),
-    getWalletBalances(accountId, token)
-  ])
-
-  return {
-    account,
-    orders,
-    trades,
-    positions,
-    positionHistory,
-    fundingSettlements,
-    transfers,
-    ledgerEntries,
-    assetLedgerEntries,
-    walletBalances
-  }
-}
+export const loadTradingAccountData = loadAccountData
 
 export async function submitTradingOrder(payload: OrderPayload, token?: string | null) {
   if (!token) {
@@ -186,16 +119,4 @@ export function updateTradingPositionProtection(
   token: string
 ) {
   return updatePositionProtection(accountId, positionId, payload, token)
-}
-
-export function selectActiveDemoAccount(accounts: AccountSummary[]) {
-  return accounts.find((account) =>
-    account.accountType.trim().toUpperCase() === 'DEMO'
-    && account.status.trim().toUpperCase() === 'ACTIVE'
-  )
-}
-
-export async function firstOrCreatedAccount(token: string) {
-  const accounts = await getAccounts(token)
-  return selectActiveDemoAccount(accounts) ?? createDemoAccount(token)
 }

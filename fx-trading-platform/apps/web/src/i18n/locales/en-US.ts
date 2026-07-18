@@ -828,6 +828,12 @@ const enUS = {
     }
   },
   assets: {
+    transferAmountInvalid: 'Enter a transfer amount greater than 0.',
+    transferBalanceInsufficient: 'Transfer amount must not exceed the available source balance.',
+    transferCompleted: 'Transferred {{amount}} USDT ({{direction}}).',
+    transferFailed: '{{message}}',
+    resetCompleted: 'Demo account reset completed.',
+    resetFailed: '{{message}}',
     walletTitle: 'Assets',
     walletSummary: 'Manage asset overview, deposit, withdrawal, ledger, and address book entries. This is currently a simulated ledger.',
     loginMessage: 'Log in to view the simulated ledger and submit deposit or withdrawal requests.',
@@ -1187,6 +1193,7 @@ const enUS = {
     }
   },
   account: {
+    dataUnavailable: '{{message}}',
     title: 'Account',
     summary: 'Mobile account entry for assets, security, and settings.',
     entryTitle: 'Account entry',

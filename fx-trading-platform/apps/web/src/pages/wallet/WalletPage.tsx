@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowDownToLine, ArrowUpFromLine, BookUser, RefreshCcw, ShieldCheck, SlidersHorizontal, WalletCards } from 'lucide-react'
 import type { TFunction } from 'i18next'
-import type { AccountTransferDirection } from '@fx-platform/shared-types'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
 
@@ -10,14 +9,13 @@ import { AssetMark } from '../../components/asset/AssetMark'
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'
-import { useTradingSession } from '../../features/trading-session/useTradingSession'
+import { translateCoreMessage } from '../../routes/shared/translateCoreMessage'
 import {
   createFundOrder,
   filterByStatus,
   getFundOrders,
-  resetDemoAccount,
   toNumber,
-  transferDemoFunds,
+  useWalletController,
   type Amount,
   type AssetLedgerEntry,
   type FundOrder,
@@ -43,8 +41,37 @@ type AssetRow = {
 export function WalletPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { token, account, accountId, ledgerEntries, assetLedgerEntries, walletBalances, sessionMode, sessionError, loginRequired, refreshAccountData, retrySession } =
-    useTradingSession()
+  const {
+    token,
+    account,
+    accountId,
+    ledgerEntries,
+    assetLedgerEntries,
+    walletBalances,
+    sessionMode,
+    sessionError: sessionErrorMessage,
+    loginRequired,
+    retrySession,
+    transferDirection,
+    transferAmount,
+    transferRequestId,
+    transferPending,
+    transferError: transferErrorMessage,
+    resetRequestId,
+    resetPending,
+    resetError: resetErrorMessage,
+    notice: walletNotice,
+    beginTransfer,
+    changeTransferDirection,
+    changeTransferAmount,
+    submitTransfer,
+    beginReset,
+    submitReset
+  } = useWalletController()
+  const sessionError = translateCoreMessage(sessionErrorMessage, t)
+  const transferError = translateCoreMessage(transferErrorMessage, t)
+  const resetError = translateCoreMessage(resetErrorMessage, t)
+  const translatedWalletNotice = translateCoreMessage(walletNotice, t)
   const [fundOrders, setFundOrders] = useState<FundOrder[]>([])
   const [fundOrdersLoading, setFundOrdersLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState('ALL')
@@ -57,17 +84,7 @@ export function WalletPage() {
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null)
   const [fundOrderType, setFundOrderType] = useState<'RECHARGE' | 'WITHDRAWAL'>('RECHARGE')
   const [transferOpen, setTransferOpen] = useState(false)
-  const [transferDirection, setTransferDirection] = useState<AccountTransferDirection>('SPOT_TO_PERP')
-  const [transferAmount, setTransferAmount] = useState('')
-  const [transferRequestId, setTransferRequestId] = useState('')
-  const [transferPending, setTransferPending] = useState(false)
-  const [transferError, setTransferError] = useState<string | null>(null)
   const [resetOpen, setResetOpen] = useState(false)
-  const [resetRequestId, setResetRequestId] = useState('')
-  const [resetPending, setResetPending] = useState(false)
-  const [resetError, setResetError] = useState<string | null>(null)
-  const transferInFlight = useRef(false)
-  const resetInFlight = useRef(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [apiError, setApiError] = useState<ReturnType<typeof formatApiError> | null>(null)
 
@@ -161,80 +178,32 @@ export function WalletPage() {
   }
 
   const openTransfer = () => {
-    setTransferAmount('')
-    setTransferRequestId(crypto.randomUUID())
-    setTransferError(null)
+    setNotice(null)
+    beginTransfer()
     setTransferOpen(true)
   }
 
-  const handleTransferDirectionChange = (direction: AccountTransferDirection) => {
-    setTransferDirection(direction)
-    setTransferAmount('')
-    setTransferRequestId(crypto.randomUUID())
-    setTransferError(null)
-  }
-
-  const handleTransferAmountChange = (amount: string) => {
-    setTransferAmount(amount)
-    setTransferRequestId(crypto.randomUUID())
-    setTransferError(null)
-  }
-
   const handleTransfer = async () => {
-    const amount = Number(transferAmount)
-    const available = Number(transferAvailable)
-    if (!token || !accountId || transferInFlight.current) return
-    if (!Number.isFinite(amount) || amount <= 0 || !Number.isFinite(available) || amount > available) {
-      setTransferError('Transfer amount must not exceed the available source balance.')
-      return
-    }
-    setNotice(null)
-    setTransferError(null)
-    transferInFlight.current = true
-    setTransferPending(true)
     try {
-      const transfer = await transferDemoFunds(
-        accountId,
-        {
-          direction: transferDirection,
-          amount,
-          requestId: transferRequestId
-        },
-        token
-      )
-      await refreshAccountData(token, accountId)
-      setNotice(`Transferred ${transfer.amount ?? amount} USDT (${transfer.direction ?? transferDirection}).`)
-      setTransferOpen(false)
-    } catch (error) {
-      setTransferError(formatApiError(error).message)
-    } finally {
-      transferInFlight.current = false
-      setTransferPending(false)
+      const transfer = await submitTransfer(transferAvailable)
+      if (transfer) setTransferOpen(false)
+    } catch {
+      // The core controller preserves the API error as a message descriptor.
     }
   }
 
   const openReset = () => {
-    setResetRequestId(crypto.randomUUID())
-    setResetError(null)
+    setNotice(null)
+    beginReset()
     setResetOpen(true)
   }
 
   const handleReset = async () => {
-    if (!token || !accountId || resetInFlight.current) return
-    setNotice(null)
-    setResetError(null)
-    resetInFlight.current = true
-    setResetPending(true)
     try {
-      await resetDemoAccount(accountId, { requestId: resetRequestId }, token)
-      await refreshAccountData(token, accountId)
-      setNotice('Demo account reset completed.')
-      setResetOpen(false)
-    } catch (error) {
-      setResetError(formatApiError(error).message)
-    } finally {
-      resetInFlight.current = false
-      setResetPending(false)
+      const result = await submitReset()
+      if (result) setResetOpen(false)
+    } catch {
+      // The core controller preserves the API error as a message descriptor.
     }
   }
 
@@ -282,7 +251,7 @@ export function WalletPage() {
         />
       ) : null}
       {apiError ? <ApiErrorState error={apiError} onAction={() => void loadFundOrders()} /> : null}
-      {notice ? <div className="user-page__notice">{notice}</div> : null}
+      {notice || translatedWalletNotice ? <div className="user-page__notice">{notice ?? translatedWalletNotice}</div> : null}
 
       <section id="wallet-overview" className="wallet-hero-grid" aria-label={t('assets.overview')}>
         <article className="wallet-balance-card">
@@ -581,8 +550,8 @@ export function WalletPage() {
         requestId={transferRequestId}
         pending={transferPending}
         error={transferError}
-        onDirectionChange={handleTransferDirectionChange}
-        onAmountChange={handleTransferAmountChange}
+        onDirectionChange={changeTransferDirection}
+        onAmountChange={changeTransferAmount}
         onClose={() => setTransferOpen(false)}
         onConfirm={() => void handleTransfer()}
       />

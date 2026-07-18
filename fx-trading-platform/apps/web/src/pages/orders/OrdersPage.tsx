@@ -7,7 +7,7 @@ import { AssetMark } from '../../components/asset/AssetMark'
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'
-import { useTradingSession } from '../../features/trading-session/useTradingSession'
+import { useTranslatedAccountData } from '../../routes/shared/useTranslatedAccountData'
 import {
   cancelOrder,
   cancelProtection,
@@ -38,7 +38,7 @@ const statusOptions = [
 export function OrdersPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { token, orders, sessionMode, sessionError, loginRequired, retrySession } = useTradingSession()
+  const { token, orders, sessionMode, sessionError, loginRequired, retrySession } = useTranslatedAccountData()
   const [view, setView] = useState<OrderView>('CURRENT')
   const [status, setStatus] = useState('ALL')
   const [symbol, setSymbol] = useState('')

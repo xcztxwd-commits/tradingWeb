@@ -828,6 +828,12 @@ const jaJP = {
     }
   },
   assets: {
+    transferAmountInvalid: '0 より大きい振替金額を入力してください。',
+    transferBalanceInsufficient: '振替金額は振替元の利用可能残高以下にしてください。',
+    transferCompleted: '{{amount}} USDT を振替しました（{{direction}}）。',
+    transferFailed: '{{message}}',
+    resetCompleted: 'Demo アカウントをリセットしました。',
+    resetFailed: '{{message}}',
     walletTitle: '資産',
     walletSummary: '資産概要、入金入口、出金入口、資金履歴、アドレス帳入口を管理します。現在はシミュレーション資金台帳です。',
     loginMessage: 'ログインするとシミュレーション資金台帳の確認と入出金申請ができます。',
@@ -1187,6 +1193,7 @@ const jaJP = {
     }
   },
   account: {
+    dataUnavailable: '{{message}}',
     title: 'マイページ',
     summary: 'モバイル向けのアカウント入口。資産、セキュリティ、設定へアクセスできます。',
     entryTitle: 'アカウント入口',

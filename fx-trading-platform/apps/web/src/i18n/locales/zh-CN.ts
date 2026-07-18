@@ -828,6 +828,12 @@ const zhCN = {
     }
   },
   assets: {
+    transferAmountInvalid: '请输入大于 0 的划转金额。',
+    transferBalanceInsufficient: '划转金额不得超过来源账户的可用余额。',
+    transferCompleted: '已划转 {{amount}} USDT（{{direction}}）。',
+    transferFailed: '{{message}}',
+    resetCompleted: 'Demo 账户已重置。',
+    resetFailed: '{{message}}',
     walletTitle: '资金',
     walletSummary: '管理资产总览、充值入口、提现入口、资金流水和地址簿入口。当前为模拟资金账本。',
     loginMessage: '登录后才能查看模拟资金账本和提交充值/提现申请。',
@@ -1187,6 +1193,7 @@ const zhCN = {
     }
   },
   account: {
+    dataUnavailable: '{{message}}',
     title: '我的',
     summary: '移动端账户入口，集中访问资金、安全和设置。',
     entryTitle: '账户入口',

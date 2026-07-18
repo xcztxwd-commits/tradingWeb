@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import { describe, it } from 'node:test'
 
-import { createLocalPreviewOrder, deriveTradingBalances } from './tradingSessionModels.ts'
+import { createLocalPreviewOrder, deriveTradingBalances } from '@fx-platform/frontend-core'
 import { repriceOpenPositionsForQuote } from './tradingSessionPositions.ts'
 import {
   clearStoredAuthToken,
@@ -306,7 +306,7 @@ describe('trading session submit mode', () => {
   })
 
   it('selects the active demo account from an unsorted mixed account list case-insensitively', async () => {
-    const { selectActiveDemoAccount } = await import('./tradingSession.ts')
+    const { selectActiveDemoAccount } = await import('@fx-platform/frontend-core')
     const liveActive = accountSummary({ id: 'live-active', accountType: 'LIVE', status: 'ACTIVE' })
     const demoDisabled = accountSummary({ id: 'demo-disabled', accountType: 'DEMO', status: 'DISABLED' })
     const demoActive = accountSummary({ id: 'demo-active', accountType: 'dEmO', status: 'aCtIvE' })
@@ -426,6 +426,10 @@ describe('trading session submit mode', () => {
   it('uses an explicit auth session probe instead of auto demo login on trading page boot', async () => {
     const sessionSource = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
     const hookSource = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+    const accountSource = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      'utf8'
+    )
     const authApiSource = readFileSync(
       new URL('../../../../../packages/frontend-core/src/api/authApi.ts', import.meta.url),
       'utf8'
@@ -441,10 +445,11 @@ describe('trading session submit mode', () => {
     assert.match(authApiSource, /getSessionStatus/)
     assert.match(authApiSource, /export type SessionAuthStatus = SessionStatus\['status'\]/)
     assert.match(authApiSource, /apiGet<SessionStatus>\('\/api\/auth\/session'/)
-    assert.match(hookSource, /getSessionStatus/)
+    assert.match(hookSource, /useAccountData\(\{ refreshMs \}\)/)
+    assert.match(accountSource, /getSessionStatus/)
     assert.match(hookSource, /sessionAuthStatus/)
-    assert.match(hookSource, /setSessionAuthStatus\('valid_token'\)/)
-    assert.match(hookSource, /setLoginRequired\(true\)/)
+    assert.match(accountSource, /authStatus: 'valid_token'/)
+    assert.match(accountSource, /requireLogin\('guest'\)/)
     assert.doesNotMatch(hookSource, /getCachedDemoSession\(\)/)
     assert.doesNotMatch(hookSource, /refreshCachedDemoSession\(\)/)
     assert.doesNotMatch(sessionSource, /const demoEmail =/)
@@ -452,84 +457,117 @@ describe('trading session submit mode', () => {
   })
 
   it('requires login when no stored token or an unauthenticated session probe is returned', () => {
-    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
-    const loadBlock = sourceBetween(source, 'const loadSessionSnapshot = useCallback', 'const retrySession = useCallback')
+    const source = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      'utf8'
+    )
+    const loadBlock = sourceBetween(source, 'const boot = async', 'return {')
 
-    assert.match(loadBlock, /readStoredAuthToken\(\)/)
+    assert.match(loadBlock, /dependencies\.readStoredAuthToken\(\)/)
     assert.match(loadBlock, /getSessionStatus\(savedToken\)/)
     assert.match(loadBlock, /if \(status\.status === 'invalid_token'\)[\s\S]*requireLogin\('invalid_token'\)/)
     assert.match(loadBlock, /if \(!savedToken \|\| status\.status === 'guest' \|\| !status\.authenticated\)[\s\S]*requireLogin\('guest'\)/)
   })
 
   it('marks boot refresh failures as an error session without clearing the latest account snapshot', async () => {
-    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
-    const bootBlock = sourceBetween(source, 'async function bootSession()', 'void bootSession()')
+    const source = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      'utf8'
+    )
     const { getTradingSessionMode } = await import('./useTradingSession.ts')
 
     assert.equal(getTradingSessionMode({ sessionReady: false, token: null, sessionError: 'boot failed' }), 'error')
-    assert.match(bootBlock, /catch\s*\(error\)\s*\{[\s\S]*markSessionError\(error\)/)
-    assert.match(bootBlock, /isAuthSessionFailure\(error\)/)
-    assert.doesNotMatch(bootBlock, /setAccount\(undefined\)/)
+    assert.match(source, /const markError = \(error: unknown\)/)
+    assert.match(source, /state: \{ status: 'error', error: apiError, message: toAccountErrorMessage\(apiError\) \}/)
+    assert.match(source, /data: previousData/)
+    assert.doesNotMatch(source, /setAccount\(undefined\)/)
   })
 
   it('turns coordinated refresh auth failures into login-required instead of offline preview', async () => {
-    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+    const source = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      'utf8'
+    )
     const { getTradingSessionMode } = await import('./useTradingSession.ts')
 
     assert.equal(getTradingSessionMode({ sessionReady: false, token: null, sessionError: null, loginRequired: true }), 'login-required')
     assert.equal(getTradingSessionMode({ sessionReady: false, token: 'token-1', sessionError: 'poll failed' }), 'error')
-    assert.match(source, /createAccountRefreshCoordinator\(\{[\s\S]*onError:[\s\S]*isAuthSessionFailure\(error\)[\s\S]*requireLogin\(\)/)
+    assert.match(source, /createAccountRefreshCoordinator\(\{[\s\S]*onError: markError/)
+    assert.match(source, /isAuthSessionFailure\(error\)[\s\S]*requireLogin\('invalid_token'\)/)
   })
 
   it('uses the coordinator 15s visible fallback without a duplicate hook interval', () => {
-    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+    const hookSource = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/useAccountData.ts', import.meta.url),
+      'utf8'
+    )
+    const source = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      'utf8'
+    )
 
-    assert.match(source, /useTradingSession\(\{ refreshMs = 15_000 \}/)
+    assert.match(hookSource, /refreshMs = 15_000/)
     assert.match(source, /createAccountRefreshCoordinator\(\{[\s\S]*pollMs: refreshMs/)
-    assert.doesNotMatch(source, /window\.setInterval/)
+    assert.doesNotMatch(hookSource, /window\.setInterval/)
   })
 
   it('refreshes the authoritative account snapshot after trading-session stream events', () => {
-    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+    const source = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      'utf8'
+    )
     const streamSource = readFileSync(
       new URL('../../../../../packages/frontend-core/src/market/marketStream.ts', import.meta.url),
       'utf8'
     )
 
-    assert.match(source, /subscribeTradingSessionEvents/)
-    assert.match(source, /subscribeTradingSessionEvents\([\s\S]*coordinator\.notifyEvent\(\)[\s\S]*coordinator\.notifyReconnect\(\)/)
-    assert.match(source, /coordinator\.dispose\(\)/)
+    assert.match(source, /subscribeAccountEvents/)
+    assert.match(source, /subscribeAccountEvents\([\s\S]*coordinator\?\.notifyEvent\(\)[\s\S]*coordinator\?\.notifyReconnect\(\)/)
+    assert.match(source, /coordinator\?\.dispose\(\)/)
     assert.match(streamSource, /subscribeTradingSessionEvents/)
     assert.match(streamSource, /'\/user\/queue\/trading-events'/)
     assert.doesNotMatch(streamSource, /\/topic\/trading\/accounts/)
   })
 
   it('uses backend position refresh as the authoritative open-position PnL source', () => {
-    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
+    const source = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      'utf8'
+    )
 
     assert.match(source, /createAccountRefreshCoordinator/)
-    assert.match(source, /refresh: \(\) => refreshAccountData\(token, accountId/)
+    assert.match(source, /createAccountRefreshCoordinator\(\{[\s\S]*refresh,/)
     assert.doesNotMatch(source, /subscribeQuote/)
     assert.doesNotMatch(source, /repriceOpenPositionsForQuote/)
     assert.doesNotMatch(source, /positionQuoteSymbolsKey/)
   })
 
   it('loads merged ledger rows while keeping account asset ledger details available', () => {
-    const source = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
+    const source = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      'utf8'
+    )
+    const modelsSource = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountSessionModels.ts', import.meta.url),
+      'utf8'
+    )
 
     assert.match(source, /getLedgerEntries/)
     assert.match(source, /getAssetLedger/)
-    assert.match(source, /assetLedgerEntries:\s*AssetLedgerEntry\[\]/)
+    assert.match(modelsSource, /assetLedgerEntries:\s*AssetLedgerEntry\[\]/)
     assert.match(source, /return \{[\s\S]*ledgerEntries,[\s\S]*assetLedgerEntries,[\s\S]*walletBalances[\s\S]*\}/)
     assert.doesNotMatch(source, /mapAssetLedgerEntry/)
   })
 
   it('loads the initial account, order, trade, position, funding and transfer snapshot in parallel', () => {
-    const source = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
+    const source = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      'utf8'
+    )
     const loadBlock = sourceBetween(
       source,
-      'export async function loadTradingAccountData',
-      'export async function submitTradingOrder'
+      'export async function loadAccountData',
+      'export function createAccountDataController'
     )
 
     assert.match(loadBlock, /Promise\.all\(\[/)
@@ -554,23 +592,20 @@ describe('trading session submit mode', () => {
   })
 
   it('routes boot, public, event, order, OCO and position refreshes through one latest single-flight gate', () => {
-    const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
-    const refreshBlock = sourceBetween(
-      source,
-      'const refreshAccountData = useCallback',
-      'const clearSessionSnapshot = useCallback'
+    const source = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      'utf8'
     )
+    const hookSource = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
 
     assert.match(source, /createLatestSingleFlightRefreshGate/)
-    assert.match(refreshBlock, /refreshGate\.request\(/)
-    assert.match(refreshBlock, /loadTradingAccountData\(accessToken, currentAccountId\)/)
-    assert.match(refreshBlock, /applyAccountData\(data\)/)
-    assert.equal((source.match(/loadTradingAccountData\(/g) ?? []).length, 1)
-    assert.match(source, /refresh: \(\) => refreshAccountData\(token, accountId/)
-    assert.match(source, /await refreshAccountData\(savedToken, account\.id, isActive\)/)
-    assert.match(source, /submitTradingOrder[\s\S]*await refreshAccountData\(token, accountId\)/)
-    assert.match(source, /submitTradingOco[\s\S]*await refreshAccountData\(token, accountId\)/)
-    assert.match(source, /mutateTradingPosition[\s\S]*await refreshAccountData\(token, accountId\)/)
+    assert.match(source, /refreshGate\.request\(/)
+    assert.match(source, /dependencies\.loadAccountData\(token, data\.account\.id\)/)
+    assert.match(source, /startRuntime\(savedToken\)/)
+    assert.match(source, /coordinator\?\.notifyEvent\(\)/)
+    assert.match(hookSource, /submitTradingOrder[\s\S]*await refreshAccountData\(token, accountId\)/)
+    assert.match(hookSource, /submitTradingOco[\s\S]*await refreshAccountData\(token, accountId\)/)
+    assert.match(hookSource, /mutateTradingPosition[\s\S]*await refreshAccountData\(token, accountId\)/)
   })
 })
 

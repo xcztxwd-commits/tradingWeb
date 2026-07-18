@@ -7,12 +7,13 @@ import { AssetMark } from '../../components/asset/AssetMark'
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'
-import { useTradingSession, type TradingSessionMode } from '../../features/trading-session/useTradingSession'
+import { useTranslatedAccountData } from '../../routes/shared/useTranslatedAccountData'
 import {
   createFundOrder,
   filterByStatus,
   getFundOrders,
   toNumber,
+  type AccountDataStatus,
   type AccountSummary,
   type Amount,
   type FundOrder,
@@ -51,7 +52,7 @@ type AssetRow = {
 }
 
 type AccountStateProps = {
-  sessionMode: TradingSessionMode
+  sessionMode: AccountDataStatus
   sessionError: string | null
   loginRequired: boolean
   retrySession: () => Promise<void>
@@ -69,7 +70,7 @@ export function AccountOverviewPage() {
     sessionError,
     sessionMode,
     walletBalances
-  } = useTradingSession()
+  } = useTranslatedAccountData()
 
   return (
     <AccountShell
@@ -104,7 +105,7 @@ export function AccountAssetsPage() {
     sessionError,
     sessionMode,
     walletBalances
-  } = useTradingSession()
+  } = useTranslatedAccountData()
   const frozenAmount = toNumber(account?.usedMargin) ?? 0
   const assetRows = useMemo(
     () => getAssetRows(account, walletBalances, ledgerEntries, frozenAmount),
@@ -143,7 +144,7 @@ export function AccountAssetsPage() {
 }
 
 export function FundingRecordsPage() {
-  const { account, accountId, ledgerEntries, loginRequired, retrySession, sessionError, sessionMode, token } = useTradingSession()
+  const { account, accountId, ledgerEntries, loginRequired, retrySession, sessionError, sessionMode, token } = useTranslatedAccountData()
   const [fundOrders, setFundOrders] = useState<FundOrder[]>([])
   const [fundOrdersLoading, setFundOrdersLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState('ALL')
@@ -293,7 +294,7 @@ export function FundingRecordsPage() {
 }
 
 export function TradeOrdersPage() {
-  const { account, loginRequired, orders, retrySession, sessionError, sessionMode } = useTradingSession()
+  const { account, loginRequired, orders, retrySession, sessionError, sessionMode } = useTranslatedAccountData()
   const [activeTab, setActiveTab] = useState<TradeOrderTab>('OPEN')
   const [sideFilter, setSideFilter] = useState('ALL')
   const [query, setQuery] = useState('')
@@ -339,7 +340,7 @@ export function TradeOrdersPage() {
 }
 
 export function KycPage() {
-  const { account, loginRequired, retrySession, sessionError, sessionMode } = useTradingSession()
+  const { account, loginRequired, retrySession, sessionError, sessionMode } = useTranslatedAccountData()
 
   return (
     <AccountShell account={account} title="Identity verification" summary="KYC is coming soon and currently limited to internal testing.">
@@ -365,7 +366,7 @@ export function KycPage() {
 }
 
 export function AccountSettingsPage() {
-  const { account, loginRequired, retrySession, sessionError, sessionMode } = useTradingSession()
+  const { account, loginRequired, retrySession, sessionError, sessionMode } = useTranslatedAccountData()
 
   return (
     <AccountShell account={account} title="Settings" summary="Basic profile, notifications and trading preferences.">

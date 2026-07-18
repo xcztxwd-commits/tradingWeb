@@ -5,14 +5,14 @@ import { useNavigate } from 'react-router-dom'
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'
-import { useTradingSession } from '../../features/trading-session/useTradingSession'
+import { useTranslatedAccountData } from '../../routes/shared/useTranslatedAccountData'
 import { toNumber, type AccountSummary, type Amount, type LedgerEntry, type OrderResponse, type PositionResponse } from '@fx-platform/frontend-core'
 
 export function DashboardPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const { account, orders, positions, ledgerEntries, sessionMode, sessionError, loginRequired, retrySession } =
-    useTradingSession()
+    useTranslatedAccountData()
 
   const openPositions = useMemo(() => positions.filter((position) => position.status !== 'CLOSED'), [positions])
   const recentOrders = useMemo(() => orders.slice(0, 8), [orders])

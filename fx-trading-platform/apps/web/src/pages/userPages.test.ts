@@ -278,7 +278,7 @@ describe('prototype auth and account center', () => {
   })
 
   it('connects account pages to the authenticated trading session instead of static placeholders', () => {
-    assert.match(accountPages, /useTradingSession/)
+    assert.match(accountPages, /useTranslatedAccountData/)
     assert.match(accountPages, /DataTable/)
     assert.match(accountPages, /LoadingState/)
     assert.match(accountPages, /LoginRequiredState/)
@@ -360,7 +360,7 @@ describe('prototype auth and account center', () => {
   })
 
   it('remodels wallet into a Binance-style asset dashboard without changing the funding data flow', () => {
-    assert.match(wallet, /useTradingSession/)
+    assert.match(wallet, /useWalletController/)
     assert.match(wallet, /getFundOrders/)
     assert.match(wallet, /createFundOrder/)
     assert.match(wallet, /walletBalances/)

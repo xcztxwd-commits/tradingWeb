@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
+const coreAccountDir = join(currentDir, '../../../../../packages/frontend-core/src/account')
 
 function readRequiredSource(name: string) {
   const path = join(currentDir, name)
@@ -48,13 +49,20 @@ describe('wallet Spot and Perpetual operations', () => {
 
   it('uses Task 7 APIs, refreshes successful mutations and never creates a USDT_PERP mirror', () => {
     const wallet = readRequiredSource('WalletPage.tsx')
+    const controller = readFileSync(join(coreAccountDir, 'useWalletController.ts'), 'utf8')
+    const operations = readFileSync(join(coreAccountDir, 'accountOperations.ts'), 'utf8')
 
-    assert.match(wallet, /transferDemoFunds/)
-    assert.match(wallet, /resetDemoAccount/)
+    assert.match(wallet, /useWalletController/)
+    assert.match(controller, /runWalletTransfer/)
+    assert.match(controller, /runWalletReset/)
+    assert.match(controller, /transferInFlight/)
+    assert.match(controller, /resetInFlight/)
+    assert.match(operations, /transferDemoFunds/)
+    assert.match(operations, /resetDemoAccount/)
     assert.match(wallet, /<TransferDialog/)
     assert.match(wallet, /<DemoResetDialog/)
-    assert.match(wallet, /crypto\.randomUUID\(\)/)
-    assert.match(wallet, /await refreshAccountData\(token, accountId\)/)
+    assert.match(controller, /crypto\.randomUUID\(\)/)
+    assert.match(operations, /await dependencies\.refresh\(\)/)
     assert.doesNotMatch(wallet, /USDT_PERP/)
     assert.doesNotMatch(wallet, /AssetConversionPanel/)
     assert.doesNotMatch(wallet, /convertAsset/)
