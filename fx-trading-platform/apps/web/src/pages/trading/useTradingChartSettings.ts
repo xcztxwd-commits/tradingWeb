@@ -17,7 +17,7 @@ import type {
   IndicatorSettings,
   OwnedChartSettingsState
 } from './chartSettings'
-import type { ChartThemeMode, TradingChartCallbacks } from './tradingPageViewModels'
+import type { ChartThemeMode, TradingChartCallbacks } from '../../routes/trading/tradingRoute.types'
 import type { TradingPeriod } from '@fx-platform/frontend-core'
 
 type TradingChartSettingsState = {

@@ -6,18 +6,21 @@ import {
   createOcoOrder,
   createOrder,
   createPositionProtection,
+  updatePositionProtection
+} from '../api/tradingApi.ts'
+import { firstOrCreatedAccount, loadAccountData } from '../account/accountOperations.ts'
+import { isAuthSessionFailure } from '../account/accountErrors.ts'
+import {
   deriveTradingBalances,
-  firstOrCreatedAccount,
-  isAuthSessionFailure,
-  loadAccountData,
-  updatePositionProtection,
   type AccountSessionData,
-  type AccountSummary,
-  type OcoOrderPayload,
-  type OrderPayload,
-  type UpdatePositionProtectionPayload,
   type TradingBalances
-} from '@fx-platform/frontend-core'
+} from '../account/accountSessionModels.ts'
+import type {
+  AccountSummary,
+  OcoOrderPayload,
+  OrderPayload,
+  UpdatePositionProtectionPayload
+} from '../models/index.ts'
 import type {
   AdjustPositionMarginRequest,
   BatchActionRequest,

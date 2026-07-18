@@ -72,7 +72,10 @@ register(
 const { applyAuthoritativeRealtimeQuoteToChart, applyRealtimeQuoteToChart } = await import('./KLineChartPanel.tsx')
 const source = readFileSync(join(currentDir, 'KLineChartPanel.tsx'), 'utf8')
 const chartWorkspaceSource = readFileSync(join(currentDir, 'ChartWorkspace.tsx'), 'utf8')
-const tradingPageSource = readFileSync(join(currentDir, '..', 'TradingPage.tsx'), 'utf8')
+const tradingPageSource = [
+  readFileSync(join(currentDir, '..', 'TradingPage.tsx'), 'utf8'),
+  readFileSync(join(currentDir, '..', '..', '..', 'routes', 'trading', 'useTradingRouteController.ts'), 'utf8')
+].join('\n')
 const desktopViewSource = readFileSync(join(currentDir, 'TradingDesktopView.tsx'), 'utf8')
 const mobileViewSource = readFileSync(join(currentDir, 'TradingMobileView.tsx'), 'utf8')
 const styles = readFileSync(join(currentDir, 'KLineChartPanel.module.css'), 'utf8')

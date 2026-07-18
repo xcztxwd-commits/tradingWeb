@@ -20,10 +20,11 @@ describe('@fx-platform/frontend-core package contract', () => {
     assert.equal(packageJson.scripts.typecheck, 'tsc --noEmit -p tsconfig.json')
   })
 
-  it('adds only the market runtime dependencies required by the extracted implementation', () => {
+  it('adds only the runtime dependencies required by the extracted core implementation', () => {
     assert.deepEqual(packageJson.dependencies, {
       '@fx-platform/shared-types': '0.1.0',
-      '@stomp/stompjs': '^7.3.0'
+      '@stomp/stompjs': '^7.3.0',
+      zustand: '^5.0.0'
     })
     assert.equal(packageJson.peerDependencies.react, '^19.0.0')
     assert.equal(packageJson.devDependencies.react, '^19.0.0')

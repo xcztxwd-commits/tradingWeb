@@ -1,5 +1,4 @@
 import { useCallback, useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
 
 import {
   cancelAllTradingOrders,
@@ -9,36 +8,32 @@ import {
   submitTradingOco,
   submitTradingOrder,
   updateTradingPositionProtection
-} from './tradingSession'
-import type { PositionMutation } from './tradingSession'
-import {
-  useAccountData,
-  type OcoOrderPayload,
-  type OrderPayload,
-  type OrderResponse,
-  type PositionResponse,
-  type UpdatePositionProtectionPayload
-} from '@fx-platform/frontend-core'
-import { translateCoreMessage } from '../../routes/shared/translateCoreMessage'
+} from './tradingSession.ts'
+import type { PositionMutation } from './tradingSession.ts'
+import { useAccountData } from '../account/useAccountData.ts'
+import { ApiClientError } from '../api/apiClient.ts'
+import type { CoreMessage } from '../coreMessage.ts'
+import type {
+  OcoOrderPayload,
+  OrderPayload,
+  OrderResponse,
+  PositionResponse,
+  UpdatePositionProtectionPayload
+} from '../models/index.ts'
 
 type Options = {
   refreshMs?: number
 }
 
-type Translate = (key: string, options?: Record<string, unknown>) => string
-
-const defaultTranslate: Translate = (key) => {
-  if (key === 'trading.backendSessionFailed') return 'Backend session connection failed. Try again later.'
-  if (key === 'trading.loginBeforeOrder') return 'Log in before placing an order.'
-  return key
-}
+const backendSessionFallback = 'Backend session connection failed. Try again later.'
+const loginRequiredFallback = 'Log in before placing an order.'
 
 export type TradingSessionMode = 'loading' | 'ready' | 'login-required' | 'error'
 
 type TradingSessionModeInput = {
   sessionReady: boolean
   token?: string | null
-  sessionError?: string | null
+  sessionError?: CoreMessage | string | null
   loginRequired?: boolean
 }
 
@@ -54,14 +49,25 @@ export function getTradingSessionMode({
   return 'loading'
 }
 
-export function formatTradingSessionError(error: unknown, t: Translate = defaultTranslate) {
-  if (error instanceof Error && error.message) return error.message
-  if (typeof error === 'string' && error) return error
-  return t('trading.backendSessionFailed')
+export function formatTradingSessionError(error: unknown): CoreMessage {
+  const message = error instanceof Error && error.message
+    ? error.message
+    : typeof error === 'string' && error
+      ? error
+      : backendSessionFallback
+  const requestId = error instanceof ApiClientError
+    ? error.requestId
+    : getStringProperty(error, 'requestId')
+  return {
+    key: 'trading.backendSessionFailed',
+    values: {
+      message,
+      ...(requestId ? { requestId } : {})
+    }
+  }
 }
 
 export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
-  const { t } = useTranslation()
   const accountData = useAccountData({ refreshMs })
   const {
     token,
@@ -80,7 +86,7 @@ export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
     loginRequired,
     retrySession
   } = accountData
-  const sessionError = translateCoreMessage(accountData.sessionError, t)
+  const sessionError = accountData.sessionError
   const [submittedOrders, setSubmittedOrders] = useState<OrderResponse[]>([])
   const [lastOrderError, setLastOrderError] = useState<unknown>(null)
   const orders = useMemo(
@@ -101,7 +107,7 @@ export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
       setLastOrderError(null)
       try {
         if (loginRequired) {
-          throw new Error(t('trading.loginBeforeOrder'))
+          throw new Error(loginRequiredFallback)
         }
         if (token && !accountId) {
           throw new Error('Trading account is not ready')
@@ -120,14 +126,14 @@ export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
         throw error
       }
     },
-    [accountId, loginRequired, refreshAccountData, t, token]
+    [accountId, loginRequired, refreshAccountData, token]
   )
 
   const submitOco = useCallback(
     async (payload: OcoOrderPayload) => {
       setLastOrderError(null)
       try {
-        if (loginRequired) throw new Error(t('trading.loginBeforeOrder'))
+        if (loginRequired) throw new Error(loginRequiredFallback)
         if (!token || !accountId) throw new Error('Trading account is not ready')
         const response = await submitTradingOco({ ...payload, accountId }, token)
         await refreshAccountData(token, accountId).catch(() => undefined)
@@ -137,7 +143,7 @@ export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
         throw error
       }
     },
-    [accountId, loginRequired, refreshAccountData, t, token]
+    [accountId, loginRequired, refreshAccountData, token]
   )
 
   const submitClosePosition = useCallback(
@@ -209,4 +215,10 @@ export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
     closePosition: submitClosePosition,
     updatePositionProtection: submitProtectionUpdate
   }
+}
+
+function getStringProperty(value: unknown, key: string) {
+  if (!value || typeof value !== 'object') return undefined
+  const property = (value as Record<string, unknown>)[key]
+  return typeof property === 'string' && property ? property : undefined
 }

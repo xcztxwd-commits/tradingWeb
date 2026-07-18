@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { QuantityUnit } from '@fx-platform/shared-types'
 
 import type { PositionResponse } from '@fx-platform/frontend-core'
-import type { PositionMutation } from '../../../features/trading-session/tradingSession'
+import type { PositionMutation } from '@fx-platform/frontend-core'
 import { PositionActionDialog } from '../../../features/trading/components/PositionActionDialog'
 import type { MarginAdjustmentValue, PositionAction } from '../../../features/trading/components/PositionActionDialog'
 import type { ProtectionLevel, ProtectionType } from '../../../features/trading/components/MultiLevelProtectionEditor'

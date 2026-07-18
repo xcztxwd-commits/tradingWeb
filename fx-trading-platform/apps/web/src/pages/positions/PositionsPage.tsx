@@ -7,7 +7,7 @@ import { AssetMark } from '../../components/asset/AssetMark'
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'
-import { mutateTradingPosition, updateTradingPositionProtection } from '../../features/trading-session/tradingSession'
+import { mutateTradingPosition, updateTradingPositionProtection } from '@fx-platform/frontend-core'
 import { useTranslatedAccountData } from '../../routes/shared/useTranslatedAccountData'
 import type { PositionResponse, UpdatePositionProtectionPayload } from '@fx-platform/frontend-core'
 import {

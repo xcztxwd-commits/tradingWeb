@@ -1,7 +1,7 @@
 import { Activity, LogIn, ShieldCheck, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import type { TradingSessionMode } from '../../../features/trading-session/useTradingSession'
+import type { TradingSessionMode } from '@fx-platform/frontend-core'
 import styles from './LoginPromptDialog.module.css'
 
 type Props = {

@@ -2,7 +2,7 @@ import { ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import type { TradingWorkspaceLayoutControls } from '../../pages/trading/tradingPageViewModels'
+import type { TradingWorkspaceLayoutControls } from '../../routes/trading/tradingRoute.types'
 import type { TradingDropSide, TradingLayoutNode, TradingPanelId, TradingPanelNode } from '../../stores/layoutStore'
 import { ResizablePanel } from './ResizablePanel'
 import { ResizeHandle } from './ResizeHandle'

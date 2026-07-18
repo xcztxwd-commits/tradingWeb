@@ -1,8 +1,7 @@
-import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from './chartSettings'
+import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from '../../pages/trading/chartSettings'
 import type { AccountSummary, LedgerEntry, OcoOrderPayload, OrderPayload, OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
 import type { TradingMarket, TradingPeriod, TradingQuote } from '@fx-platform/frontend-core'
-import type { TradingBalances } from '../../features/trading-session/tradingSession'
-import type { TradingSessionMode } from '../../features/trading-session/useTradingSession'
+import type { TradingBalances, TradingSessionMode } from '@fx-platform/frontend-core'
 import type {
   TradingDropSide,
   TradingLayout,
@@ -11,8 +10,8 @@ import type {
   TradingSplitDirection
 } from '../../stores/layoutStore'
 import type { AccountTransferResponse, BatchActionResponse, FundingSettlement, OcoOrderGroupResponse, Trade } from '@fx-platform/shared-types'
-import type { TradingMarketDataStatusView } from './tradingPageMarketDataStatus'
-import type { PerpetualTradingControlsModel } from './usePerpetualTradingControls'
+import type { TradingMarketDataStatusView } from '../../pages/trading/tradingPageMarketDataStatus'
+import type { PerpetualTradingControlsModel } from '../../pages/trading/usePerpetualTradingControls'
 import type { TradingProduct } from '../../app/tradingRoutes'
 
 export type ChartThemeMode = 'dark' | 'light'
@@ -59,7 +58,7 @@ export type TradingWorkspaceLayoutControls = {
   resetSignal: number
 }
 
-export type TradingTerminalViewProps = {
+export type TradingRouteModel = {
   accountPanel: TradingAccountPanelData
   accountId?: string
   balances: TradingBalances
@@ -99,5 +98,9 @@ export type TradingTerminalViewProps = {
   terminalLoading: boolean
   token: string | null
   tradePanelSessionMode: TradingSessionMode
+}
+
+/** Temporary name used only while the current views are migrated in Task 15. */
+export type TradingTerminalViewProps = TradingRouteModel & {
   workspaceLayoutControls: TradingWorkspaceLayoutControls
 }

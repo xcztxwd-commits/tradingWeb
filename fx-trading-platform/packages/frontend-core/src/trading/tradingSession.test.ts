@@ -254,6 +254,41 @@ describe('trading session models', () => {
 })
 
 describe('trading session submit mode', () => {
+  it('derives loading, ready, login-required and error modes without app state', async () => {
+    const { getTradingSessionMode } = await import('./useTradingSession.ts')
+
+    assert.equal(getTradingSessionMode({ sessionReady: false }), 'loading')
+    assert.equal(getTradingSessionMode({ sessionReady: true, token: 'token-1' }), 'ready')
+    assert.equal(getTradingSessionMode({ sessionReady: false, loginRequired: true }), 'login-required')
+    assert.equal(getTradingSessionMode({ sessionReady: false, sessionError: 'failed' }), 'error')
+  })
+
+  it('describes session failures without depending on application translation', async () => {
+    const { ApiClientError } = await import('../api/apiClient.ts')
+    const { formatTradingSessionError } = await import('./useTradingSession.ts')
+
+    assert.deepEqual(formatTradingSessionError(new ApiClientError({
+      status: 503,
+      code: 'SESSION_UNAVAILABLE',
+      message: 'Session temporarily unavailable',
+      requestId: 'session-request-42'
+    })), {
+      key: 'trading.backendSessionFailed',
+      values: {
+        message: 'Session temporarily unavailable',
+        requestId: 'session-request-42'
+      }
+    })
+    assert.deepEqual(formatTradingSessionError('Connection interrupted'), {
+      key: 'trading.backendSessionFailed',
+      values: { message: 'Connection interrupted' }
+    })
+    assert.deepEqual(formatTradingSessionError(null), {
+      key: 'trading.backendSessionFailed',
+      values: { message: 'Backend session connection failed. Try again later.' }
+    })
+  })
+
   it('gives every batch action a unique request id, calls the API once, and returns its result', async () => {
     const { runTradingBatchAction } = await import('./tradingSession.ts')
     const payloads: Array<{ accountId: string; requestId: string }> = []
@@ -427,11 +462,11 @@ describe('trading session submit mode', () => {
     const sessionSource = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
     const hookSource = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
     const accountSource = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      new URL('../account/accountOperations.ts', import.meta.url),
       'utf8'
     )
     const authApiSource = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/api/authApi.ts', import.meta.url),
+      new URL('../api/authApi.ts', import.meta.url),
       'utf8'
     )
     const { getTradingSessionMode } = await import('./useTradingSession.ts')
@@ -458,7 +493,7 @@ describe('trading session submit mode', () => {
 
   it('requires login when no stored token or an unauthenticated session probe is returned', () => {
     const source = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      new URL('../account/accountOperations.ts', import.meta.url),
       'utf8'
     )
     const loadBlock = sourceBetween(source, 'const boot = async', 'return {')
@@ -471,7 +506,7 @@ describe('trading session submit mode', () => {
 
   it('marks boot refresh failures as an error session without clearing the latest account snapshot', async () => {
     const source = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      new URL('../account/accountOperations.ts', import.meta.url),
       'utf8'
     )
     const { getTradingSessionMode } = await import('./useTradingSession.ts')
@@ -485,7 +520,7 @@ describe('trading session submit mode', () => {
 
   it('turns coordinated refresh auth failures into login-required instead of offline preview', async () => {
     const source = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      new URL('../account/accountOperations.ts', import.meta.url),
       'utf8'
     )
     const { getTradingSessionMode } = await import('./useTradingSession.ts')
@@ -498,11 +533,11 @@ describe('trading session submit mode', () => {
 
   it('uses the coordinator 15s visible fallback without a duplicate hook interval', () => {
     const hookSource = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/useAccountData.ts', import.meta.url),
+      new URL('../account/useAccountData.ts', import.meta.url),
       'utf8'
     )
     const source = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      new URL('../account/accountOperations.ts', import.meta.url),
       'utf8'
     )
 
@@ -513,11 +548,11 @@ describe('trading session submit mode', () => {
 
   it('refreshes the authoritative account snapshot after trading-session stream events', () => {
     const source = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      new URL('../account/accountOperations.ts', import.meta.url),
       'utf8'
     )
     const streamSource = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/market/marketStream.ts', import.meta.url),
+      new URL('../market/marketStream.ts', import.meta.url),
       'utf8'
     )
 
@@ -531,7 +566,7 @@ describe('trading session submit mode', () => {
 
   it('uses backend position refresh as the authoritative open-position PnL source', () => {
     const source = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      new URL('../account/accountOperations.ts', import.meta.url),
       'utf8'
     )
 
@@ -544,11 +579,11 @@ describe('trading session submit mode', () => {
 
   it('loads merged ledger rows while keeping account asset ledger details available', () => {
     const source = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      new URL('../account/accountOperations.ts', import.meta.url),
       'utf8'
     )
     const modelsSource = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountSessionModels.ts', import.meta.url),
+      new URL('../account/accountSessionModels.ts', import.meta.url),
       'utf8'
     )
 
@@ -561,7 +596,7 @@ describe('trading session submit mode', () => {
 
   it('loads the initial account, order, trade, position, funding and transfer snapshot in parallel', () => {
     const source = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      new URL('../account/accountOperations.ts', import.meta.url),
       'utf8'
     )
     const loadBlock = sourceBetween(
@@ -593,7 +628,7 @@ describe('trading session submit mode', () => {
 
   it('routes boot, public, event, order, OCO and position refreshes through one latest single-flight gate', () => {
     const source = readFileSync(
-      new URL('../../../../../packages/frontend-core/src/account/accountOperations.ts', import.meta.url),
+      new URL('../account/accountOperations.ts', import.meta.url),
       'utf8'
     )
     const hookSource = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
@@ -606,6 +641,7 @@ describe('trading session submit mode', () => {
     assert.match(hookSource, /submitTradingOrder[\s\S]*await refreshAccountData\(token, accountId\)/)
     assert.match(hookSource, /submitTradingOco[\s\S]*await refreshAccountData\(token, accountId\)/)
     assert.match(hookSource, /mutateTradingPosition[\s\S]*await refreshAccountData\(token, accountId\)/)
+    assert.match(hookSource, /updateTradingPositionProtection[\s\S]*await refreshAccountData\(token, accountId\)/)
   })
 })
 

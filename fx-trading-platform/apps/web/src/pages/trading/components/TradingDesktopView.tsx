@@ -10,7 +10,7 @@ import { RightTradingPanel } from './RightTradingPanel'
 import { SymbolHeader } from './SymbolHeader'
 import { PerpetualTradingControls } from './PerpetualTradingControls'
 import styles from '../TradingPage.module.css'
-import type { TradingTerminalViewProps } from '../tradingPageViewModels'
+import type { TradingTerminalViewProps } from '../../../routes/trading/tradingRoute.types'
 
 export function TradingDesktopView({
   accountId,

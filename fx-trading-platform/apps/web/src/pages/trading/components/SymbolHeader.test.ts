@@ -9,6 +9,7 @@ const source = readFileSync(join(currentDir, 'SymbolHeader.tsx'), 'utf8')
 const styles = readFileSync(join(currentDir, 'SymbolHeader.module.css'), 'utf8')
 const desktopSource = readFileSync(join(currentDir, 'TradingDesktopView.tsx'), 'utf8')
 const pageSource = readFileSync(join(currentDir, '..', 'TradingPage.tsx'), 'utf8')
+const controllerSource = readFileSync(join(currentDir, '..', '..', '..', 'routes', 'trading', 'useTradingRouteController.ts'), 'utf8')
 
 describe('OKX-style symbol header', () => {
   it('shows product-aware trading and margin modes with richer 24h market metrics', () => {
@@ -19,7 +20,8 @@ describe('OKX-style symbol header', () => {
     assert.match(source, /const marginModeKey = perpetual\s*\? marginMode === 'ISOLATED' \? 'trading\.isolatedMargin' : 'trading\.crossMargin'\s*: 'trading\.cash'/)
     assert.match(source, /<span>\{t\(productModeKey\)\}<\/span>/)
     assert.match(source, /<span>\{t\(marginModeKey\)\}<\/span>/)
-    assert.match(pageSource, /const viewProps: TradingTerminalViewProps = \{[\s\S]*?\n    product,/)
+    assert.match(pageSource, /const viewProps: TradingTerminalViewProps = \{[\s\S]*\.\.\.model/)
+    assert.match(controllerSource, /const routeModel: TradingRouteModel = \{[\s\S]*?\n    product,/)
     assert.match(desktopSource, /product=\{product\}/)
     assert.match(desktopSource, /marginMode=\{perpetualControls\.marginMode\}/)
     assert.match(source, /markets\.volume24h/)

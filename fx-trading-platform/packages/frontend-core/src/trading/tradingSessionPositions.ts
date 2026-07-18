@@ -1,4 +1,4 @@
-import type { Amount, PositionResponse, Quote } from '@fx-platform/frontend-core'
+import type { Amount, PositionResponse, Quote } from '../models/index.ts'
 
 const FOREX_CONTRACT_SIZE = 100000
 

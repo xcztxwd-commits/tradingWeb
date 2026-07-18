@@ -1,5 +1,5 @@
 import type { SessionAuthStatus } from '@fx-platform/frontend-core'
-import type { TradingSessionMode } from '../../features/trading-session/useTradingSession'
+import type { TradingSessionMode } from '@fx-platform/frontend-core'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
 

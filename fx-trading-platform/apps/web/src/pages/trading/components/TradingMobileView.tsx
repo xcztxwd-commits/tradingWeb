@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { BottomAccountPanel } from './BottomAccountPanel'
 import { ChartWorkspace } from './ChartWorkspace'
 import styles from '../TradingPage.module.css'
-import type { TradingTerminalViewProps } from '../tradingPageViewModels'
+import type { TradingTerminalViewProps } from '../../../routes/trading/tradingRoute.types'
 
 const MobileTradingTerminal = lazy(() =>
   import('../mobile/MobileTradingTerminal').then((module) => ({ default: module.MobileTradingTerminal }))

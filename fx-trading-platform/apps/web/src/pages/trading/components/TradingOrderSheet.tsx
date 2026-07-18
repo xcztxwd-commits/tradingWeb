@@ -1,5 +1,5 @@
 import { TradePanel } from '../../../features/trading/components/TradePanel'
-import type { TradingTerminalViewProps } from '../tradingPageViewModels'
+import type { TradingTerminalViewProps } from '../../../routes/trading/tradingRoute.types'
 import { MobileOrderSheet } from './MobilePanels'
 import { PerpetualTradingControls } from './PerpetualTradingControls'
 

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-import type { Quote, SymbolItem } from '@fx-platform/frontend-core'
+import type { Quote, SymbolItem } from '../models/index.ts'
 
 type TradingState = {
   selectedSymbol: string

@@ -6,8 +6,10 @@ import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(currentDir, '..', '..', '..', '..', '..')
-const source = readFileSync(join(currentDir, 'TradingPage.tsx'), 'utf8')
-const sourceLines = source.split(/\r?\n/)
+const pageSource = readFileSync(join(currentDir, 'TradingPage.tsx'), 'utf8')
+const controllerSource = readFileSync(join(currentDir, '..', '..', 'routes', 'trading', 'useTradingRouteController.ts'), 'utf8')
+const source = `${pageSource}\n${controllerSource}`
+const sourceLines = pageSource.split(/\r?\n/)
 const desktopSource = readFileSync(join(currentDir, 'components', 'TradingDesktopView.tsx'), 'utf8')
 const mobileSource = readFileSync(join(currentDir, 'components', 'TradingMobileView.tsx'), 'utf8')
 const orderSheetSource = readFileSync(join(currentDir, 'components', 'TradingOrderSheet.tsx'), 'utf8')
@@ -18,7 +20,7 @@ const marketStatusSource = readFileSync(join(currentDir, 'tradingPageMarketDataS
 const marketStatusHookSource = readFileSync(join(currentDir, 'useTradingMarketDataStatus.ts'), 'utf8')
 const sessionStatusSource = readFileSync(join(currentDir, 'tradingPageSessionStatus.ts'), 'utf8')
 const tradeRulesSource = readFileSync(join(currentDir, 'tradingPageTradeRules.ts'), 'utf8')
-const viewModelsSource = readFileSync(join(currentDir, 'tradingPageViewModels.ts'), 'utf8')
+const viewModelsSource = readFileSync(join(currentDir, '..', '..', 'routes', 'trading', 'tradingRoute.types.ts'), 'utf8')
 const chartSettingsSource = readFileSync(join(currentDir, 'useTradingChartSettings.ts'), 'utf8')
 const styles = readFileSync(join(currentDir, 'TradingPage.module.css'), 'utf8')
 const layoutStyles = styles.slice(styles.indexOf('.layout {'), styles.indexOf('.desktopTerminal {'))
@@ -81,7 +83,7 @@ describe('TradingPage terminal viewport', () => {
     assert.match(source, /setTradePricePrefill\(\{ id: Date\.now\(\), price \}\)/)
     assert.match(desktopSource, /onSelectPrice=\{onSelectPrice\}/)
     assert.match(desktopSource, /pricePrefill=\{tradePricePrefill\}/)
-    assert.match(source, /<MobileDrawer[\s\S]*title="Quote"[\s\S]*onSelectPrice=\{handleSelectPrice\}/)
+    assert.match(source, /<MobileDrawer[\s\S]*title="Quote"[\s\S]*onSelectPrice=\{model\.onSelectPrice\}/)
     assert.match(orderSheetSource, /pricePrefill=\{view\.tradePricePrefill\}/)
   })
 
@@ -115,7 +117,7 @@ describe('TradingPage terminal viewport', () => {
     assert.doesNotMatch(source, /mobileTerminalFallback|正在连接交易终端|Connecting trading terminal/)
     assert.match(desktopSource, /market=\{[\s\S]*<RightTradingPanel[\s\S]*loading=\{terminalLoading\}/)
     assert.match(desktopSource, /bottom=\{[\s\S]*<BottomAccountPanel[\s\S]*loading=\{accountPanel\.loading\}/)
-    assert.match(source, /<MobileDrawer[\s\S]*title="Quote"[\s\S]*<RightTradingPanel[\s\S]*loading=\{terminalLoading\}/)
+    assert.match(source, /<MobileDrawer[\s\S]*title="Quote"[\s\S]*<RightTradingPanel[\s\S]*loading=\{model\.terminalLoading\}/)
   })
 
   it('limits realtime quote subscriptions instead of subscribing every visible market', () => {
@@ -174,10 +176,12 @@ describe('TradingPage terminal viewport', () => {
     assert.match(source, /sessionMode === 'loading'[\s\S]*setPendingTradeOpen\(true\)/)
     assert.match(source, /if \(!pendingTradeOpen \|\| sessionMode === 'loading'\) return/)
     assert.match(source, /setLoginPromptRequested\(true\)/)
-    assert.match(source, /open=\{loginRequired && loginPromptRequested\}/)
+    assert.match(source, /loginPromptOpen:\s*loginRequired && loginPromptRequested/)
+    assert.match(source, /open=\{loginPromptOpen\}/)
     assert.match(source, /handleLoginRedirect/)
     assert.match(source, /navigate\(`\/login\?redirect=\$\{encodeURIComponent\(resolveTradingPath\(product, selectedSymbol\)\)\}`\)/)
-    assert.match(source, /onClose=\{\(\) => setLoginPromptRequested\(false\)\}/)
+    assert.match(source, /closeLoginPrompt:\s*\(\) => setLoginPromptRequested\(false\)/)
+    assert.match(source, /onClose=\{closeLoginPrompt\}/)
     assert.match(orderSheetSource, /loginRequired=\{view\.loginRequired\}/)
     assert.match(orderSheetSource, /onLoginRequired=\{view\.onLoginRequired\}/)
     assert.doesNotMatch(source, /loginRequired && !loginPromptDismissed/)
@@ -197,7 +201,7 @@ describe('TradingPage terminal viewport', () => {
   it('keeps session status models for compact panel and mobile surfaces without a desktop telemetry row', () => {
     assert.match(source, /sessionAuthStatus/)
     assert.match(source, /getTradingSessionStatusLabel\(sessionMode, sessionAuthStatus,\s*t\)/)
-    assert.match(source, /getTradingSessionStatusText\(\{ sessionMode, sessionAuthStatus, sessionError, loginRequired,\s*t \}\)/)
+    assert.match(source, /getTradingSessionStatusText\(\{[\s\S]*sessionMode,[\s\S]*sessionAuthStatus,[\s\S]*sessionError,[\s\S]*loginRequired,[\s\S]*t[\s\S]*\}\)/)
     assert.doesNotMatch(source, /const showSessionRetry = sessionMode === 'error' \|\| sessionAuthStatus === 'invalid_token'/)
     assert.match(sessionStatusSource, /case 'guest':[\s\S]*trading\.publicMarketMode/)
     assert.match(sessionStatusSource, /case 'valid_token':[\s\S]*trading\.accountLinkConnected/)

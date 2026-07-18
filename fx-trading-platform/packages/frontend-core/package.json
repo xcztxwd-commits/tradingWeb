@@ -17,7 +17,8 @@
   },
   "dependencies": {
     "@fx-platform/shared-types": "0.1.0",
-    "@stomp/stompjs": "^7.3.0"
+    "@stomp/stompjs": "^7.3.0",
+    "zustand": "^5.0.0"
   },
   "peerDependencies": {
     "react": "^19.0.0"
