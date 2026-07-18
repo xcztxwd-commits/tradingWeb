@@ -6,7 +6,14 @@ import { describe, it } from 'node:test'
 
 const pagesDir = dirname(fileURLToPath(import.meta.url))
 const projectRoot = resolve(pagesDir, '../../../..')
-const markets = readFileSync(join(pagesDir, 'markets', 'MarketsPage.tsx'), 'utf8')
+const marketsContent = readFileSync(join(pagesDir, '..', 'shared-widgets', 'market', 'MarketsContent.tsx'), 'utf8')
+const marketsController = readFileSync(join(pagesDir, '..', 'routes', 'markets', 'useMarketsRouteController.ts'), 'utf8')
+const marketsModel = readFileSync(join(pagesDir, '..', 'routes', 'markets', 'marketsRouteModel.ts'), 'utf8')
+const marketsViews = [
+  readFileSync(join(pagesDir, '..', 'pc', 'pages', 'markets', 'PcMarketsPage.tsx'), 'utf8'),
+  readFileSync(join(pagesDir, '..', 'mobile', 'pages', 'markets', 'MobileMarketsPage.tsx'), 'utf8')
+].join('\n')
+const markets = `${marketsContent}\n${marketsController}\n${marketsModel}\n${marketsViews}`
 const binanceMarketData = readFileSync(
   join(projectRoot, 'packages', 'frontend-core', 'src', 'market', 'binanceMarketData.ts'),
   'utf8'
@@ -36,6 +43,8 @@ const authSupport = `${authController}\n${authModel}\n${authContent}`
 const login = authSupport
 const authStyles = readFileSync(join(pagesDir, '..', 'shared-widgets', 'auth', 'AuthPageContent.module.css'), 'utf8')
 const styles = readFileSync(join(pagesDir, '..', 'styles.css'), 'utf8')
+const pcMarketsStyles = readFileSync(join(pagesDir, '..', 'pc', 'pages', 'markets', 'PcMarketsPage.module.css'), 'utf8')
+const mobileMarketsStyles = readFileSync(join(pagesDir, '..', 'mobile', 'pages', 'markets', 'MobileMarketsPage.module.css'), 'utf8')
 const selectFieldPath = join(projectRoot, 'packages', 'ui', 'src', 'select-field', 'SelectField.tsx')
 const selectField = existsSync(selectFieldPath) ? readFileSync(selectFieldPath, 'utf8') : ''
 const selectFieldCss = readFileSync(join(projectRoot, 'packages', 'ui', 'src', 'select-field', 'SelectField.module.css'), 'utf8')
@@ -58,7 +67,7 @@ describe('prototype markets page', () => {
     assert.match(markets, /ApiErrorState/)
     assert.match(markets, /formatApiError/)
     assert.match(markets, /useState<TradingMarket\[\]>\(\[\]\)/)
-    assert.match(markets, /const nextMarkets = initialMarkets/)
+    assert.match(markets, /const nextMarkets = mergeBinanceOverviewMarkets/)
     assert.doesNotMatch(markets, /mockTradingData/)
     assert.match(markets, /marketPageTabs/)
     assert.match(markets, /overview/)
@@ -137,20 +146,21 @@ describe('prototype markets page', () => {
   it('paginates the overview market list at 20 rows by default', () => {
     assert.match(markets, /const marketOverviewPageSize = 20/)
     assert.match(markets, /paginateRows\(visibleMarkets, marketPage, marketOverviewPageSize\)/)
-    assert.match(markets, /<MarketTable[\s\S]*markets=\{pagedMarkets\.items\}/)
-    assert.match(markets, /<MarketMobileList markets=\{pagedMarkets\.items\}/)
+    assert.match(markets, /<MarketCollection[\s\S]*markets=\{pagedMarkets\.items\}/)
+    assert.match(marketsViews, /MarketTable/)
+    assert.match(marketsViews, /MarketMobileList/)
     assert.match(markets, /pagedMarkets\.pageSize/)
   })
 
   it('renders provider symbol lists before quote hydration so forex data is not blocked by every pair quote', () => {
     assert.match(markets, /const marketQuoteHydrationLimit = 40/)
-    assert.match(markets, /Promise\.allSettled\(\[fetchMarketSymbols\(\), fetchBinanceMarketOverview\(\)\]\)/)
-    assert.match(markets, /const initialMarkets = mergeBinanceOverviewMarkets\(symbols, nextBinanceOverview\?\.markets \?\? \[\]\)/)
+    assert.match(markets, /Promise\.allSettled\(\[[\s\S]*fetchMarketSymbols\(\)[\s\S]*fetchBinanceMarketOverview\(\)[\s\S]*\]\)/)
+    assert.match(markets, /const nextMarkets = mergeBinanceOverviewMarkets\(symbols, nextOverview\?\.markets \?\? \[\]\)/)
     assert.match(markets, /setMarkets\(nextMarkets\)/)
-    assert.match(markets, /loadQuotedMarkets\(nextMarkets\.filter\(canHydrateMarketQuote\)\.slice\(0, marketQuoteHydrationLimit\)\)/)
+    assert.match(markets, /loadQuotedMarkets\([\s\S]*nextMarkets\.filter\(canHydrateMarketQuote\)\.slice\(0, marketQuoteHydrationLimit\)[\s\S]*\)/)
     assert.match(markets, /fetchMarketQuotes/)
     assert.doesNotMatch(markets, /Promise\.all\([\s\S]*loadQuotedMarket/)
-    assert.match(markets, /visibleMarkets\.filter\(canHydrateMarketQuote\)\.slice\(0, marketQuoteHydrationLimit\)/)
+    assert.match(markets, /visibleMarkets[\s\S]*\.filter\(canHydrateMarketQuote\)[\s\S]*\.slice\(0, marketQuoteHydrationLimit\)/)
     assert.match(markets, /function canHydrateMarketQuote\(market: TradingMarket\)/)
     assert.match(markets, /market\.source !== 'binance-market-overview'/)
     assert.match(markets, /market\.tradable !== false/)
@@ -167,7 +177,7 @@ describe('prototype markets page', () => {
   it('connects only canonical P0 market rows to product-aware trading routes', () => {
     assert.match(markets, /resolveMarketTradingTarget/)
     assert.match(markets, /isMarketTradingEnabled/)
-    assert.match(markets, /onOpenMarket/)
+    assert.match(markets, /const openMarket/)
     assert.match(markets, /navigate\(target\)/)
   })
 
@@ -199,8 +209,8 @@ describe('prototype markets page', () => {
 
   it('keeps the rankings tab on ranking cards while leaving U-margined futures charts separate', () => {
     assert.match(markets, /const rankings = useMemo\(\(\) => buildRankings\(hydratedMarkets\), \[hydratedMarkets\]\)/)
-    assert.match(markets, /<TradingDataDashboard rankings=\{rankings\} onOpen=\{onOpenMarket\}/)
-    assert.match(markets, /function TradingDataDashboard\(\{ rankings, onOpen \}: \{ rankings: RankingGroup\[\]; onOpen: \(market: TradingMarket\) => void \}\)/)
+    assert.match(markets, /<TradingDataDashboard rankings=\{rankings\} onOpen=\{model\.openMarket\} futures=\{model\.futures\}/)
+    assert.match(markets, /function TradingDataDashboard\(\{[\s\S]*futures[\s\S]*MarketsRouteModel\['futures'\]/)
     assert.match(markets, /useState<TradingDataTab>\('rankings'\)/)
     assert.match(markets, /activeTab === 'rankings' \? \(/)
     assert.match(markets, /market-data-dashboard market-ranking-preview-grid/)
@@ -369,7 +379,9 @@ describe('prototype auth and account center', () => {
     assert.match(styles, /\.market-zone-tabs/)
     assert.match(styles, /\.market-mobile-list/)
     assert.match(styles, /\.market-ranking-preview-grid/)
-    assert.match(styles, /@media \(max-width:\s*640px\)[\s\S]*\.market-table\s*{[\s\S]*display:\s*none/)
+    assert.doesNotMatch(styles, /\.market-table\s*{[\s\S]*display:\s*none/)
+    assert.match(pcMarketsStyles, /market-table[\s\S]*display:\s*block/)
+    assert.match(mobileMarketsStyles, /market-mobile-list[\s\S]*display:\s*grid/)
     assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)/)
   })
 

@@ -1,0 +1,11 @@
+.root {
+  min-width: 0;
+}
+
+.root :global(.market-table-section) {
+  min-width: 0;
+}
+
+.root :global(.market-table) {
+  display: block;
+}

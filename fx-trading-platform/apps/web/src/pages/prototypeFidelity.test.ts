@@ -16,7 +16,11 @@ const homeSources = [
   readFileSync(join(sharedHomeDir, 'HomeSupportSections.tsx'), 'utf8'),
   readFileSync(join(srcDir, 'routes', 'home', 'useHomeRouteController.ts'), 'utf8')
 ].join('\n')
-const marketsSource = readFileSync(join(pagesDir, 'markets', 'MarketsPage.tsx'), 'utf8')
+const marketsSource = [
+  readFileSync(join(srcDir, 'shared-widgets', 'market', 'MarketsContent.tsx'), 'utf8'),
+  readFileSync(join(srcDir, 'routes', 'markets', 'useMarketsRouteController.ts'), 'utf8'),
+  readFileSync(join(srcDir, 'routes', 'markets', 'marketsRouteModel.ts'), 'utf8')
+].join('\n')
 const authSource = readFileSync(join(srcDir, 'shared-widgets', 'auth', 'AuthPageContent.tsx'), 'utf8')
 const loginSource = readFileSync(join(srcDir, 'routes', 'auth', 'useAuthRouteController.ts'), 'utf8')
 const accountSource = [

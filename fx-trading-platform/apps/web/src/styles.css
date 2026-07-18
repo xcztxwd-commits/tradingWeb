@@ -2931,7 +2931,7 @@ th {
 }
 
 .market-mobile-list {
-  display: none;
+  min-width: 0;
 }
 
 .market-mobile-row {
@@ -3558,15 +3558,6 @@ th {
     width: 100%;
     margin-left: 0;
     justify-content: flex-start;
-  }
-
-  .market-table {
-    display: none;
-  }
-
-  .market-mobile-list {
-    display: grid;
-    gap: 8px;
   }
 
   .account-filter-row input,

@@ -1,53 +1,29 @@
 import { ChevronDown, LayoutGrid, List, Search, Star } from 'lucide-react'
-import { useEffect, useMemo, useState, type PointerEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useMemo, useState, type ComponentType, type PointerEvent } from 'react'
 import { SelectField, type SelectFieldOption } from '@fx-platform/ui'
 
-import { AssetMark } from '../../shared-widgets/asset/AssetMark'
+import { AssetMark } from '../asset/AssetMark'
 import { ApiErrorState, LoadingState } from '../../components/user-page/PageState'
-import { formatApiError } from '../../components/user-page/userPageModels'
-import { paginateRows, type Quote } from '@fx-platform/frontend-core'
 import {
-  fetchBinanceFuturesDashboard,
-  fetchBinanceMarketOverview,
   type BinanceFuturesChartPanelModel,
   type BinanceFuturesChartSeries,
-  type BinanceFuturesDashboard,
-  type BinanceFuturesPeriod,
   type BinanceMarketOverview
 } from '@fx-platform/frontend-core'
-import { hydrateMarketFavorites } from '@fx-platform/frontend-core'
-import { mergeTradingQuoteIntoMarket } from '@fx-platform/frontend-core'
-import { fetchMarketQuotes, fetchMarketSymbols } from '@fx-platform/frontend-core'
 import { formatMarketPrice } from '@fx-platform/frontend-core'
-import type { TradingMarket, TradingQuote } from '@fx-platform/frontend-core'
-import { useMarketFavorites } from '@fx-platform/frontend-core'
-import { isMarketTradingEnabled, resolveMarketTradingTarget } from './marketTradingTarget'
-import { subscribeQuote } from '@fx-platform/frontend-core'
+import type { TradingMarket } from '@fx-platform/frontend-core'
+import type {
+  MarketPageTab,
+  MarketsRouteModel,
+  MarketSortDirection as SortDirection,
+  MarketSortKey as SortKey,
+  MarketUniverseTab,
+  MarketZoneTab,
+  TradingDataTab
+} from '../../routes/markets/marketsRoute.types'
+import { marketCap, marketTurnover as turnover, parseCompactNumber } from '../../routes/markets/marketsRouteModel'
+import { isMarketTradingEnabled } from '../../routes/markets/marketTradingTarget'
 
-type MarketPageTab = 'overview' | 'trading-data' | 'ai-picks' | 'token-unlocks'
-type TradingDataTab = 'rankings' | 'usdt-contracts' | 'coin-contracts' | 'options'
-type FuturesViewMode = 'list' | 'card'
-type FuturesPeriodTab = BinanceFuturesPeriod
-type MarketUniverseTab = 'favorites' | 'forex' | 'crypto' | 'spot' | 'contract'
-type MarketZoneTab =
-  | 'all'
-  | 'bnb-chain'
-  | 'solana'
-  | 'rwa'
-  | 'meme'
-  | 'payments'
-  | 'ai'
-  | 'layer'
-  | 'metals'
-  | 'indices'
-  | 'launchpool'
-  | 'defi'
-type SortKey = 'symbol' | 'price' | 'change' | 'volume' | 'marketCap'
-type SortDirection = 'asc' | 'desc'
-
-const marketQuoteHydrationLimit = 40
-const marketOverviewPageSize = 20
+type FuturesPeriodTab = MarketsRouteModel['futures']['period']
 
 const marketPageTabs: Array<{ value: MarketPageTab; label: string }> = [
   { value: 'overview', label: '总览' },
@@ -116,98 +92,43 @@ const marketSortOptions: Array<SelectFieldOption<SortKey>> = [
   { value: 'symbol', label: '名称' }
 ]
 
-export function MarketsPage() {
-  const navigate = useNavigate()
-  const [markets, setMarkets] = useState<TradingMarket[]>([])
-  const [binanceOverview, setBinanceOverview] = useState<BinanceMarketOverview | null>(null)
-  const { favorites, toggleFavorite } = useMarketFavorites()
-  const [query, setQuery] = useState('')
-  const [pageTab, setPageTab] = useState<MarketPageTab>('trading-data')
-  const [universeTab, setUniverseTab] = useState<MarketUniverseTab>('crypto')
-  const [zoneTab, setZoneTab] = useState<MarketZoneTab>('all')
-  const [sortKey, setSortKey] = useState<SortKey>('volume')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
-  const [marketPage, setMarketPage] = useState(1)
-  const [loading, setLoading] = useState(false)
-  const [apiError, setApiError] = useState<ReturnType<typeof formatApiError> | null>(null)
-  const [reloadKey, setReloadKey] = useState(0)
+export type MarketCollectionProps = {
+  markets: TradingMarket[]
+  favorites: Set<string>
+  sortKey: SortKey
+  sortDirection: SortDirection
+  onFavorite(symbol: string): void
+  onOpen(market: TradingMarket): void
+  onSort(key: SortKey): void
+}
 
-  const hydratedMarkets = useMemo(
-    () => hydrateMarketFavorites(markets, favorites),
-    [favorites, markets]
-  )
-  const visibleMarkets = useMemo(
-    () =>
-      filterMarketRows(hydratedMarkets, query, universeTab, zoneTab).sort((left, right) =>
-        compareMarkets(left, right, sortKey, sortDirection)
-      ),
-    [hydratedMarkets, query, sortDirection, sortKey, universeTab, zoneTab]
-  )
+export type MarketCollectionComponent = ComponentType<MarketCollectionProps>
+
+export function MarketsContent({
+  model,
+  MarketCollection
+}: {
+  model: MarketsRouteModel
+  MarketCollection: MarketCollectionComponent
+}) {
+  const {
+    apiError,
+    binanceOverview,
+    favorites,
+    hydratedMarkets,
+    loading,
+    pageTab,
+    pagedMarkets,
+    query,
+    sortDirection,
+    sortKey,
+    universeTab,
+    visibleMarkets,
+    zoneTab
+  } = model
   const activeMarketZoneTabs = universeTab === 'forex' ? forexMarketZoneTabs : marketZoneTabs
   const summaryDeck = useMemo(() => buildSummaryDeck(hydratedMarkets, binanceOverview), [binanceOverview, hydratedMarkets])
   const rankings = useMemo(() => buildRankings(hydratedMarkets), [hydratedMarkets])
-  const pagedMarkets = useMemo(
-    () => paginateRows(visibleMarkets, marketPage, marketOverviewPageSize),
-    [marketPage, visibleMarkets]
-  )
-  const visibleSymbolKey = useMemo(
-    () => visibleMarkets.filter(canHydrateMarketQuote).slice(0, marketQuoteHydrationLimit).map((market) => market.symbol).join('|'),
-    [visibleMarkets]
-  )
-
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    async function loadMarkets() {
-      const [symbolsResult, binanceOverviewResult] = await Promise.allSettled([fetchMarketSymbols(), fetchBinanceMarketOverview()])
-      const symbols = symbolsResult.status === 'fulfilled' ? symbolsResult.value : []
-      const nextBinanceOverview = binanceOverviewResult.status === 'fulfilled' ? binanceOverviewResult.value : null
-      const initialMarkets = mergeBinanceOverviewMarkets(symbols, nextBinanceOverview?.markets ?? [])
-      const nextMarkets = initialMarkets
-
-      if (active) {
-        setBinanceOverview(nextBinanceOverview)
-        setMarkets(nextMarkets)
-        setApiError(symbolsResult.status === 'rejected' && binanceOverviewResult.status === 'rejected' ? formatApiError(symbolsResult.reason) : null)
-      }
-
-      const quotedMarkets = await loadQuotedMarkets(nextMarkets.filter(canHydrateMarketQuote).slice(0, marketQuoteHydrationLimit))
-      if (active && quotedMarkets.length > 0) {
-        setMarkets((current) => mergeQuotedMarkets(current, quotedMarkets))
-      }
-    }
-
-    loadMarkets()
-      .catch((error) => {
-        if (active) {
-          setMarkets([])
-          setBinanceOverview(null)
-          setApiError(formatApiError(error))
-        }
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [reloadKey])
-
-  useEffect(() => {
-    setMarketPage(1)
-  }, [query, sortDirection, sortKey, universeTab, zoneTab])
-
-  useEffect(() => {
-    if (!visibleSymbolKey) return
-    const unsubscribers = visibleSymbolKey.split('|').map((symbol) =>
-      subscribeQuote(symbol, null, (quote) => {
-        setMarkets((current) => current.map((market) => (market.symbol === quote.symbol ? applyRealtimeQuote(market, quote) : market)))
-      })
-    )
-    return () => {
-      unsubscribers.forEach((unsubscribe) => unsubscribe())
-    }
-  }, [visibleSymbolKey])
 
   return (
     <section className="user-page market-shell" aria-labelledby="markets-title">
@@ -221,7 +142,7 @@ export function MarketsPage() {
 
       <div className="market-shell__tabs" role="tablist" aria-label="行情页面导航">
         {marketPageTabs.map((tab) => (
-          <button key={tab.value} type="button" aria-selected={pageTab === tab.value} onClick={() => setPageTab(tab.value)}>
+          <button key={tab.value} type="button" aria-selected={pageTab === tab.value} onClick={() => model.setPageTab(tab.value)}>
             {tab.label}
           </button>
         ))}
@@ -231,24 +152,21 @@ export function MarketsPage() {
       {apiError ? (
         <ApiErrorState
           error={apiError}
-          onAction={() => {
-            setApiError(null)
-            setReloadKey((current) => current + 1)
-          }}
+          onAction={model.retry}
         />
       ) : null}
 
       {pageTab === 'overview' ? (
         <>
           <MarketOverviewMetrics overview={binanceOverview} />
-          <MarketSummaryDeck deck={summaryDeck} onOpen={onOpenMarket} />
+          <MarketSummaryDeck deck={summaryDeck} onOpen={model.openMarket} />
 
           <MarketFilters
             universeTab={universeTab}
             zoneTab={zoneTab}
             zoneTabs={activeMarketZoneTabs}
-            onUniverseTab={handleUniverseTab}
-            onZoneTab={setZoneTab}
+            onUniverseTab={model.setUniverseTab}
+            onZoneTab={model.setZoneTab}
           />
 
           <section className="market-table-section" aria-labelledby="market-table-title">
@@ -261,27 +179,26 @@ export function MarketsPage() {
                 <MarketToolbar
                   query={query}
                   sortKey={sortKey}
-                  onQuery={setQuery}
-                  onSort={(nextKey) => {
-                    setSortKey(nextKey)
-                    setSortDirection(nextKey === 'symbol' ? 'asc' : 'desc')
-                  }}
+                  onQuery={model.setQuery}
+                  onSort={model.selectSort}
                 />
                 <span className="market-table-section__count">
                   {pagedMarkets.total} 个市场 · 每页 {pagedMarkets.pageSize} 条
                 </span>
               </div>
             </div>
-            <MarketTable
+            {!loading && !apiError && visibleMarkets.length === 0 ? (
+              <MarketInsightPlaceholder title="No markets" description="No markets match the current filters." />
+            ) : null}
+            <MarketCollection
               markets={pagedMarkets.items}
               favorites={favorites}
               sortKey={sortKey}
               sortDirection={sortDirection}
-              onFavorite={toggleFavorite}
-              onOpen={onOpenMarket}
-              onSort={toggleTableSort}
+              onFavorite={model.toggleFavorite}
+              onOpen={model.openMarket}
+              onSort={model.toggleTableSort}
             />
-            <MarketMobileList markets={pagedMarkets.items} favorites={favorites} onFavorite={toggleFavorite} onOpen={onOpenMarket} />
             <div className="table-pagination" aria-label="行情分页">
               <span>
                 共 {pagedMarkets.total} 个市场 · 第 {pagedMarkets.page}/{pagedMarkets.totalPages} 页
@@ -291,7 +208,7 @@ export function MarketsPage() {
                   type="button"
                   className="table-action table-action--secondary"
                   disabled={pagedMarkets.page <= 1}
-                  onClick={() => setMarketPage((value) => value - 1)}
+                  onClick={() => model.changePage(-1)}
                 >
                   上一页
                 </button>
@@ -299,7 +216,7 @@ export function MarketsPage() {
                   type="button"
                   className="table-action table-action--secondary"
                   disabled={pagedMarkets.page >= pagedMarkets.totalPages}
-                  onClick={() => setMarketPage((value) => value + 1)}
+                  onClick={() => model.changePage(1)}
                 >
                   下一页
                 </button>
@@ -309,7 +226,7 @@ export function MarketsPage() {
         </>
       ) : null}
 
-      {pageTab === 'trading-data' ? <TradingDataDashboard rankings={rankings} onOpen={onOpenMarket} /> : null}
+      {pageTab === 'trading-data' ? <TradingDataDashboard rankings={rankings} onOpen={model.openMarket} futures={model.futures} /> : null}
       {pageTab === 'ai-picks' ? (
         <MarketInsightPlaceholder
           title="AI 精选"
@@ -325,26 +242,6 @@ export function MarketsPage() {
     </section>
   )
 
-  function toggleTableSort(nextKey: SortKey) {
-    setSortKey((currentKey) => {
-      if (currentKey !== nextKey) {
-        setSortDirection(nextKey === 'symbol' ? 'asc' : 'desc')
-        return nextKey
-      }
-      setSortDirection((currentDirection) => (currentDirection === 'asc' ? 'desc' : 'asc'))
-      return currentKey
-    })
-  }
-
-  function handleUniverseTab(nextTab: MarketUniverseTab) {
-    setUniverseTab(nextTab)
-    if (nextTab === 'forex') setZoneTab('all')
-  }
-
-  function onOpenMarket(market: TradingMarket) {
-    const target = resolveMarketTradingTarget(market)
-    if (target) navigate(target)
-  }
 }
 
 function MarketSummaryDeck({ deck, onOpen }: { deck: SummaryGroup[]; onOpen: (market: TradingMarket) => void }) {
@@ -488,7 +385,7 @@ function MarketToolbar({
   )
 }
 
-function MarketTable({
+export function MarketTable({
   markets,
   favorites,
   sortKey,
@@ -496,15 +393,7 @@ function MarketTable({
   onFavorite,
   onOpen,
   onSort
-}: {
-  markets: TradingMarket[]
-  favorites: Set<string>
-  sortKey: SortKey
-  sortDirection: SortDirection
-  onFavorite: (symbol: string) => void
-  onOpen: (market: TradingMarket) => void
-  onSort: (key: SortKey) => void
-}) {
+}: MarketCollectionProps) {
   return (
     <div className="market-table" aria-label="行情表格">
       <table>
@@ -562,17 +451,12 @@ function MarketTable({
   )
 }
 
-function MarketMobileList({
+export function MarketMobileList({
   markets,
   favorites,
   onFavorite,
   onOpen
-}: {
-  markets: TradingMarket[]
-  favorites: Set<string>
-  onFavorite: (symbol: string) => void
-  onOpen: (market: TradingMarket) => void
-}) {
+}: MarketCollectionProps) {
   return (
     <div className="market-mobile-list" aria-label="移动端行情列表">
       {markets.map((market) => (
@@ -624,34 +508,18 @@ function FavoriteButton({
   )
 }
 
-function TradingDataDashboard({ rankings, onOpen }: { rankings: RankingGroup[]; onOpen: (market: TradingMarket) => void }) {
-  const [activeTab, setActiveTab] = useState<TradingDataTab>('rankings')
-  const [viewMode, setViewMode] = useState<FuturesViewMode>('list')
-  const [period, setPeriod] = useState<FuturesPeriodTab>('5m')
-  const [dashboard, setDashboard] = useState<BinanceFuturesDashboard | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+function TradingDataDashboard({
+  rankings,
+  onOpen,
+  futures
+}: {
+  rankings: RankingGroup[]
+  onOpen: (market: TradingMarket) => void
+  futures: MarketsRouteModel['futures']
+}) {
+  const { activeTab, dashboard, error, loading, period, setActiveTab, setPeriod, setViewMode, viewMode } = futures
   const futuresChartPanels = dashboard?.panels ?? []
   const referenceMarket = dashboard?.referenceMarket
-
-  useEffect(() => {
-    let active = true
-    setLoading(true)
-    setError(null)
-    fetchBinanceFuturesDashboard('BTCUSDT', period)
-      .then((nextDashboard) => {
-        if (active) setDashboard(nextDashboard)
-      })
-      .catch(() => {
-        if (active) setError('Binance perpetual trading-data 暂时不可用')
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [period])
 
   return (
     <div className="market-data-view" aria-label="交易数据">
@@ -1038,112 +906,6 @@ function rankingMarket(displaySymbol: string, priceLabel: string, changePercent:
   } as RankingMarket
 }
 
-function filterMarketRows(markets: TradingMarket[], query: string, universeTab: MarketUniverseTab, zoneTab: MarketZoneTab) {
-  const normalizedQuery = query.trim().toLowerCase()
-  return markets.filter((market) => {
-    const favorite = market.favorite
-    const universe = getMarketUniverse(market)
-    const universeMatches =
-      universeTab === 'favorites'
-        ? favorite
-        : universeTab === 'forex'
-          ? market.category === 'fx'
-          : universeTab === 'crypto'
-            ? universe === 'spot' || universe === 'contract'
-            : universe === universeTab
-    const zoneMatches = matchesZone(market, zoneTab)
-    const queryMatches =
-      normalizedQuery.length === 0 ||
-      market.symbol.toLowerCase().includes(normalizedQuery) ||
-      market.name.toLowerCase().includes(normalizedQuery)
-    return universeMatches && zoneMatches && queryMatches
-  })
-}
-
-function compareMarkets(left: TradingMarket, right: TradingMarket, sortKey: SortKey, direction: SortDirection) {
-  const multiplier = direction === 'asc' ? 1 : -1
-  if (sortKey === 'symbol') return left.symbol.localeCompare(right.symbol) * multiplier
-  if (sortKey === 'price') return (left.last - right.last) * multiplier
-  if (sortKey === 'change') return (left.changePercent - right.changePercent) * multiplier
-  if (sortKey === 'marketCap') return (marketCap(left) - marketCap(right)) * multiplier
-  return (turnover(left) - turnover(right)) * multiplier
-}
-
-function getMarketUniverse(market: TradingMarket): Exclude<MarketUniverseTab, 'favorites' | 'crypto'> {
-  if (market.category === 'fx') return 'forex'
-  if (market.category === 'crypto') return market.symbol === 'ETHUSDT' ? 'contract' : 'spot'
-  return 'contract'
-}
-
-function matchesZone(market: TradingMarket, zone: MarketZoneTab) {
-  if (zone === 'all') return true
-  if (zone === 'solana') return market.symbol === 'SOLUSDT'
-  if (zone === 'payments') return market.symbol === 'XRPUSDT'
-  if (zone === 'metals') return market.category === 'metals'
-  if (zone === 'indices') return market.category === 'indices'
-  return true
-}
-
-async function loadQuotedMarkets(markets: TradingMarket[]) {
-  if (markets.length === 0) return []
-  try {
-    const quotes = await fetchMarketQuotes(markets.map((market) => market.symbol))
-    return markets.map((market) => {
-      const quote = quotes[market.symbol]
-      return quote ? applyQuote(market, quote) : market
-    })
-  } catch {
-    return markets
-  }
-}
-
-function mergeBinanceOverviewMarkets(providerMarkets: TradingMarket[], binanceMarkets: TradingMarket[]) {
-  const merged = new Map<string, TradingMarket>()
-  binanceMarkets.forEach((market) => merged.set(market.symbol, market))
-  providerMarkets.forEach((market) => {
-    const liveMarket = merged.get(market.symbol)
-    if (!liveMarket) {
-      merged.set(market.symbol, market)
-      return
-    }
-    merged.set(market.symbol, {
-      ...liveMarket,
-      favorite: market.favorite,
-      tradable: market.tradable,
-      quoteEnabled: market.quoteEnabled,
-      chartEnabled: market.chartEnabled,
-      orderBookEnabled: market.orderBookEnabled,
-      minLot: market.minLot,
-      pricePrecision: market.pricePrecision,
-      quantityPrecision: market.quantityPrecision
-    })
-  })
-  return Array.from(merged.values())
-}
-
-function canHydrateMarketQuote(market: TradingMarket) {
-  return market.source !== 'binance-market-overview' && market.tradable !== false && market.quoteEnabled !== false && (market.category === 'fx' || market.provider === 'massive' || market.provider === 'binance')
-}
-
-function applyQuote(market: TradingMarket, quote: TradingQuote): TradingMarket {
-  return mergeTradingQuoteIntoMarket(market, quote)
-}
-
-function mergeQuotedMarkets(markets: TradingMarket[], quotedMarkets: TradingMarket[]) {
-  const quotedBySymbol = new Map(quotedMarkets.map((market) => [market.symbol, market]))
-  return markets.map((market) => quotedBySymbol.get(market.symbol) ?? market)
-}
-
-function applyRealtimeQuote(market: TradingMarket, quote: Quote): TradingMarket {
-  const mid = Number(quote.mid)
-  const spread = Number(quote.spread)
-  return {
-    ...market,
-    last: Number.isFinite(mid) ? mid : market.last,
-    spread: Number.isFinite(spread) ? spread : market.spread
-  }
-}
-
 function formatSignedPercent(value: number) {
   const sign = value > 0 ? '+' : ''
   return `${sign}${value.toFixed(2)}%`
@@ -1156,26 +918,6 @@ function formatVolume(market: TradingMarket) {
 function formatMarketCap(market: TradingMarket) {
   const value = marketCap(market)
   return value > 0 ? `$${compactNumber(value)}` : '--'
-}
-
-function marketCap(market: TradingMarket) {
-  if (typeof market.marketCap === 'number' && market.marketCap > 0) return market.marketCap
-  return 0
-}
-
-function turnover(market: TradingMarket) {
-  return parseCompactNumber(market.volume) * market.last
-}
-
-function parseCompactNumber(value: string) {
-  const normalized = value.trim().toUpperCase()
-  const number = Number(normalized.replace(/[^\d.]/g, ''))
-  if (!Number.isFinite(number)) return 0
-  if (normalized.endsWith('T')) return number * 1_000_000_000_000
-  if (normalized.endsWith('B')) return number * 1_000_000_000
-  if (normalized.endsWith('M')) return number * 1_000_000
-  if (normalized.endsWith('K')) return number * 1_000
-  return number
 }
 
 function compactNumber(value: number) {

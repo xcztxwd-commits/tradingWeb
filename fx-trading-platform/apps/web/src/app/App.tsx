@@ -5,6 +5,7 @@ import { ExchangeLoading } from '../components/loading/ExchangeLoading'
 import { AccountRoute } from '../routes/account/AccountRoutes'
 import { AuthRoute } from '../routes/auth/AuthRoute'
 import { HomeRoute } from '../routes/home/HomeRoute'
+import { MarketsRoute } from '../routes/markets/MarketsRoute'
 import { AppShell } from './AppShell'
 import { LegacyTradingRedirect } from './LegacyTradingRedirect'
 import { resolveSafeTradingPath } from './tradingRoutes'
@@ -12,7 +13,6 @@ import { resolveSafeTradingPath } from './tradingRoutes'
 const TradingPage = lazy(() => import('../pages/trading/TradingPage').then((module) => ({ default: module.TradingPage })))
 const OrdersPage = lazy(() => import('../pages/orders/OrdersPage').then((module) => ({ default: module.OrdersPage })))
 const PositionsPage = lazy(() => import('../pages/positions/PositionsPage').then((module) => ({ default: module.PositionsPage })))
-const MarketsPage = lazy(() => import('../pages/markets/MarketsPage').then((module) => ({ default: module.MarketsPage })))
 const WalletPage = lazy(() => import('../pages/wallet/WalletPage').then((module) => ({ default: module.WalletPage })))
 
 export function App() {
@@ -31,7 +31,7 @@ export function App() {
           <Route path="/forgot-password" element={<AuthRoute mode="forgot-password" />} />
           <Route path="/two-factor-help" element={<AuthRoute mode="two-factor-help" />} />
           <Route path="/dashboard" element={<AccountRoute mode="dashboard" />} />
-          <Route path="/markets" element={<MarketsPage />} />
+          <Route path="/markets" element={<MarketsRoute />} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/positions" element={<PositionsPage />} />
           <Route path="/wallet" element={<WalletPage />} />
