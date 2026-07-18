@@ -7,13 +7,14 @@ import { describe, it } from 'node:test'
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const tradingDir = resolve(currentDir, '..')
 const webSrcDir = resolve(tradingDir, '..', '..')
+const projectRoot = resolve(webSrcDir, '..', '..', '..')
 const terminalSourcePath = join(currentDir, 'MobileTradingTerminal.tsx')
 const terminalStylesPath = join(currentDir, 'MobileTradingTerminal.module.css')
 const tradingPageSource = readFileSync(join(tradingDir, 'TradingPage.tsx'), 'utf8')
 const tradingPageStyles = readFileSync(join(tradingDir, 'TradingPage.module.css'), 'utf8')
 const mobileViewSource = readFileSync(join(tradingDir, 'components', 'TradingMobileView.tsx'), 'utf8')
 const mobileViewportSource = readFileSync(join(tradingDir, 'useMobileTerminalViewport.ts'), 'utf8')
-const themeCss = readFileSync(join(webSrcDir, 'design-system', 'theme', 'theme.css'), 'utf8')
+const themeCss = readFileSync(join(projectRoot, 'packages', 'ui', 'src', 'theme', 'theme.css'), 'utf8')
 const mobilePanelsStyles = readFileSync(join(tradingDir, 'components', 'MobilePanels.module.css'), 'utf8')
 
 describe('mobile trading terminal redesign', () => {

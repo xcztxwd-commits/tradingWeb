@@ -112,6 +112,21 @@ describe('frontend dependency boundaries', () => {
     }
   })
 
+  it('ignores import-like text inside source contracts, comments and ordinary strings', () => {
+    const root = createFixture()
+
+    writeFixture(root, 'packages/ui/src/source-contract.test.ts', String.raw`
+      const importPattern = /import \{ useTheme \} from '@fx-platform\/frontend-core'/u
+      const exportPattern = /export \* from '@fx-platform\/frontend-core'/u
+      const documentedExample = "import '@fx-platform/frontend-core'"
+      // import '@fx-platform/frontend-core'
+      /* export { api } from '@fx-platform/frontend-core' */
+      export const patterns = [importPattern, exportPattern, documentedExample]
+    `)
+
+    assert.deepEqual(findFrontendBoundaryViolations(root), [])
+  })
+
   it('registers the frontend gates in architecture verification and durable docs', () => {
     const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
     const packageJson = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf8'))

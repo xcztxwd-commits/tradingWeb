@@ -16,6 +16,11 @@ describe('@fx-platform/ui package contract', () => {
       types: './src/index.ts',
       import: './src/index.ts'
     })
+    assert.deepEqual(packageJson.exports['./theme'], {
+      types: './src/theme/index.ts',
+      import: './src/theme/index.ts'
+    })
+    assert.equal(packageJson.exports['./theme.css'], './src/theme/theme.css')
     assert.equal(packageJson.scripts.test, 'node --test "src/**/*.test.ts"')
     assert.equal(packageJson.scripts.typecheck, 'tsc --noEmit -p tsconfig.json')
   })
@@ -29,6 +34,6 @@ describe('@fx-platform/ui package contract', () => {
 
   it('has a public source entry point', () => {
     const indexSource = readFileSync(resolve(packageRoot, 'src/index.ts'), 'utf8')
-    assert.match(indexSource, /export\s*\{\s*\}/u)
+    assert.match(indexSource, /export \* from '\.\/theme'/u)
   })
 })
