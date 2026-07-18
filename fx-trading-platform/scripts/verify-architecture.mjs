@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { findFrontendBoundaryViolations } from './verify-frontend-boundaries.mjs'
+
 const root = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 
 const requiredFiles = [
@@ -200,6 +202,10 @@ if (existsSync(frontendServiceDir)) {
   if (/https?:\/\/[^'"]*massive/i.test(marketApi)) {
     failures.push('Frontend must not call Massive directly')
   }
+}
+
+for (const violation of findFrontendBoundaryViolations(root)) {
+  failures.push(`Frontend dependency boundary: ${violation}`)
 }
 
 if (failures.length > 0) {
