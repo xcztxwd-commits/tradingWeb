@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { BackendMarketStatus } from '../../features/market/tradingMarketAdapters'
-import { fetchMarketStatus } from '../../features/market/tradingMarketApi'
+import { fetchMarketStatus, type BackendMarketStatus } from '@fx-platform/frontend-core'
 import {
   getTradingMarketDataStatusView,
   toTradingMarketDataError,

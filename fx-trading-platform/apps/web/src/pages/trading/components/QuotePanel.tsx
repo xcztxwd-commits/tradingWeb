@@ -1,8 +1,7 @@
 import { Radio } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { formatMarketPrice } from '../../../features/market/tradingModels'
-import type { TradingQuote } from '../../../features/market/tradingModels'
+import { formatMarketPrice, type TradingQuote } from '@fx-platform/frontend-core'
 import styles from './QuotePanel.module.css'
 
 type Props = {

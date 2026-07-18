@@ -2,8 +2,7 @@ import { ChevronDown, Radio } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { TradingProduct } from '../../../app/tradingRoutes'
-import { formatMarketPrice } from '../../../features/market/tradingModels'
-import type { TradingMarket, TradingQuote } from '../../../features/market/tradingModels'
+import { formatMarketPrice, type TradingMarket, type TradingQuote } from '@fx-platform/frontend-core'
 import styles from './SymbolHeader.module.css'
 
 type Props = {

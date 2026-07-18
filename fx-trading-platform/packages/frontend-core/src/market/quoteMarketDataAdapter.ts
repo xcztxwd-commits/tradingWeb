@@ -1,10 +1,10 @@
-import { subscribeMarketSourceChanges, subscribeOrderBook, subscribeQuote, subscribeRecentTrades } from '../../services/marketStream'
-import type { MarketSourceChangedEvent } from '../../services/marketStream'
+import { subscribeMarketSourceChanges, subscribeOrderBook, subscribeQuote, subscribeRecentTrades } from './marketStream.ts'
+import type { MarketSourceChangedEvent } from './marketStream.ts'
 import { createAuthoritativeMarketSnapshot, matchesExpectedMarketSource, unavailableSnapshot } from './authoritativeMarketSnapshot.ts'
-import { fetchMarketOrderBook, fetchMarketQuote, fetchMarketRecentTradeBatch } from './tradingMarketApi'
+import { fetchMarketOrderBook, fetchMarketQuote, fetchMarketRecentTradeBatch } from './tradingMarketApi.ts'
 import type { MarketOrderBook, MarketTradeBatch } from './marketDataTypes.ts'
-import type { MarketSourceMode, TradingQuote } from './tradingModels'
-import { marketDataStore } from './marketDataStore'
+import type { MarketSourceMode, TradingQuote } from './tradingModels.ts'
+import { marketDataStore } from './marketDataStore.ts'
 
 type AdapterStore = typeof marketDataStore
 

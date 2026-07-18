@@ -19,7 +19,7 @@ import {
   createAccountRefreshCoordinator,
   createLatestSingleFlightRefreshGate
 } from './accountRefreshCoordinator'
-import { subscribeTradingSessionEvents } from '../../services/marketStream'
+import { subscribeTradingSessionEvents } from '@fx-platform/frontend-core'
 import type { AccountTransferResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
 import {
   clearStoredAuthToken,

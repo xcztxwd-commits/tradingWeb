@@ -1,5 +1,5 @@
-import { getBrowserStorage, type KeyValueStorage } from '@fx-platform/frontend-core'
-import type { TradingMarket } from './tradingModels'
+import { getBrowserStorage, type KeyValueStorage } from '../storage/browserStorage.ts'
+import type { TradingMarket } from './tradingModels.ts'
 
 export const marketFavoriteStorageKey = 'fx-trading-market-favorites'
 

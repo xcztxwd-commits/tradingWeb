@@ -29,7 +29,7 @@ import {
   shouldIgnoreIntervalShortcut
 } from '../chartSettings'
 import type { ChartSettings, ChartType } from '../chartSettings'
-import type { TradingPeriod } from '../../../features/market/tradingModels'
+import type { TradingPeriod } from '@fx-platform/frontend-core'
 import { IntervalDropdown } from './IntervalDropdown'
 import styles from './ChartTopToolbar.module.css'
 

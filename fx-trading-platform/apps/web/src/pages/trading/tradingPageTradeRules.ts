@@ -1,5 +1,4 @@
-import { getPricePrecision } from '../../features/market/tradingModels'
-import type { TradingInstrumentRules, TradingMarket } from '../../features/market/tradingModels'
+import { getPricePrecision, type TradingInstrumentRules, type TradingMarket } from '@fx-platform/frontend-core'
 
 export function mergeMarketRules(market: TradingMarket, rules: TradingInstrumentRules | null): TradingMarket {
   if (!rules || rules.symbol !== market.symbol) return market

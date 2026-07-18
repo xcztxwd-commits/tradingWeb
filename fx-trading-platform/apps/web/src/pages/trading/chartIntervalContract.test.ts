@@ -5,8 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 import * as chartSettings from './chartSettings.ts'
-import { buildMarketCandlesPath } from '../../features/market/tradingMarketAdapters.ts'
-import type { TradingPeriod } from '../../features/market/tradingModels.ts'
+import { buildMarketCandlesPath, type TradingPeriod } from '@fx-platform/frontend-core'
 
 type ChartIntervalContract = {
   getChartIntervalOptions: (symbol: string) => typeof chartSettings.allChartIntervals

@@ -1,4 +1,5 @@
-import { apiGet, type Candle, type Quote, type SymbolItem } from '@fx-platform/frontend-core'
+import { apiGet } from './apiClient.ts'
+import type { Candle, Quote, SymbolItem } from '../models/trading.ts'
 import type { PerpetualReferenceResponse } from '@fx-platform/shared-types'
 
 export function getSymbols() {

@@ -14,7 +14,6 @@
     "@fx-platform/shared-types": "0.1.0",
     "@fx-platform/frontend-core": "0.1.0",
     "@fx-platform/ui": "0.1.0",
-    "@stomp/stompjs": "^7.3.0",
     "i18next": "^26.3.1",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

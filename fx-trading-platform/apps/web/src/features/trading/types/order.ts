@@ -1,4 +1,4 @@
-import type { TradingInstrumentRules } from '../../market/tradingModels'
+import type { TradingInstrumentRules } from '@fx-platform/frontend-core'
 import type {
   CreateOrderRequest,
   MarginMode,

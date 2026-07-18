@@ -8,9 +8,9 @@ import type {
   TradingMarket,
   TradingPeriod,
   TradingQuote
-} from './tradingModels'
-import type { MarketOrderBook, MarketTradeBatch, TradeItem } from './marketDataTypes'
-import { normalizePlatformMarketSymbol } from '../../utils/marketSymbol.ts'
+} from './tradingModels.ts'
+import type { MarketOrderBook, MarketTradeBatch, TradeItem } from './marketDataTypes.ts'
+import { normalizePlatformMarketSymbol } from './marketSymbol.ts'
 
 type BackendMarketSource = {
   providerCode?: string | null

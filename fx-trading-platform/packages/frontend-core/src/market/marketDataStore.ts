@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
 import { unavailableSnapshot } from './authoritativeMarketSnapshot.ts'
-import type { MarketDataSnapshot, OrderBookLevel, OrderBookSide, TradeItem } from './marketDataTypes'
+import type { MarketDataSnapshot, OrderBookLevel, OrderBookSide, TradeItem } from './marketDataTypes.ts'
 
 type Listener = () => void
 type OrderBookLevelUpdate = OrderBookLevel & { side: OrderBookSide }

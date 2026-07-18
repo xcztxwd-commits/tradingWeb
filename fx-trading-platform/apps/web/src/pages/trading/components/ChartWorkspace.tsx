@@ -9,7 +9,7 @@ import { buildChartTradeMarkers } from '../chartTradeMarkers'
 import { getDrawingShortcutAction, normalizeChartInterval, shouldIgnoreDrawingShortcut } from '../chartSettings'
 import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from '../chartSettings'
 import type { OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
-import type { TradingPeriod } from '../../../features/market/tradingModels'
+import type { TradingPeriod } from '@fx-platform/frontend-core'
 import styles from './ChartWorkspace.module.css'
 
 const IndicatorSettingsModal = lazy(() =>

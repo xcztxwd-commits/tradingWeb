@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 
-import type { MarketSourceChangedEvent } from '../../../services/marketStream'
+import type { MarketSourceChangedEvent } from '@fx-platform/frontend-core'
 import styles from '../TradingPage.module.css'
 
 type MarketSourceChangeNoticeProps = {

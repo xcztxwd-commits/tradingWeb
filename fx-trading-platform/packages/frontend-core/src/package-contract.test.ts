@@ -20,10 +20,14 @@ describe('@fx-platform/frontend-core package contract', () => {
     assert.equal(packageJson.scripts.typecheck, 'tsc --noEmit -p tsconfig.json')
   })
 
-  it('keeps shared-types as its only runtime dependency for API and model ownership', () => {
+  it('adds only the market runtime dependencies required by the extracted implementation', () => {
     assert.deepEqual(packageJson.dependencies, {
-      '@fx-platform/shared-types': '0.1.0'
+      '@fx-platform/shared-types': '0.1.0',
+      '@stomp/stompjs': '^7.3.0'
     })
+    assert.equal(packageJson.peerDependencies.react, '^19.0.0')
+    assert.equal(packageJson.devDependencies.react, '^19.0.0')
+    assert.equal(packageJson.devDependencies['@types/react'], '^19.0.0')
   })
 
   it('has a public source entry point', () => {
@@ -32,5 +36,6 @@ describe('@fx-platform/frontend-core package contract', () => {
     assert.match(indexSource, /export \* from '\.\/auth\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/models\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/storage\/index\.ts'/u)
+    assert.match(indexSource, /export \* from '\.\/market\/index\.ts'/u)
   })
 })

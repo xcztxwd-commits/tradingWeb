@@ -1,5 +1,5 @@
 import type { OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
-import type { TradingPeriod } from '../../features/market/tradingModels'
+import type { TradingPeriod } from '@fx-platform/frontend-core'
 
 export type ChartTradeMarkerKind = 'positionEntry' | 'takeProfit' | 'stopLoss' | 'liquidation' | 'order'
 export type ChartTradeMarkerTone = 'buy' | 'sell' | 'profit' | 'loss' | 'risk' | 'neutral'

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
 import { historicalCandleBatchSize, loadChartCandles, resolveHistoricalCandleEndTime } from './chartCandleData.ts'
-import type { TradingCandle } from '../../features/market/tradingModels.ts'
+import type { TradingCandle } from '@fx-platform/frontend-core'
 
 describe('chart candle data loading', () => {
   it('uses backend candles when the request returns rows', async () => {

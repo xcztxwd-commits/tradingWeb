@@ -1,5 +1,5 @@
-import type { Quote } from '@fx-platform/frontend-core'
-import { normalizePlatformMarketSymbol } from '../utils/marketSymbol.ts'
+import type { Quote } from '../models/trading.ts'
+import { normalizePlatformMarketSymbol } from './marketSymbol.ts'
 import { Client } from '@stomp/stompjs'
 import type { IMessage, StompSubscription } from '@stomp/stompjs'
 

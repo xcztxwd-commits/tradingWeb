@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { readStoredAuthToken } from '@fx-platform/frontend-core'
+import { readStoredAuthToken } from '../auth/sessionStorage.ts'
 import {
   favoriteSymbolList,
   loadFavoriteSymbols,
   normalizeFavoriteSymbol,
   saveFavoriteSymbols,
   toggleFavoriteSymbol
-} from './marketFavorites'
-import { fetchMarketFavorites, setMarketFavorite } from './tradingMarketApi'
+} from './marketFavorites.ts'
+import { fetchMarketFavorites, setMarketFavorite } from './tradingMarketApi.ts'
 
 export function useMarketFavorites(token?: string | null) {
   const [storedToken] = useState(() => (token === undefined ? readStoredAuthToken() : null))

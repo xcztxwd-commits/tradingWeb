@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { getPerpetualReference } from '../../services/marketApi.ts'
+import { getPerpetualReference } from '@fx-platform/frontend-core'
 import { toPerpetualReferenceView, type PerpetualReferenceView } from './perpetualReferenceModel.ts'
-import type { MarketSourceMetadata } from '../../features/market/tradingModels.ts'
+import type { MarketSourceMetadata } from '@fx-platform/frontend-core'
 
 export function usePerpetualReference(symbol: string, enabled: boolean, expectedSource?: MarketSourceMetadata) {
   const [reference, setReference] = useState<PerpetualReferenceView | null>(null)

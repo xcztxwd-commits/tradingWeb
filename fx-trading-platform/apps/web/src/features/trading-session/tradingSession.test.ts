@@ -491,7 +491,10 @@ describe('trading session submit mode', () => {
 
   it('refreshes the authoritative account snapshot after trading-session stream events', () => {
     const source = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
-    const streamSource = readFileSync(new URL('../../services/marketStream.ts', import.meta.url), 'utf8')
+    const streamSource = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/market/marketStream.ts', import.meta.url),
+      'utf8'
+    )
 
     assert.match(source, /subscribeTradingSessionEvents/)
     assert.match(source, /subscribeTradingSessionEvents\([\s\S]*coordinator\.notifyEvent\(\)[\s\S]*coordinator\.notifyReconnect\(\)/)

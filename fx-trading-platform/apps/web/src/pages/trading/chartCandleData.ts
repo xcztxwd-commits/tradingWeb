@@ -1,4 +1,4 @@
-import type { TradingCandle, TradingPeriod } from '../../features/market/tradingModels.ts'
+import type { TradingCandle, TradingPeriod } from '@fx-platform/frontend-core'
 
 export const historicalCandleBatchSize = 220
 
@@ -13,7 +13,7 @@ type LoadChartCandlesOptions = {
 }
 
 async function fetchBackendCandles(symbol: string, period: TradingPeriod, options?: CandleFetcherOptions) {
-  const { fetchMarketCandles } = await import('../../features/market/tradingMarketApi.ts')
+  const { fetchMarketCandles } = await import('@fx-platform/frontend-core')
   return fetchMarketCandles(symbol, period, options)
 }
 

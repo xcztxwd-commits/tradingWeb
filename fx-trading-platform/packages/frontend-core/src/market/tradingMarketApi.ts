@@ -1,5 +1,5 @@
-import { apiGet, apiPut } from '@fx-platform/frontend-core'
-import { favoriteSymbolList } from './marketFavorites'
+import { apiGet, apiPut } from '../api/apiClient.ts'
+import { favoriteSymbolList } from './marketFavorites.ts'
 import {
   buildMarketCandlesPath,
   buildMarketFavoritePath,
@@ -20,10 +20,10 @@ import {
   mapRecentTradesToMarketData,
   mapSymbolToTradingMarket,
   tradingMarketEndpoints
-} from './tradingMarketAdapters'
-import type { BackendCandle, BackendOrderBook, BackendQuote, BackendRecentTrade, BackendSymbol } from './tradingMarketAdapters'
-import type { BackendInstrumentRules, BackendMarketStatus } from './tradingMarketAdapters'
-import type { TradingInstrumentRules, TradingPeriod, TradingQuote } from './tradingModels'
+} from './tradingMarketAdapters.ts'
+import type { BackendCandle, BackendOrderBook, BackendQuote, BackendRecentTrade, BackendSymbol } from './tradingMarketAdapters.ts'
+import type { BackendInstrumentRules, BackendMarketStatus } from './tradingMarketAdapters.ts'
+import type { TradingInstrumentRules, TradingPeriod, TradingQuote } from './tradingModels.ts'
 
 type FetchMarketCandlesOptions = {
   endTime?: Date | number

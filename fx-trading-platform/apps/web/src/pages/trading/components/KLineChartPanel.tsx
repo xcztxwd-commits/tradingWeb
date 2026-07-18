@@ -20,15 +20,20 @@ import {
 import type { PersistedChartDrawing } from '../chartDrawingPersistence'
 import { buildTradeMarkerOverlays, tradeMarkerOverlayGroupId } from '../chartTradeMarkers'
 import type { ChartTradeMarker } from '../chartTradeMarkers'
-import { formatMarketPrice, getPricePrecision, toKLinePeriod } from '../../../features/market/tradingModels'
-import { mapQuoteToTradingQuote } from '../../../features/market/tradingMarketAdapters'
-import type { BackendQuote } from '../../../features/market/tradingMarketAdapters'
+import {
+  formatMarketPrice,
+  getPricePrecision,
+  mapQuoteToTradingQuote,
+  subscribeQuote,
+  toKLinePeriod,
+  type BackendQuote,
+  type TradingCandle,
+  type TradingPeriod
+} from '@fx-platform/frontend-core'
 import { registerTradingGeneratedIndicators } from '../generatedTradingIndicators'
 import { registerTradingDrawingOverlays } from '../tradingDrawingOverlays'
-import type { TradingCandle, TradingPeriod } from '../../../features/market/tradingModels'
 import { registerWeightedMovingAverageIndicator } from '../weightedMovingAverageIndicator'
 import { useResizeObserver } from '../../../hooks/useResizeObserver'
-import { subscribeQuote } from '../../../services/marketStream'
 import styles from './KLineChartPanel.module.css'
 
 type Props = {

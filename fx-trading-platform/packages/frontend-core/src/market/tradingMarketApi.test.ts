@@ -28,14 +28,12 @@ import {
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const adapterSource = readFileSync(join(currentDir, 'tradingMarketAdapters.ts'), 'utf8')
-const componentTypesSource = readFileSync(join(currentDir, '..', '..', 'components', 'market-side-panel', 'types.ts'), 'utf8')
 
 describe('trading market API adapters', () => {
   it('owns market data snapshot types inside the market feature boundary', () => {
     assert.equal(existsSync(join(currentDir, 'marketDataTypes.ts')), true)
-    assert.match(adapterSource, /from '\.\/marketDataTypes'/)
+    assert.match(adapterSource, /from '\.\/marketDataTypes\.ts'/)
     assert.doesNotMatch(adapterSource, /components\/market-side-panel\/types/)
-    assert.match(componentTypesSource, /from '..\/..\/features\/market\/marketDataTypes'/)
   })
 
   it('uses current backend endpoints instead of removed market ticker and candle paths', () => {

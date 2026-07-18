@@ -1,5 +1,5 @@
 import { defaultTradingSymbols, tradingProductSymbols, type TradingProduct } from '../../app/tradingRoutes.ts'
-import type { TradingMarket } from '../../features/market/tradingModels.ts'
+import type { TradingMarket } from '@fx-platform/frontend-core'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string
 

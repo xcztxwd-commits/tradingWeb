@@ -1,4 +1,4 @@
-import type { TradingPeriod } from '../../features/market/tradingModels'
+import type { TradingPeriod } from '@fx-platform/frontend-core'
 
 export type ChartType = 'candle' | 'bar' | 'hlc' | 'line'
 export type LineType = 'solid' | 'dashed'

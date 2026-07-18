@@ -15,15 +15,15 @@ import {
   type BinanceFuturesDashboard,
   type BinanceFuturesPeriod,
   type BinanceMarketOverview
-} from '../../features/market/binanceMarketData'
-import { hydrateMarketFavorites } from '../../features/market/marketFavorites'
-import { mergeTradingQuoteIntoMarket } from '../../features/market/tradingMarketAdapters'
-import { fetchMarketQuotes, fetchMarketSymbols } from '../../features/market/tradingMarketApi'
-import { formatMarketPrice } from '../../features/market/tradingModels'
-import type { TradingMarket, TradingQuote } from '../../features/market/tradingModels'
-import { useMarketFavorites } from '../../features/market/useMarketFavorites'
+} from '@fx-platform/frontend-core'
+import { hydrateMarketFavorites } from '@fx-platform/frontend-core'
+import { mergeTradingQuoteIntoMarket } from '@fx-platform/frontend-core'
+import { fetchMarketQuotes, fetchMarketSymbols } from '@fx-platform/frontend-core'
+import { formatMarketPrice } from '@fx-platform/frontend-core'
+import type { TradingMarket, TradingQuote } from '@fx-platform/frontend-core'
+import { useMarketFavorites } from '@fx-platform/frontend-core'
 import { isMarketTradingEnabled, resolveMarketTradingTarget } from './marketTradingTarget'
-import { subscribeQuote } from '../../services/marketStream'
+import { subscribeQuote } from '@fx-platform/frontend-core'
 
 type MarketPageTab = 'overview' | 'trading-data' | 'ai-picks' | 'token-unlocks'
 type TradingDataTab = 'rankings' | 'usdt-contracts' | 'coin-contracts' | 'options'

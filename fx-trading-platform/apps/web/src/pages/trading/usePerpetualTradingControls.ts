@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 
 import { useTradingSettings } from '../../features/trading-settings/useTradingSettings'
 import type { OrderAdapterSettings } from '../../features/trading/services/orderAdapter'
-import type { MarketSourceMetadata, TradingInstrumentRules, TradingMarket } from '../../features/market/tradingModels'
+import type { MarketSourceMetadata, TradingInstrumentRules, TradingMarket } from '@fx-platform/frontend-core'
 import { usePerpetualReference } from './usePerpetualReference'
 
 export type PerpetualTradingControlsModel = {

@@ -7,7 +7,10 @@ import { describe, it } from 'node:test'
 const pagesDir = dirname(fileURLToPath(import.meta.url))
 const projectRoot = resolve(pagesDir, '../../../..')
 const markets = readFileSync(join(pagesDir, 'markets', 'MarketsPage.tsx'), 'utf8')
-const binanceMarketData = readFileSync(join(pagesDir, '..', 'features', 'market', 'binanceMarketData.ts'), 'utf8')
+const binanceMarketData = readFileSync(
+  join(projectRoot, 'packages', 'frontend-core', 'src', 'market', 'binanceMarketData.ts'),
+  'utf8'
+)
 const marketSources = `${markets}\n${binanceMarketData}`
 const orders = readFileSync(join(pagesDir, 'orders', 'OrdersPage.tsx'), 'utf8')
 const positions = readFileSync(join(pagesDir, 'positions', 'PositionsPage.tsx'), 'utf8')

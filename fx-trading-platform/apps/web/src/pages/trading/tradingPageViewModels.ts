@@ -1,6 +1,6 @@
 import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from './chartSettings'
 import type { AccountSummary, LedgerEntry, OcoOrderPayload, OrderPayload, OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
-import type { TradingMarket, TradingPeriod, TradingQuote } from '../../features/market/tradingModels'
+import type { TradingMarket, TradingPeriod, TradingQuote } from '@fx-platform/frontend-core'
 import type { TradingBalances } from '../../features/trading-session/tradingSession'
 import type { TradingSessionMode } from '../../features/trading-session/useTradingSession'
 import type {

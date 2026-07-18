@@ -1,4 +1,4 @@
-import { getPercentageStep, percentageSteps } from '../../../features/market/tradingModels'
+import { getPercentageStep, percentageSteps } from '@fx-platform/frontend-core'
 import styles from './TradingSlider.module.css'
 
 type Props = {

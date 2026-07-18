@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { ChartIntervalOption } from '../chartSettings'
-import type { TradingPeriod } from '../../../features/market/tradingModels'
+import type { TradingPeriod } from '@fx-platform/frontend-core'
 import styles from './ChartTopToolbar.module.css'
 
 type Props = {

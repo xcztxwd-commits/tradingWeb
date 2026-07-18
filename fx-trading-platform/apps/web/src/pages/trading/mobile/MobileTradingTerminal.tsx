@@ -2,8 +2,7 @@ import { ChevronDown, List, PanelRight, ShoppingBag } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { formatMarketPrice } from '../../../features/market/tradingModels'
-import type { TradingMarket, TradingQuote } from '../../../features/market/tradingModels'
+import { formatMarketPrice, type TradingMarket, type TradingQuote } from '@fx-platform/frontend-core'
 import type { TradingMarketDataStatusView } from '../tradingPageMarketDataStatus'
 import styles from './MobileTradingTerminal.module.css'
 

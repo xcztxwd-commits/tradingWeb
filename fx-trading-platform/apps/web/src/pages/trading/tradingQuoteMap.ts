@@ -1,6 +1,4 @@
-import { createTradingQuoteFromMarket } from '../../features/market/tradingMarketAdapters.ts'
-import { isFreshSource } from '../../features/market/authoritativeMarketSnapshot.ts'
-import type { TradingMarket, TradingQuote } from '../../features/market/tradingModels.ts'
+import { createTradingQuoteFromMarket, isFreshSource, type TradingMarket, type TradingQuote } from '@fx-platform/frontend-core'
 import { tradingProductSymbols } from '../../app/tradingRoutes.ts'
 
 const p0Symbols = new Set<string>([...tradingProductSymbols.spot, ...tradingProductSymbols.perpetual])

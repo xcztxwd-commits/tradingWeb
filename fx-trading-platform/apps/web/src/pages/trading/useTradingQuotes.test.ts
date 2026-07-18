@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
 import { createUnavailableTradingQuote, expireTradingQuote, reconcileQuoteMap } from './tradingQuoteMap.ts'
-import type { TradingMarket, TradingQuote } from '../../features/market/tradingModels.ts'
+import type { TradingMarket, TradingQuote } from '@fx-platform/frontend-core'
 
 describe('trading quote map reconciliation', () => {
   it('keeps an existing provider quote when the market list refreshes', () => {

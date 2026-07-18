@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
-import type { TradingMarket } from '../../features/market/tradingModels.ts'
+import type { TradingMarket } from '@fx-platform/frontend-core'
 import {
   getTradingMarketsForProduct,
   mergeWithLocalTradingMarkets,

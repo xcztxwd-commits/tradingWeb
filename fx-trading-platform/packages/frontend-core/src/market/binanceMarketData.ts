@@ -1,5 +1,5 @@
-import type { TradingMarket } from './tradingModels'
-import { apiGet } from '@fx-platform/frontend-core'
+import type { TradingMarket } from './tradingModels.ts'
+import { apiGet } from '../api/apiClient.ts'
 
 type NumberLike = string | number | null | undefined
 

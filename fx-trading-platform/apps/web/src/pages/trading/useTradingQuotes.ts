@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { subscribeMarketSourceChanges, subscribeQuote, type MarketSourceChangedEvent } from '../../services/marketStream'
 import {
-  mapQuoteToTradingQuote
-} from '../../features/market/tradingMarketAdapters'
-import type { BackendQuote } from '../../features/market/tradingMarketAdapters'
-import { isFreshSource, matchesExpectedMarketSource } from '../../features/market/authoritativeMarketSnapshot'
-import { fetchMarketQuote } from '../../features/market/tradingMarketApi'
-import type { MarketSourceMetadata, TradingMarket, TradingQuote } from '../../features/market/tradingModels'
-import { normalizePlatformMarketSymbol } from '../../utils/marketSymbol.ts'
+  fetchMarketQuote,
+  isFreshSource,
+  mapQuoteToTradingQuote,
+  matchesExpectedMarketSource,
+  normalizePlatformMarketSymbol,
+  subscribeMarketSourceChanges,
+  subscribeQuote,
+  type BackendQuote,
+  type MarketSourceChangedEvent,
+  type MarketSourceMetadata,
+  type TradingMarket,
+  type TradingQuote
+} from '@fx-platform/frontend-core'
 import { toTradingMarketDataError, type TradingMarketDataError } from './tradingPageMarketDataStatus'
 import { createUnavailableTradingQuote, expireTradingQuote, reconcileQuoteMap } from './tradingQuoteMap'
 

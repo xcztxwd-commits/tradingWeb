@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
 import { TradingWorkspace } from '../../../components/layout/TradingWorkspace'
-import { formatMarketPrice } from '../../../features/market/tradingModels'
+import { formatMarketPrice } from '@fx-platform/frontend-core'
 import { TradePanel } from '../../../features/trading/components/TradePanel'
 import { BottomAccountPanel } from './BottomAccountPanel'
 import { ChartWorkspace } from './ChartWorkspace'

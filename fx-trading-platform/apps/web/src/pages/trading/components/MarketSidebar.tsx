@@ -2,9 +2,15 @@ import { Search, Star } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { AssetMark } from '../../../components/asset/AssetMark'
-import { hydrateMarketFavorites } from '../../../features/market/marketFavorites'
-import { filterMarkets, formatMarketPrice, marketCategories } from '../../../features/market/tradingModels'
-import type { MarketCategory, TradingMarket, TradingQuote } from '../../../features/market/tradingModels'
+import {
+  filterMarkets,
+  formatMarketPrice,
+  hydrateMarketFavorites,
+  marketCategories,
+  type MarketCategory,
+  type TradingMarket,
+  type TradingQuote
+} from '@fx-platform/frontend-core'
 import styles from './MarketSidebar.module.css'
 
 type Props = {

@@ -1,7 +1,6 @@
 import type { PerpetualReferenceResponse } from '@fx-platform/shared-types'
 import type { MarketSource } from '../../features/trading/components/MarketSourceBadge.tsx'
-import { isFreshSource } from '../../features/market/authoritativeMarketSnapshot.ts'
-import type { MarketSourceMetadata } from '../../features/market/tradingModels.ts'
+import { isFreshSource, type MarketSourceMetadata } from '@fx-platform/frontend-core'
 
 export type PerpetualReferenceView = {
   markPrice: string

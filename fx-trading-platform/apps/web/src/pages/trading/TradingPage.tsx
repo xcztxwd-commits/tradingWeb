@@ -19,13 +19,12 @@ import { TradingMobileView } from './components/TradingMobileView'
 import { MarketSourceChangeNotice } from './components/MarketSourceChangeNotice'
 import { usePerpetualTradingControls } from './usePerpetualTradingControls'
 import { TradingOrderSheet } from './components/TradingOrderSheet'
-import { hydrateMarketFavorites } from '../../features/market/marketFavorites'
-import { createTradingMarketPlaceholder, createTradingQuoteFromMarket } from '../../features/market/tradingMarketAdapters'
-import { fetchMarketSymbolRules, fetchMarketSymbols } from '../../features/market/tradingMarketApi'
-import { startQuoteMarketDataAdapter } from '../../features/market/quoteMarketDataAdapter'
-import { getRealtimeQuoteMarkets } from '../../features/market/tradingModels'
-import type { TradingInstrumentRules, TradingMarket } from '../../features/market/tradingModels'
-import { useMarketFavorites } from '../../features/market/useMarketFavorites'
+import {
+  createTradingMarketPlaceholder, createTradingQuoteFromMarket,
+  fetchMarketSymbolRules, fetchMarketSymbols, getRealtimeQuoteMarkets,
+  hydrateMarketFavorites, startQuoteMarketDataAdapter, useMarketFavorites,
+  type TradingInstrumentRules, type TradingMarket
+} from '@fx-platform/frontend-core'
 import { useTradingQuoteMap } from './useTradingQuotes'
 import { deriveTradingBalances } from '../../features/trading-session/tradingSession'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'

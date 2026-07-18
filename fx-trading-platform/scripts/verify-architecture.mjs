@@ -59,11 +59,11 @@ const requiredFiles = [
   'apps/web/src/pages/trading/TradingPage.tsx',
   'apps/web/src/pages/trading/components/KLineChartPanel.tsx',
   'apps/web/src/features/trading/components/TradePanel.tsx',
-  'apps/web/src/features/market/tradingMarketApi.ts',
-  'apps/web/src/features/market/tradingMarketAdapters.ts',
-  'apps/web/src/features/market/tradingModels.ts',
+  'packages/frontend-core/src/market/tradingMarketApi.ts',
+  'packages/frontend-core/src/market/tradingMarketAdapters.ts',
+  'packages/frontend-core/src/market/tradingModels.ts',
   'packages/frontend-core/src/api/apiClient.ts',
-  'apps/web/src/services/marketStream.ts',
+  'packages/frontend-core/src/market/marketStream.ts',
   'apps/admin/package.json',
   'apps/admin/src/app/AdminApp.tsx',
   'apps/admin/src/pages/DashboardPage.tsx',
@@ -123,10 +123,10 @@ const contentChecks = [
   ['apps/web/src/components/market-side-panel/MarketSidePanel.tsx', '../loading/TerminalSkeleton'],
   ['apps/web/src/components/loading/TerminalSkeleton.tsx', 'export function OrderBookSkeleton'],
   ['apps/web/src/pages/trading/components/TerminalSkeleton.tsx', 'components/loading/TerminalSkeleton'],
-  ['apps/web/src/services/marketApi.ts', '/api/market'],
-  ['apps/web/src/services/marketStream.ts', '/topic/market/quotes/'],
+  ['packages/frontend-core/src/api/marketApi.ts', '/api/market'],
+  ['packages/frontend-core/src/market/marketStream.ts', '/topic/market/quotes/'],
   ['packages/frontend-core/src/api/tradingApi.ts', '/close?accountId='],
-  ['apps/web/src/services/marketApi.ts', 'Massive'],
+  ['packages/frontend-core/src/api/marketApi.ts', 'Massive'],
   ['apps/web/package.json', 'ensure-klinecharts-dist.mjs'],
   ['apps/web/vite.config.ts', '../../../dist/index.esm.js'],
   ['apps/admin/src/services/adminApi.ts', '/api/admin/users'],
@@ -196,9 +196,9 @@ for (const [file, forbidden] of forbiddenFrontendImports) {
   }
 }
 
-const frontendServiceDir = join(root, 'apps/web/src/services')
-if (existsSync(frontendServiceDir)) {
-  const marketApi = readFileSync(join(frontendServiceDir, 'marketApi.ts'), 'utf8')
+const frontendMarketApi = join(root, 'packages/frontend-core/src/api/marketApi.ts')
+if (existsSync(frontendMarketApi)) {
+  const marketApi = readFileSync(frontendMarketApi, 'utf8')
   if (/https?:\/\/[^'"]*massive/i.test(marketApi)) {
     failures.push('Frontend must not call Massive directly')
   }

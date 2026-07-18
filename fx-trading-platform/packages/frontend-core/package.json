@@ -16,9 +16,15 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@fx-platform/shared-types": "0.1.0"
+    "@fx-platform/shared-types": "0.1.0",
+    "@stomp/stompjs": "^7.3.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   },
   "devDependencies": {
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
     "typescript": "^5.8.3"
   }
 }

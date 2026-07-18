@@ -1,4 +1,4 @@
-import type { OrderBookLevel, OrderBookSide } from '../../features/market/marketDataTypes'
+import type { OrderBookLevel, OrderBookSide } from '@fx-platform/frontend-core'
 
 export type {
   LastPriceDirection,
@@ -7,7 +7,7 @@ export type {
   OrderBookSide,
   OrderBookState,
   TradeItem
-} from '../../features/market/marketDataTypes'
+} from '@fx-platform/frontend-core'
 
 export type OrderBookDisplayMode = 'both' | 'bids' | 'asks'
 export type MarketSidePanelTab = 'orderbook' | 'trades'
