@@ -1,4 +1,4 @@
-import type { MockOrderPayload, MockOrderResponse } from '../types/order'
+import type { MockOrderPayload, MockOrderResponse } from './orderTypes.ts'
 
 export function submitOrder(payload: MockOrderPayload): Promise<MockOrderResponse> {
   return Promise.resolve({

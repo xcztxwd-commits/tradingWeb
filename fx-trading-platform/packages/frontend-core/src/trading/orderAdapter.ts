@@ -6,8 +6,8 @@ import type {
   QuantityUnit
 } from '@fx-platform/shared-types'
 
-import type { OcoOrderPayload, OrderPayload } from '@fx-platform/frontend-core'
-import type { TradeFormState, TradeMarket } from '../types/order'
+import type { OcoOrderPayload, OrderPayload } from '../models/index.ts'
+import type { TradeFormState, TradeMarket } from './orderTypes.ts'
 
 export const CANONICAL_TIME_IN_FORCE = 'GTC' as const
 
@@ -38,6 +38,7 @@ export function toOrderPayload(
       : 'LIMIT'
   const quantityUnit = resolveQuantityUnit(form, market, settings, perpetual)
   const clientOrderId = form.clientOrderId || crypto.randomUUID()
+  const idempotencyKey = crypto.randomUUID()
   const price = orderType === 'LIMIT' ? positiveDecimal(form.price, 'price') : undefined
   const triggerPrice = orderType === 'STOP_MARKET'
     ? positiveDecimal(form.triggerPrice, 'triggerPrice')
@@ -50,7 +51,7 @@ export function toOrderPayload(
     orderType,
     quantity: positiveDecimal(resolveQuantityValue(form, quantityUnit), 'quantity'),
     price,
-    idempotencyKey: clientOrderId,
+    idempotencyKey,
     clientOrderId,
     leverage: perpetual ? normalizeLeverage(settings.leverage ?? market.leverage) : undefined,
     positionSide: perpetual ? resolvePositionSide(form, settings) : 'BOTH',
@@ -61,6 +62,8 @@ export function toOrderPayload(
       ? undefined
       : perpetual ? 'MARK_PRICE' : 'LAST_PRICE',
     reduceOnly: perpetual ? settings.reduceOnly ?? form.reduceOnly : false,
+    timeInForce: CANONICAL_TIME_IN_FORCE,
+    postOnly: false,
     attachedProtections: perpetual
       ? settings.attachedProtections ?? form.attachedProtections
       : []
@@ -76,6 +79,7 @@ export function toOcoOrderPayload(
     throw new RangeError('OCO is only supported for Spot markets')
   }
   const clientOrderId = form.clientOrderId || crypto.randomUUID()
+  const idempotencyKey = crypto.randomUUID()
   return {
     accountId,
     symbol: canonicalSymbol(form.symbol),
@@ -85,7 +89,7 @@ export function toOcoOrderPayload(
     limitPrice: positiveDecimal(form.price, 'limitPrice'),
     stopTriggerPrice: positiveDecimal(form.triggerPrice, 'stopTriggerPrice'),
     triggerPriceType: 'LAST_PRICE',
-    idempotencyKey: clientOrderId,
+    idempotencyKey,
     clientOrderId
   } satisfies OcoOrderPayload
 }

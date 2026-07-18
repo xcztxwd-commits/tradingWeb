@@ -1,7 +1,7 @@
 import { ChevronDown, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import type { TradeSide } from '../types/order'
+import type { TradeSide } from '@fx-platform/frontend-core'
 
 const leverageOptions = [5, 10, 20, 30, 50, 75, 100]
 

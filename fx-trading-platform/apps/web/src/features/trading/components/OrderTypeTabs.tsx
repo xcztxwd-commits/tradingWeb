@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 
-import type { PrimaryOrderType, StrategyType } from '../types/order'
+import type { PrimaryOrderType, StrategyType } from '@fx-platform/frontend-core'
 
 type Props = {
   orderType: PrimaryOrderType

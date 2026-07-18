@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { createInitialTradeForm } from '../hooks/useTradeForm.ts'
-import type { TradeMarket } from '../types/order.ts'
+import { createInitialTradeForm } from './useTradeForm.ts'
+import type { TradeMarket } from './orderTypes.ts'
 import { CANONICAL_TIME_IN_FORCE, toOcoOrderPayload, toOrderPayload } from './orderAdapter.ts'
 
 const spotMarket: TradeMarket = {
@@ -44,8 +44,18 @@ describe('trading order adapter', () => {
     assert.equal(payload.positionSide, 'BOTH')
     assert.equal(payload.marginMode, 'CASH')
     assert.equal(payload.reduceOnly, false)
+    assert.equal(payload.clientOrderId, 'spot_market_buy')
+    assert.notEqual(payload.idempotencyKey, payload.clientOrderId)
+    assert.match(
+      payload.idempotencyKey,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+    )
     assert.equal(CANONICAL_TIME_IN_FORCE, 'GTC')
-    assert.equal('timeInForce' in payload, false)
+    assert.equal(payload.timeInForce, 'GTC')
+    assert.equal(payload.postOnly, false)
+    assert.equal('activationPrice' in payload, false)
+    assert.equal('trailingDelta' in payload, false)
+    assert.equal('trailingRate' in payload, false)
     assert.equal('lots' in payload, false)
   })
 
@@ -107,7 +117,8 @@ describe('trading order adapter', () => {
       clientOrderId: 'spot_oco'
     }
 
-    assert.deepEqual(toOcoOrderPayload('acct_1', form, spotMarket), {
+    const payload = toOcoOrderPayload('acct_1', form, spotMarket)
+    assert.deepEqual({ ...payload, idempotencyKey: '<generated>' }, {
       accountId: 'acct_1',
       symbol: 'BTCUSDT',
       side: 'SELL',
@@ -116,9 +127,14 @@ describe('trading order adapter', () => {
       limitPrice: 65000,
       stopTriggerPrice: 57000,
       triggerPriceType: 'LAST_PRICE',
-      idempotencyKey: 'spot_oco',
+      idempotencyKey: '<generated>',
       clientOrderId: 'spot_oco'
     })
+    assert.notEqual(payload.idempotencyKey, payload.clientOrderId)
+    assert.match(
+      payload.idempotencyKey,
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+    )
   })
 
   it('supports BASE, QUOTE and CONTRACTS quantities for Perpetual orders', () => {
@@ -169,7 +185,11 @@ describe('trading order adapter', () => {
     assert.equal(payload.quantityUnit, 'BASE')
     assert.equal(payload.reduceOnly, true)
     assert.equal(payload.leverage, 25)
-    assert.equal('timeInForce' in payload, false)
+    assert.equal(payload.timeInForce, 'GTC')
+    assert.equal(payload.postOnly, false)
+    assert.equal('activationPrice' in payload, false)
+    assert.equal('trailingDelta' in payload, false)
+    assert.equal('trailingRate' in payload, false)
   })
 
   it('sends multiple attached Perpetual protection levels without scalar legacy fields', () => {

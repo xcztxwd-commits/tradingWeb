@@ -5,10 +5,19 @@ import { OrderSubmitButton } from './OrderSubmitButton'
 import { PercentSlider } from './PercentSlider'
 import { PerpetualOrderOptions } from './PerpetualOrderOptions'
 import { PriceInput } from './PriceInput'
-import { getRequiredMargin, isMarginQuantityMarket, usesQuoteBudgetMarketBuy } from '../hooks/useTradeForm'
-import { formatDecimal } from '../utils/format'
-import { parseSymbolAssets } from '../utils/symbols'
-import type { OrderValidationResult, TradeBalances, TradeField, TradeFormState, TradeMarket } from '../types/order'
+import {
+  formatDecimal,
+  getRequiredMargin,
+  isMarginQuantityMarket,
+  parseSymbolAssets,
+  usesQuoteBudgetMarketBuy,
+  type OrderValidationResult,
+  type TradeBalances,
+  type TradeField,
+  type TradeFormState,
+  type TradeMarket
+} from '@fx-platform/frontend-core'
+import { translateCoreMessage } from '../../../routes/shared/translateCoreMessage'
 
 type Props = {
   form: TradeFormState
@@ -79,7 +88,8 @@ export function OrderFormSide({
 
   const getError = (...keys: string[]) => {
     if (!showErrors) return undefined
-    return keys.map((key) => validation.fieldErrors[key as keyof typeof validation.fieldErrors]).find(Boolean)
+    const message = keys.map((key) => validation.fieldErrors[key as keyof typeof validation.fieldErrors]).find(Boolean)
+    return translateCoreMessage(message, t)
   }
   const marketStaleError = validation.errors.includes('marketStale') ? t('validation.marketStale') : undefined
   const quoteBalanceError = getError('quoteBalance')

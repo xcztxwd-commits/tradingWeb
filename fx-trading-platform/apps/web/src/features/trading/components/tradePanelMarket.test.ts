@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { createInitialTradeForm } from '../hooks/useTradeForm.ts'
-import { toOrderPayload } from '../services/orderAdapter.ts'
+import { createInitialTradeForm, toOrderPayload } from '@fx-platform/frontend-core'
 import { createPanelMarket } from './tradePanelMarket.ts'
 
 describe('trade panel market model', () => {

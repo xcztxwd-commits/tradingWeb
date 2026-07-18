@@ -1,24 +1,23 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { createPanelMarket } from '../components/tradePanelMarket.ts'
-import { testMarket as mockMarket } from './tradeFormTestFixtures.ts'
+import { createTestTradeMarket, testMarket as mockMarket } from './tradeFormTestFixtures.ts'
 import {
   createInitialTradeForm,
   deriveTradeForm,
-  getOrderNotional,
-  getRequiredMargin,
-  replaceAttachedProtections,
-  validateOrder
+  replaceAttachedProtections
 } from './useTradeForm.ts'
+import { getOrderNotional, getRequiredMargin, validateOrder } from './orderValidation.ts'
 
 describe('trade form sizing algorithms', () => {
   it('rejects malformed or more than ten attached protections before confirmation', () => {
-    const perpetualMarket = createPanelMarket(
-      'BTCUSDT-PERP',
-      { bids: [{ price: 50_000 }], asks: [{ price: 50_001 }], lastPrice: 50_000 },
-      { productType: 'LINEAR_PERP', leverage: 10 }
-    )
+    const perpetualMarket = createTestTradeMarket('BTCUSDT-PERP', {
+      bestBid: 50_000,
+      bestAsk: 50_001,
+      lastPrice: 50_000,
+      productType: 'LINEAR_PERP',
+      leverage: 10
+    })
     const form = createInitialTradeForm('buy', perpetualMarket)
     form.amount = '1'
     form.attachedProtections = [{
@@ -42,11 +41,13 @@ describe('trade form sizing algorithms', () => {
   })
 
   it('requires attached quantities and caps each protection type at the parent quantity', () => {
-    const perpetualMarket = createPanelMarket(
-      'BTCUSDT-PERP',
-      { bids: [{ price: 50_000 }], asks: [{ price: 50_001 }], lastPrice: 50_000 },
-      { productType: 'LINEAR_PERP', leverage: 10 }
-    )
+    const perpetualMarket = createTestTradeMarket('BTCUSDT-PERP', {
+      bestBid: 50_000,
+      bestAsk: 50_001,
+      lastPrice: 50_000,
+      productType: 'LINEAR_PERP',
+      leverage: 10
+    })
     const form = {
       ...createInitialTradeForm('buy', perpetualMarket),
       orderType: 'market' as const,
@@ -71,16 +72,18 @@ describe('trade form sizing algorithms', () => {
     }, options).errors.includes('attachedProtections'), true)
   })
   it('initializes canonical order controls for Spot and Perpetual forms', () => {
-    const spot = createPanelMarket(
-      'BTCUSDT',
-      { bids: [{ price: 60000 }], asks: [{ price: 60001 }], lastPrice: 60000 },
-      { productType: 'CRYPTO_SPOT' }
-    )
-    const perpetual = createPanelMarket(
-      'BTCUSDT-PERP',
-      { bids: [{ price: 60000 }], asks: [{ price: 60001 }], lastPrice: 60000 },
-      { productType: 'LINEAR_PERP' }
-    )
+    const spot = createTestTradeMarket('BTCUSDT', {
+      bestBid: 60_000,
+      bestAsk: 60_001,
+      lastPrice: 60_000,
+      productType: 'CRYPTO_SPOT'
+    })
+    const perpetual = createTestTradeMarket('BTCUSDT-PERP', {
+      bestBid: 60_000,
+      bestAsk: 60_001,
+      lastPrice: 60_000,
+      productType: 'LINEAR_PERP'
+    })
 
     assert.deepEqual(
       {
@@ -133,11 +136,15 @@ describe('trade form sizing algorithms', () => {
   })
 
   it('treats forex market buy amount as lots instead of quote budget', () => {
-    const market = createPanelMarket(
-      'EURUSD',
-      { symbol: 'EURUSD', bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378, tradable: true },
-      { category: 'fx', leverage: 100 }
-    )
+    const market = createTestTradeMarket('EURUSD', {
+      bestBid: 1.08377,
+      bestAsk: 1.08379,
+      lastPrice: 1.08378,
+      unitSize: 100_000,
+      quantityMode: 'quantity',
+      productType: 'FX_MARGIN',
+      leverage: 100
+    })
     const form = deriveTradeForm(
       { ...createInitialTradeForm('buy', market), orderType: 'market', price: '' },
       { amount: '0.01' },
@@ -153,11 +160,15 @@ describe('trade form sizing algorithms', () => {
   })
 
   it('checks margin rather than base inventory for forex shorts', () => {
-    const market = createPanelMarket(
-      'EURUSD',
-      { symbol: 'EURUSD', bids: [{ price: 1.08377 }], asks: [{ price: 1.08379 }], lastPrice: 1.08378, tradable: true },
-      { category: 'fx', leverage: 100 }
-    )
+    const market = createTestTradeMarket('EURUSD', {
+      bestBid: 1.08377,
+      bestAsk: 1.08379,
+      lastPrice: 1.08378,
+      unitSize: 100_000,
+      quantityMode: 'quantity',
+      productType: 'FX_MARGIN',
+      leverage: 100
+    })
     const form = deriveTradeForm(
       { ...createInitialTradeForm('sell', market), orderType: 'market', price: '' },
       { amount: '0.01' },
@@ -181,7 +192,7 @@ describe('trade form sizing algorithms', () => {
   })
 
   it('rejects market orders when the quote is unavailable or stale', () => {
-    const emptyMarket = createPanelMarket('ETHUSDT', { bids: [], asks: [], lastPrice: 0 })
+    const emptyMarket = createTestTradeMarket('ETHUSDT', { tradable: false })
     const emptyQuoteForm = {
       ...createInitialTradeForm('buy', emptyMarket),
       orderType: 'market' as const,
@@ -194,10 +205,12 @@ describe('trade form sizing algorithms', () => {
       ['marketStale']
     )
 
-    const staleMarket = createPanelMarket(
-      'BTCUSDT',
-      { bids: [{ price: 60000 }], asks: [{ price: 60001 }], lastPrice: 60000, updatedAt: 1_780_000_000_000 }
-    )
+    const staleMarket = createTestTradeMarket('BTCUSDT', {
+      bestBid: 60_000,
+      bestAsk: 60_001,
+      lastPrice: 60_000,
+      quoteTimestamp: 1_780_000_000_000
+    })
     const staleForm = {
       ...createInitialTradeForm('buy', staleMarket),
       orderType: 'market' as const,

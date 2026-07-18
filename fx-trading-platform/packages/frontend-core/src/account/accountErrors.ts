@@ -1,9 +1,5 @@
 import { ApiClientError } from '../api/apiClient.ts'
-
-export type CoreMessage = {
-  key: string
-  values?: Record<string, string | number>
-}
+import type { CoreMessage } from '../coreMessage.ts'
 
 export type AccountDataState<T> =
   | { status: 'loading'; data?: T }

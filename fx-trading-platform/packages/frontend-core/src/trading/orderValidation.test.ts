@@ -7,12 +7,12 @@ import {
   buildOrderPayload,
   createInitialTradeForm,
   deriveTradeForm,
-  syncLimitPriceFromMarket,
-  validateOrder
+  syncLimitPriceFromMarket
 } from './useTradeForm.ts'
+import { validateOrder } from './orderValidation.ts'
 import { testBalances as mockBalances, testMarket as mockMarket } from './tradeFormTestFixtures.ts'
-import { strategyOptions } from '../types/order.ts'
-import type { TradeFormState } from '../types/order.ts'
+import { strategyOptions } from './orderTypes.ts'
+import type { TradeFormState } from './orderTypes.ts'
 
 describe('trade form model', () => {
   it('initializes limit forms with the side-specific best price', () => {
@@ -120,6 +120,7 @@ describe('trade form model', () => {
       { balances: mockBalances, market: mockMarket, minAmount: 0.0001, minNotional: 5 }
     )
     assert.deepEqual(zeroAmount.errors, ['amount'])
+    assert.deepEqual(zeroAmount.fieldErrors.amount, { key: 'validation.amountPositive' })
 
     const tooSmallAmount = validateOrder(
       { ...createInitialTradeForm('buy', mockMarket), price: '60736.3', amount: '0.00001', total: '0.607363' },

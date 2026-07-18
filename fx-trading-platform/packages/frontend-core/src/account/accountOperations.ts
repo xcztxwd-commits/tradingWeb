@@ -18,11 +18,11 @@ import {
   type SessionAuthStatus
 } from '../api/index.ts'
 import { clearStoredAuthToken, readStoredAuthToken } from '../auth/sessionStorage.ts'
+import type { CoreMessage } from '../coreMessage.ts'
 import { subscribeTradingSessionEvents } from '../market/marketStream.ts'
 import type { AccountSummary } from '../models/index.ts'
 import {
   type AccountDataState,
-  type CoreMessage,
   isAuthSessionFailure,
   toAccountApiError,
   toAccountErrorMessage

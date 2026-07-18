@@ -6,7 +6,9 @@ import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const sessionStatusPath = join(currentDir, 'TradePanelSessionStatus.tsx')
-const submitHookPath = join(currentDir, '..', 'hooks', 'useTradePanelSubmit.ts')
+const coreTradingDir = join(currentDir, '../../../../../../packages/frontend-core/src/trading')
+const submitHookPath = join(coreTradingDir, 'useTradeSubmit.ts')
+const tradeFormPath = join(coreTradingDir, 'useTradeForm.ts')
 const tradePanelSource = readFileSync(join(currentDir, 'TradePanel.tsx'), 'utf8')
 const tradePanelLines = tradePanelSource.split(/\r?\n/)
 const sessionStatusSource = existsSync(sessionStatusPath) ? readFileSync(sessionStatusPath, 'utf8') : ''
@@ -36,7 +38,7 @@ describe('OKX-style trade panel density', () => {
     assert.equal(existsSync(submitHookPath), true)
     assert.ok(tradePanelLines.length <= 320, `TradePanel.tsx has ${tradePanelLines.length} lines`)
     assert.match(tradePanelSource, /<OrderConfirmationDialog/)
-    assert.match(tradePanelSource, /useTradePanelSubmit/)
+    assert.match(tradePanelSource, /useTradeSubmit/)
     assert.doesNotMatch(tradePanelSource, /TradePanelAccountStrip/)
     assert.doesNotMatch(tradePanelSource, /TradePanelLeverageToggle/)
     assert.doesNotMatch(tradePanelSource, /TradePanelLeverageControls/)
@@ -80,12 +82,12 @@ describe('OKX-style trade panel density', () => {
     assert.match(submitHookSource, /toOcoOrderPayload/)
     assert.match(submitHookSource, /createCanonicalPayload\(accountId,\s*form,\s*market,\s*adapterSettings\)/)
     assert.match(submitHookSource, /await onSubmitOrder\(payload\)/)
-    assert.match(tradePanelSource, /useTradePanelSubmit\(\{[\s\S]*adapterSettings:/)
+    assert.match(tradePanelSource, /useTradeSubmit\(\{[\s\S]*adapterSettings:/)
     assert.match(tradePanelSource, /resolveTradePanelLeverage\(resolveRuleLeverage\(adapterSettings\.leverage \?\? symbolLeverage,\s*rules\)\)/)
     assert.match(tradePanelSource, /createPanelMarket\(symbol,\s*snapshot,\s*\{ category,\s*leverage,\s*productType,\s*rules \}\)/)
     assert.doesNotMatch(tradePanelSource, /const leverage = 1/)
     assert.match(tradePanelSource, /backendReady/)
-    assert.match(submitHookSource, /\.\.\/services\/orderAdapter/)
+    assert.match(submitHookSource, /\.\/orderAdapter\.ts/)
   })
 
   it('keeps trading limits and precision props available to the order form', () => {
@@ -100,7 +102,7 @@ describe('OKX-style trade panel density', () => {
 
   it('requires a confirmation dialog before real order submission', () => {
     assert.match(submitHookSource, /onConfirmRequired/)
-    assert.match(submitHookSource, /t\('trading\.submitConfirmFirst'\)/)
+    assert.match(submitHookSource, /key: 'trading\.submitConfirmFirst'/)
     assert.match(confirmDialogSource, /import \{ Dialog \} from '@fx-platform\/ui'/)
     assert.match(confirmDialogSource, /<Dialog/)
     assert.match(confirmDialogSource, /pending=\{submitting\}/)
@@ -130,17 +132,17 @@ describe('OKX-style trade panel density', () => {
   it('accepts clicked quote prices as limit price prefill signals', () => {
     assert.match(tradePanelSource, /pricePrefill/)
     assert.match(tradePanelSource, /fillLimitPrice/)
-    assert.match(tradePanelSource, /t\('trading\.priceFilled'/)
+    assert.match(tradePanelSource, /key: 'trading\.priceFilled'/)
   })
 
   it('does not overwrite a price input that is currently being edited by quote prefill', () => {
-    const tradeFormSource = readFileSync(join(currentDir, '..', 'hooks', 'useTradeForm.ts'), 'utf8')
+    const tradeFormSource = readFileSync(tradeFormPath, 'utf8')
 
     assert.match(tradeFormSource, /export type LimitPriceFillResult = 'updated' \| 'skipped-focused' \| 'invalid'/)
     assert.match(tradeFormSource, /if \(priceFocused\) return 'skipped-focused'/)
     assert.match(tradePanelSource, /buyForm\.fillLimitPrice\(pricePrefill\.price\)/)
     assert.match(tradePanelSource, /sellForm\.fillLimitPrice\(pricePrefill\.price\)/)
-    assert.match(tradePanelSource, /t\('trading\.editingPrice'\)/)
+    assert.match(tradePanelSource, /key: 'trading\.editingPrice'/)
   })
 
   it('uses cohesive compact light surfaces instead of mixed order-form layers', () => {
@@ -159,7 +161,7 @@ describe('OKX-style trade panel density', () => {
   })
 
   it('keeps unavailable backend sessions in loading or error states without engineering preview copy', () => {
-    assert.match(submitHookSource, /useState\(''\)/)
+    assert.match(submitHookSource, /useState<CoreMessage \| null>\(null\)/)
     assert.doesNotMatch(submitHookSource, /useState\(\(\) => t\('trading\.simulatedMode'\)\)/)
     assert.match(sessionStatusSource, /t\('trading\.sessionConnected'\)/)
     assert.match(tradePanelSource, /sessionMode/)
@@ -188,15 +190,18 @@ describe('OKX-style trade panel density', () => {
   })
 
   it('formats the caught order submission error instead of stale parent error state', () => {
-    assert.match(submitHookSource, /formatOrderError\(error/)
-    assert.doesNotMatch(submitHookSource, /formatOrderError\(orderError \?\? error\)/)
+    assert.match(submitHookSource, /createOrderSubmitFailureMessage\(error\)/)
+    assert.doesNotMatch(submitHookSource, /orderError \?\? error/)
   })
 
   it('formats backend API order failures with code, status, and request id', () => {
     assert.match(submitHookSource, /ApiClientError/)
-    assert.match(submitHookSource, /t\('errors\.apiCode'/)
-    assert.match(submitHookSource, /t\('errors\.httpStatus'/)
-    assert.match(submitHookSource, /t\('errors\.requestId'/)
+    assert.match(submitHookSource, /code: error\.code/)
+    assert.match(submitHookSource, /status: error\.status/)
+    assert.match(submitHookSource, /requestId: error\.requestId/)
+    assert.match(submitHookSource, /key: 'trading\.backendOrderFailed'/)
+    assert.doesNotMatch(submitHookSource, /react-i18next|TFunction|useTranslation/)
+    assert.match(tradePanelSource, /translateCoreMessage\(noticeMessage,\s*t\)/)
     assert.doesNotMatch(submitHookSource, /Request ID锛\?/)
   })
 

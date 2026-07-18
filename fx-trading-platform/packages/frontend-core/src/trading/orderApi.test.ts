@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { buildOrderPayload, createInitialTradeForm } from '../hooks/useTradeForm.ts'
-import { testMarket as mockMarket } from '../hooks/tradeFormTestFixtures.ts'
+import { buildOrderPayload, createInitialTradeForm } from './useTradeForm.ts'
+import { testMarket as mockMarket } from './tradeFormTestFixtures.ts'
 import { submitOrder } from './orderApi.ts'
 
 describe('mock order api', () => {

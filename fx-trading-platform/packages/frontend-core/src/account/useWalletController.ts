@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from 'react'
 import type { AccountTransferDirection } from '@fx-platform/shared-types'
 
-import { toAccountApiError, type CoreMessage } from './accountErrors.ts'
+import type { CoreMessage } from '../coreMessage.ts'
+import { toAccountApiError } from './accountErrors.ts'
 import {
   defaultWalletMutationDependencies,
   runWalletReset,

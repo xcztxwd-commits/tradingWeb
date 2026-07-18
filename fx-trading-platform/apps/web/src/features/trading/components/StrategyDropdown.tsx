@@ -2,7 +2,7 @@ import { Check, ChevronDown } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import type { PrimaryOrderType } from '../types/order'
+import type { PrimaryOrderType } from '@fx-platform/frontend-core'
 
 type Props = {
   active: boolean

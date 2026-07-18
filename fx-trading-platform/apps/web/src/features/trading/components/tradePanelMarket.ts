@@ -1,5 +1,4 @@
-import type { TradeMarket } from '../types/order'
-import { parseSymbolAssets } from '../utils/symbols.ts'
+import { parseSymbolAssets, type TradeMarket } from '@fx-platform/frontend-core'
 
 type Snapshot = {
   symbol?: string

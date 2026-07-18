@@ -8,14 +8,23 @@ import { getTradePanelSessionState } from './TradePanelSessionStatus'
 import type { TradePanelSessionMode } from './TradePanelSessionStatus'
 import { TradeTabs } from './TradeTabs'
 import { createPanelMarket } from './tradePanelMarket'
-import { useTradePanelSubmit } from '../hooks/useTradePanelSubmit'
-import type { CanonicalSubmitPayload } from '../hooks/useTradePanelSubmit'
-import type { OrderAdapterSettings } from '../services/orderAdapter'
-import { useTradeForm } from '../hooks/useTradeForm'
-import type { OrderValidationResult, TradeBalances, TradeFormState, TradeMarket, TradeSide } from '../types/order'
-import { useMarketDataSnapshot } from '@fx-platform/frontend-core'
-import type { OcoOrderPayload, OrderPayload, OrderResponse } from '@fx-platform/frontend-core'
+import {
+  useMarketDataSnapshot,
+  useTradeForm,
+  useTradeSubmit,
+  type CanonicalSubmitPayload,
+  type OcoOrderPayload,
+  type OrderAdapterSettings,
+  type OrderPayload,
+  type OrderResponse,
+  type OrderValidationResult,
+  type TradeBalances,
+  type TradeFormState,
+  type TradeMarket,
+  type TradeSide
+} from '@fx-platform/frontend-core'
 import type { OcoOrderGroupResponse } from '@fx-platform/shared-types'
+import { translateCoreMessage } from '../../../routes/shared/translateCoreMessage'
 import '../styles/trade-panel.css'
 const skipConfirmStorageKey = 'fx-trade-confirm-skip'
 
@@ -91,7 +100,7 @@ export function TradePanel({
   const marketDataReady = market.tradable === true
   const perpetual = market.productType === 'LINEAR_PERP'
   const canTrade = marketDataReady && backendReady && rulesTradable && (!perpetual || settingsReady)
-  const { attempted, handleSubmit, notice, setNotice, submittingSide } = useTradePanelSubmit({
+  const { attempted, handleSubmit, notice: noticeMessage, setNotice, submittingSide } = useTradeSubmit({
     accountId,
     backendReady,
     canTrade,
@@ -103,6 +112,7 @@ export function TradePanel({
     onSubmitOco,
     sessionHasError: sessionState.sessionHasError
   })
+  const notice = translateCoreMessage(noticeMessage, t)
 
   const activeOrderType = mobileSide === 'buy' ? buyForm.form.orderType : sellForm.form.orderType
   const activeStrategyType = mobileSide === 'buy' ? buyForm.form.strategyType : sellForm.form.strategyType
@@ -113,11 +123,11 @@ export function TradePanel({
     if (results.includes('updated')) {
       setNotice(
         results.includes('skipped-focused')
-          ? t('trading.priceFilledSkipFocused', { price: pricePrefill.price })
-          : t('trading.priceFilled', { price: pricePrefill.price })
+          ? { key: 'trading.priceFilledSkipFocused', values: { price: pricePrefill.price } }
+          : { key: 'trading.priceFilled', values: { price: pricePrefill.price } }
       )
     } else if (results.includes('skipped-focused')) {
-      setNotice(t('trading.editingPrice'))
+      setNotice({ key: 'trading.editingPrice' })
     }
   }, [pricePrefill?.id])
 

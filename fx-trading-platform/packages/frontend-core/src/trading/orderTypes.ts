@@ -1,4 +1,5 @@
-import type { TradingInstrumentRules } from '@fx-platform/frontend-core'
+import type { CoreMessage } from '../coreMessage.ts'
+import type { TradingInstrumentRules } from '../market/tradingModels.ts'
 import type {
   CreateOrderRequest,
   MarginMode,
@@ -97,7 +98,7 @@ export type OrderValidationErrorKey =
 
 export type OrderValidationResult = {
   errors: OrderValidationErrorKey[]
-  fieldErrors: Partial<Record<OrderValidationErrorKey, string>>
+  fieldErrors: Partial<Record<OrderValidationErrorKey, CoreMessage>>
   canSubmit: boolean
 }
 

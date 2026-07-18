@@ -10,7 +10,7 @@ import {
   getTradingSettings,
   updateTradingPositionMode,
   updateTradingSymbolSettings
-} from '@fx-platform/frontend-core'
+} from '../api/tradingApi.ts'
 
 export type TradingSymbolSettings = NonNullable<TradingSettingsResponse['symbols']>[number]
 

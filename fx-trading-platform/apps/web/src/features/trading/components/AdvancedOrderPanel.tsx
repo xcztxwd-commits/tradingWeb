@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next'
 
-import { advancedLimitModes } from '../types/order'
-import type { TradeField, TradeFormState } from '../types/order'
+import { advancedLimitModes, type TradeField, type TradeFormState } from '@fx-platform/frontend-core'
 
 type Props = {
   form: TradeFormState

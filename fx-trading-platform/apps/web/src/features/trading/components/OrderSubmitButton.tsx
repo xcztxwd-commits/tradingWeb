@@ -1,7 +1,7 @@
 import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import type { TradeSide } from '../types/order'
+import type { TradeSide } from '@fx-platform/frontend-core'
 
 type Props = {
   side: TradeSide
