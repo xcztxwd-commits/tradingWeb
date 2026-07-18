@@ -1,7 +1,7 @@
 import { LockKeyhole, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import styles from '../HomePage.module.css'
+import styles from './HomeContent.module.css'
 
 const faqs = [
   '为什么 FX Trader 适合加密货币交易者？',

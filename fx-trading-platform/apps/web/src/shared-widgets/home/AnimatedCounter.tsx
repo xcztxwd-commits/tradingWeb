@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import styles from '../HomePage.module.css'
+import styles from './HomeContent.module.css'
 
 type AnimatedCounterProps = {
   value: number

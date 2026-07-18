@@ -3,7 +3,7 @@ import { ArrowDownCircle, ArrowUpCircle, Bell, CheckCircle2, CircleDollarSign, S
 import type { ReactNode } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 
-import { AssetMark } from '../../components/asset/AssetMark'
+import { AssetMark } from '../../shared-widgets/asset/AssetMark'
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'

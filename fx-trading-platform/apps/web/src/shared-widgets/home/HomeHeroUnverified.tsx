@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import styles from '../HomePage.module.css'
+import styles from './HomeContent.module.css'
 
 export function HomeHeroUnverified() {
   return (

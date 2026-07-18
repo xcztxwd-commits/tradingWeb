@@ -24,8 +24,8 @@ const jaLocale = readFileSync(join(currentDir, '..', 'i18n', 'locales', 'ja-JP.t
 
 describe('prototype-driven app shell and routes', () => {
   it('keeps the homepage at root and exposes only canonical Spot and Perpetual terminals', () => {
-    assert.match(source, /const HomePage = lazy\(/)
-    assert.match(source, /<Route path="\/" element=\{<HomePage \/>\} \/>/)
+    assert.match(source, /import \{ HomeRoute \} from '\.\.\/routes\/home\/HomeRoute'/)
+    assert.match(source, /<Route path="\/" element=\{<HomeRoute \/>\} \/>/)
     assert.match(source, /<Route path="\/trade\/spot\/:symbol\?" element=\{<TradingPage product="spot" \/>\} \/>/)
     assert.match(source, /<Route path="\/trade\/perpetual\/:symbol\?" element=\{<TradingPage product="perpetual" \/>\} \/>/)
     assert.match(source, /<Route path="\/trading" element=\{<LegacyTradingRedirect \/>\} \/>/)

@@ -1,6 +1,6 @@
 import { Award, BadgeCheck, Trophy } from 'lucide-react'
 
-import styles from '../HomePage.module.css'
+import styles from './HomeContent.module.css'
 
 const trustSignals = [
   { icon: Trophy, title: '获评 2025 年最受信任交易平台', description: '以资产透明度、风控流程和用户保护作为首屏信任背书。' },

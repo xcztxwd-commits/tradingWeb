@@ -7,16 +7,18 @@ import { describe, it } from 'node:test'
 const pagesDir = dirname(fileURLToPath(import.meta.url))
 const srcDir = join(pagesDir, '..')
 const webRoot = join(srcDir, '..')
+const sharedHomeDir = join(srcDir, 'shared-widgets', 'home')
 
 const homeSources = [
-  readFileSync(join(pagesDir, 'home', 'HomePage.tsx'), 'utf8'),
-  readFileSync(join(pagesDir, 'home', 'components', 'HomeHeroGuest.tsx'), 'utf8'),
-  readFileSync(join(pagesDir, 'home', 'components', 'MarketPreviewPanel.tsx'), 'utf8'),
-  readFileSync(join(pagesDir, 'home', 'components', 'HomeSupportSections.tsx'), 'utf8')
+  readFileSync(join(sharedHomeDir, 'HomeContent.tsx'), 'utf8'),
+  readFileSync(join(sharedHomeDir, 'HomeHeroGuest.tsx'), 'utf8'),
+  readFileSync(join(sharedHomeDir, 'MarketPreviewPanel.tsx'), 'utf8'),
+  readFileSync(join(sharedHomeDir, 'HomeSupportSections.tsx'), 'utf8'),
+  readFileSync(join(srcDir, 'routes', 'home', 'useHomeRouteController.ts'), 'utf8')
 ].join('\n')
 const marketsSource = readFileSync(join(pagesDir, 'markets', 'MarketsPage.tsx'), 'utf8')
-const authSource = readFileSync(join(pagesDir, 'login', 'AuthSupportPage.tsx'), 'utf8')
-const loginSource = readFileSync(join(pagesDir, 'login', 'LoginPage.tsx'), 'utf8')
+const authSource = readFileSync(join(srcDir, 'shared-widgets', 'auth', 'AuthPageContent.tsx'), 'utf8')
+const loginSource = readFileSync(join(srcDir, 'routes', 'auth', 'useAuthRouteController.ts'), 'utf8')
 const accountSource = [
   readFileSync(join(pagesDir, 'account', 'AccountPages.tsx'), 'utf8'),
   readFileSync(join(pagesDir, 'account', 'AccountHubPage.tsx'), 'utf8')
@@ -29,8 +31,8 @@ const shellSource = [
 const zhLocale = readFileSync(join(srcDir, 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
 const styles = readFileSync(join(srcDir, 'styles.css'), 'utf8')
 const themeStyles = readFileSync(join(webRoot, '..', '..', 'packages', 'ui', 'src', 'theme', 'theme.css'), 'utf8')
-const homeStyles = readFileSync(join(pagesDir, 'home', 'HomePage.module.css'), 'utf8')
-const authStyles = readFileSync(join(pagesDir, 'login', 'LoginPage.module.css'), 'utf8')
+const homeStyles = readFileSync(join(sharedHomeDir, 'HomeContent.module.css'), 'utf8')
+const authStyles = readFileSync(join(srcDir, 'shared-widgets', 'auth', 'AuthPageContent.module.css'), 'utf8')
 const tradingStyles = readFileSync(join(pagesDir, 'trading', 'TradingPage.module.css'), 'utf8')
 
 const mojibakePattern =

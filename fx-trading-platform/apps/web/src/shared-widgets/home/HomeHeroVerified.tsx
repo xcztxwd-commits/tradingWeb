@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 
-import styles from '../HomePage.module.css'
+import styles from './HomeContent.module.css'
 import { AnimatedCounter } from './AnimatedCounter'
 
 type HomeHeroVerifiedProps = {

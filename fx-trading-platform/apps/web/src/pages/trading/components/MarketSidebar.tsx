@@ -1,7 +1,7 @@
 import { Search, Star } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
-import { AssetMark } from '../../../components/asset/AssetMark'
+import { AssetMark } from '../../../shared-widgets/asset/AssetMark'
 import {
   filterMarkets,
   formatMarketPrice,

@@ -2,16 +2,13 @@ import { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { ExchangeLoading } from '../components/loading/ExchangeLoading'
+import { AuthRoute } from '../routes/auth/AuthRoute'
+import { HomeRoute } from '../routes/home/HomeRoute'
 import { AppShell } from './AppShell'
 import { LegacyTradingRedirect } from './LegacyTradingRedirect'
 import { resolveSafeTradingPath } from './tradingRoutes'
 
-const HomePage = lazy(() => import('../pages/home/HomePage').then((module) => ({ default: module.HomePage })))
 const TradingPage = lazy(() => import('../pages/trading/TradingPage').then((module) => ({ default: module.TradingPage })))
-const LoginPage = lazy(() => import('../pages/login/LoginPage').then((module) => ({ default: module.LoginPage })))
-const RegisterPage = lazy(() => import('../pages/login/AuthSupportPage').then((module) => ({ default: module.RegisterPage })))
-const ForgotPasswordPage = lazy(() => import('../pages/login/AuthSupportPage').then((module) => ({ default: module.ForgotPasswordPage })))
-const TwoFactorHelpPage = lazy(() => import('../pages/login/AuthSupportPage').then((module) => ({ default: module.TwoFactorHelpPage })))
 const SettingsPage = lazy(() => import('../pages/settings/SettingsPage').then((module) => ({ default: module.SettingsPage })))
 const SecurityCenterPage = lazy(() => import('../pages/security/SecurityCenterPage').then((module) => ({ default: module.SecurityCenterPage })))
 const OrdersPage = lazy(() => import('../pages/orders/OrdersPage').then((module) => ({ default: module.OrdersPage })))
@@ -31,16 +28,16 @@ export function App() {
     <AppShell>
       <Suspense fallback={<ExchangeLoading />}>
         <Routes>
-          <Route path="/" element={<HomePage />} />
+          <Route path="/" element={<HomeRoute />} />
           <Route path="/trade" element={<LegacyTradingRedirect />} />
           <Route path="/trading" element={<LegacyTradingRedirect />} />
           <Route path="/trade/spot/:symbol?" element={<TradingPage product="spot" />} />
           <Route path="/trade/perpetual/:symbol?" element={<TradingPage product="perpetual" />} />
           <Route path="/trade/:product/:symbol?" element={<Navigate to={resolveSafeTradingPath(null)} replace />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/two-factor-help" element={<TwoFactorHelpPage />} />
+          <Route path="/login" element={<AuthRoute mode="login" />} />
+          <Route path="/register" element={<AuthRoute mode="register" />} />
+          <Route path="/forgot-password" element={<AuthRoute mode="forgot-password" />} />
+          <Route path="/two-factor-help" element={<AuthRoute mode="two-factor-help" />} />
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/markets" element={<MarketsPage />} />
           <Route path="/orders" element={<OrdersPage />} />

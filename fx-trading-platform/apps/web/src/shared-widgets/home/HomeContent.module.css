@@ -559,80 +559,78 @@
   }
 }
 
-@media (max-width: 760px) {
-  .page {
-    width: calc(100% + 24px);
-    margin: -12px;
-    padding: 22px 16px calc(32px + var(--mobile-tabs-height, 64px) + env(safe-area-inset-bottom));
-  }
+.mobile {
+  width: calc(100% + 24px);
+  margin: -12px;
+  padding: 22px 16px calc(32px + var(--mobile-tabs-height, 64px) + env(safe-area-inset-bottom));
+}
 
-  .heroGrid {
-    grid-template-columns: 1fr;
-  }
+.mobile .heroGrid {
+  grid-template-columns: 1fr;
+}
 
-  .trustStrip,
-  .supportGrid {
-    grid-template-columns: 1fr;
-  }
+.mobile .trustStrip,
+.mobile .supportGrid {
+  grid-template-columns: 1fr;
+}
 
-  .previewStack {
-    gap: 12px;
-  }
+.mobile .previewStack {
+  gap: 12px;
+}
 
-  .heroTitle {
-    font-size: clamp(40px, 14vw, 58px);
-    line-height: 1.08;
-  }
+.mobile .heroTitle {
+  font-size: clamp(40px, 14vw, 58px);
+  line-height: 1.08;
+}
 
-  .actionRow {
-    grid-template-columns: 1fr;
-  }
+.mobile .actionRow {
+  grid-template-columns: 1fr;
+}
 
-  .primaryAction,
-  .secondaryAction,
-  .ghostAction {
-    width: 100%;
-  }
+.mobile .primaryAction,
+.mobile .secondaryAction,
+.mobile .ghostAction {
+  width: 100%;
+}
 
-  .appDownloadRow {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
+.mobile .appDownloadRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
 
-  .appDownloadRow .secondaryAction {
-    grid-column: 1 / -1;
-  }
+.mobile .appDownloadRow .secondaryAction {
+  grid-column: 1 / -1;
+}
 
-  .marketRow {
-    grid-template-columns: 30px minmax(0, 1fr) auto;
-  }
+.mobile .marketRow {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+}
 
-  .marketRow em {
-    grid-column: 3;
-  }
+.mobile .marketRow em {
+  grid-column: 3;
+}
 
-  .mobileCounter {
-    display: block;
-  }
+.mobile .mobileCounter {
+  display: block;
+}
 
-  .promoCard {
-    width: 100%;
-    height: 82px;
-  }
+.mobile .promoCard {
+  width: 100%;
+  height: 82px;
+}
 
-  .promoCardSurface {
-    grid-template-columns: 38px minmax(0, 1fr) 38px;
-  }
+.mobile .promoCardSurface {
+  grid-template-columns: 38px minmax(0, 1fr) 38px;
+}
 
-  .promoRank,
-  .promoBackTitle {
-    font-size: 24px;
-  }
+.mobile .promoRank,
+.mobile .promoBackTitle {
+  font-size: 24px;
+}
 
-  .promoLabel,
-  .promoValue {
-    font-size: 12px;
-  }
+.mobile .promoLabel,
+.mobile .promoValue {
+  font-size: 12px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -849,62 +847,67 @@
   color: var(--home-muted);
 }
 
-@media (max-width: 760px) {
-  .page {
-    padding: 16px 12px calc(24px + var(--mobile-tabs-height, 64px) + env(safe-area-inset-bottom));
-  }
+.mobile {
+  padding: 16px 12px calc(24px + var(--mobile-tabs-height, 64px) + env(safe-area-inset-bottom));
+}
 
-  .heroGrid {
-    grid-template-columns: 1fr;
-    gap: 14px;
-  }
+.mobile .heroGrid {
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
 
-  .heroTitle {
-    max-width: 10ch;
-    font-size: clamp(30px, 9vw, 36px);
-    line-height: 1.1;
-  }
+.mobile .heroTitle {
+  max-width: 10ch;
+  font-size: clamp(30px, 9vw, 36px);
+  line-height: 1.1;
+}
 
-  .heroNumber {
-    font-size: clamp(38px, 11vw, 44px);
-    line-height: 1;
-  }
+.mobile .heroNumber {
+  font-size: clamp(38px, 11vw, 44px);
+  line-height: 1;
+}
 
-  .summary {
-    font-size: 12px;
-    line-height: 1.55;
-  }
+.mobile .summary {
+  font-size: 12px;
+  line-height: 1.55;
+}
 
-  .signupPanel,
-  .heroActions,
-  .appDownloadRow,
-  .metricGrid {
-    gap: 8px;
-  }
+.mobile .signupPanel,
+.mobile .heroActions,
+.mobile .appDownloadRow,
+.mobile .metricGrid {
+  gap: 8px;
+}
 
-  .actionRow input,
-  .primaryCta {
-    min-height: 42px;
-  }
+.mobile .actionRow input,
+.mobile .primaryCta {
+  min-height: 42px;
+}
 
-  .panelCard,
-  .trustStrip article,
-  .safuPanel,
-  .faqPanel {
-    padding: 12px;
-  }
+.mobile .panelCard,
+.mobile .trustStrip article,
+.mobile .safuPanel,
+.mobile .faqPanel {
+  padding: 12px;
+}
 
-  .metricGrid > div {
-    min-width: min(132px, calc(50% - 4px));
-    padding: 10px;
-  }
+.mobile .metricGrid > div {
+  min-width: min(132px, calc(50% - 4px));
+  padding: 10px;
+}
 
-  .metricGrid > div strong {
-    font-size: 22px;
-  }
+.mobile .metricGrid > div strong {
+  font-size: 22px;
+}
 
-  .metricGrid > div span,
-  .metricGrid > div small {
-    margin-top: 4px;
-  }
+.mobile .metricGrid > div span,
+.mobile .metricGrid > div small {
+  margin-top: 4px;
+}
+
+.dataNotice {
+  width: min(1180px, 100%);
+  margin: 12px auto 0;
+  color: var(--home-muted);
+  font-size: 13px;
 }

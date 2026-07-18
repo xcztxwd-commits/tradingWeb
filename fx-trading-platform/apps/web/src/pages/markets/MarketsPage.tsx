@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, type PointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { SelectField, type SelectFieldOption } from '@fx-platform/ui'
 
-import { AssetMark } from '../../components/asset/AssetMark'
+import { AssetMark } from '../../shared-widgets/asset/AssetMark'
 import { ApiErrorState, LoadingState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'
 import { paginateRows, type Quote } from '@fx-platform/frontend-core'

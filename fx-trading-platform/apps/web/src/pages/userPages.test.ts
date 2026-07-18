@@ -19,9 +19,12 @@ const accountPages = existsSync(accountPagesPath) ? readFileSync(accountPagesPat
 const wallet = readFileSync(join(pagesDir, 'wallet', 'WalletPage.tsx'), 'utf8')
 const accountApi = readFileSync(join(projectRoot, 'packages', 'frontend-core', 'src', 'api', 'accountApi.ts'), 'utf8')
 const tradingTypes = readFileSync(join(projectRoot, 'packages', 'frontend-core', 'src', 'models', 'trading.ts'), 'utf8')
-const authSupport = readFileSync(join(pagesDir, 'login', 'AuthSupportPage.tsx'), 'utf8')
-const login = readFileSync(join(pagesDir, 'login', 'LoginPage.tsx'), 'utf8')
-const authStyles = readFileSync(join(pagesDir, 'login', 'LoginPage.module.css'), 'utf8')
+const authController = readFileSync(join(pagesDir, '..', 'routes', 'auth', 'useAuthRouteController.ts'), 'utf8')
+const authModel = readFileSync(join(pagesDir, '..', 'routes', 'auth', 'authRouteModel.ts'), 'utf8')
+const authContent = readFileSync(join(pagesDir, '..', 'shared-widgets', 'auth', 'AuthPageContent.tsx'), 'utf8')
+const authSupport = `${authController}\n${authModel}\n${authContent}`
+const login = authSupport
+const authStyles = readFileSync(join(pagesDir, '..', 'shared-widgets', 'auth', 'AuthPageContent.module.css'), 'utf8')
 const styles = readFileSync(join(pagesDir, '..', 'styles.css'), 'utf8')
 const selectFieldPath = join(projectRoot, 'packages', 'ui', 'src', 'select-field', 'SelectField.tsx')
 const selectField = existsSync(selectFieldPath) ? readFileSync(selectFieldPath, 'utf8') : ''
@@ -225,9 +228,9 @@ describe('prototype markets page', () => {
 
 describe('prototype auth and account center', () => {
   it('moves successful login and registration to account overview', () => {
-    assert.match(login, /return '\/account\/overview'/)
-    assert.match(authSupport, /navigate\('\/account\/overview'/)
-    assert.match(authSupport, /AuthEntryPage/)
+    assert.match(login, /return mode === 'login' \? loginRedirect : '\/account\/overview'/)
+    assert.match(authSupport, /navigate\(successPath, \{ replace: true \}\)/)
+    assert.match(authSupport, /AuthPageContent/)
   })
 
   it('registers email or phone identifiers directly through the backend', () => {
@@ -235,7 +238,8 @@ describe('prototype auth and account center', () => {
     assert.match(authSupport, /countryCode/)
     assert.match(authSupport, /identifier/)
     assert.match(authSupport, /password/)
-    assert.match(authSupport, /register\(normalizedIdentifier, password, channel\)/)
+    assert.match(authSupport, /await register\(/)
+    assert.match(authSupport, /normalizeRegistrationIdentifier\(channel, countryCode, identifier\)/)
     assert.doesNotMatch(authSupport, /verification/)
     assert.doesNotMatch(authSupport, /checkAuthIdentity/)
     assert.doesNotMatch(authSupport, /sendAuthVerificationCode/)
@@ -244,12 +248,11 @@ describe('prototype auth and account center', () => {
   })
 
   it('uses a Binance-style authentication shell while preserving login and registration APIs', () => {
-    assert.match(login, /login\(email\.trim\(\), password\)/)
+    assert.match(login, /await login\(email\.trim\(\), password\)/)
     assert.match(login, /type="text"/)
     assert.match(login, /writeStoredAuthTokens\(auth\.accessToken,\s*auth\.refreshToken\)/)
-    assert.match(authSupport, /finishAuth\(auth\.accessToken,\s*auth\.refreshToken,\s*auth\.email \|\| normalizedIdentifier\)/)
-    assert.match(authSupport, /writeStoredAuthTokens\(accessToken,\s*refreshToken\)/)
-    assert.match(authSupport, /register\(normalizedIdentifier, password, channel\)/)
+    assert.match(authSupport, /writeStoredAuthTokens\(auth\.accessToken,\s*auth\.refreshToken\)/)
+    assert.match(authSupport, /await register\(/)
     assert.match(authStyles, /\.page\s*{[\s\S]*background:\s*var\(--auth-bg\)/)
     assert.match(authStyles, /\.shell\s*{[\s\S]*grid-template-columns:\s*minmax\(0,\s*520px\) 425px/)
     assert.match(authStyles, /\.form\s*{[\s\S]*width:\s*425px[\s\S]*padding:\s*40px[\s\S]*border-radius:\s*24px[\s\S]*border:\s*1px solid var\(--auth-border\)/)

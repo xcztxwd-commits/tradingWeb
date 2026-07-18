@@ -6,11 +6,11 @@ import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const projectRoot = resolve(currentDir, '../../../../..')
-const pagePath = join(currentDir, 'HomePage.tsx')
-const stylesPath = join(currentDir, 'HomePage.module.css')
+const pagePath = join(currentDir, 'HomeContent.tsx')
+const stylesPath = join(currentDir, 'HomeContent.module.css')
 const homeApiPath = join(projectRoot, 'packages', 'frontend-core', 'src', 'api', 'homeApi.ts')
-const homeComponentsDir = join(currentDir, 'components')
-const homeHooksDir = join(currentDir, 'hooks')
+const homeComponentsDir = currentDir
+const homeHooksDir = join(currentDir, '..', '..', 'routes', 'home')
 const publicDir = join(currentDir, '..', '..', '..', 'public')
 
 describe('prototype home page source', () => {
@@ -21,8 +21,8 @@ describe('prototype home page source', () => {
     assert.match(source, /HomeHeroGuest/)
     assert.match(source, /HomeHeroUnverified/)
     assert.match(source, /HomeHeroVerified/)
-    assert.match(source, /useHomeAuthVariant/)
-    assert.match(source, /useHomeCounters/)
+    assert.match(source, /model\.authVariant/)
+    assert.match(source, /model\.counters/)
     assert.match(source, /MarketPreviewPanel/)
     assert.match(source, /NewsPreviewPanel/)
     assert.match(source, /TrustAwardsStrip/)
@@ -55,15 +55,15 @@ describe('prototype home page source', () => {
       join(homeComponentsDir, 'MarketPreviewPanel.tsx'),
       join(homeComponentsDir, 'NewsPreviewPanel.tsx'),
       join(homeComponentsDir, 'TrustAwardsStrip.tsx'),
-      join(homeHooksDir, 'useHomeAuthVariant.ts'),
-      join(homeHooksDir, 'useHomeCounters.ts')
+      join(homeHooksDir, 'homeRouteModel.ts'),
+      join(homeHooksDir, 'useHomeRouteController.ts')
     ]
 
     for (const file of requiredFiles) {
       assert.equal(existsSync(file), true, `${file} should exist`)
     }
 
-    const counterHook = readFileSync(join(homeHooksDir, 'useHomeCounters.ts'), 'utf8')
+    const counterHook = readFileSync(join(homeHooksDir, 'useHomeRouteController.ts'), 'utf8')
     assert.match(counterHook, /getHomeCounters/)
     assert.match(counterHook, /setInterval/)
     assert.match(counterHook, /1000/)
@@ -77,10 +77,10 @@ describe('prototype home page source', () => {
   })
 
   it('refreshes the auth hero when auth storage changes on the same route', () => {
-    const authVariantHook = readFileSync(join(homeHooksDir, 'useHomeAuthVariant.ts'), 'utf8')
+    const authVariantHook = readFileSync(join(homeHooksDir, 'useHomeRouteController.ts'), 'utf8')
 
     assert.match(authVariantHook, /authSessionChangedEvent/)
-    assert.match(authVariantHook, /const refreshVariant = \(\) => setVariant\(resolveVariant\(\)\)/)
+    assert.match(authVariantHook, /const refreshVariant = \(\) => setAuthVariant\(readAuthVariant\(\)\)/)
     assert.match(authVariantHook, /window\.addEventListener\(authSessionChangedEvent, refreshVariant\)/)
     assert.match(authVariantHook, /window\.removeEventListener\(authSessionChangedEvent, refreshVariant\)/)
   })
@@ -111,7 +111,8 @@ describe('prototype home page source', () => {
     assert.doesNotMatch(styles, /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.promoCard:hover\s+\.promoTextInner[\s\S]*transform:\s*none/)
     assert.match(styles, /\.panelCard:hover/)
     assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)/)
-    assert.match(styles, /@media \(max-width:\s*760px\)[\s\S]*\.heroGrid\s*{[\s\S]*grid-template-columns:\s*1fr/)
+    assert.match(styles, /\.mobile\s+\.heroGrid\s*{[\s\S]*grid-template-columns:\s*1fr/)
+    assert.doesNotMatch(styles, /@media \(max-width:\s*(?:760|768)px\)/)
     assert.doesNotMatch(styles, /phoneReflection|deviceDrift|scanSweep|radial-gradient\(circle/)
 
     const laurelAsset = join(publicDir, 'home-laurel.svg')
