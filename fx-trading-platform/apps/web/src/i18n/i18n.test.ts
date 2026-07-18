@@ -34,7 +34,10 @@ describe('web i18n setup', () => {
   })
 
   it('mounts the language switcher in the app shell', () => {
-    const shellSource = readFileSync(join(srcDir, 'app', 'AppShell.tsx'), 'utf8')
+    const shellSource = [
+      readFileSync(join(srcDir, 'app', 'AppShell.tsx'), 'utf8'),
+      readFileSync(join(srcDir, 'pc', 'shell', 'PcShellChrome.tsx'), 'utf8')
+    ].join('\n')
     const navigationSource = readFileSync(join(srcDir, 'app', 'navigation.ts'), 'utf8')
     const switcherSource = readFileSync(join(srcDir, 'components', 'LanguageSwitcher.tsx'), 'utf8')
 

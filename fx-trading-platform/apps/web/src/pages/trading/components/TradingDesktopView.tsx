@@ -54,7 +54,7 @@ export function TradingDesktopView({
   const { t } = useTranslation()
 
   return (
-    <div className={`${styles.layout} ${styles.desktopTerminal}`}>
+    <div className={`${styles.layout} ${styles.desktopTerminal}`} data-platform-view="pc">
       <div className={styles.terminalTicker} aria-label={t('markets.overview')}>
         <strong>{market.symbol}</strong>
         <span>{formatMarketPrice(market.symbol, quote.mid)}</span>

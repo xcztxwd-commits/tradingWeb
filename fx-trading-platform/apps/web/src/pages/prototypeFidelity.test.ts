@@ -21,7 +21,11 @@ const accountSource = [
   readFileSync(join(pagesDir, 'account', 'AccountPages.tsx'), 'utf8'),
   readFileSync(join(pagesDir, 'account', 'AccountHubPage.tsx'), 'utf8')
 ].join('\n')
-const shellSource = readFileSync(join(srcDir, 'app', 'AppShell.tsx'), 'utf8')
+const shellSource = [
+  readFileSync(join(srcDir, 'app', 'AppShell.tsx'), 'utf8'),
+  readFileSync(join(srcDir, 'pc', 'shell', 'PcShellChrome.tsx'), 'utf8'),
+  readFileSync(join(srcDir, 'mobile', 'shell', 'MobileShellChrome.tsx'), 'utf8')
+].join('\n')
 const zhLocale = readFileSync(join(srcDir, 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
 const styles = readFileSync(join(srcDir, 'styles.css'), 'utf8')
 const themeStyles = readFileSync(join(webRoot, '..', '..', 'packages', 'ui', 'src', 'theme', 'theme.css'), 'utf8')

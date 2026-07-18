@@ -6,7 +6,11 @@ import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(currentDir, 'App.tsx'), 'utf8')
-const appShellSource = readFileSync(join(currentDir, 'AppShell.tsx'), 'utf8')
+const appShellControllerSource = readFileSync(join(currentDir, 'AppShell.tsx'), 'utf8')
+const pcShellSource = readFileSync(join(currentDir, '..', 'pc', 'shell', 'PcShellChrome.tsx'), 'utf8')
+const mobileShellSource = readFileSync(join(currentDir, '..', 'mobile', 'shell', 'MobileShellChrome.tsx'), 'utf8')
+const shellRouteModelSource = readFileSync(join(currentDir, 'shell', 'shellRouteModel.ts'), 'utf8')
+const appShellSource = [appShellControllerSource, shellRouteModelSource, pcShellSource, mobileShellSource].join('\n')
 const styles = readFileSync(join(currentDir, '..', 'styles.css'), 'utf8')
 const navigationPath = join(currentDir, 'navigation.ts')
 const navigationSource = existsSync(navigationPath) ? readFileSync(navigationPath, 'utf8') : ''
@@ -62,8 +66,8 @@ describe('prototype-driven app shell and routes', () => {
     assert.match(appShellSource, /useTheme/)
     assert.match(appShellSource, /const \{ currentTheme,\s*toggleTheme \} = useTheme\(\)/)
     assert.match(appShellSource, /className="app-topbar__icon app-topbar__theme"/)
-    assert.match(appShellSource, /aria-pressed=\{currentTheme\.colorScheme === 'light'\}/)
-    assert.match(appShellSource, /onClick=\{toggleTheme\}/)
+    assert.match(pcShellSource, /aria-pressed=\{model\.themeColorScheme === 'light'\}/)
+    assert.match(pcShellSource, /onClick=\{model\.onToggleTheme\}/)
     assert.match(appShellSource, /to="\/login"/)
     assert.match(appShellSource, /to="\/register"/)
     assert.match(navigationSource, /export const guestNavItems/)
@@ -136,8 +140,8 @@ describe('prototype-driven app shell and routes', () => {
 
     assert.match(accountMenuSource, /onLogout:\s*\(\)\s*=>\s*void/)
     assert.match(accountMenuSource, /clearStoredAuthToken\(\)[\s\S]*onLogout\(\)/)
-    assert.match(appShellSource, /const handleLogout = \(\) => \{[\s\S]*setSession\(\{ authenticated: false, email: null \}\)[\s\S]*\}/)
-    assert.match(appShellSource, /<AccountUserMenu email=\{session\.email\} onLogout=\{handleLogout\} \/>/)
+    assert.match(appShellControllerSource, /const handleLogout = useCallback\(\(\) => \{[\s\S]*setSession\(\{ authenticated: false, email: null \}\)/)
+    assert.match(pcShellSource, /<AccountUserMenu email=\{model\.email\} onLogout=\{model\.onLogout\} \/>/)
   })
 
   it('keeps the account user panel stable across the pointer gap and centered on the profile icon', () => {
@@ -180,7 +184,7 @@ describe('prototype-driven app shell and routes', () => {
     assert.equal([...mobileNavSource.matchAll(/to:\s*'/g)].length, expectedRoutes.length)
     assert.doesNotMatch(mobileNavSource, /to:\s*'\/admin'|to:\s*'\/wallet'|to:\s*'\/orders'|to:\s*'\/positions'|to:\s*'\/security'|to:\s*'\/settings'/)
     assert.match(appShellSource, /isConfiguredNavPathActive\(item, pathname\)/)
-    assert.match(appShellSource, /pathname === path \|\| pathname\.startsWith\(`\$\{path\}\/`\)/)
+    assert.match(navigationSource, /pathname === path \|\| pathname\.startsWith\(`\$\{path\}\/`\)/)
   })
 
   it('uses Binance-like shell tokens with safe-area mobile tabs', () => {

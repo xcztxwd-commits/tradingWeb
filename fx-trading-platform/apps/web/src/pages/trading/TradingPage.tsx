@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 
 import { useResizableLayout } from '../../hooks/useResizableLayout'
 import type { TradingProduct } from '../../app/tradingRoutes'
+import { useDeviceClass } from '../../app/device/DeviceClassProvider'
 import type { TradingTerminalViewProps } from '../../routes/trading/tradingRoute.types'
 import { useTradingRouteController } from '../../routes/trading/useTradingRouteController'
 import { LoginPromptDialog } from './components/LoginPromptDialog'
@@ -12,7 +13,6 @@ import { RightTradingPanel } from './components/RightTradingPanel'
 import { TradingDesktopView } from './components/TradingDesktopView'
 import { TradingMobileView } from './components/TradingMobileView'
 import { TradingOrderSheet } from './components/TradingOrderSheet'
-import { useMobileTerminalViewport } from './useMobileTerminalViewport'
 import styles from './TradingPage.module.css'
 
 type TradingPageProps = { product: TradingProduct }
@@ -31,7 +31,7 @@ export function TradingPage({ product }: TradingPageProps) {
     closeLoginPrompt,
     login
   } = useTradingRouteController({ product })
-  const isMobileTerminal = useMobileTerminalViewport()
+  const deviceClass = useDeviceClass()
   const [workspaceResetSignal, setWorkspaceResetSignal] = useState(0)
   const {
     layout,
@@ -79,8 +79,8 @@ export function TradingPage({ product }: TradingPageProps) {
   return (
     <div className={styles.page}>
       <MarketSourceChangeNotice notice={sourceNotice} />
-      {!isMobileTerminal ? <TradingDesktopView {...viewProps} /> : null}
-      {isMobileTerminal ? <TradingMobileView {...viewProps} /> : null}
+      {deviceClass === 'pc' ? <TradingDesktopView {...viewProps} /> : null}
+      {deviceClass === 'mobile' ? <TradingMobileView {...viewProps} /> : null}
       <MobileDrawer open={marketDrawerOpen} side="left" title="Markets" onClose={closeMarketDrawer}>
         <MarketSidebar
           markets={model.markets}

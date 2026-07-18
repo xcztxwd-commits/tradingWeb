@@ -51,7 +51,7 @@ describe('canonical trading routes', () => {
   })
 
   it('wires the route-aware resolver into AppShell without rewriting the static mobile nav', () => {
-    const source = readFileSync(new URL('./AppShell.tsx', import.meta.url), 'utf8')
+    const source = readFileSync(new URL('../mobile/shell/MobileShellChrome.tsx', import.meta.url), 'utf8')
 
     assert.match(source, /resolveMobileTradingPath/)
     assert.match(source, /resolveMobileTradingPath\(pathname\)/)

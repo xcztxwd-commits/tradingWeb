@@ -29,7 +29,7 @@ export function TradingMobileView({
   token
 }: TradingTerminalViewProps) {
   return (
-    <div className={styles.mobileTerminal}>
+    <div className={styles.mobileTerminal} data-platform-view="mobile">
       <Suspense fallback={<MobileTerminalFallback />}>
         <MobileTradingTerminal
           market={market}
