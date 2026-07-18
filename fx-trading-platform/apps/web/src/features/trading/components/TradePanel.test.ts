@@ -101,7 +101,9 @@ describe('OKX-style trade panel density', () => {
   it('requires a confirmation dialog before real order submission', () => {
     assert.match(submitHookSource, /onConfirmRequired/)
     assert.match(submitHookSource, /t\('trading\.submitConfirmFirst'\)/)
-    assert.match(confirmDialogSource, /role="dialog"/)
+    assert.match(confirmDialogSource, /import \{ Dialog \} from '@fx-platform\/ui'/)
+    assert.match(confirmDialogSource, /<Dialog/)
+    assert.match(confirmDialogSource, /pending=\{submitting\}/)
     assert.match(confirmDialogSource, /t\('trading\.orderConfirmTitle'\)/)
     assert.match(confirmDialogSource, /t\('trading\.skipConfirm'\)/)
     assert.match(confirmDialogSource, /buildConfirmationRows/)

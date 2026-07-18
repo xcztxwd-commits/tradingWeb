@@ -1,0 +1,109 @@
+.surface {
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--state-surface-padding, var(--space-4));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  border: 1px solid var(--user-border, var(--theme-border));
+  border-radius: var(--state-surface-radius, var(--radius-3));
+  background: var(--user-surface, var(--theme-surface));
+  color: var(--user-muted, var(--theme-text-muted));
+}
+
+.content {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-1);
+}
+
+.content strong {
+  color: var(--user-text, var(--theme-text));
+  font-size: 14px;
+}
+
+.content span,
+.content small {
+  color: var(--user-muted, var(--theme-text-muted));
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.default,
+.empty,
+.login {
+  border-color: var(--user-border, var(--theme-border));
+}
+
+.error {
+  border-color: color-mix(in srgb, var(--trading-sell) 34%, transparent);
+  background: color-mix(in srgb, var(--trading-sell) 12%, var(--user-surface, var(--theme-surface)));
+  color: var(--trading-sell);
+}
+
+.error .content strong {
+  color: var(--trading-sell);
+}
+
+.loading {
+  align-items: stretch;
+}
+
+.skeletons {
+  width: min(320px, 36vw);
+  display: grid;
+  align-content: center;
+  gap: var(--space-2);
+}
+
+.action {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--user-primary, var(--trading-accent));
+  border-radius: var(--radius-2);
+  background: var(--user-primary, var(--trading-accent));
+  color: var(--trading-accent-text);
+  padding: 0 var(--space-3);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  transition:
+    background-color var(--motion-base) var(--ease-standard),
+    border-color var(--motion-base) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.action:hover {
+  border-color: var(--user-primary-hover, var(--theme-primary-hover));
+  background: var(--user-primary-hover, var(--theme-primary-hover));
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: var(--space-1);
+}
+
+.action:active {
+  transform: scale(0.98);
+}
+
+@media (max-width: 720px) {
+  .surface {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 14px;
+  }
+
+  .skeletons {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action {
+    transition: none;
+  }
+}

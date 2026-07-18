@@ -1,5 +1,5 @@
+import { Dialog } from '@fx-platform/ui'
 import { Bitcoin, X } from 'lucide-react'
-import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { CanonicalSubmitPayload } from '../hooks/useTradePanelSubmit'
@@ -26,48 +26,46 @@ export function OrderConfirmationDialog({
   const sideLabel = payload.side === 'BUY' ? t('common.buy') : t('common.sell')
   const rows = buildConfirmationRows(payload, t('trading.marketOrder'))
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onCancel()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onCancel])
-
   return (
-    <div className="trade-panel__confirm-layer" role="presentation">
-      <button type="button" className="trade-panel__confirm-backdrop" aria-label={t('trading.closeOrderConfirm')} onClick={onCancel} />
-      <section className="trade-panel__confirm" role="dialog" aria-modal="true" aria-label={t('trading.orderConfirmAria', { side: sideLabel, symbol: payload.symbol })}>
-        <header className="trade-panel__confirm-head">
-          <strong>{t('trading.orderConfirmTitle')}</strong>
-          <button type="button" aria-label={t('trading.closeOrderConfirm')} onClick={onCancel}>
-            <X size={22} aria-hidden="true" />
-          </button>
-        </header>
+    <Dialog
+      open
+      onClose={onCancel}
+      ariaLabel={t('trading.orderConfirmAria', { side: sideLabel, symbol: payload.symbol })}
+      closeLabel={t('trading.closeOrderConfirm')}
+      pending={submitting}
+      className="trade-panel__confirm-layer"
+      backdropClassName="trade-panel__confirm-backdrop"
+      panelClassName="trade-panel__confirm"
+    >
+      <header className="trade-panel__confirm-head">
+        <strong>{t('trading.orderConfirmTitle')}</strong>
+        <button type="button" aria-label={t('trading.closeOrderConfirm')} disabled={submitting} onClick={onCancel}>
+          <X size={22} aria-hidden="true" />
+        </button>
+      </header>
 
-        <div className="trade-panel__confirm-symbol">
-          <span className="trade-panel__confirm-coin" aria-hidden="true"><Bitcoin size={14} /></span>
-          <strong>{payload.symbol}</strong>
-          <span className={`trade-panel__confirm-side trade-panel__confirm-side--${payload.side.toLowerCase()}`}>{sideLabel}</span>
-        </div>
+      <div className="trade-panel__confirm-symbol">
+        <span className="trade-panel__confirm-coin" aria-hidden="true"><Bitcoin size={14} /></span>
+        <strong>{payload.symbol}</strong>
+        <span className={`trade-panel__confirm-side trade-panel__confirm-side--${payload.side.toLowerCase()}`}>{sideLabel}</span>
+      </div>
 
-        <dl className="trade-panel__confirm-grid trade-panel__confirm-grid--primary">
-          {rows.map((row) => <ConfirmItem key={row.label} label={row.label} value={row.value} />)}
-        </dl>
+      <dl className="trade-panel__confirm-grid trade-panel__confirm-grid--primary">
+        {rows.map((row) => <ConfirmItem key={row.label} label={row.label} value={row.value} />)}
+      </dl>
 
-        <p className="trade-panel__confirm-risk">{t('trading.orderConfirmRisk')}</p>
-        <label className="trade-panel__confirm-skip">
-          <input type="checkbox" checked={skipConfirm} onChange={(event) => onSkipConfirmChange(event.target.checked)} />
-          <span>{t('trading.skipConfirm')}</span>
-        </label>
-        <footer className="trade-panel__confirm-actions">
-          <button type="button" className="trade-panel__confirm-cancel" onClick={onCancel}>{t('common.cancel')}</button>
-          <button type="button" className="trade-panel__confirm-submit" disabled={submitting} onClick={onConfirm}>
-            {submitting ? t('trading.submitting') : t('common.confirm')}
-          </button>
-        </footer>
-      </section>
-    </div>
+      <p className="trade-panel__confirm-risk">{t('trading.orderConfirmRisk')}</p>
+      <label className="trade-panel__confirm-skip">
+        <input type="checkbox" checked={skipConfirm} onChange={(event) => onSkipConfirmChange(event.target.checked)} />
+        <span>{t('trading.skipConfirm')}</span>
+      </label>
+      <footer className="trade-panel__confirm-actions">
+        <button type="button" className="trade-panel__confirm-cancel" disabled={submitting} onClick={onCancel}>{t('common.cancel')}</button>
+        <button type="button" className="trade-panel__confirm-submit" disabled={submitting} onClick={onConfirm}>
+          {submitting ? t('trading.submitting') : t('common.confirm')}
+        </button>
+      </footer>
+    </Dialog>
   )
 }
 

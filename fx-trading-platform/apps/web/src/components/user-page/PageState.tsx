@@ -1,3 +1,4 @@
+import { StateSurface } from '@fx-platform/ui'
 import { useTranslation } from 'react-i18next'
 
 import type { ApiErrorView } from './userPageModels'
@@ -11,37 +12,13 @@ type StatePanelProps = {
 }
 
 export function StatePanel({ title, message, action, onAction, variant = 'default' }: StatePanelProps) {
-  return (
-    <div className={`state-panel state-panel--${variant}`}>
-      <div>
-        <strong>{title}</strong>
-        <span>{message}</span>
-      </div>
-      {action ? (
-        <button type="button" className="table-action table-action--primary" onClick={onAction}>
-          {action}
-        </button>
-      ) : null}
-    </div>
-  )
+  return <StateSurface title={title} message={message} actionLabel={action} onAction={onAction} variant={variant} />
 }
 
 export function LoadingState({ message }: { message?: string }) {
   const { t } = useTranslation()
 
-  return (
-    <div className="state-panel state-panel--loading" role="status" aria-live="polite">
-      <div>
-        <strong>{t('common.loading')}</strong>
-        <span>{message ?? t('common.loadingData')}</span>
-      </div>
-      <div className="state-panel__skeleton" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </div>
-    </div>
-  )
+  return <StateSurface title={t('common.loading')} message={message ?? t('common.loadingData')} variant="loading" />
 }
 
 export function EmptyState({
@@ -76,18 +53,14 @@ export function ApiErrorState({
   const { t } = useTranslation()
 
   return (
-    <div className="state-panel state-panel--error" role="alert">
-      <div>
-        <strong>{getReadableErrorTitle(error, t('common.loadFailed'))}</strong>
-        <span>{error.message}</span>
-        {error.requestId ? <small>{t('common.issueId', { requestId: error.requestId })}</small> : null}
-      </div>
-      {onAction ? (
-        <button type="button" className="table-action table-action--secondary" onClick={onAction}>
-          {action ?? t('common.retry')}
-        </button>
-      ) : null}
-    </div>
+    <StateSurface
+      title={getReadableErrorTitle(error, t('common.loadFailed'))}
+      message={error.message}
+      detail={error.requestId ? t('common.issueId', { requestId: error.requestId }) : undefined}
+      actionLabel={onAction ? (action ?? t('common.retry')) : undefined}
+      onAction={onAction}
+      variant="error"
+    />
   )
 }
 

@@ -1,3 +1,4 @@
+import { Dialog } from '@fx-platform/ui'
 import type { FormEvent } from 'react'
 import type { AccountTransferDirection } from '@fx-platform/shared-types'
 
@@ -30,8 +31,6 @@ export function TransferDialog({
   onClose,
   onConfirm
 }: TransferDialogProps) {
-  if (!open) return null
-
   const parsedAvailable = Number(available)
   const availableNumber = Number.isFinite(parsedAvailable) ? Math.max(0, parsedAvailable) : 0
   const amountNumber = Number(amount)
@@ -46,19 +45,16 @@ export function TransferDialog({
   }
 
   return (
-    <div
-      className="confirm-dialog"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !pending) onClose()
-      }}
+    <Dialog
+      open={open}
+      onClose={onClose}
+      labelledBy="wallet-transfer-title"
+      closeLabel="Close transfer dialog"
+      pending={pending}
+      panelClassName="confirm-dialog__panel"
     >
       <form
-        className="confirm-dialog__panel user-page__form"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="wallet-transfer-title"
-        aria-busy={pending}
+        className="user-page__form"
         onSubmit={handleSubmit}
       >
         <h2 id="wallet-transfer-title">Transfer Demo USDT</h2>
@@ -110,6 +106,6 @@ export function TransferDialog({
           </button>
         </div>
       </form>
-    </div>
+    </Dialog>
   )
 }

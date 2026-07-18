@@ -11,40 +11,36 @@ const styles = readFileSync(join(currentDir, '..', '..', 'styles.css'), 'utf8')
 
 describe('user page shared UI system', () => {
   it('uses skeleton loading states instead of a text-only loading panel', () => {
-    assert.match(pageState, /state-panel--loading/)
-    assert.match(pageState, /state-panel__skeleton/)
-    assert.match(styles, /\.state-panel--loading/)
-    assert.match(styles, /@keyframes\s+userPageSkeleton/)
+    assert.match(pageState, /import \{ StateSurface \} from '@fx-platform\/ui'/)
+    assert.match(pageState, /<StateSurface/)
+    assert.doesNotMatch(pageState, /state-panel--loading/)
+    assert.doesNotMatch(styles, /@keyframes\s+userPageSkeleton/)
   })
 
   it('gives empty tables an optional next action', () => {
     assert.match(dataTable, /emptyAction/)
-    assert.match(dataTable, /data-table__empty/)
-    assert.match(styles, /\.data-table__empty-action/)
+    assert.match(dataTable, /TableEmptyState/)
+    assert.match(dataTable, /empty=\{/)
   })
 
   it('renders a card layout for tables on small screens', () => {
     assert.match(dataTable, /data-table__cards/)
-    assert.match(dataTable, /data-table__card-row/)
+    assert.match(dataTable, /DataCardList/)
     assert.match(styles, /@media\s*\(max-width:\s*720px\)/)
     assert.match(styles, /\.data-table__cards\s*{[\s\S]*display:\s*grid/)
     assert.match(styles, /\.user-page__table\s*{[\s\S]*display:\s*none/)
-    assert.match(styles, /\.data-table__card-row\s*{[\s\S]*grid-template-columns:\s*minmax\(88px,\s*36%\)\s*minmax\(0,\s*1fr\)/)
-    assert.match(styles, /\.data-table__card-value\s*{[\s\S]*overflow-wrap:\s*anywhere/)
+    assert.doesNotMatch(dataTable, /data-table__card-row/)
   })
 
   it('announces table sorting state and next sort direction', () => {
-    assert.match(dataTable, /const activeSort = sortKey === columnKey/)
-    assert.match(dataTable, /const nextSortDirection = activeSort && sortDirection === 'asc' \? 'desc' : 'asc'/)
-    assert.match(
-      dataTable,
-      /const ariaSort: 'ascending' \| 'descending' \| undefined = activeSort[\s\S]*\? \(sortDirection === 'asc' \? 'ascending' : 'descending'\)[\s\S]*: undefined/,
-    )
-    assert.match(dataTable, /aria-sort=\{ariaSort\}/)
+    assert.match(dataTable, /getNextDataSort/)
+    assert.match(dataTable, /DataTable as UiDataTable/)
+    assert.match(dataTable, /sortKey=\{sortKey\}/)
+    assert.match(dataTable, /sortDirection=\{sortDirection\}/)
     assert.match(dataTable, /common\.tableSort/)
     assert.match(dataTable, /common\.sortAsc/)
     assert.match(dataTable, /common\.sortDesc/)
-    assert.match(dataTable, /aria-hidden="true"/)
+    assert.match(dataTable, /getSortLabel/)
   })
 
   it('defines semantic table action variants including destructive actions', () => {

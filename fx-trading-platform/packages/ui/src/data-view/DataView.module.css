@@ -1,0 +1,101 @@
+.table {
+  width: 100%;
+}
+
+.sort {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.sort:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: var(--space-1);
+}
+
+.cards {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.card {
+  min-width: 0;
+  max-width: 100%;
+  display: grid;
+  gap: var(--space-2);
+  border: 1px solid var(--user-border, var(--theme-border));
+  border-radius: var(--radius-2);
+  background: var(--user-surface, var(--theme-surface));
+  padding: var(--space-3);
+}
+
+.cardRow {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(88px, 36%) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.cardLabel {
+  color: var(--user-muted, var(--theme-text-muted));
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.cardValue {
+  min-width: 0;
+  color: var(--user-text, var(--theme-text));
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  min-height: 118px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  text-align: center;
+  color: var(--user-muted, var(--theme-text-muted));
+}
+
+.empty strong {
+  color: var(--user-text, var(--theme-text));
+  font-size: 14px;
+}
+
+.empty span {
+  margin: 0;
+  font-size: 13px;
+}
+
+.empty a,
+.empty button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--user-primary, var(--trading-accent));
+  border-radius: var(--radius-2);
+  background: var(--user-primary, var(--trading-accent));
+  color: var(--trading-accent-text);
+  padding: 0 var(--space-3);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.empty a:hover,
+.empty a:focus-visible,
+.empty button:hover,
+.empty button:focus-visible {
+  border-color: var(--user-primary-hover, var(--theme-primary-hover));
+  background: var(--user-primary-hover, var(--theme-primary-hover));
+}

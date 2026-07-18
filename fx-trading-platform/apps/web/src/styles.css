@@ -653,8 +653,6 @@ th {
 
 .user-page,
 .data-table,
-.data-table__card,
-.data-table__empty,
 .market-rank-card,
 .dashboard-card,
 .wallet-action-card,
@@ -666,8 +664,7 @@ th {
 
 .user-page__header,
 .user-page__toolbar,
-.user-page__events,
-.state-panel {
+.user-page__events {
   border: 1px solid var(--user-border);
   border-radius: 20px;
   background: var(--user-surface);
@@ -891,84 +888,6 @@ th {
   margin-right: 8px;
 }
 
-.state-panel {
-  padding: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  color: var(--user-muted);
-}
-
-.state-panel > div {
-  min-width: 0;
-  display: grid;
-  gap: 3px;
-}
-
-.state-panel strong {
-  color: var(--user-text);
-  font-size: 14px;
-}
-
-.state-panel span,
-.state-panel small {
-  color: var(--user-muted);
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.state-panel--error {
-  border-color: rgb(246 70 93 / 0.34);
-  background: var(--user-danger-soft);
-  color: #ff707e;
-}
-
-.state-panel--error strong {
-  color: #ff707e;
-}
-
-.state-panel--login {
-  border-color: var(--user-border);
-  background: var(--user-surface);
-}
-
-.state-panel--loading {
-  align-items: stretch;
-}
-
-.state-panel__skeleton {
-  width: min(320px, 36vw);
-  display: grid;
-  gap: 8px;
-}
-
-.state-panel__skeleton span {
-  height: 10px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #e8edf3 0%, #f8fafc 50%, #e8edf3 100%);
-  background-size: 220% 100%;
-  animation: userPageSkeleton 1.1s ease-in-out infinite;
-}
-
-.state-panel__skeleton span:nth-child(2) {
-  width: 82%;
-}
-
-.state-panel__skeleton span:nth-child(3) {
-  width: 62%;
-}
-
-@keyframes userPageSkeleton {
-  from {
-    background-position: 100% 0;
-  }
-
-  to {
-    background-position: -100% 0;
-  }
-}
-
 .data-table {
   display: grid;
   gap: 8px;
@@ -978,58 +897,10 @@ th {
   display: none;
 }
 
-.data-table__empty {
-  min-height: 118px;
-  display: grid;
-  place-items: center;
-  align-content: center;
-  gap: 8px;
-  padding: 18px;
-  text-align: center;
-  color: var(--user-muted);
-}
-
-.data-table__empty strong {
-  color: var(--user-text);
-  font-size: 14px;
-}
-
-.data-table__empty span {
-  margin: 0;
-  font-size: 13px;
-}
-
-.data-table__empty-action {
-  min-height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--user-primary);
-  border-radius: 7px;
-  background: var(--user-primary);
-  color: #ffffff;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 800;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.table-action,
-.data-table__empty-action {
+.table-action {
   max-width: 100%;
   white-space: normal;
   text-align: center;
-}
-
-.table-sort {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  font-weight: 700;
 }
 
 .table-pagination {
@@ -1070,21 +941,17 @@ th {
 }
 
 .table-action:hover,
-.table-action:focus-visible,
-.data-table__empty-action:hover,
-.data-table__empty-action:focus-visible {
+.table-action:focus-visible {
   background: var(--user-primary-hover);
   border-color: var(--user-primary-hover);
 }
 
-.table-action:focus-visible,
-.data-table__empty-action:focus-visible {
+.table-action:focus-visible {
   outline: 2px solid rgb(14 116 144 / 0.24);
   outline-offset: 2px;
 }
 
-.table-action:active,
-.data-table__empty-action:active {
+.table-action:active {
   transform: scale(0.98);
 }
 
@@ -2411,42 +2278,11 @@ th {
     gap: 8px;
   }
 
-  .data-table__card {
-    display: grid;
-    gap: 8px;
-    border: 1px solid var(--user-border);
-    border-radius: 8px;
-    background: var(--user-surface);
-    padding: 12px;
-  }
-
-  .data-table__card-row {
-    min-width: 0;
-    display: grid;
-    grid-template-columns: minmax(88px, 36%) minmax(0, 1fr);
-    gap: 10px;
-    align-items: start;
-  }
-
-  .data-table__card-label {
-    color: var(--user-muted);
-    font-size: 11px;
-    font-weight: 800;
-  }
-
-  .data-table__card-value {
-    min-width: 0;
-    color: var(--user-text);
-    font-size: 13px;
-    overflow-wrap: anywhere;
-  }
-
   .user-page__actions {
     justify-content: flex-end;
   }
 
-  .table-action,
-  .data-table__empty-action {
+  .table-action {
     min-height: 40px;
   }
 
@@ -2460,18 +2296,9 @@ th {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .state-panel {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
   .wallet-simulation-note {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .state-panel__skeleton {
-    width: 100%;
   }
 
   .settings-section-head,
@@ -4002,7 +3829,6 @@ th {
 
 .user-page__header,
 .user-page__events,
-.state-panel,
 .market-summary-card,
 .account-card,
 .account-panel,
@@ -4127,21 +3953,6 @@ th {
   background: rgb(234 236 239 / 0.045);
 }
 
-.data-table__card,
-.data-table__empty {
-  border-color: var(--user-border);
-  background: var(--user-surface);
-  color: var(--user-text);
-}
-
-.data-table__card-label {
-  color: var(--user-muted);
-}
-
-.data-table__card-value {
-  color: var(--user-text);
-}
-
 .wallet-simulation-note {
   border-color: color-mix(in srgb, var(--user-primary) 18%, transparent);
   background: color-mix(in srgb, var(--user-primary) 8%, transparent);
@@ -4153,8 +3964,7 @@ th {
   color: inherit;
 }
 
-.table-action,
-.data-table__empty-action {
+.table-action {
   min-height: 30px;
   border-radius: 6px;
   border-color: var(--user-border);
@@ -4164,8 +3974,7 @@ th {
   box-shadow: none;
 }
 
-.table-action--primary,
-.data-table__empty-action {
+.table-action--primary {
   border-color: var(--user-primary-hover);
   background: var(--user-primary-hover);
   color: var(--bn-page);
@@ -4179,8 +3988,6 @@ th {
 
 .table-action:hover,
 .table-action:focus-visible,
-.data-table__empty-action:hover,
-.data-table__empty-action:focus-visible,
 .table-action--secondary:hover,
 .table-action--secondary:focus-visible {
   border-color: var(--user-border-strong);
@@ -4189,9 +3996,7 @@ th {
 }
 
 .table-action--primary:hover,
-.table-action--primary:focus-visible,
-.data-table__empty-action:hover,
-.data-table__empty-action:focus-visible {
+.table-action--primary:focus-visible {
   border-color: var(--user-primary-hover);
   background: var(--user-primary-hover);
   color: var(--bn-page);
@@ -4567,7 +4372,6 @@ th {
 
   .user-page__header,
   .user-page__events,
-  .state-panel,
   .account-panel,
   .market-insight-placeholder {
     padding: 14px;
@@ -4594,7 +4398,6 @@ th {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .state-panel__skeleton span,
   .app-topbar__link,
   .app-topbar__icon,
   .app-topbar__utility-cluster,
@@ -4602,7 +4405,6 @@ th {
   .app-topbar__primary,
   .language-switcher--compact,
   .table-action,
-  .data-table__empty-action,
   .trading-nav-menu__panel,
   .account-user-menu__panel,
   .market-summary-card,
@@ -5056,10 +4858,6 @@ th {
 
 .data-table {
   gap: 10px;
-}
-
-.data-table__empty {
-  min-height: 180px;
 }
 
 .wallet-workbench {

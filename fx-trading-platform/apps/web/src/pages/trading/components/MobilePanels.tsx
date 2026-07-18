@@ -1,3 +1,4 @@
+import { Drawer } from '@fx-platform/ui'
 import { X } from 'lucide-react'
 import type { ReactNode } from 'react'
 
@@ -20,18 +21,16 @@ type SheetProps = {
 
 export function MobileDrawer({ open, title, side, onClose, children }: DrawerProps) {
   return (
-    <div className={`${styles.drawerLayer} ${open ? styles.open : ''}`} aria-hidden={!open}>
-      <button type="button" className={styles.backdrop} tabIndex={open ? 0 : -1} onClick={onClose} />
-      <aside className={`${styles.drawer} ${side === 'right' ? styles.right : styles.left}`}>
-        <header className={styles.mobileHeader}>
-          <h2>{title}</h2>
-          <button type="button" onClick={onClose}>
-            <X size={17} />
-          </button>
-        </header>
-        <div className={styles.drawerBody}>{children}</div>
-      </aside>
-    </div>
+    <Drawer
+      open={open}
+      title={title}
+      side={side}
+      onClose={onClose}
+      closeLabel={`Close ${title}`}
+      className={styles.drawerViewport}
+    >
+      {children}
+    </Drawer>
   )
 }
 

@@ -36,10 +36,12 @@ describe('wallet Spot and Perpetual operations', () => {
     for (const source of [transfer, reset]) {
       assert.match(source, /pending: boolean/)
       assert.match(source, /disabled=\{[^}]*pending[^}]*\}/)
-      assert.match(source, /aria-busy=\{pending\}/)
       assert.match(source, /role="alert"/)
       assert.match(source, /\{error\}/)
     }
+    assert.match(transfer, /import \{ Dialog \} from '@fx-platform\/ui'/)
+    assert.match(transfer, /pending=\{pending\}/)
+    assert.match(reset, /aria-busy=\{pending\}/)
     assert.match(reset, /requestId: string/)
     assert.match(reset, /onConfirm:/)
   })

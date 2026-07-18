@@ -125,7 +125,55 @@ try {
   await dispatchKey(' ')
   await waitFor(async () => !(await isExpanded()), 'Space selection close')
 
-  console.log('UI primitive browser smoke passed: click, outside click, keyboard, ARIA, disabled and custom-class contracts.')
+  await click('#dialog-trigger')
+  await waitFor(async () => evaluate(`document.querySelector('.test-dialog [role="dialog"]') !== null`), 'dialog open')
+  await waitFor(async () => evaluate(`document.activeElement?.id === 'dialog-action'`), 'dialog initial focus')
+  await dispatchWindowKey('Escape')
+  await waitFor(async () => evaluate(`document.querySelector('.test-dialog') === null`), 'dialog Escape close')
+  assert.equal(await evaluate(`document.activeElement?.id`), 'dialog-trigger')
+
+  await click('#dialog-trigger')
+  await waitFor(async () => evaluate(`document.querySelector('.test-dialog [role="dialog"]') !== null`), 'dialog reopen')
+  await click('.test-dialog > button')
+  await waitFor(async () => evaluate(`document.querySelector('.test-dialog') === null`), 'dialog backdrop close')
+
+  await click('#pending-dialog-trigger')
+  await waitFor(async () => evaluate(`document.querySelector('.pending-dialog [role="dialog"]') !== null`), 'pending dialog open')
+  await dispatchWindowKey('Escape')
+  await delay(100)
+  assert.equal(await evaluate(`document.querySelector('.pending-dialog [role="dialog"]') !== null`), true)
+  const pendingBackdrop = await evaluate(`(() => {
+    const backdrop = document.querySelector('.pending-dialog > button')
+    backdrop?.click()
+    return { disabled: backdrop?.disabled, open: document.querySelector('.pending-dialog [role="dialog"]') !== null }
+  })()`)
+  assert.deepEqual(pendingBackdrop, { disabled: true, open: true })
+  await click('#force-close-pending-dialog')
+  await waitFor(async () => evaluate(`document.querySelector('.pending-dialog') === null`), 'pending dialog forced close')
+
+  await click('#drawer-trigger')
+  await waitFor(async () => evaluate(`document.querySelector('.test-drawer')?.dataset.open === 'true'`), 'left drawer open')
+  await waitFor(async () => evaluate(`document.activeElement?.getAttribute('aria-label') === 'Close test drawer'`), 'drawer initial focus')
+  const leftDrawer = await evaluate(`(() => {
+    const drawer = document.querySelector('.test-drawer [role="dialog"]')
+    return { side: drawer?.dataset.side, left: getComputedStyle(drawer).left }
+  })()`)
+  assert.deepEqual(leftDrawer, { side: 'left', left: '0px' })
+  await dispatchWindowKey('Escape')
+  await waitFor(async () => evaluate(`document.querySelector('.test-drawer')?.dataset.open === 'false'`), 'drawer Escape close')
+  assert.equal(await evaluate(`document.activeElement?.id`), 'drawer-trigger')
+
+  await click('#right-drawer-trigger')
+  await waitFor(async () => evaluate(`document.querySelector('.test-drawer')?.dataset.open === 'true'`), 'right drawer open')
+  const rightDrawer = await evaluate(`(() => {
+    const drawer = document.querySelector('.test-drawer [role="dialog"]')
+    return { side: drawer?.dataset.side, right: getComputedStyle(drawer).right }
+  })()`)
+  assert.deepEqual(rightDrawer, { side: 'right', right: '0px' })
+  await click('.test-drawer > button')
+  await waitFor(async () => evaluate(`document.querySelector('.test-drawer')?.dataset.open === 'false'`), 'drawer backdrop close')
+
+  console.log('UI primitive browser smoke passed: select, icon button, dialog and drawer keyboard, backdrop, pending, focus and ARIA contracts.')
 } finally {
   cdp?.close()
   await stopBrowser(browser)
@@ -143,7 +191,7 @@ function writeHarness() {
     join(harnessRoot, 'main.jsx'),
     `import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { IconButton, SelectField } from '../packages/ui/src/index.ts'
+import { Dialog, Drawer, IconButton, SelectField } from '../packages/ui/src/index.ts'
 import '../packages/ui/src/theme/theme.css'
 
 const options = [
@@ -154,6 +202,10 @@ const options = [
 
 function Harness() {
   const [value, setValue] = useState('beta')
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [pendingDialogOpen, setPendingDialogOpen] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerSide, setDrawerSide] = useState('left')
   return (
     <main id="outside" tabIndex={-1}>
       <span id="select-label">Choose value</span>
@@ -161,6 +213,40 @@ function Harness() {
       <SelectField className="empty-select" ariaLabel="Empty select" value="" options={[]} onChange={() => {}} />
       <IconButton className="custom-icon" icon={<span aria-hidden="true">+</span>} label="Run action" disabled />
       <output id="selected">{value}</output>
+      <button id="dialog-trigger" type="button" onClick={() => setDialogOpen(true)}>Open dialog</button>
+      <Dialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        ariaLabel="Test dialog"
+        closeLabel="Close test dialog"
+        className="test-dialog"
+      >
+        <button id="dialog-action" type="button">Dialog action</button>
+      </Dialog>
+      <button id="pending-dialog-trigger" type="button" onClick={() => setPendingDialogOpen(true)}>Open pending dialog</button>
+      <button id="force-close-pending-dialog" type="button" onClick={() => setPendingDialogOpen(false)}>Force close pending dialog</button>
+      <Dialog
+        open={pendingDialogOpen}
+        onClose={() => setPendingDialogOpen(false)}
+        ariaLabel="Pending dialog"
+        closeLabel="Close pending dialog"
+        pending
+        className="pending-dialog"
+      >
+        <button type="button" disabled>Pending action</button>
+      </Dialog>
+      <button id="drawer-trigger" type="button" onClick={() => { setDrawerSide('left'); setDrawerOpen(true) }}>Open left drawer</button>
+      <button id="right-drawer-trigger" type="button" onClick={() => { setDrawerSide('right'); setDrawerOpen(true) }}>Open right drawer</button>
+      <Drawer
+        open={drawerOpen}
+        title="Test drawer"
+        side={drawerSide}
+        onClose={() => setDrawerOpen(false)}
+        closeLabel="Close test drawer"
+        className="test-drawer"
+      >
+        <button id="drawer-action" type="button">Drawer action</button>
+      </Drawer>
     </main>
   )
 }
@@ -287,7 +373,7 @@ async function evaluate(expression) {
 }
 
 async function click(selector) {
-  const clicked = await evaluate(`(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!element) return false; element.click(); return true })()`)
+  const clicked = await evaluate(`(() => { const element = document.querySelector(${JSON.stringify(selector)}); if (!element) return false; element.focus(); element.click(); return true })()`)
   assert.equal(clicked, true, `Expected clickable element ${selector}`)
 }
 
@@ -300,6 +386,14 @@ async function dispatchKey(key) {
     return true
   })()`)
   assert.equal(dispatched, true, `Expected key target for ${key}`)
+}
+
+async function dispatchWindowKey(key) {
+  const dispatched = await evaluate(`(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(key)}, bubbles: true, cancelable: true }))
+    return true
+  })()`)
+  assert.equal(dispatched, true, `Expected window key target for ${key}`)
 }
 
 async function isExpanded() {
