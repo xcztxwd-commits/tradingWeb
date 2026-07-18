@@ -2,7 +2,7 @@ import {
   clearStoredAuthToken,
   readStoredRefreshToken,
   writeStoredAuthTokens
-} from '../features/trading-session/tradingSessionStorage.ts'
+} from '../auth/sessionStorage.ts'
 import { friendlyApiErrorMessage } from '@fx-platform/shared-types'
 import type { ApiResponse } from '@fx-platform/shared-types'
 

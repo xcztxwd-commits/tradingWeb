@@ -9,11 +9,21 @@ import { Link, useNavigate } from 'react-router-dom'
 import { AssetMark } from '../../components/asset/AssetMark'
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
-import { filterByStatus, formatApiError, toNumber } from '../../components/user-page/userPageModels'
+import { formatApiError } from '../../components/user-page/userPageModels'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
-import { resetDemoAccount, transferDemoFunds } from '../../services/accountApi'
-import { createFundOrder, getFundOrders } from '../../services/financeApi'
-import type { Amount, AssetLedgerEntry, FundOrder, LedgerEntry, WalletBalance } from '../../types/trading'
+import {
+  createFundOrder,
+  filterByStatus,
+  getFundOrders,
+  resetDemoAccount,
+  toNumber,
+  transferDemoFunds,
+  type Amount,
+  type AssetLedgerEntry,
+  type FundOrder,
+  type LedgerEntry,
+  type WalletBalance
+} from '@fx-platform/frontend-core'
 import { DemoResetDialog } from './DemoResetDialog'
 import { TransferDialog } from './TransferDialog'
 

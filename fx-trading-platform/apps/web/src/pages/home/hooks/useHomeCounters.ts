@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { getHomeCounters, type HomeCounters } from '../../../services/homeApi'
+import { getHomeCounters, type HomeCounters } from '@fx-platform/frontend-core'
 
 const fallbackCounters: HomeCounters = {
   users: 321443508,

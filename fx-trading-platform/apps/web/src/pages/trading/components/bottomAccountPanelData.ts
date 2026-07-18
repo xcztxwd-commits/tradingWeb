@@ -1,5 +1,4 @@
-import type { OrderResponse, PositionResponse } from '../../../components/tables/types'
-import type { AccountSummary, LedgerEntry } from '../../../types/trading'
+import type { AccountSummary, LedgerEntry, OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
 import type { AccountTransferResponse, BatchActionResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
 import { isCurrentOrderStatus } from '../../orders/orderActionPolicy.ts'
 import type { BottomAccountTab } from './bottomAccountTabs.ts'

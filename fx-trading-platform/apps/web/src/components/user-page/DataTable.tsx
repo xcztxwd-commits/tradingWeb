@@ -6,10 +6,9 @@ import {
   type DataSortDirection,
   type DataViewColumn
 } from '@fx-platform/ui'
+import { paginateRows, sortRows } from '@fx-platform/frontend-core'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-
-import { paginateRows, sortRows } from './userPageModels'
 
 export type DataTableColumn<T extends object> = DataViewColumn<T>
 

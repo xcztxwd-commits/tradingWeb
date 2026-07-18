@@ -1,6 +1,5 @@
 import { resolveSafeTradingPath } from '../../app/tradingRoutes.ts'
-import type { PositionResponse } from '../../components/tables/types'
-import type { UpdatePositionProtectionPayload } from '../../types/trading'
+import type { PositionResponse, UpdatePositionProtectionPayload } from '@fx-platform/frontend-core'
 
 type LegacyProtectionUpdate = (
   position: PositionResponse,

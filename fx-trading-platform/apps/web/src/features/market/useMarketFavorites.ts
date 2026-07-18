@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { readStoredAuthToken } from '../trading-session/tradingSessionStorage'
+import { readStoredAuthToken } from '@fx-platform/frontend-core'
 import {
   favoriteSymbolList,
   loadFavoriteSymbols,

@@ -1,4 +1,4 @@
-import type { OrderResponse } from './types'
+import type { OrderResponse } from '@fx-platform/frontend-core'
 
 type Props = {
   orders: OrderResponse[]

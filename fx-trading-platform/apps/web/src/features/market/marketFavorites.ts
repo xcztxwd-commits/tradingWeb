@@ -1,6 +1,5 @@
+import { getBrowserStorage, type KeyValueStorage } from '@fx-platform/frontend-core'
 import type { TradingMarket } from './tradingModels'
-
-type FavoriteStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
 export const marketFavoriteStorageKey = 'fx-trading-market-favorites'
 
@@ -8,7 +7,7 @@ export function normalizeFavoriteSymbol(symbol: string) {
   return symbol.trim().toUpperCase()
 }
 
-export function loadFavoriteSymbols(storage = getFavoriteStorage()) {
+export function loadFavoriteSymbols(storage: KeyValueStorage | undefined = getBrowserStorage()) {
   if (!storage) return new Set<string>()
   try {
     const parsed = JSON.parse(storage.getItem(marketFavoriteStorageKey) ?? '[]')
@@ -19,7 +18,7 @@ export function loadFavoriteSymbols(storage = getFavoriteStorage()) {
   }
 }
 
-export function saveFavoriteSymbols(favorites: Set<string>, storage = getFavoriteStorage()) {
+export function saveFavoriteSymbols(favorites: Set<string>, storage: KeyValueStorage | undefined = getBrowserStorage()) {
   if (!storage) return
   const symbols = favoriteSymbolList(favorites)
   try {
@@ -49,12 +48,4 @@ export function hydrateMarketFavorites<T extends TradingMarket>(markets: T[], fa
 export function favoriteSymbolList(favorites: Set<string> | string[]) {
   const symbols = favorites instanceof Set ? Array.from(favorites) : favorites
   return Array.from(new Set(symbols.map(normalizeFavoriteSymbol).filter(Boolean)))
-}
-
-function getFavoriteStorage(): FavoriteStorage | undefined {
-  try {
-    return globalThis.localStorage
-  } catch {
-    return undefined
-  }
 }

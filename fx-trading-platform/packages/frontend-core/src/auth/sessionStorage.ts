@@ -1,4 +1,4 @@
-type AuthTokenStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+import { getBrowserStorage, type KeyValueStorage } from '../storage/browserStorage.ts'
 
 export const authSessionChangedEvent = 'fx-platform-auth-session-changed'
 
@@ -6,7 +6,7 @@ const authTokenStorageKey = 'fx-platform-auth-token'
 const authRefreshTokenStorageKey = 'fx-platform-auth-refresh-token'
 const legacyAuthTokenStorageKey = 'fx-platform-demo-token'
 
-export function readStoredAuthToken(storage = getAuthTokenStorage()) {
+export function readStoredAuthToken(storage = getBrowserStorage()) {
   try {
     const token = storage?.getItem(authTokenStorageKey)
     if (token) {
@@ -22,7 +22,7 @@ export function readStoredAuthToken(storage = getAuthTokenStorage()) {
   }
 }
 
-export function writeStoredAuthToken(token: string, storage = getAuthTokenStorage()) {
+export function writeStoredAuthToken(token: string, storage = getBrowserStorage()) {
   try {
     storage?.setItem(authTokenStorageKey, token)
     storage?.removeItem(authRefreshTokenStorageKey)
@@ -33,7 +33,7 @@ export function writeStoredAuthToken(token: string, storage = getAuthTokenStorag
   notifyAuthSessionChanged()
 }
 
-export function readStoredRefreshToken(storage = getAuthTokenStorage()) {
+export function readStoredRefreshToken(storage = getBrowserStorage()) {
   try {
     return storage?.getItem(authRefreshTokenStorageKey) ?? null
   } catch {
@@ -44,7 +44,7 @@ export function readStoredRefreshToken(storage = getAuthTokenStorage()) {
 export function writeStoredAuthTokens(
   accessToken: string,
   refreshToken: string,
-  storage = getAuthTokenStorage()
+  storage = getBrowserStorage()
 ) {
   try {
     storage?.setItem(authTokenStorageKey, accessToken)
@@ -56,7 +56,7 @@ export function writeStoredAuthTokens(
   notifyAuthSessionChanged()
 }
 
-export function clearStoredAuthToken(storage = getAuthTokenStorage()) {
+export function clearStoredAuthToken(storage = getBrowserStorage()) {
   try {
     storage?.removeItem(authTokenStorageKey)
     storage?.removeItem(authRefreshTokenStorageKey)
@@ -71,27 +71,19 @@ export function clearStoredAuthToken(storage = getAuthTokenStorage()) {
   notifyAuthSessionChanged()
 }
 
-export function readStoredDemoToken(storage = getAuthTokenStorage()) {
+export function readStoredDemoToken(storage = getBrowserStorage()) {
   return readStoredAuthToken(storage)
 }
 
-export function writeStoredDemoToken(token: string, storage = getAuthTokenStorage()) {
+export function writeStoredDemoToken(token: string, storage = getBrowserStorage()) {
   writeStoredAuthToken(token, storage)
 }
 
-export function clearStoredDemoToken(storage = getAuthTokenStorage()) {
+export function clearStoredDemoToken(storage = getBrowserStorage()) {
   clearStoredAuthToken(storage)
 }
 
-function getAuthTokenStorage(): AuthTokenStorage | undefined {
-  try {
-    return globalThis.localStorage
-  } catch {
-    return undefined
-  }
-}
-
-function migrateStoredAuthToken(token: string, storage: AuthTokenStorage | undefined) {
+function migrateStoredAuthToken(token: string, storage: KeyValueStorage | undefined) {
   try {
     storage?.setItem(authTokenStorageKey, token)
     clearLegacyStoredAuthToken(storage)
@@ -100,7 +92,7 @@ function migrateStoredAuthToken(token: string, storage: AuthTokenStorage | undef
   }
 }
 
-function clearLegacyStoredAuthToken(storage: AuthTokenStorage | undefined) {
+function clearLegacyStoredAuthToken(storage: KeyValueStorage | undefined) {
   try {
     storage?.removeItem(legacyAuthTokenStorageKey)
   } catch {

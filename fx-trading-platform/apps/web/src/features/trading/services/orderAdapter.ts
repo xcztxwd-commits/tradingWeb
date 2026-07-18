@@ -6,7 +6,7 @@ import type {
   QuantityUnit
 } from '@fx-platform/shared-types'
 
-import type { OcoOrderPayload, OrderPayload } from '../../../types/trading'
+import type { OcoOrderPayload, OrderPayload } from '@fx-platform/frontend-core'
 import type { TradeFormState, TradeMarket } from '../types/order'
 
 export const CANONICAL_TIME_IN_FORCE = 'GTC' as const

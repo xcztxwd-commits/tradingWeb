@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { buildChartTradeMarkers, buildTradeMarkerOverlays } from './chartTradeMarkers.ts'
-import type { OrderResponse, PositionResponse } from '../../components/tables/types.ts'
+import type { OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
 
 describe('chart trade markers', () => {
   it('builds symbol-scoped marker rows from active orders and positions', () => {

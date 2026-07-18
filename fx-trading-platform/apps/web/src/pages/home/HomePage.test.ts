@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
+const projectRoot = resolve(currentDir, '../../../../..')
 const pagePath = join(currentDir, 'HomePage.tsx')
 const stylesPath = join(currentDir, 'HomePage.module.css')
-const homeApiPath = join(currentDir, '..', '..', 'services', 'homeApi.ts')
+const homeApiPath = join(projectRoot, 'packages', 'frontend-core', 'src', 'api', 'homeApi.ts')
 const homeComponentsDir = join(currentDir, 'components')
 const homeHooksDir = join(currentDir, 'hooks')
 const publicDir = join(currentDir, '..', '..', '..', 'public')

@@ -5,7 +5,7 @@ import type {
   DemoResetRequest,
   DemoResetResponse
 } from '@fx-platform/shared-types'
-import type { AccountSummary, AssetConversionPayload, AssetConversionResponse, AssetLedgerEntry, WalletBalance } from '../types/trading'
+import type { AccountSummary, AssetConversionPayload, AssetConversionResponse, AssetLedgerEntry, WalletBalance } from '../models/trading.ts'
 
 export type AssetLedgerFilters = {
   walletType?: string

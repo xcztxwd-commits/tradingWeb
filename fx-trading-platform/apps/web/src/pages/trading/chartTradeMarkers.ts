@@ -1,4 +1,4 @@
-import type { OrderResponse, PositionResponse } from '../../components/tables/types'
+import type { OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
 import type { TradingPeriod } from '../../features/market/tradingModels'
 
 export type ChartTradeMarkerKind = 'positionEntry' | 'takeProfit' | 'stopLoss' | 'liquidation' | 'order'

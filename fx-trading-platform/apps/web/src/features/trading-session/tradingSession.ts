@@ -1,22 +1,35 @@
-import { createDemoAccount, getAccounts, getAccountSummary, getAssetLedger, getWalletBalances } from '../../services/accountApi'
-import { ApiClientError } from '../../services/apiClient'
-import { getLedgerEntries } from '../../services/ledgerApi'
 import {
+  ApiClientError,
   adjustPositionMargin,
   cancelAllOrders,
   closePosition,
   closeAllPositions,
+  createDemoAccount,
   createOcoOrder,
   createOrder,
   createPositionProtection,
+  getAccounts,
+  getAccountSummary,
   getAccountTransfers,
+  getAssetLedger,
   getFundingSettlements,
+  getLedgerEntries,
   getOrders,
   getPositionHistory,
   getPositions,
   getTrades,
-  updatePositionProtection
-} from '../../services/tradingApi'
+  getWalletBalances,
+  updatePositionProtection,
+  type AccountSummary,
+  type AssetLedgerEntry,
+  type LedgerEntry,
+  type OcoOrderPayload,
+  type OrderPayload,
+  type OrderResponse,
+  type PositionResponse,
+  type UpdatePositionProtectionPayload,
+  type WalletBalance
+} from '@fx-platform/frontend-core'
 import type {
   AccountTransferResponse,
   AdjustPositionMarginRequest,
@@ -27,9 +40,6 @@ import type {
   FundingSettlement,
   Trade
 } from '@fx-platform/shared-types'
-import type { OrderResponse, PositionResponse } from '../../components/tables/types'
-import type { AccountSummary, AssetLedgerEntry, LedgerEntry, OcoOrderPayload, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
-
 export { deriveTradingBalances } from './tradingSessionModels'
 export type { TradingBalances } from './tradingSessionModels'
 

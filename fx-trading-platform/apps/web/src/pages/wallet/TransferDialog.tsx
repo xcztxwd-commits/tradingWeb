@@ -2,7 +2,7 @@ import { Dialog } from '@fx-platform/ui'
 import type { FormEvent } from 'react'
 import type { AccountTransferDirection } from '@fx-platform/shared-types'
 
-import type { Amount } from '../../types/trading.ts'
+import type { Amount } from '@fx-platform/frontend-core'
 
 type TransferDialogProps = {
   open: boolean

@@ -10,10 +10,13 @@ import {
   readStoredAuthToken,
   readStoredRefreshToken,
   writeStoredAuthToken,
-  writeStoredAuthTokens
-} from './tradingSessionStorage.ts'
-import type { PositionResponse } from '../../components/tables/types.ts'
-import type { AccountSummary, OrderPayload, Quote, WalletBalance } from '../../types/trading.ts'
+  writeStoredAuthTokens,
+  type AccountSummary,
+  type OrderPayload,
+  type PositionResponse,
+  type Quote,
+  type WalletBalance
+} from '@fx-platform/frontend-core'
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -392,7 +395,7 @@ describe('trading session submit mode', () => {
   })
 
   it('treats auth failures as login-required session failures', async () => {
-    const { ApiClientError } = await import('../../services/apiClient.ts')
+    const { ApiClientError } = await import('@fx-platform/frontend-core')
     const { isAuthSessionFailure } = await import('./tradingSession.ts')
 
     assert.equal(isAuthSessionFailure(new ApiClientError({
@@ -423,7 +426,10 @@ describe('trading session submit mode', () => {
   it('uses an explicit auth session probe instead of auto demo login on trading page boot', async () => {
     const sessionSource = readFileSync(new URL('./tradingSession.ts', import.meta.url), 'utf8')
     const hookSource = readFileSync(new URL('./useTradingSession.ts', import.meta.url), 'utf8')
-    const authApiSource = readFileSync(new URL('../../services/authApi.ts', import.meta.url), 'utf8')
+    const authApiSource = readFileSync(
+      new URL('../../../../../packages/frontend-core/src/api/authApi.ts', import.meta.url),
+      'utf8'
+    )
     const { getTradingSessionMode } = await import('./useTradingSession.ts')
 
     assert.equal(getTradingSessionMode({

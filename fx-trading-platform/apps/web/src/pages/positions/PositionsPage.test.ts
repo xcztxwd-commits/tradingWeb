@@ -9,7 +9,7 @@ import {
   executePositionProtectionUpdate,
   resolvePositionProtectionPath
 } from './positionProtectionPolicy.ts'
-import type { PositionResponse } from '../../components/tables/types.ts'
+import type { PositionResponse } from '@fx-platform/frontend-core'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(join(currentDir, 'PositionsPage.tsx'), 'utf8')

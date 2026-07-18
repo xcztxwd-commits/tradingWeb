@@ -1,7 +1,7 @@
 import { Apple, ArrowRight, QrCode, Smartphone } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-import type { HomeMetricCard } from '../../../services/homeApi'
+import type { HomeMetricCard } from '@fx-platform/frontend-core'
 import styles from '../HomePage.module.css'
 import { AnimatedCounter } from './AnimatedCounter'
 

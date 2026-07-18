@@ -1,6 +1,5 @@
-import type { OrderResponse, PositionResponse } from '../../components/tables/types'
+import type { AccountSummary, OrderPayload, OrderResponse, PositionResponse, WalletBalance } from '@fx-platform/frontend-core'
 import { parseSymbolAssets } from '../trading/utils/symbols.ts'
-import type { AccountSummary, OrderPayload, WalletBalance } from '../../types/trading'
 
 export type TradingBalances = Record<string, number>
 

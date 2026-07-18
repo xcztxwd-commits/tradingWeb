@@ -11,14 +11,18 @@ import {
 } from './bottomAccountPanelData.ts'
 import * as positionDisplayModel from './positionDisplayModel.ts'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
+const projectRoot = resolve(currentDir, '../../../../../..')
 const { createPositionDisplayRow } = positionDisplayModel
 const source = readFileSync(join(currentDir, 'BottomAccountPanel.tsx'), 'utf8')
 const contentSource = readFileSync(join(currentDir, 'BottomAccountContent.tsx'), 'utf8')
-const positionResponseTypesSource = readFileSync(join(currentDir, '../../../components/tables/types.ts'), 'utf8')
+const positionResponseTypesSource = readFileSync(
+  join(projectRoot, 'packages', 'frontend-core', 'src', 'models', 'account.ts'),
+  'utf8'
+)
 const selectionSource = readFileSync(join(currentDir, 'bottomAccountPanelSelection.ts'), 'utf8')
 const styles = readFileSync(join(currentDir, 'BottomAccountPanel.module.css'), 'utf8')
 const expectedViewFiles = [

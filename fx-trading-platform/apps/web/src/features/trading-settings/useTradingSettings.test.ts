@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 
 import type { TradingSettingsResponse } from '@fx-platform/shared-types'
 
-import { ApiClientError } from '../../services/apiClient.ts'
+import { ApiClientError } from '@fx-platform/frontend-core'
 import {
   buildSymbolSettingsPayload,
   clampTradingLeverage,

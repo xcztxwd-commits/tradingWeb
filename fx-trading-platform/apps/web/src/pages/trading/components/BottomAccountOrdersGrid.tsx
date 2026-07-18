@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 
-import type { OrderResponse } from '../../../components/tables/types'
+import type { OrderResponse } from '@fx-platform/frontend-core'
 import { getOrderActionSummary } from '../../orders/orderActionPolicy'
 import { EmptyState } from './BottomAccountEmptyState'
 import { formatTime, formatValue } from './bottomAccountFormatters'

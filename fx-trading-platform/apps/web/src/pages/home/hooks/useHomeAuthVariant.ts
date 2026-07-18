@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-import { authSessionChangedEvent, readStoredAuthToken } from '../../../features/trading-session/tradingSessionStorage'
+import { authSessionChangedEvent, readStoredAuthToken } from '@fx-platform/frontend-core'
 
 export type HomeAuthVariant = 'guest' | 'authenticated_unverified' | 'authenticated_verified'
 

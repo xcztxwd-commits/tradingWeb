@@ -6,11 +6,21 @@ import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { AssetMark } from '../../components/asset/AssetMark'
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
-import { filterByStatus, formatApiError, toNumber } from '../../components/user-page/userPageModels'
+import { formatApiError } from '../../components/user-page/userPageModels'
 import { useTradingSession, type TradingSessionMode } from '../../features/trading-session/useTradingSession'
-import { createFundOrder, getFundOrders } from '../../services/financeApi'
-import type { OrderResponse, PositionResponse } from '../../components/tables/types'
-import type { AccountSummary, Amount, FundOrder, LedgerEntry, WalletBalance } from '../../types/trading'
+import {
+  createFundOrder,
+  filterByStatus,
+  getFundOrders,
+  toNumber,
+  type AccountSummary,
+  type Amount,
+  type FundOrder,
+  type LedgerEntry,
+  type OrderResponse,
+  type PositionResponse,
+  type WalletBalance
+} from '@fx-platform/frontend-core'
 
 const accountNav = [
   { to: '/account/overview', label: 'Overview' },

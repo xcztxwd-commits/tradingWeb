@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { QuantityUnit } from '@fx-platform/shared-types'
 
-import type { PositionResponse } from '../../../components/tables/types'
+import type { PositionResponse } from '@fx-platform/frontend-core'
 import type { PositionMutation } from '../../../features/trading-session/tradingSession'
 import { PositionActionDialog } from '../../../features/trading/components/PositionActionDialog'
 import type { MarginAdjustmentValue, PositionAction } from '../../../features/trading/components/PositionActionDialog'

@@ -1,5 +1,5 @@
-import { apiGet, apiPost } from './apiClient'
-import type { FundOrder, FundOrderPayload } from '../types/trading'
+import { apiGet, apiPost } from './apiClient.ts'
+import type { FundOrder, FundOrderPayload } from '../models/trading.ts'
 
 export const financeEndpoints = {
   fundOrders: (accountId: string) => `/api/finance/fund-orders?${new URLSearchParams({ accountId }).toString()}`,

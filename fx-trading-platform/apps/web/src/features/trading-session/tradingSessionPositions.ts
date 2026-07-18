@@ -1,5 +1,4 @@
-import type { PositionResponse } from '../../components/tables/types'
-import type { Amount, Quote } from '../../types/trading'
+import type { Amount, PositionResponse, Quote } from '@fx-platform/frontend-core'
 
 const FOREX_CONTRACT_SIZE = 100000
 

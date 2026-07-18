@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 
-import type { AccountSummary, LedgerEntry } from '../../../types/trading'
+import type { AccountSummary, LedgerEntry } from '@fx-platform/frontend-core'
 import { EmptyState } from './BottomAccountEmptyState'
 import { formatTime, formatValue } from './bottomAccountFormatters'
 import styles from './BottomAccountPanel.module.css'

@@ -94,6 +94,51 @@ describe('api client error model', () => {
     assert.equal(storage.getItem('fx-platform-auth-refresh-token'), 'new-refresh-token')
   })
 
+  it('clears both stored tokens when refresh fails and never retries the original request twice', async () => {
+    const storage = createStorage({
+      'fx-platform-auth-token': 'expired-access-token',
+      'fx-platform-auth-refresh-token': 'expired-refresh-token'
+    })
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage })
+    const calls: string[] = []
+    globalThis.fetch = (async (url) => {
+      calls.push(String(url))
+      return jsonResponse(401, {
+        success: false,
+        code: calls.length === 1 ? 'AUTH_TOKEN_EXPIRED' : 'AUTH_REFRESH_INVALID',
+        message: 'expired',
+        data: null
+      })
+    }) as typeof fetch
+
+    await assert.rejects(() => apiGet('/api/accounts', 'expired-access-token'), (error: unknown) => {
+      assert.ok(error instanceof ApiClientError)
+      assert.equal(error.status, 401)
+      return true
+    })
+    assert.deepEqual(calls, ['/api/accounts', '/api/auth/refresh'])
+    assert.equal(storage.getItem('fx-platform-auth-token'), null)
+    assert.equal(storage.getItem('fx-platform-auth-refresh-token'), null)
+  })
+
+  it('propagates the response request id header on a failed request', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      success: false,
+      code: 'VALIDATION_ERROR',
+      message: 'Invalid quantity',
+      requestId: 'payload-request-id'
+    }), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json', 'X-Request-Id': 'header-request-id' }
+    })) as typeof fetch
+
+    await assert.rejects(() => apiGet('/api/trading/orders'), (error: unknown) => {
+      assert.ok(error instanceof ApiClientError)
+      assert.equal(error.requestId, 'header-request-id')
+      return true
+    })
+  })
+
   it('sends DELETE through the shared authenticated response and error pipeline without a body', async () => {
     let captured: { method?: string; body?: BodyInit | null; authorization: string | null } | undefined
     globalThis.fetch = (async (_url, init) => {

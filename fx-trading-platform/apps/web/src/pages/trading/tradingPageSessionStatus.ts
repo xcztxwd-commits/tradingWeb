@@ -1,4 +1,4 @@
-import type { SessionAuthStatus } from '../../services/authApi'
+import type { SessionAuthStatus } from '@fx-platform/frontend-core'
 import type { TradingSessionMode } from '../../features/trading-session/useTradingSession'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string

@@ -1,4 +1,4 @@
-import { apiGet, apiPut } from '../../services/apiClient'
+import { apiGet, apiPut } from '@fx-platform/frontend-core'
 import { favoriteSymbolList } from './marketFavorites'
 import {
   buildMarketCandlesPath,

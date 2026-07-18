@@ -1,4 +1,4 @@
-import type { LedgerEntry } from '../../types/trading'
+import type { LedgerEntry } from '@fx-platform/frontend-core'
 
 type Props = {
   entries: LedgerEntry[]

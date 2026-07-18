@@ -5,7 +5,8 @@ import { SelectField, type SelectFieldOption } from '@fx-platform/ui'
 
 import { AssetMark } from '../../components/asset/AssetMark'
 import { ApiErrorState, LoadingState } from '../../components/user-page/PageState'
-import { formatApiError, paginateRows } from '../../components/user-page/userPageModels'
+import { formatApiError } from '../../components/user-page/userPageModels'
+import { paginateRows, type Quote } from '@fx-platform/frontend-core'
 import {
   fetchBinanceFuturesDashboard,
   fetchBinanceMarketOverview,
@@ -23,7 +24,6 @@ import type { TradingMarket, TradingQuote } from '../../features/market/tradingM
 import { useMarketFavorites } from '../../features/market/useMarketFavorites'
 import { isMarketTradingEnabled, resolveMarketTradingTarget } from './marketTradingTarget'
 import { subscribeQuote } from '../../services/marketStream'
-import type { Quote } from '../../types/trading'
 
 type MarketPageTab = 'overview' | 'trading-data' | 'ai-picks' | 'token-unlocks'
 type TradingDataTab = 'rankings' | 'usdt-contracts' | 'coin-contracts' | 'options'

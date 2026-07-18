@@ -5,10 +5,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import { TopbarToolIcon } from '../../components/TopbarToolIcon'
 import {
   clearStoredAuthToken,
+  logoutAuth,
   readStoredAuthToken,
   readStoredRefreshToken
-} from '../../features/trading-session/tradingSessionStorage'
-import { logoutAuth } from '../../services/authApi'
+} from '@fx-platform/frontend-core'
 
 type AccountUserMenuProps = {
   email?: string | null

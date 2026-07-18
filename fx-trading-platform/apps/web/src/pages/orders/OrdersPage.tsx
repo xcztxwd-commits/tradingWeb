@@ -6,11 +6,18 @@ import { useNavigate } from 'react-router-dom'
 import { AssetMark } from '../../components/asset/AssetMark'
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
-import { filterByStatus, formatApiError } from '../../components/user-page/userPageModels'
+import { formatApiError } from '../../components/user-page/userPageModels'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
-import { cancelOrder, cancelProtection, getOrderEvents, modifyOrder, updateProtection } from '../../services/tradingApi'
-import type { OrderResponse } from '../../components/tables/types'
-import type { OrderEventResponse } from '../../types/trading'
+import {
+  cancelOrder,
+  cancelProtection,
+  filterByStatus,
+  getOrderEvents,
+  modifyOrder,
+  updateProtection,
+  type OrderEventResponse,
+  type OrderResponse
+} from '@fx-platform/frontend-core'
 import { formatOrderActionReason, getOrderActionPolicy, isCurrentOrderStatus } from './orderActionPolicy'
 import { buildNormalOrderUpdatePayload, buildProtectionUpdatePayload } from './orderActionPayloads'
 

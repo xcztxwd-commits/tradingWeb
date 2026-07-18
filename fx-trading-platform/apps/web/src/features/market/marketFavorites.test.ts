@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
 import {
@@ -10,6 +11,13 @@ import {
 import type { TradingMarket } from './tradingModels.ts'
 
 describe('market favorites', () => {
+  it('reuses the frontend-core browser storage boundary', () => {
+    const source = readFileSync(new URL('./marketFavorites.ts', import.meta.url), 'utf8')
+    assert.match(source, /import \{ getBrowserStorage, type KeyValueStorage \} from '@fx-platform\/frontend-core'/)
+    assert.doesNotMatch(source, /Pick<Storage/)
+    assert.doesNotMatch(source, /globalThis\.localStorage/)
+  })
+
   it('persists normalized favorite symbols for the shared watchlist', () => {
     const storage = createStorage()
 

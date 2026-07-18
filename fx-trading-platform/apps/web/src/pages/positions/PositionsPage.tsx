@@ -8,8 +8,7 @@ import { DataTable, type DataTableColumn } from '../../components/user-page/Data
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
-import type { PositionResponse } from '../../components/tables/types'
-import type { UpdatePositionProtectionPayload } from '../../types/trading'
+import type { PositionResponse, UpdatePositionProtectionPayload } from '@fx-platform/frontend-core'
 import {
   canUseLegacyPositionProtection,
   executePositionProtectionUpdate,

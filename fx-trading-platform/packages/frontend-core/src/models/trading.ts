@@ -132,6 +132,8 @@ export type OrderPayload = Omit<
     | 'triggerPrice'
     | 'triggerPriceType'
     | 'reduceOnly'
+    | 'timeInForce'
+    | 'postOnly'
     | 'attachedProtections'
   >,
   'idempotencyKey' | 'clientOrderId' | 'quantity'

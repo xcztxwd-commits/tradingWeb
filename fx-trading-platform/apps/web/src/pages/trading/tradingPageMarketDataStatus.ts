@@ -1,4 +1,4 @@
-import { ApiClientError } from '../../services/apiClient'
+import { ApiClientError } from '@fx-platform/frontend-core'
 import type { BackendMarketStatus } from '../../features/market/tradingMarketAdapters'
 
 export type TradingMarketDataError = {

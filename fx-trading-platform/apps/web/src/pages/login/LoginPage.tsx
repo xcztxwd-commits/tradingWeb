@@ -4,8 +4,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
-import { login } from '../../services/authApi'
-import { writeStoredAuthTokens } from '../../features/trading-session/tradingSessionStorage'
+import { login, writeStoredAuthTokens } from '@fx-platform/frontend-core'
 import styles from './LoginPage.module.css'
 
 export function LoginPage() {

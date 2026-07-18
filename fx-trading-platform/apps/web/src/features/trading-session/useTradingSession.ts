@@ -19,13 +19,23 @@ import {
   createAccountRefreshCoordinator,
   createLatestSingleFlightRefreshGate
 } from './accountRefreshCoordinator'
-import { getSessionStatus } from '../../services/authApi'
-import type { SessionAuthStatus } from '../../services/authApi'
 import { subscribeTradingSessionEvents } from '../../services/marketStream'
-import type { PositionResponse, OrderResponse } from '../../components/tables/types'
 import type { AccountTransferResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
-import type { AccountSummary, AssetLedgerEntry, LedgerEntry, OcoOrderPayload, OrderPayload, UpdatePositionProtectionPayload, WalletBalance } from '../../types/trading'
-import { clearStoredAuthToken, readStoredAuthToken } from './tradingSessionStorage'
+import {
+  clearStoredAuthToken,
+  getSessionStatus,
+  readStoredAuthToken,
+  type AccountSummary,
+  type AssetLedgerEntry,
+  type LedgerEntry,
+  type OcoOrderPayload,
+  type OrderPayload,
+  type OrderResponse,
+  type PositionResponse,
+  type SessionAuthStatus,
+  type UpdatePositionProtectionPayload,
+  type WalletBalance
+} from '@fx-platform/frontend-core'
 
 type Options = {
   refreshMs?: number

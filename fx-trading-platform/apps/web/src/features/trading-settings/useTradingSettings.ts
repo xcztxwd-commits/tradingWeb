@@ -6,12 +6,11 @@ import type {
   TradingSettingsResponse,
   UpdateSymbolSettingsRequest
 } from '@fx-platform/shared-types'
-
 import {
   getTradingSettings,
   updateTradingPositionMode,
   updateTradingSymbolSettings
-} from '../../services/tradingApi.ts'
+} from '@fx-platform/frontend-core'
 
 export type TradingSymbolSettings = NonNullable<TradingSettingsResponse['symbols']>[number]
 

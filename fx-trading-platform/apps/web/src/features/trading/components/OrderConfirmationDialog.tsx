@@ -3,7 +3,7 @@ import { Bitcoin, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { CanonicalSubmitPayload } from '../hooks/useTradePanelSubmit'
-import type { OcoOrderPayload } from '../../../types/trading'
+import type { OcoOrderPayload } from '@fx-platform/frontend-core'
 
 type Props = {
   payload: CanonicalSubmitPayload

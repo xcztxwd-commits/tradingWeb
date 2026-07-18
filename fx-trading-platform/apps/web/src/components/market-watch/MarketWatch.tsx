@@ -1,4 +1,4 @@
-import type { Quote, SymbolItem } from '../../types/trading'
+import type { Quote, SymbolItem } from '@fx-platform/frontend-core'
 
 type Props = {
   symbols: SymbolItem[]

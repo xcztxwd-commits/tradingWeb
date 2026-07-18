@@ -1,4 +1,4 @@
-import type { Amount } from '../../types/trading'
+import type { Amount } from './trading.ts'
 import type {
   OrderOrigin,
   PositionResponse as GeneratedPositionResponse,

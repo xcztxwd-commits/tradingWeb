@@ -1,4 +1,4 @@
-import type { OrderResponse, PositionResponse } from '../../../components/tables/types'
+import type { OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
 import type { BottomAccountTabView } from './bottomAccountPanelData'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string

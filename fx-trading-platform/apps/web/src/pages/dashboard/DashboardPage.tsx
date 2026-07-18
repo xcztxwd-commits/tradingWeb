@@ -4,10 +4,9 @@ import { useNavigate } from 'react-router-dom'
 
 import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
-import { formatApiError, toNumber } from '../../components/user-page/userPageModels'
+import { formatApiError } from '../../components/user-page/userPageModels'
 import { useTradingSession } from '../../features/trading-session/useTradingSession'
-import type { OrderResponse, PositionResponse } from '../../components/tables/types'
-import type { AccountSummary, Amount, LedgerEntry } from '../../types/trading'
+import { toNumber, type AccountSummary, type Amount, type LedgerEntry, type OrderResponse, type PositionResponse } from '@fx-platform/frontend-core'
 
 export function DashboardPage() {
   const navigate = useNavigate()

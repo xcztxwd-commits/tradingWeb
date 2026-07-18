@@ -1,4 +1,4 @@
-import type { PositionResponse } from './types'
+import type { PositionResponse } from '@fx-platform/frontend-core'
 
 type Props = {
   positions: PositionResponse[]

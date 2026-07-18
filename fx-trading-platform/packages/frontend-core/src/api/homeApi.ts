@@ -1,4 +1,4 @@
-import { apiGet } from './apiClient'
+import { apiGet } from './apiClient.ts'
 
 export type HomeMetricCard = {
   slot: string

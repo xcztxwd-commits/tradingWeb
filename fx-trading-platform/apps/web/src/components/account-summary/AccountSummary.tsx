@@ -1,4 +1,4 @@
-import type { AccountSummary as AccountSummaryType } from '../../types/trading'
+import type { AccountSummary as AccountSummaryType } from '@fx-platform/frontend-core'
 
 type Props = {
   account?: AccountSummaryType

@@ -5,9 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { toOcoOrderPayload, toOrderPayload } from '../services/orderAdapter'
 import type { OrderAdapterSettings } from '../services/orderAdapter'
 import type { OrderValidationResult, TradeFormState, TradeMarket, TradeSide } from '../types/order'
-import type { OrderResponse } from '../../../components/tables/types'
-import { ApiClientError } from '../../../services/apiClient'
-import type { OcoOrderPayload, OrderPayload } from '../../../types/trading'
+import { ApiClientError, type OcoOrderPayload, type OrderPayload, type OrderResponse } from '@fx-platform/frontend-core'
 import type { OcoOrderGroupResponse } from '@fx-platform/shared-types'
 
 type UseTradePanelSubmitArgs = {

@@ -1,5 +1,5 @@
 import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from './chartSettings'
-import type { OrderResponse, PositionResponse } from '../../components/tables/types'
+import type { AccountSummary, LedgerEntry, OcoOrderPayload, OrderPayload, OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
 import type { TradingMarket, TradingPeriod, TradingQuote } from '../../features/market/tradingModels'
 import type { TradingBalances } from '../../features/trading-session/tradingSession'
 import type { TradingSessionMode } from '../../features/trading-session/useTradingSession'
@@ -10,8 +10,6 @@ import type {
   TradingPanelId,
   TradingSplitDirection
 } from '../../stores/layoutStore'
-import type { AccountSummary, LedgerEntry, OrderPayload } from '../../types/trading'
-import type { OcoOrderPayload } from '../../types/trading'
 import type { AccountTransferResponse, BatchActionResponse, FundingSettlement, OcoOrderGroupResponse, Trade } from '@fx-platform/shared-types'
 import type { TradingMarketDataStatusView } from './tradingPageMarketDataStatus'
 import type { PerpetualTradingControlsModel } from './usePerpetualTradingControls'

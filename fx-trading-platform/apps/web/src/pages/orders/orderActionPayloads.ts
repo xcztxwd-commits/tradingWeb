@@ -1,7 +1,6 @@
 import type { QuantityUnit, TriggerExecutionType, UpdateProtectionRequest } from '@fx-platform/shared-types'
 
-import type { OrderResponse } from '../../components/tables/types'
-import type { UpdateOrderPayload } from '../../types/trading'
+import type { OrderResponse, UpdateOrderPayload } from '@fx-platform/frontend-core'
 
 type EditFields = Record<string, unknown>
 

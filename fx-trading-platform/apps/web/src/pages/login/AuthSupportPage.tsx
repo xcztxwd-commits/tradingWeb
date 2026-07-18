@@ -3,8 +3,7 @@ import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
-import { writeStoredAuthTokens } from '../../features/trading-session/tradingSessionStorage'
-import { register } from '../../services/authApi'
+import { register, writeStoredAuthTokens } from '@fx-platform/frontend-core'
 import styles from './LoginPage.module.css'
 
 type AuthChannel = 'email' | 'phone'

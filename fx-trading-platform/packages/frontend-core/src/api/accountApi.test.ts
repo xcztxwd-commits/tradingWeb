@@ -5,7 +5,7 @@ import { describe, it } from 'node:test'
 import * as accountApi from './accountApi.ts'
 
 const source = readFileSync(new URL('./accountApi.ts', import.meta.url), 'utf8')
-const types = readFileSync(new URL('../types/trading.ts', import.meta.url), 'utf8')
+const types = readFileSync(new URL('../models/trading.ts', import.meta.url), 'utf8')
 
 describe('account api endpoint contracts', () => {
   it('covers wallet typed asset ledger filters and asset conversions', () => {

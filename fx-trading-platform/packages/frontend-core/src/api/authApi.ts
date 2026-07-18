@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from './apiClient'
+import { apiGet, apiPost } from './apiClient.ts'
 import type { AuthResponse, SessionStatus } from '@fx-platform/shared-types'
 
 export type { AuthResponse, SessionStatus }

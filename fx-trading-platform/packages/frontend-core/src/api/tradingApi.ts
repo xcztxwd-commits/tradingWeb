@@ -20,8 +20,8 @@ import type {
   UpdateProtectionRequest,
   UpdateSymbolSettingsRequest
 } from '@fx-platform/shared-types'
-import type { OcoOrderPayload, OrderEventResponse, OrderPayload, UpdateOrderPayload, UpdatePositionProtectionPayload } from '../types/trading'
-import type { OrderResponse, PositionResponse } from '../components/tables/types'
+import type { OcoOrderPayload, OrderEventResponse, OrderPayload, UpdateOrderPayload, UpdatePositionProtectionPayload } from '../models/trading.ts'
+import type { OrderResponse, PositionResponse } from '../models/account.ts'
 
 type OrderPage = Omit<OrderPageResponse, 'items'> & { items?: OrderResponse[] }
 type PositionPage = Omit<PositionPageResponse, 'items'> & { items?: PositionResponse[] }

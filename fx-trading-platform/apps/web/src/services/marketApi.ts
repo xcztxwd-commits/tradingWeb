@@ -1,6 +1,5 @@
-import { apiGet } from './apiClient'
+import { apiGet, type Candle, type Quote, type SymbolItem } from '@fx-platform/frontend-core'
 import type { PerpetualReferenceResponse } from '@fx-platform/shared-types'
-import type { Candle, Quote, SymbolItem } from '../types/trading'
 
 export function getSymbols() {
   return apiGet<SymbolItem[]>('/api/market/symbols')

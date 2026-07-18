@@ -1,5 +1,4 @@
-import type { PositionResponse } from '../../../components/tables/types'
-import type { Amount } from '../../../types/trading'
+import type { Amount, PositionResponse } from '@fx-platform/frontend-core'
 import type { QuantityUnit } from '@fx-platform/shared-types'
 
 export type PositionPnlTone = 'positive' | 'negative' | 'neutral'
