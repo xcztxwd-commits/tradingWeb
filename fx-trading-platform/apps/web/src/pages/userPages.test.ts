@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 const pagesDir = dirname(fileURLToPath(import.meta.url))
+const projectRoot = resolve(pagesDir, '../../../..')
 const markets = readFileSync(join(pagesDir, 'markets', 'MarketsPage.tsx'), 'utf8')
 const binanceMarketData = readFileSync(join(pagesDir, '..', 'features', 'market', 'binanceMarketData.ts'), 'utf8')
 const marketSources = `${markets}\n${binanceMarketData}`
@@ -19,12 +20,13 @@ const authSupport = readFileSync(join(pagesDir, 'login', 'AuthSupportPage.tsx'),
 const login = readFileSync(join(pagesDir, 'login', 'LoginPage.tsx'), 'utf8')
 const authStyles = readFileSync(join(pagesDir, 'login', 'LoginPage.module.css'), 'utf8')
 const styles = readFileSync(join(pagesDir, '..', 'styles.css'), 'utf8')
-const selectFieldPath = join(pagesDir, '..', 'components', 'SelectField.tsx')
+const selectFieldPath = join(projectRoot, 'packages', 'ui', 'src', 'select-field', 'SelectField.tsx')
 const selectField = existsSync(selectFieldPath) ? readFileSync(selectFieldPath, 'utf8') : ''
-const selectFieldCss = styles.slice(styles.indexOf('.select-field {'), styles.indexOf('.app-shell {'))
+const selectFieldCss = readFileSync(join(projectRoot, 'packages', 'ui', 'src', 'select-field', 'SelectField.module.css'), 'utf8')
+const marketSortSelectStart = styles.indexOf('.market-sort-field__select {')
 const marketSortSelectCss = styles.slice(
-  styles.indexOf('.market-sort-field .select-field {'),
-  styles.indexOf('.market-universe-tabs,'),
+  marketSortSelectStart,
+  styles.indexOf('.market-universe-tabs,', marketSortSelectStart),
 )
 
 describe('prototype markets page', () => {
@@ -204,15 +206,15 @@ describe('prototype markets page', () => {
     assert.match(selectField, /role="listbox"/)
     assert.match(selectField, /role="option"/)
     assert.match(selectField, /aria-selected/)
-    assert.match(styles, /\.select-field__menu/)
-    assert.match(styles, /\.select-field__option\[aria-selected="true"\]/)
-    assert.match(styles, /\.market-sort-field\s+\.select-field__menu\s*{[\s\S]*bottom:\s*calc\(100% \+ 6px\)/)
-    assert.match(styles, /\.market-sort-field\s+\.select-field__menu\s*{[\s\S]*min-width:\s*144px/)
-    assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.select-field__menu/)
-    assert.match(selectFieldCss, /\.select-field\[data-open="true"\]\s+\.select-field__chevron\s*{[\s\S]*transform:\s*rotate\(180deg\)/)
-    assert.match(selectFieldCss, /\.select-field__button:hover\s*{[\s\S]*border-color:\s*color-mix\(in srgb,\s*var\(--theme-primary\) 42%,\s*transparent\)/)
-    assert.match(selectFieldCss, /\.select-field__menu\s*{[\s\S]*border:\s*1px solid var\(--bn-border\)/)
-    assert.doesNotMatch(selectFieldCss, /\.select-field__button:hover,\s*\.select-field\[data-open="true"\]\s+\.select-field__button/)
+    assert.match(selectFieldCss, /\.menu\s*{/)
+    assert.match(selectFieldCss, /\.option\[aria-selected='true'\]/)
+    assert.match(marketSortSelectCss, /--select-menu-bottom:\s*calc\(100% \+ 6px\)/)
+    assert.match(marketSortSelectCss, /--select-menu-min-width:\s*144px/)
+    assert.match(selectFieldCss, /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.menu/)
+    assert.match(selectFieldCss, /\.root\[data-open='true'\]\s+\.chevron\s*{[\s\S]*transform:\s*rotate\(180deg\)/)
+    assert.match(selectFieldCss, /\.button:hover\s*{[\s\S]*color-mix\(in srgb,\s*var\(--theme-primary\) 42%,\s*transparent\)/)
+    assert.match(selectFieldCss, /\.menu\s*{[\s\S]*border:\s*1px solid var\(--select-menu-border, color-mix\(in srgb, var\(--theme-border\) 74%, transparent\)\)/)
+    assert.doesNotMatch(selectFieldCss, /:global/)
     assert.doesNotMatch(selectFieldCss, /linear-gradient|box-shadow|animation:\s*dropdownIn/)
     assert.doesNotMatch(marketSortSelectCss, /box-shadow/)
   })

@@ -113,119 +113,6 @@ select option:checked {
   color: var(--bn-page);
 }
 
-.select-field {
-  position: relative;
-  width: max-content;
-  min-width: 0;
-  color: var(--bn-text);
-  font-size: 13px;
-}
-
-.select-field__button {
-  width: 100%;
-  min-height: 36px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid var(--bn-border);
-  border-radius: 7px;
-  background: var(--bn-page);
-  color: var(--bn-text);
-  padding: 0 10px 0 12px;
-  cursor: pointer;
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease;
-}
-
-.select-field__button:hover {
-  border-color: color-mix(in srgb, var(--theme-primary) 42%, transparent);
-  background: var(--theme-surface-elevated);
-}
-
-.select-field__button:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--theme-primary) 28%, transparent);
-  outline-offset: 2px;
-  border-color: color-mix(in srgb, var(--theme-primary-hover) 68%, transparent);
-}
-
-.select-field__button:disabled {
-  color: var(--bn-muted);
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.select-field__value {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 700;
-}
-
-.select-field__chevron {
-  flex: 0 0 auto;
-  color: var(--bn-gold-strong);
-  transition: transform 160ms ease;
-}
-
-.select-field[data-open="true"] .select-field__chevron {
-  transform: rotate(180deg);
-}
-
-.select-field__menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 80;
-  width: max-content;
-  min-width: 100%;
-  max-width: min(280px, calc(100vw - 24px));
-  display: grid;
-  gap: 2px;
-  border: 1px solid var(--bn-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--theme-surface) 96%, var(--theme-background));
-  padding: 4px;
-}
-
-.select-field__option {
-  min-height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--bn-text);
-  padding: 0 8px 0 10px;
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.select-field__option:hover,
-.select-field__option[data-active="true"] {
-  background: color-mix(in srgb, var(--theme-text-primary) 8%, transparent);
-}
-
-.select-field__option[aria-selected="true"] {
-  background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
-  color: var(--bn-gold-strong);
-  font-weight: 700;
-}
-
-.select-field__option:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--theme-primary) 28%, transparent);
-  outline-offset: -2px;
-}
-
-.select-field__option svg {
-  flex: 0 0 auto;
-}
-
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -429,28 +316,19 @@ select option:checked {
   gap: 6px;
 }
 
-.language-switcher .select-field {
-  width: 100%;
-  min-width: 148px;
-}
-
-.language-switcher .select-field__button {
-  min-height: 34px;
-  border: 1px solid var(--binance-line);
-  border-radius: var(--radii-m);
-  background: var(--binance-surface);
-  color: var(--binance-text);
-  padding: 0 8px 0 10px;
-}
-
-.language-switcher .select-field__menu {
-  right: 0;
-  left: auto;
-  min-width: 148px;
-}
-
-.language-switcher .select-field__option {
-  min-height: 32px;
+.language-switcher__select {
+  --select-root-width: 100%;
+  --select-root-min-width: 148px;
+  --select-button-min-height: 34px;
+  --select-button-border: 1px solid var(--bn-border);
+  --select-button-radius: var(--radii-m);
+  --select-button-background: transparent;
+  --select-button-color: var(--bn-muted);
+  --select-button-padding: 0 8px 0 10px;
+  --select-menu-right: 0;
+  --select-menu-left: auto;
+  --select-menu-min-width: 148px;
+  --select-option-min-height: 32px;
 }
 
 .language-switcher--compact {
@@ -497,38 +375,31 @@ select option:checked {
   white-space: nowrap;
 }
 
-.language-switcher--compact .select-field {
-  width: 36px;
-  min-width: 36px;
-}
-
-.language-switcher--compact .select-field__button {
-  width: 36px;
-  min-height: 36px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: transparent;
-  padding: 0;
-}
-
-.language-switcher--compact .select-field__button:hover,
-.language-switcher--compact .select-field__button:focus-visible,
-.language-switcher--compact .select-field[data-open="true"] .select-field__button {
-  border-color: transparent;
-  background: color-mix(in srgb, var(--theme-text-primary) 7%, transparent);
-  outline: 0;
-}
-
-.language-switcher--compact .select-field__value,
-.language-switcher--compact .select-field__chevron {
-  width: 0;
-  opacity: 0;
-  overflow: hidden;
-}
-
-.language-switcher--compact .select-field__menu {
-  min-width: 112px;
+.language-switcher__select--compact {
+  --select-root-width: 40px;
+  --select-root-min-width: 40px;
+  --select-root-min-height: 40px;
+  --select-button-width: 40px;
+  --select-button-min-width: 40px;
+  --select-button-min-height: 40px;
+  --select-button-border: 1px solid transparent;
+  --select-button-radius: 999px;
+  --select-button-background: transparent;
+  --select-button-color: transparent;
+  --select-button-padding: 0;
+  --select-button-hover-border-color: transparent;
+  --select-button-hover-background: color-mix(in srgb, var(--theme-text-primary) 7%, transparent);
+  --select-button-hover-color: var(--bn-text);
+  --select-button-focus-outline: 0;
+  --select-button-focus-border-color: transparent;
+  --select-button-focus-background: color-mix(in srgb, var(--theme-text-primary) 7%, transparent);
+  --select-button-focus-color: var(--bn-text);
+  --select-button-open-border-color: transparent;
+  --select-button-open-background: color-mix(in srgb, var(--theme-text-primary) 7%, transparent);
+  --select-button-open-color: var(--bn-text);
+  --select-value-display: none;
+  --select-chevron-display: none;
+  --select-menu-min-width: 112px;
 }
 
 .mobile-tab {
@@ -4092,11 +3963,6 @@ th {
   box-shadow: none;
 }
 
-.language-switcher .select-field__button {
-  border-color: var(--bn-border);
-  background: var(--bn-panel);
-}
-
 .main-region {
   background: var(--bn-app);
 }
@@ -4744,11 +4610,7 @@ th {
   .market-category-tabs button,
   .account-filter-row button,
   .asset-range-tabs button,
-  .account-step-card,
-  .select-field__button,
-  .select-field__chevron,
-  .select-field__menu,
-  .select-field__option {
+  .account-step-card {
     transition: none;
     animation: none;
   }
@@ -4827,34 +4689,10 @@ th {
   color: var(--bn-muted);
 }
 
-.app-topbar__ghost,
-.language-switcher .select-field__button {
-  background: transparent;
-  color: var(--bn-muted);
-}
-
 .app-topbar__ghost {
   border-color: var(--bn-border-subtle);
   background: var(--bn-surface-3);
   color: var(--bn-text);
-}
-
-.language-switcher--compact .select-field__button,
-.language-switcher--compact .select-field__button:hover,
-.language-switcher--compact .select-field__button:focus-visible {
-  width: 36px;
-  min-height: 36px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: transparent;
-  outline: 0;
-}
-
-.language-switcher--compact .select-field__button:hover,
-.language-switcher--compact .select-field__button:focus-visible,
-.language-switcher--compact .select-field[data-open="true"] .select-field__button {
-  background: color-mix(in srgb, var(--theme-text-primary) 7%, transparent);
 }
 
 .app-topbar__icon {
@@ -4894,18 +4732,14 @@ th {
   gap: 0;
 }
 
-.language-switcher--compact,
-.language-switcher--compact .select-field {
+.language-switcher--compact {
   width: 40px;
   min-width: 40px;
   min-height: 40px;
 }
 
 .app-topbar__icon:hover,
-.app-topbar__icon:focus-visible,
-.language-switcher--compact .select-field__button:hover,
-.language-switcher--compact .select-field__button:focus-visible,
-.language-switcher--compact .select-field[data-open="true"] .select-field__button {
+.app-topbar__icon:focus-visible {
   background: color-mix(in srgb, var(--theme-text-primary) 7%, transparent);
   color: var(--bn-text);
 }
@@ -4913,14 +4747,6 @@ th {
 .language-switcher--compact:hover,
 .language-switcher--compact:focus-within {
   color: var(--bn-text);
-}
-
-.language-switcher--compact .select-field__button,
-.language-switcher--compact .select-field__button:hover,
-.language-switcher--compact .select-field__button:focus-visible {
-  width: 40px;
-  min-height: 40px;
-  border-radius: 999px;
 }
 
 .main-region {
@@ -5007,9 +4833,12 @@ th {
 
 :root[data-theme='minimal-white'] .app-topbar__icon,
 :root[data-theme='minimal-white'] .app-topbar__ghost,
-:root[data-theme='minimal-white'] .language-switcher--compact,
-:root[data-theme='minimal-white'] .language-switcher--compact .select-field__button {
+:root[data-theme='minimal-white'] .language-switcher--compact {
   color: #475569;
+}
+
+:root[data-theme='minimal-white'] .language-switcher__select--compact {
+  --select-button-color: #475569;
 }
 
 :root[data-theme='minimal-white'] .user-page__header,
@@ -5121,20 +4950,19 @@ th {
   padding: 0 10px 0 31px;
 }
 
-.market-sort-field .select-field {
-  min-width: 144px;
+.market-sort-field__select {
+  --select-root-min-width: 144px;
+  --select-menu-top: auto;
+  --select-menu-right: 0;
+  --select-menu-bottom: calc(100% + 6px);
+  --select-menu-left: auto;
+  --select-menu-min-width: 144px;
+  --select-button-focus-border-color: color-mix(in srgb, var(--theme-primary) 42%, transparent);
+  --select-button-focus-outline: 2px solid color-mix(in srgb, var(--theme-primary) 22%, transparent);
+  --select-button-focus-outline-offset: 2px;
 }
 
-.market-sort-field .select-field__menu {
-  top: auto;
-  right: 0;
-  bottom: calc(100% + 6px);
-  left: auto;
-  min-width: 144px;
-}
-
-.market-search-field input:focus,
-.market-sort-field .select-field__button:focus-visible {
+.market-search-field input:focus {
   border-color: color-mix(in srgb, var(--theme-primary) 42%, transparent);
   outline: 2px solid color-mix(in srgb, var(--theme-primary) 22%, transparent);
   outline-offset: 2px;
@@ -5325,7 +5153,10 @@ th {
     align-self: flex-start;
   }
 
-  .market-sort-field .select-field,
+  .market-sort-field__select {
+    --select-root-width: 100%;
+  }
+
   .market-search-field input {
     width: 100%;
   }

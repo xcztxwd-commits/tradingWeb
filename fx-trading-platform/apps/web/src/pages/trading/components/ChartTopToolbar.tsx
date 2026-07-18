@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { IconButton } from '@fx-platform/ui'
 
 import {
   chartTimezoneOptions,
@@ -340,44 +341,36 @@ export function ChartTopToolbar({
         </div>
       </div>
       <div className={styles.toolbarActions}>
-        <button
-          type="button"
+        <IconButton
           className={styles.actionButton}
+          icon={<Settings size={15} />}
+          label={t('chart.chartSettings')}
           title={t('chart.chartSettings')}
-          aria-label={t('chart.chartSettings')}
           aria-expanded={chartSettingsOpen}
           onClick={() => setChartSettingsOpen((open) => !open)}
-        >
-          <Settings size={15} />
-        </button>
-        <button
-          type="button"
+        />
+        <IconButton
           className={styles.actionButton}
+          icon={<ChevronsRight size={15} />}
+          label={t('chart.scrollToRealtime')}
           title={t('chart.scrollToRealtime')}
-          aria-label={t('chart.scrollToRealtime')}
           onClick={onScrollToRealtime}
-        >
-          <ChevronsRight size={15} />
-        </button>
-        <button
-          type="button"
+        />
+        <IconButton
           className={styles.actionButton}
+          icon={<Camera size={15} />}
+          label={t('chart.exportImage')}
           title={t('chart.exportImage')}
-          aria-label={t('chart.exportImage')}
           onClick={onExportChart}
-        >
-          <Camera size={15} />
-        </button>
-        <button
-          type="button"
+        />
+        <IconButton
           className={styles.fullscreenButton}
+          icon={fullscreenActive ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          label={fullscreenActive ? t('chart.exitFullscreen') : t('chart.fullscreen')}
           title={fullscreenActive ? t('chart.exitFullscreenWithShortcut') : t('chart.fullscreenWithShortcut')}
-          aria-label={fullscreenActive ? t('chart.exitFullscreen') : t('chart.fullscreen')}
           aria-pressed={fullscreenActive}
           onClick={onToggleFullscreen}
-        >
-          {fullscreenActive ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-        </button>
+        />
       </div>
       {chartSettingsOpen ? (
         <div

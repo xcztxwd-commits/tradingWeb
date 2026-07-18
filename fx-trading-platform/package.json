@@ -30,6 +30,7 @@
     "audit:large-files": "node scripts/audit-large-files.mjs",
     "ui:test": "npm --workspace packages/ui run test",
     "ui:typecheck": "npm --workspace packages/ui run typecheck",
+    "ui:smoke": "node scripts/smoke-ui-primitives.mjs",
     "frontend-core:test": "npm --workspace packages/frontend-core run test",
     "frontend-core:typecheck": "npm --workspace packages/frontend-core run typecheck",
     "frontend:check": "npm run ui:test && npm run ui:typecheck && npm run frontend-core:test && npm run frontend-core:typecheck && npm run web:test && npm run web:build && npm run verify:frontend-boundaries && npm run verify:architecture && npm run web:bundle-budget && npm run audit:large-files",

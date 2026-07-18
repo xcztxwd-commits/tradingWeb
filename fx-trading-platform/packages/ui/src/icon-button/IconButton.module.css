@@ -1,7 +1,7 @@
 .button {
-  width: calc(var(--space-8) + var(--space-3));
-  min-width: calc(var(--space-8) + var(--space-3));
-  min-height: calc(var(--space-8) + var(--space-3));
+  width: var(--icon-button-width, calc(var(--space-8) + var(--space-3)));
+  min-width: var(--icon-button-min-width, calc(var(--space-8) + var(--space-3)));
+  min-height: var(--icon-button-min-height, calc(var(--space-8) + var(--space-3)));
   display: inline-grid;
   place-items: center;
   border: 1px solid var(--trading-border);
@@ -34,6 +34,11 @@
 
 .button:active {
   transform: scale(0.96);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .primary {

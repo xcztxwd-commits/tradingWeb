@@ -1,8 +1,8 @@
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
+import { SelectField, type SelectFieldOption } from '@fx-platform/ui'
 
 import { changeLanguage, supportedLanguages, type SupportedLanguage } from '../i18n'
-import { SelectField, type SelectFieldOption } from './SelectField'
 import { TopbarToolIcon } from './TopbarToolIcon'
 
 const languageLabelKeys: Record<SupportedLanguage, string> = {
@@ -27,6 +27,7 @@ export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
         <span className="language-switcher__label-text">{t('language.label')}</span>
       </span>
       <SelectField
+        className={`language-switcher__select${compact ? ' language-switcher__select--compact' : ''}`}
         ariaLabel={t('language.label')}
         labelledBy={labelId}
         value={activeLanguage}

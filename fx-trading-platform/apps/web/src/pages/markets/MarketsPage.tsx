@@ -1,9 +1,9 @@
 import { ChevronDown, LayoutGrid, List, Search, Star } from 'lucide-react'
 import { useEffect, useMemo, useState, type PointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { SelectField, type SelectFieldOption } from '@fx-platform/ui'
 
 import { AssetMark } from '../../components/asset/AssetMark'
-import { SelectField, type SelectFieldOption } from '../../components/SelectField'
 import { ApiErrorState, LoadingState } from '../../components/user-page/PageState'
 import { formatApiError, paginateRows } from '../../components/user-page/userPageModels'
 import {
@@ -476,7 +476,13 @@ function MarketToolbar({
       </label>
       <div className="market-sort-field">
         <span id="market-sort-label">排序</span>
-        <SelectField labelledBy="market-sort-label" value={sortKey} options={marketSortOptions} onChange={onSort} />
+        <SelectField
+          className="market-sort-field__select"
+          labelledBy="market-sort-label"
+          value={sortKey}
+          options={marketSortOptions}
+          onChange={onSort}
+        />
       </div>
     </div>
   )

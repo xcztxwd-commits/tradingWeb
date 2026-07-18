@@ -1,12 +1,15 @@
 import { Check, ChevronDown } from 'lucide-react'
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
+import styles from './SelectField.module.css'
+import { getSelectFieldKeyTransition } from './selectFieldState'
+
 export type SelectFieldOption<T extends string = string> = {
   label: string
   value: T
 }
 
-type SelectFieldProps<T extends string = string> = {
+export type SelectFieldProps<T extends string = string> = {
   ariaLabel?: string
   className?: string
   labelledBy?: string
@@ -30,7 +33,7 @@ export function SelectField<T extends string>({
   const fallbackIndex = selectedIndex >= 0 ? selectedIndex : 0
   const [activeIndex, setActiveIndex] = useState(fallbackIndex)
   const selectedOption = options[fallbackIndex]
-  const rootClassName = ['select-field', className].filter(Boolean).join(' ')
+  const rootClassName = [styles.root, className].filter(Boolean).join(' ')
   const buttonId = `${generatedId}-button`
   const listboxId = `${generatedId}-listbox`
 
@@ -67,43 +70,23 @@ export function SelectField<T extends string>({
   }
 
   const handleKeyDown = (event: KeyboardEvent) => {
-    if (event.altKey || event.ctrlKey || event.metaKey) return
+    const transition = getSelectFieldKeyTransition({
+      key: event.key,
+      open,
+      activeIndex,
+      selectedIndex,
+      optionCount: options.length,
+      modified: event.altKey || event.ctrlKey || event.metaKey
+    })
 
-    if (event.key === 'Escape') {
-      setOpen(false)
+    if (transition.preventDefault) event.preventDefault()
+    if (transition.selectIndex !== null) {
+      setActiveIndex(transition.activeIndex)
+      selectOption(transition.selectIndex)
       return
     }
-
-    if (event.key === 'Tab') {
-      setOpen(false)
-      return
-    }
-
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault()
-      const direction = event.key === 'ArrowDown' ? 1 : -1
-      if (!open) {
-        openMenu(Math.max(0, fallbackIndex + direction))
-        return
-      }
-      setActiveIndex((current) => (current + direction + options.length) % options.length)
-      return
-    }
-
-    if (event.key === 'Home' || event.key === 'End') {
-      event.preventDefault()
-      openMenu(event.key === 'Home' ? 0 : options.length - 1)
-      return
-    }
-
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault()
-      if (open) {
-        selectOption(activeIndex)
-        return
-      }
-      openMenu()
-    }
+    if (transition.activeIndex !== activeIndex) setActiveIndex(transition.activeIndex)
+    if (transition.open !== open) setOpen(transition.open)
   }
 
   return (
@@ -111,7 +94,7 @@ export function SelectField<T extends string>({
       <button
         id={buttonId}
         type="button"
-        className="select-field__button"
+        className={styles.button}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listboxId : undefined}
@@ -120,13 +103,13 @@ export function SelectField<T extends string>({
         disabled={options.length === 0}
         onClick={() => (open ? setOpen(false) : openMenu())}
       >
-        <span className="select-field__value">{selectedOption?.label ?? ''}</span>
-        <ChevronDown className="select-field__chevron" size={16} aria-hidden="true" />
+        <span className={styles.value}>{selectedOption?.label ?? ''}</span>
+        <ChevronDown className={styles.chevron} size={16} aria-hidden="true" />
       </button>
       {open ? (
         <div
           id={listboxId}
-          className="select-field__menu"
+          className={styles.menu}
           role="listbox"
           aria-label={labelledBy ? undefined : ariaLabel}
           aria-labelledby={labelledBy}
@@ -136,7 +119,7 @@ export function SelectField<T extends string>({
               key={option.value}
               id={`${generatedId}-option-${option.value}`}
               type="button"
-              className="select-field__option"
+              className={styles.option}
               role="option"
               aria-selected={option.value === value}
               data-active={index === activeIndex ? 'true' : 'false'}

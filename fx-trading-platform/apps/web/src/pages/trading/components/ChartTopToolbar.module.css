@@ -86,12 +86,24 @@
 }
 
 .actionButton {
+  --icon-button-width: 28px;
+  --icon-button-min-width: 28px;
+  --icon-button-min-height: 28px;
+
   width: 28px;
+  min-width: 28px;
+  min-height: 28px;
   height: 28px;
 }
 
 .fullscreenButton {
+  --icon-button-width: 28px;
+  --icon-button-min-width: 28px;
+  --icon-button-min-height: 28px;
+
   width: 28px;
+  min-width: 28px;
+  min-height: 28px;
   height: 28px;
 }
 

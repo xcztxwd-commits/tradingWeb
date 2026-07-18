@@ -35,5 +35,7 @@ describe('@fx-platform/ui package contract', () => {
   it('has a public source entry point', () => {
     const indexSource = readFileSync(resolve(packageRoot, 'src/index.ts'), 'utf8')
     assert.match(indexSource, /export \* from '\.\/theme'/u)
+    assert.match(indexSource, /export \* from '\.\/select-field\/SelectField'/u)
+    assert.match(indexSource, /export \* from '\.\/icon-button\/IconButton'/u)
   })
 })
