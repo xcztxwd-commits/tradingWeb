@@ -1,7 +1,7 @@
 import { resolveSafeTradingPath } from '../../app/tradingRoutes.ts'
 import type { PositionResponse, UpdatePositionProtectionPayload } from '@fx-platform/frontend-core'
 
-type LegacyProtectionUpdate = (
+export type LegacyProtectionUpdate = (
   position: PositionResponse,
   payload: UpdatePositionProtectionPayload
 ) => Promise<unknown> | unknown

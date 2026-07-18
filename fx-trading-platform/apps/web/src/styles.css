@@ -888,15 +888,6 @@ th {
   margin-right: 8px;
 }
 
-.data-table {
-  display: grid;
-  gap: 8px;
-}
-
-.data-table__cards {
-  display: none;
-}
-
 .table-action {
   max-width: 100%;
   white-space: normal;
@@ -2267,15 +2258,6 @@ th {
   .account-asset-panel strong {
     font-size: 24px;
     line-height: 30px;
-  }
-
-  .user-page__table {
-    display: none;
-  }
-
-  .data-table__cards {
-    display: grid;
-    gap: 8px;
   }
 
   .user-page__actions {

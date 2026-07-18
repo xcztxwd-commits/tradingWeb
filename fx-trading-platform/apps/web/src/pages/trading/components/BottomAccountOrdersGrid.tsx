@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
 import type { OrderResponse } from '@fx-platform/frontend-core'
-import { getOrderActionSummary } from '../../orders/orderActionPolicy'
+import { getOrderActionSummary } from '../../../routes/orders/orderActionPolicy'
 import { EmptyState } from './BottomAccountEmptyState'
 import { formatTime, formatValue } from './bottomAccountFormatters'
 import styles from './BottomAccountPanel.module.css'

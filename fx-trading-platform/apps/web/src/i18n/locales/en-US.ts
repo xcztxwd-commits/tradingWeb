@@ -683,6 +683,8 @@ const enUS = {
     timelineFilled: 'Filled',
     timelineCanceled: 'Canceled',
     cancel: 'Cancel order',
+    cancelConfirm: 'Cancel this order?',
+    cancelConfirmBody: 'Confirm cancellation of the current {{symbol}} order.',
     modify: 'Modify',
     modifyOrder: 'Modify order',
     cancelUnavailable: 'This order cannot be canceled.',

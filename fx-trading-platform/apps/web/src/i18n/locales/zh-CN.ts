@@ -683,6 +683,8 @@ const zhCN = {
     timelineFilled: '成交',
     timelineCanceled: '撤销',
     cancel: '撤单',
+    cancelConfirm: '确认撤销此订单？',
+    cancelConfirmBody: '确认撤销当前 {{symbol}} 订单。',
     modify: '修改',
     modifyOrder: '修改委托',
     cancelUnavailable: '当前订单不能撤单。',

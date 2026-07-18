@@ -24,7 +24,7 @@ export function StateSurface({
   const classNames = [styles.surface, styles[variant]].filter(Boolean).join(' ')
 
   return (
-    <section className={classNames} role={role} aria-live={variant === 'loading' ? 'polite' : undefined}>
+    <section className={classNames} role={role} aria-live={variant === 'loading' ? 'polite' : undefined} data-state-variant={variant}>
       <div className={styles.content}>
         <strong>{title}</strong>
         {message ? <span>{message}</span> : null}

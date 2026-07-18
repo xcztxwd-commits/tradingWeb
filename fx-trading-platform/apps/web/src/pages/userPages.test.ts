@@ -19,8 +19,17 @@ const binanceMarketData = readFileSync(
   'utf8'
 )
 const marketSources = `${markets}\n${binanceMarketData}`
-const orders = readFileSync(join(pagesDir, 'orders', 'OrdersPage.tsx'), 'utf8')
-const positions = readFileSync(join(pagesDir, 'positions', 'PositionsPage.tsx'), 'utf8')
+const orders = [
+  readFileSync(join(pagesDir, '..', 'shared-widgets', 'orders', 'OrdersRouteContent.tsx'), 'utf8'),
+  readFileSync(join(pagesDir, '..', 'routes', 'orders', 'useOrdersRouteController.ts'), 'utf8'),
+  readFileSync(join(pagesDir, '..', 'routes', 'orders', 'orderActionPolicy.ts'), 'utf8'),
+  readFileSync(join(pagesDir, '..', 'routes', 'orders', 'orderActionPayloads.ts'), 'utf8')
+].join('\n')
+const positions = [
+  readFileSync(join(pagesDir, '..', 'shared-widgets', 'positions', 'PositionsRouteContent.tsx'), 'utf8'),
+  readFileSync(join(pagesDir, '..', 'routes', 'positions', 'usePositionsRouteController.ts'), 'utf8'),
+  readFileSync(join(pagesDir, '..', 'routes', 'positions', 'positionProtectionPolicy.ts'), 'utf8')
+].join('\n')
 const accountPagesPath = join(pagesDir, '..', 'shared-widgets', 'account', 'AccountPagesContent.tsx')
 const accountControllerPath = join(pagesDir, '..', 'routes', 'account', 'useAccountRouteController.ts')
 const accountRoutePath = join(pagesDir, '..', 'routes', 'account', 'AccountRoutes.tsx')
@@ -33,7 +42,13 @@ const accountController = readFileSync(accountControllerPath, 'utf8')
 const accountRoute = readFileSync(accountRoutePath, 'utf8')
 const accountViews = accountViewPaths.map((path) => readFileSync(path, 'utf8')).join('\n')
 const accountPages = `${accountContent}\n${accountController}\n${accountRoute}\n${accountViews}`
-const wallet = readFileSync(join(pagesDir, 'wallet', 'WalletPage.tsx'), 'utf8')
+const wallet = [
+  readFileSync(join(pagesDir, '..', 'shared-widgets', 'wallet', 'WalletRouteContent.tsx'), 'utf8'),
+  readFileSync(join(pagesDir, '..', 'routes', 'wallet', 'useWalletRouteController.ts'), 'utf8'),
+  readFileSync(join(pagesDir, '..', 'routes', 'wallet', 'walletRouteModel.ts'), 'utf8'),
+  readFileSync(join(pagesDir, '..', 'pc', 'components', 'PcDataCollection.tsx'), 'utf8'),
+  readFileSync(join(pagesDir, '..', 'mobile', 'components', 'MobileDataCollection.tsx'), 'utf8')
+].join('\n')
 const accountApi = readFileSync(join(projectRoot, 'packages', 'frontend-core', 'src', 'api', 'accountApi.ts'), 'utf8')
 const tradingTypes = readFileSync(join(projectRoot, 'packages', 'frontend-core', 'src', 'models', 'trading.ts'), 'utf8')
 const authController = readFileSync(join(pagesDir, '..', 'routes', 'auth', 'useAuthRouteController.ts'), 'utf8')
@@ -391,7 +406,7 @@ describe('prototype auth and account center', () => {
     assert.match(wallet, /createFundOrder/)
     assert.match(wallet, /walletBalances/)
     assert.match(wallet, /assetLedgerEntries/)
-    assert.match(wallet, /getAssetRows\(account,\s*walletBalances,\s*assetLedgerEntries,\s*frozenAmount\)/)
+    assert.match(wallet, /getAssetRows\(wallet\.account,\s*wallet\.walletBalances,\s*wallet\.assetLedgerEntries,\s*frozenAmount\)/)
     assert.match(wallet, /balances:\s*WalletBalance\[\]/)
     assert.match(wallet, /entries:\s*AssetLedgerEntry\[\]/)
     assert.match(wallet, /walletType/)

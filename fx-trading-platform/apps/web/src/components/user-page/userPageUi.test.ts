@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const dataTable = readFileSync(join(currentDir, 'DataTable.tsx'), 'utf8')
+const dataCollection = readFileSync(join(currentDir, '..', '..', 'shared-widgets', 'data', 'RouteDataCollection.tsx'), 'utf8')
+const pcCollection = readFileSync(join(currentDir, '..', '..', 'pc', 'components', 'PcDataCollection.tsx'), 'utf8')
+const mobileCollection = readFileSync(join(currentDir, '..', '..', 'mobile', 'components', 'MobileDataCollection.tsx'), 'utf8')
 const pageState = readFileSync(join(currentDir, 'PageState.tsx'), 'utf8')
 const styles = readFileSync(join(currentDir, '..', '..', 'styles.css'), 'utf8')
 
@@ -18,29 +20,28 @@ describe('user page shared UI system', () => {
   })
 
   it('gives empty tables an optional next action', () => {
-    assert.match(dataTable, /emptyAction/)
-    assert.match(dataTable, /TableEmptyState/)
-    assert.match(dataTable, /empty=\{/)
+    assert.match(dataCollection, /emptyAction/)
+    assert.match(dataCollection, /RouteDataCollectionEmpty/)
+    assert.match(`${pcCollection}\n${mobileCollection}`, /empty=\{/)
   })
 
-  it('renders a card layout for tables on small screens', () => {
-    assert.match(dataTable, /data-table__cards/)
-    assert.match(dataTable, /DataCardList/)
-    assert.match(styles, /@media\s*\(max-width:\s*720px\)/)
-    assert.match(styles, /\.data-table__cards\s*{[\s\S]*display:\s*grid/)
-    assert.match(styles, /\.user-page__table\s*{[\s\S]*display:\s*none/)
-    assert.doesNotMatch(dataTable, /data-table__card-row/)
+  it('loads a card collection only for Mobile instead of CSS-hiding a table', () => {
+    assert.match(pcCollection, /DataTable/)
+    assert.doesNotMatch(pcCollection, /DataCardList/)
+    assert.match(mobileCollection, /DataCardList/)
+    assert.doesNotMatch(mobileCollection, /<DataTable/)
+    assert.doesNotMatch(styles, /\.data-table__cards/)
+    assert.doesNotMatch(styles, /\.user-page__table\s*{\s*display:\s*none/)
   })
 
   it('announces table sorting state and next sort direction', () => {
-    assert.match(dataTable, /getNextDataSort/)
-    assert.match(dataTable, /DataTable as UiDataTable/)
-    assert.match(dataTable, /sortKey=\{sortKey\}/)
-    assert.match(dataTable, /sortDirection=\{sortDirection\}/)
-    assert.match(dataTable, /common\.tableSort/)
-    assert.match(dataTable, /common\.sortAsc/)
-    assert.match(dataTable, /common\.sortDesc/)
-    assert.match(dataTable, /getSortLabel/)
+    assert.match(dataCollection, /getNextDataSort/)
+    assert.match(pcCollection, /sortKey=\{state\.sortKey\}/)
+    assert.match(pcCollection, /sortDirection=\{state\.sortDirection\}/)
+    assert.match(pcCollection, /common\.tableSort/)
+    assert.match(pcCollection, /common\.sortAsc/)
+    assert.match(pcCollection, /common\.sortDesc/)
+    assert.match(pcCollection, /getSortLabel/)
   })
 
   it('defines semantic table action variants including destructive actions', () => {

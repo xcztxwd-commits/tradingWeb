@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   createAccountDataController,
@@ -6,6 +6,7 @@ import {
   type AccountDataControllerDependencies
 } from './accountOperations.ts'
 import type { AccountSessionData } from './accountSessionModels.ts'
+import { createControllerLeaseRegistry } from './controllerLeaseRegistry.ts'
 
 type UseAccountDataOptions = {
   enabled?: boolean
@@ -34,15 +35,17 @@ export function useAccountData({
     () => createAccountDataController(dependencies, { refreshMs }),
     [dependencies, enabled, refreshMs]
   )
+  const controllerLeases = useRef(createControllerLeaseRegistry()).current
   const [snapshot, setSnapshot] = useState(controller.getSnapshot)
 
   useEffect(() => {
     if (!enabled) return
+    const releaseController = controllerLeases.acquire(controller)
     const unsubscribe = controller.subscribe(setSnapshot)
     void controller.start()
     return () => {
       unsubscribe()
-      controller.dispose()
+      releaseController()
     }
   }, [controller, enabled])
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
@@ -12,7 +12,11 @@ import {
 import type { PositionResponse } from '@fx-platform/frontend-core'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const source = readFileSync(join(currentDir, 'PositionsPage.tsx'), 'utf8')
+const webSrc = resolve(currentDir, '../..')
+const source = [
+  readFileSync(join(webSrc, 'shared-widgets', 'positions', 'PositionsRouteContent.tsx'), 'utf8'),
+  readFileSync(join(currentDir, 'usePositionsRouteController.ts'), 'utf8')
+].join('\n')
 
 describe('positions close confirmation dialog', () => {
   it('supports keyboard dismissal and predictable focus lifecycle', () => {

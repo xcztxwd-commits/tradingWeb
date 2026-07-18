@@ -6,7 +6,7 @@ import {
   buildProtectionUpdatePayload
 } from './orderActionPayloads.ts'
 
-describe('order action payloads', () => {
+describe('route order action payloads', () => {
   it('never carries legacy stop loss or take profit fields into a normal order update', () => {
     const payload = buildNormalOrderUpdatePayload({
       quantity: '0.25',

@@ -10,7 +10,7 @@ const currentDir = dirname(fileURLToPath(import.meta.url))
 const projectRoot = resolve(currentDir, '../../../..')
 const componentSource = readFileSync(resolve(currentDir, 'Dialog.tsx'), 'utf8')
 const styles = readFileSync(resolve(currentDir, 'Dialog.module.css'), 'utf8')
-const transferSource = readFileSync(resolve(projectRoot, 'apps/web/src/pages/wallet/TransferDialog.tsx'), 'utf8')
+const transferSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/wallet/TransferDialog.tsx'), 'utf8')
 const orderSource = readFileSync(resolve(projectRoot, 'apps/web/src/features/trading/components/OrderConfirmationDialog.tsx'), 'utf8')
 
 describe('overlay close decisions', () => {

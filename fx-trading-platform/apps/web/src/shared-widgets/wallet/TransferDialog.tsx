@@ -4,7 +4,7 @@ import type { AccountTransferDirection } from '@fx-platform/shared-types'
 
 import type { Amount } from '@fx-platform/frontend-core'
 
-type TransferDialogProps = {
+export type TransferDialogProps = {
   open: boolean
   direction: AccountTransferDirection
   amount: string

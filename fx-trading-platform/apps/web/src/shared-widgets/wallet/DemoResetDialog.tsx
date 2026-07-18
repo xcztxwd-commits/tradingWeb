@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
+import { Dialog } from '@fx-platform/ui'
 
-type DemoResetDialogProps = {
+export type DemoResetDialogProps = {
   open: boolean
   requestId: string
   pending: boolean
@@ -17,8 +18,6 @@ export function DemoResetDialog({
   onClose,
   onConfirm
 }: DemoResetDialogProps) {
-  if (!open) return null
-
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (pending) return
@@ -26,17 +25,15 @@ export function DemoResetDialog({
   }
 
   return (
-    <div
-      className="confirm-dialog"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget && !pending) onClose()
-      }}
+    <Dialog
+      open={open}
+      onClose={onClose}
+      labelledBy="wallet-reset-title"
+      closeLabel="Close reset dialog"
+      pending={pending}
+      panelClassName="confirm-dialog__panel"
     >
       <form
-        className="confirm-dialog__panel"
-        role="dialog"
-        aria-modal="true"
         aria-labelledby="wallet-reset-title"
         aria-busy={pending}
         onSubmit={handleSubmit}
@@ -57,6 +54,6 @@ export function DemoResetDialog({
           </button>
         </div>
       </form>
-    </div>
+    </Dialog>
   )
 }

@@ -19,6 +19,7 @@ describe('StateSurface component contract', () => {
     assert.match(componentSource, /actionLabel\?:\s*string/u)
     assert.match(componentSource, /variant === 'error' \? 'alert'/u)
     assert.match(componentSource, /aria-live=/u)
+    assert.match(componentSource, /data-state-variant=\{variant\}/u)
     assert.match(componentSource, /<Skeleton/u)
     assert.doesNotMatch(componentSource, /react-i18next/u)
   })

@@ -14,7 +14,7 @@ type OrderLike = {
   version?: number | null
 }
 
-type OrderActionPolicy = {
+export type OrderActionPolicy = {
   canCancel: boolean
   canModify: boolean
   cancelVia: 'ORDER' | 'PROTECTION' | null
@@ -65,6 +65,17 @@ export function getOrderActionPolicy(order: OrderLike): OrderActionPolicy {
       return unavailablePolicy(status, 'orders.actionReasons.protectionUnavailable')
     }
 
+    if (normalizeStatus(order.orderType ?? '') === 'TRAILING_STOP_MARKET') {
+      return {
+        canCancel: true,
+        canModify: false,
+        cancelVia: 'PROTECTION',
+        modifyVia: null,
+        modifyReasonKey: 'orders.actionReasons.protectionUnavailable',
+        reasonStatus: status
+      }
+    }
+
     const hasVersion = Number.isSafeInteger(order.version) && Number(order.version) >= 0
     return {
       canCancel: true,
@@ -76,8 +87,36 @@ export function getOrderActionPolicy(order: OrderLike): OrderActionPolicy {
     }
   }
 
+  const isOco = origin === 'OCO' || Boolean(order.contingencyGroupId)
+  if (status === 'PARTIALLY_FILLED'
+    && origin === 'USER'
+    && !isOco
+    && (order.productType === 'CRYPTO_SPOT' || order.productType === 'LINEAR_PERP')) {
+    return {
+      canCancel: true,
+      canModify: false,
+      cancelVia: 'ORDER',
+      modifyVia: null,
+      modifyReasonKey: 'orders.actionReasons.partiallyFilled',
+      reasonStatus: status
+    }
+  }
+
+  if (status === 'PENDING_ACTIVATION'
+    && origin === 'USER'
+    && !isOco
+    && ['STOP_MARKET', 'STOP_LIMIT'].includes(normalizeStatus(order.orderType ?? ''))) {
+    return {
+      canCancel: true,
+      canModify: false,
+      cancelVia: 'ORDER',
+      modifyVia: null,
+      modifyReasonKey: 'orders.actionReasons.productNotModifiable',
+      reasonStatus: status
+    }
+  }
+
   if (status === 'PENDING') {
-    const isOco = origin === 'OCO' || Boolean(order.contingencyGroupId)
     const isSpotModifiable = order.productType === 'CRYPTO_SPOT'
       && ['LIMIT', 'STOP_MARKET'].includes(normalizeStatus(order.orderType ?? ''))
     const canModify = isSpotModifiable && !isOco

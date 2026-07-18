@@ -11,7 +11,7 @@ const themeIndexSource = readFileSync(resolve(currentDir, 'index.ts'), 'utf8')
 const rootIndexSource = readFileSync(resolve(currentDir, '../index.ts'), 'utf8')
 const mainSource = readFileSync(resolve(projectRoot, 'apps/web/src/main.tsx'), 'utf8')
 const appShellSource = readFileSync(resolve(projectRoot, 'apps/web/src/app/AppShell.tsx'), 'utf8')
-const tradingPageSource = readFileSync(resolve(projectRoot, 'apps/web/src/pages/trading/TradingPage.tsx'), 'utf8')
+const tradingRouteControllerSource = readFileSync(resolve(projectRoot, 'apps/web/src/routes/trading/useTradingRouteController.ts'), 'utf8')
 
 describe('ThemeProvider package contract', () => {
   it('preserves storage fallback, document datasets and every CSS variable write', () => {
@@ -66,7 +66,7 @@ describe('ThemeProvider package contract', () => {
     assert.ok(mainSource.indexOf("@fx-platform/ui/theme.css") < mainSource.indexOf("./styles.css"))
     assert.match(mainSource, /<ThemeProvider>[\s\S]*<App \/>[\s\S]*<\/ThemeProvider>/u)
     assert.match(appShellSource, /import \{ useTheme \} from '@fx-platform\/ui'/u)
-    assert.match(tradingPageSource, /import \{ useTheme \} from '@fx-platform\/ui'/u)
-    assert.doesNotMatch(`${mainSource}\n${appShellSource}\n${tradingPageSource}`, /design-system\/theme/u)
+    assert.match(tradingRouteControllerSource, /import \{ useTheme \} from '@fx-platform\/ui'/u)
+    assert.doesNotMatch(`${mainSource}\n${appShellSource}\n${tradingRouteControllerSource}`, /design-system\/theme/u)
   })
 })

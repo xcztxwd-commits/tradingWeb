@@ -6,14 +6,14 @@ import { AccountRoute } from '../routes/account/AccountRoutes'
 import { AuthRoute } from '../routes/auth/AuthRoute'
 import { HomeRoute } from '../routes/home/HomeRoute'
 import { MarketsRoute } from '../routes/markets/MarketsRoute'
+import { OrdersRoute } from '../routes/orders/OrdersRoute'
+import { PositionsRoute } from '../routes/positions/PositionsRoute'
+import { WalletRoute } from '../routes/wallet/WalletRoute'
 import { AppShell } from './AppShell'
 import { LegacyTradingRedirect } from './LegacyTradingRedirect'
 import { resolveSafeTradingPath } from './tradingRoutes'
 
 const TradingPage = lazy(() => import('../pages/trading/TradingPage').then((module) => ({ default: module.TradingPage })))
-const OrdersPage = lazy(() => import('../pages/orders/OrdersPage').then((module) => ({ default: module.OrdersPage })))
-const PositionsPage = lazy(() => import('../pages/positions/PositionsPage').then((module) => ({ default: module.PositionsPage })))
-const WalletPage = lazy(() => import('../pages/wallet/WalletPage').then((module) => ({ default: module.WalletPage })))
 
 export function App() {
   return (
@@ -32,9 +32,9 @@ export function App() {
           <Route path="/two-factor-help" element={<AuthRoute mode="two-factor-help" />} />
           <Route path="/dashboard" element={<AccountRoute mode="dashboard" />} />
           <Route path="/markets" element={<MarketsRoute />} />
-          <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/positions" element={<PositionsPage />} />
-          <Route path="/wallet" element={<WalletPage />} />
+          <Route path="/orders" element={<OrdersRoute />} />
+          <Route path="/positions" element={<PositionsRoute />} />
+          <Route path="/wallet" element={<WalletRoute />} />
           <Route path="/account" element={<Navigate to="/account/overview" replace />} />
           <Route path="/account/overview" element={<AccountRoute mode="overview" />} />
           <Route path="/account/assets" element={<AccountRoute mode="assets" />} />

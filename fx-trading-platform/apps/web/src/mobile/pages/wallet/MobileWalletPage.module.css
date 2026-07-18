@@ -1,0 +1,24 @@
+.root {
+  min-width: 0;
+}
+
+.root :global(.wallet-workbench) {
+  display: block;
+}
+
+.root :global(.wallet-sidebar) {
+  display: none;
+}
+
+.root :global(.wallet-hero-grid),
+.root :global(.wallet-account-grid),
+.root :global(.wallet-action-grid),
+.root :global(.user-page__toolbar),
+.root :global(.user-page__form) {
+  grid-template-columns: 1fr;
+}
+
+.root :global(.table-action),
+.root :global(.wallet-action-card) {
+  min-height: 44px;
+}

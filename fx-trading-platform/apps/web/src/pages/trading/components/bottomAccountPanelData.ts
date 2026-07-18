@@ -1,6 +1,6 @@
 import type { AccountSummary, LedgerEntry, OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
 import type { AccountTransferResponse, BatchActionResponse, FundingSettlement, Trade } from '@fx-platform/shared-types'
-import { isCurrentOrderStatus } from '../../orders/orderActionPolicy.ts'
+import { isCurrentOrderStatus } from '../../../routes/orders/orderActionPolicy.ts'
 import type { BottomAccountTab } from './bottomAccountTabs.ts'
 
 type Translate = (key: string, options?: Record<string, unknown>) => string

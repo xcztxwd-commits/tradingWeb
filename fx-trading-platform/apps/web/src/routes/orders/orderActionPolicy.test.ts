@@ -7,7 +7,7 @@ import {
   isCurrentOrderStatus
 } from './orderActionPolicy.ts'
 
-describe('user order action policy', () => {
+describe('route user order action policy', () => {
   it('matches the backend user order lifecycle for current orders', () => {
     for (const status of [
       'RECEIVED',
@@ -68,6 +68,43 @@ describe('user order action policy', () => {
     assert.equal(policy.modifyVia, null)
   })
 
+  it('allows ordinary partially filled Spot and Perp orders to cancel only', () => {
+    for (const productType of ['CRYPTO_SPOT', 'LINEAR_PERP'] as const) {
+      const policy = getOrderActionPolicy({
+        status: 'PARTIALLY_FILLED',
+        productType,
+        orderType: 'LIMIT',
+        origin: 'USER'
+      })
+
+      assert.equal(policy.canCancel, true)
+      assert.equal(policy.canModify, false)
+      assert.equal(policy.cancelVia, 'ORDER')
+      assert.equal(policy.modifyVia, null)
+    }
+
+    const oco = getOrderActionPolicy({
+      status: 'PARTIALLY_FILLED',
+      productType: 'CRYPTO_SPOT',
+      orderType: 'LIMIT',
+      origin: 'OCO',
+      contingencyGroupId: 'oco-group-1'
+    })
+    assert.equal(oco.canCancel, false)
+    assert.equal(oco.cancelVia, null)
+
+    for (const origin of ['LIQUIDATION', 'ADMIN_FORCE_CLOSE', 'BATCH_CLOSE'] as const) {
+      const systemOrder = getOrderActionPolicy({
+        status: 'PARTIALLY_FILLED',
+        productType: 'LINEAR_PERP',
+        orderType: 'MARKET',
+        origin
+      })
+      assert.equal(systemOrder.canCancel, false, `${origin} must remain system-owned`)
+      assert.equal(systemOrder.cancelVia, null)
+    }
+  })
+
   it('routes active protective orders through protection APIs only with a real version', () => {
     const policy = getOrderActionPolicy({
       status: 'PENDING_ACTIVATION',
@@ -93,6 +130,38 @@ describe('user order action policy', () => {
     assert.equal(missingVersion.canCancel, true)
     assert.equal(missingVersion.canModify, false)
     assert.equal(missingVersion.modifyVia, null)
+  })
+
+  it('keeps trailing-stop carriers cancelable but never exposes unsupported modification', () => {
+    const policy = getOrderActionPolicy({
+      status: 'PENDING_ACTIVATION',
+      productType: 'LINEAR_PERP',
+      orderType: 'TRAILING_STOP_MARKET',
+      origin: 'PROTECTIVE',
+      protectionType: 'STOP_LOSS',
+      parentPositionId: 'position-1',
+      version: 7
+    })
+
+    assert.equal(policy.canCancel, true)
+    assert.equal(policy.canModify, false)
+    assert.equal(policy.cancelVia, 'PROTECTION')
+    assert.equal(policy.modifyVia, null)
+  })
+
+  it('keeps user STOP_LIMIT activation carriers cancelable without exposing new modify controls', () => {
+    const policy = getOrderActionPolicy({
+      status: 'PENDING_ACTIVATION',
+      productType: 'LINEAR_PERP',
+      orderType: 'STOP_LIMIT',
+      origin: 'USER',
+      version: 3
+    })
+
+    assert.equal(policy.canCancel, true)
+    assert.equal(policy.canModify, false)
+    assert.equal(policy.cancelVia, 'ORDER')
+    assert.equal(policy.modifyVia, null)
   })
 
   it('allows a triggered resting LIMIT protection to cancel but not modify', () => {
@@ -127,6 +196,8 @@ describe('user order action policy', () => {
     assert.equal(getOrderActionSummary({
       status: 'PENDING', productType: 'CRYPTO_SPOT', orderType: 'LIMIT', origin: 'USER'
     }), 'orders.actionSummary.available')
-    assert.equal(getOrderActionSummary({ status: 'PARTIALLY_FILLED' }), 'orders.actionReasons.partiallyFilled')
+    assert.equal(getOrderActionSummary({
+      status: 'PARTIALLY_FILLED', productType: 'CRYPTO_SPOT', orderType: 'LIMIT', origin: 'USER'
+    }), 'orders.actionSummary.cancelOnly')
   })
 })

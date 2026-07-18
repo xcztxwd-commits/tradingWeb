@@ -2,7 +2,7 @@ import type { QuantityUnit, TriggerExecutionType, UpdateProtectionRequest } from
 
 import type { OrderResponse, UpdateOrderPayload } from '@fx-platform/frontend-core'
 
-type EditFields = Record<string, unknown>
+export type EditFields = Record<string, unknown>
 
 export function buildNormalOrderUpdatePayload(fields: EditFields): UpdateOrderPayload {
   return compact({

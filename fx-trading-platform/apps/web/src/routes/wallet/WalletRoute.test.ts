@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
+const webSrc = resolve(currentDir, '../..')
 const coreAccountDir = join(currentDir, '../../../../../packages/frontend-core/src/account')
+const sharedWalletDir = join(webSrc, 'shared-widgets', 'wallet')
 
 function readRequiredSource(name: string) {
-  const path = join(currentDir, name)
+  const path = join(sharedWalletDir, name)
   assert.equal(existsSync(path), true, `${name} must exist`)
   return readFileSync(path, 'utf8')
 }
@@ -48,7 +50,10 @@ describe('wallet Spot and Perpetual operations', () => {
   })
 
   it('uses Task 7 APIs, refreshes successful mutations and never creates a USDT_PERP mirror', () => {
-    const wallet = readRequiredSource('WalletPage.tsx')
+    const wallet = [
+      readFileSync(join(currentDir, 'useWalletRouteController.ts'), 'utf8'),
+      readFileSync(join(sharedWalletDir, 'WalletRouteContent.tsx'), 'utf8')
+    ].join('\n')
     const controller = readFileSync(join(coreAccountDir, 'useWalletController.ts'), 'utf8')
     const operations = readFileSync(join(coreAccountDir, 'accountOperations.ts'), 'utf8')
 

@@ -12,7 +12,7 @@ const componentSource = readFileSync(resolve(currentDir, 'SelectField.tsx'), 'ut
 const componentStyles = readFileSync(resolve(currentDir, 'SelectField.module.css'), 'utf8')
 const packageIndexSource = readFileSync(resolve(currentDir, '../index.ts'), 'utf8')
 const languageSwitcherSource = readFileSync(resolve(projectRoot, 'apps/web/src/components/LanguageSwitcher.tsx'), 'utf8')
-const marketsSource = readFileSync(resolve(projectRoot, 'apps/web/src/pages/markets/MarketsPage.tsx'), 'utf8')
+const marketsSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/market/MarketsContent.tsx'), 'utf8')
 const webStyles = readFileSync(resolve(projectRoot, 'apps/web/src/styles.css'), 'utf8')
 
 describe('SelectField keyboard state transitions', () => {

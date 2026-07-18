@@ -11,7 +11,9 @@ const projectRoot = resolve(currentDir, '../../../..')
 const tableSource = readFileSync(resolve(currentDir, 'DataTable.tsx'), 'utf8')
 const cardSource = readFileSync(resolve(currentDir, 'DataCardList.tsx'), 'utf8')
 const styles = readFileSync(resolve(currentDir, 'DataView.module.css'), 'utf8')
-const adapterSource = readFileSync(resolve(projectRoot, 'apps/web/src/components/user-page/DataTable.tsx'), 'utf8')
+const routeCollectionSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/data/RouteDataCollection.tsx'), 'utf8')
+const pcCollectionSource = readFileSync(resolve(projectRoot, 'apps/web/src/pc/components/PcDataCollection.tsx'), 'utf8')
+const mobileCollectionSource = readFileSync(resolve(projectRoot, 'apps/web/src/mobile/components/MobileDataCollection.tsx'), 'utf8')
 
 describe('data view state transitions', () => {
   it('starts ascending, toggles the active key and resets a changed key to ascending', () => {
@@ -51,13 +53,23 @@ describe('DataTable and DataCardList contracts', () => {
     assert.doesNotMatch(cardSource, /react-i18next/u)
   })
 
-  it('keeps translation, row sorting and pagination in the temporary Web adapter only', () => {
-    assert.match(adapterSource, /DataCardList/u)
-    assert.match(adapterSource, /DataTable as UiDataTable/u)
-    assert.match(adapterSource, /useTranslation/u)
-    assert.match(adapterSource, /sortRows/u)
-    assert.match(adapterSource, /paginateRows/u)
-    assert.match(adapterSource, /getNextDataSort/u)
-    assert.match(adapterSource, /getNextPage/u)
+  it('keeps translation, row sorting and pagination in the shared Web route adapter', () => {
+    assert.match(routeCollectionSource, /useTranslation/u)
+    assert.match(routeCollectionSource, /sortRows/u)
+    assert.match(routeCollectionSource, /paginateRows/u)
+    assert.match(routeCollectionSource, /getNextDataSort/u)
+    assert.match(routeCollectionSource, /getNextPage/u)
+  })
+
+  it('selects exactly one data visualization in each platform renderer', () => {
+    assert.match(pcCollectionSource, /import \{ DataTable \} from '@fx-platform\/ui'/u)
+    assert.doesNotMatch(pcCollectionSource, /DataCardList/u)
+    assert.match(mobileCollectionSource, /import \{ DataCardList \} from '@fx-platform\/ui'/u)
+    assert.doesNotMatch(mobileCollectionSource, /DataTable/u)
+    for (const source of [pcCollectionSource, mobileCollectionSource]) {
+      assert.match(source, /RouteDataCollectionEmpty/u)
+      assert.match(source, /RouteDataCollectionPagination/u)
+      assert.match(source, /useRouteDataCollection/u)
+    }
   })
 })

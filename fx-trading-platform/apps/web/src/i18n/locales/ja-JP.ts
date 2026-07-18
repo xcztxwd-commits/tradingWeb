@@ -683,6 +683,8 @@ const jaJP = {
     timelineFilled: '約定',
     timelineCanceled: '取消',
     cancel: '注文取消',
+    cancelConfirm: 'この注文をキャンセルしますか？',
+    cancelConfirmBody: '現在の {{symbol}} 注文のキャンセルを確認してください。',
     modify: '変更',
     modifyOrder: '注文変更',
     cancelUnavailable: '現在の注文は取消できません。',
