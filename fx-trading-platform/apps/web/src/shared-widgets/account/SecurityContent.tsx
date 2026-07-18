@@ -56,7 +56,7 @@ const loginHistory = [
   { time: '2026-06-11 18:33', device: 'Mobile Safari', location: 'Singapore', statusKey: 'security.loginHistory.normal' }
 ]
 
-export function SecurityCenterPage() {
+export function SecurityContent() {
   const { t } = useTranslation()
 
   return (

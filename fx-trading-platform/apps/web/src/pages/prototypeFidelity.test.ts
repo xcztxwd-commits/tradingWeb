@@ -20,7 +20,8 @@ const marketsSource = readFileSync(join(pagesDir, 'markets', 'MarketsPage.tsx'),
 const authSource = readFileSync(join(srcDir, 'shared-widgets', 'auth', 'AuthPageContent.tsx'), 'utf8')
 const loginSource = readFileSync(join(srcDir, 'routes', 'auth', 'useAuthRouteController.ts'), 'utf8')
 const accountSource = [
-  readFileSync(join(pagesDir, 'account', 'AccountPages.tsx'), 'utf8'),
+  readFileSync(join(srcDir, 'shared-widgets', 'account', 'AccountPagesContent.tsx'), 'utf8'),
+  readFileSync(join(srcDir, 'routes', 'account', 'AccountRoutes.tsx'), 'utf8'),
   readFileSync(join(pagesDir, 'account', 'AccountHubPage.tsx'), 'utf8')
 ].join('\n')
 const shellSource = [

@@ -1,17 +1,15 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useMemo } from 'react'
 import { ArrowDownCircle, ArrowUpCircle, Bell, CheckCircle2, CircleDollarSign, Settings, ShieldCheck, UserRound } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
+import type { DataViewColumn } from '@fx-platform/ui'
 
-import { AssetMark } from '../../shared-widgets/asset/AssetMark'
-import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
+import { AssetMark } from '../asset/AssetMark'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'
-import { useTranslatedAccountData } from '../../routes/shared/useTranslatedAccountData'
+import type { AccountRouteModel } from '../../routes/account/accountRoute.types'
+import type { AccountDataCollectionComponent } from './dataCollection.types'
 import {
-  createFundOrder,
-  filterByStatus,
-  getFundOrders,
   toNumber,
   type AccountDataStatus,
   type AccountSummary,
@@ -41,6 +39,11 @@ const tradeOrderTabs = [
 ] as const
 type TradeOrderTab = (typeof tradeOrderTabs)[number]['value']
 
+type AccountContentProps = {
+  model: AccountRouteModel
+  DataCollection: AccountDataCollectionComponent
+}
+
 type AssetRow = {
   key: string
   walletType: string
@@ -56,10 +59,10 @@ type AccountStateProps = {
   sessionError: string | null
   loginRequired: boolean
   retrySession: () => Promise<void>
-  redirect: string
+  onLogin: () => void
 }
 
-export function AccountOverviewPage() {
+export function AccountOverviewContent({ model }: AccountContentProps) {
   const {
     account,
     ledgerEntries,
@@ -70,7 +73,7 @@ export function AccountOverviewPage() {
     sessionError,
     sessionMode,
     walletBalances
-  } = useTranslatedAccountData()
+  } = model.accountData
 
   return (
     <AccountShell
@@ -80,7 +83,7 @@ export function AccountOverviewPage() {
     >
       <AccountPageState
         loginRequired={loginRequired}
-        redirect="/account/overview"
+        onLogin={() => model.navigateTo(model.loginPath)}
         retrySession={retrySession}
         sessionError={sessionError}
         sessionMode={sessionMode}
@@ -96,7 +99,7 @@ export function AccountOverviewPage() {
   )
 }
 
-export function AccountAssetsPage() {
+export function AccountAssetsContent({ model, DataCollection }: AccountContentProps) {
   const {
     account,
     ledgerEntries,
@@ -105,7 +108,7 @@ export function AccountAssetsPage() {
     sessionError,
     sessionMode,
     walletBalances
-  } = useTranslatedAccountData()
+  } = model.accountData
   const frozenAmount = toNumber(account?.usedMargin) ?? 0
   const assetRows = useMemo(
     () => getAssetRows(account, walletBalances, ledgerEntries, frozenAmount),
@@ -121,7 +124,7 @@ export function AccountAssetsPage() {
     >
       <AccountPageState
         loginRequired={loginRequired}
-        redirect="/account/assets"
+        onLogin={() => model.navigateTo(model.loginPath)}
         retrySession={retrySession}
         sessionError={sessionError}
         sessionMode={sessionMode}
@@ -131,7 +134,7 @@ export function AccountAssetsPage() {
         <RecentLedgerPanel entries={ledgerEntries.slice(0, 6)} />
       </div>
       <DemoWalletOperationsLink account={account} walletBalances={walletBalances} />
-      <DataTable
+      <DataCollection
         rows={assetRows}
         columns={assetColumns}
         rowKey={(asset) => asset.key}
@@ -143,66 +146,39 @@ export function AccountAssetsPage() {
   )
 }
 
-export function FundingRecordsPage() {
-  const { account, accountId, ledgerEntries, loginRequired, retrySession, sessionError, sessionMode, token } = useTranslatedAccountData()
-  const [fundOrders, setFundOrders] = useState<FundOrder[]>([])
-  const [fundOrdersLoading, setFundOrdersLoading] = useState(false)
-  const [statusFilter, setStatusFilter] = useState('ALL')
-  const [typeFilter, setTypeFilter] = useState('ALL')
-  const [fundOrderType, setFundOrderType] = useState<'RECHARGE' | 'WITHDRAWAL'>('RECHARGE')
-  const [notice, setNotice] = useState<string | null>(null)
-  const [apiError, setApiError] = useState<ReturnType<typeof formatApiError> | null>(null)
-
-  const visibleFundOrders = useMemo(() => {
-    return filterByStatus(fundOrders, statusFilter).filter((order) => typeFilter === 'ALL' || order.orderType === typeFilter)
-  }, [fundOrders, statusFilter, typeFilter])
+export function FundingRecordsContent({ model, DataCollection }: AccountContentProps) {
+  const { account, accountId, ledgerEntries, loginRequired, retrySession, sessionError, sessionMode, token } = model.accountData
+  const {
+    apiError,
+    currency,
+    loading: fundOrdersLoading,
+    notice,
+    orderType: fundOrderType,
+    setOrderType: setFundOrderType,
+    setStatusFilter,
+    setTypeFilter,
+    statusFilter,
+    submit,
+    typeFilter,
+    visibleOrders: visibleFundOrders
+  } = model.funding
   const fundOrderColumns = useMemo(() => createFundOrderColumns(), [])
   const ledgerColumns = useMemo(() => createLedgerColumns(), [])
-  const currency = account?.baseCurrency ?? 'USDT'
-
-  const loadFundOrders = useCallback(async () => {
-    if (!token || !accountId) return
-    setFundOrdersLoading(true)
-    setApiError(null)
-    try {
-      setFundOrders(await getFundOrders(accountId, token))
-    } catch (error) {
-      setApiError(formatApiError(error))
-    } finally {
-      setFundOrdersLoading(false)
-    }
-  }, [accountId, token])
-
-  useEffect(() => {
-    void loadFundOrders()
-  }, [loadFundOrders])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!token || !accountId) return
     const formElement = event.currentTarget
     const form = new FormData(formElement)
-    setNotice(null)
-    setApiError(null)
-    try {
-      const createdFundOrder = await createFundOrder(
-        {
-          accountId,
-          orderType: form.get('orderType') === 'WITHDRAWAL' ? 'WITHDRAWAL' : 'RECHARGE',
-          amount: String(form.get('amount') ?? ''),
-          currency: String(form.get('currency') ?? currency),
-          paymentMethodId: nullableString(form.get('paymentMethodId')),
-          note: String(form.get('note') ?? '')
-        },
-        token
-      )
-      setFundOrders((current) => [createdFundOrder, ...current.filter((order) => order.id !== createdFundOrder.id)])
+    const submitted = await submit({
+      orderType: form.get('orderType') === 'WITHDRAWAL' ? 'WITHDRAWAL' : 'RECHARGE',
+      amount: String(form.get('amount') ?? ''),
+      currency: String(form.get('currency') ?? currency),
+      paymentMethodId: nullableString(form.get('paymentMethodId')),
+      note: String(form.get('note') ?? '')
+    })
+    if (submitted) {
       formElement.reset()
-      setFundOrderType('RECHARGE')
-      setNotice('Funding request submitted.')
-      await loadFundOrders()
-    } catch (error) {
-      setApiError(formatApiError(error))
     }
   }
 
@@ -214,12 +190,12 @@ export function FundingRecordsPage() {
     >
       <AccountPageState
         loginRequired={loginRequired}
-        redirect="/account/orders/funding"
+        onLogin={() => model.navigateTo(model.loginPath)}
         retrySession={retrySession}
         sessionError={sessionError}
         sessionMode={sessionMode}
       />
-      {apiError ? <ApiErrorState error={apiError} onAction={() => void loadFundOrders()} /> : null}
+      {apiError ? <ApiErrorState error={apiError} onAction={() => void model.funding.load()} /> : null}
       {notice ? <div className="user-page__notice">{notice}</div> : null}
 
       <form className="user-page__form" onSubmit={handleSubmit}>
@@ -275,14 +251,14 @@ export function FundingRecordsPage() {
       </div>
 
       {fundOrdersLoading ? <LoadingState message="Loading funding records." /> : null}
-      <DataTable
+      <DataCollection
         rows={visibleFundOrders}
         columns={fundOrderColumns}
         rowKey={(order) => order.id}
         emptyMessage="No funding records"
         emptyAction={{ label: 'Create funding request', href: '/account/orders/funding' }}
       />
-      <DataTable
+      <DataCollection
         rows={ledgerEntries}
         columns={ledgerColumns}
         rowKey={(entry) => entry.id}
@@ -293,24 +269,24 @@ export function FundingRecordsPage() {
   )
 }
 
-export function TradeOrdersPage() {
-  const { account, loginRequired, orders, retrySession, sessionError, sessionMode } = useTranslatedAccountData()
-  const [activeTab, setActiveTab] = useState<TradeOrderTab>('OPEN')
-  const [sideFilter, setSideFilter] = useState('ALL')
-  const [query, setQuery] = useState('')
+export function TradeOrdersContent({ model, DataCollection }: AccountContentProps) {
+  const { account, loginRequired, retrySession, sessionError, sessionMode } = model.accountData
+  const {
+    activeTab,
+    query,
+    setActiveTab,
+    setQuery,
+    setSideFilter,
+    sideFilter,
+    visibleOrders
+  } = model.trades
   const tradeColumns = useMemo(() => createTradeOrderColumns(), [])
-  const visibleOrders = useMemo(() => {
-    return orders
-      .filter((order) => matchesTradeTab(order, activeTab))
-      .filter((order) => sideFilter === 'ALL' || order.side === sideFilter)
-      .filter((order) => !query.trim() || order.symbol.toLowerCase().includes(query.trim().toLowerCase()))
-  }, [activeTab, orders, query, sideFilter])
 
   return (
     <AccountShell account={account} title="Trade orders" summary="Current and historical orders from the trading backend.">
       <AccountPageState
         loginRequired={loginRequired}
-        redirect="/account/orders/trades"
+        onLogin={() => model.navigateTo(model.loginPath)}
         retrySession={retrySession}
         sessionError={sessionError}
         sessionMode={sessionMode}
@@ -328,7 +304,7 @@ export function TradeOrdersPage() {
           <option value="SELL">SELL</option>
         </select>
       </div>
-      <DataTable
+      <DataCollection
         rows={visibleOrders}
         columns={tradeColumns}
         rowKey={(order) => order.id}
@@ -339,14 +315,14 @@ export function TradeOrdersPage() {
   )
 }
 
-export function KycPage() {
-  const { account, loginRequired, retrySession, sessionError, sessionMode } = useTranslatedAccountData()
+export function KycContent({ model }: AccountContentProps) {
+  const { account, loginRequired, retrySession, sessionError, sessionMode } = model.accountData
 
   return (
     <AccountShell account={account} title="Identity verification" summary="KYC is coming soon and currently limited to internal testing.">
       <AccountPageState
         loginRequired={loginRequired}
-        redirect="/account/security/kyc"
+        onLogin={() => model.navigateTo(model.loginPath)}
         retrySession={retrySession}
         sessionError={sessionError}
         sessionMode={sessionMode}
@@ -365,14 +341,14 @@ export function KycPage() {
   )
 }
 
-export function AccountSettingsPage() {
-  const { account, loginRequired, retrySession, sessionError, sessionMode } = useTranslatedAccountData()
+export function AccountSettingsContent({ model }: AccountContentProps) {
+  const { account, loginRequired, retrySession, sessionError, sessionMode } = model.accountData
 
   return (
     <AccountShell account={account} title="Settings" summary="Basic profile, notifications and trading preferences.">
       <AccountPageState
         loginRequired={loginRequired}
-        redirect="/account/settings"
+        onLogin={() => model.navigateTo(model.loginPath)}
         retrySession={retrySession}
         sessionError={sessionError}
         sessionMode={sessionMode}
@@ -386,11 +362,9 @@ export function AccountSettingsPage() {
   )
 }
 
-function AccountPageState({ loginRequired, redirect, retrySession, sessionError, sessionMode }: AccountStateProps) {
-  const navigate = useNavigate()
-
+function AccountPageState({ loginRequired, onLogin, retrySession, sessionError, sessionMode }: AccountStateProps) {
   if (loginRequired) {
-    return <LoginRequiredState message="Log in to view account data." onLogin={() => navigate(`/login?redirect=${redirect}`)} />
+    return <LoginRequiredState message="Log in to view account data." onLogin={onLogin} />
   }
   if (sessionMode === 'loading') {
     return <LoadingState message="Loading account data." />
@@ -686,7 +660,7 @@ function PreferenceRows({ icon, title, value }: { icon: ReactNode; title: string
   )
 }
 
-function createAssetColumns(): Array<DataTableColumn<AssetRow>> {
+function createAssetColumns(): Array<DataViewColumn<AssetRow>> {
   return [
     { key: 'walletType', label: 'Wallet', sortable: true },
     {
@@ -707,7 +681,7 @@ function createAssetColumns(): Array<DataTableColumn<AssetRow>> {
   ]
 }
 
-function createFundOrderColumns(): Array<DataTableColumn<FundOrder>> {
+function createFundOrderColumns(): Array<DataViewColumn<FundOrder>> {
   return [
     { key: 'createdAt', label: 'Time', sortable: true, render: (order) => formatTime(order.createdAt) },
     { key: 'orderType', label: 'Type', sortable: true },
@@ -719,7 +693,7 @@ function createFundOrderColumns(): Array<DataTableColumn<FundOrder>> {
   ]
 }
 
-function createLedgerColumns(): Array<DataTableColumn<LedgerEntry>> {
+function createLedgerColumns(): Array<DataViewColumn<LedgerEntry>> {
   return [
     { key: 'createdAt', label: 'Time', sortable: true, render: (entry) => formatTime(entry.createdAt) },
     { key: 'entryType', label: 'Type', sortable: true },
@@ -730,7 +704,7 @@ function createLedgerColumns(): Array<DataTableColumn<LedgerEntry>> {
   ]
 }
 
-function createTradeOrderColumns(): Array<DataTableColumn<OrderResponse>> {
+function createTradeOrderColumns(): Array<DataViewColumn<OrderResponse>> {
   return [
     { key: 'createdAt', label: 'Time', sortable: true, render: (order) => formatTime(order.createdAt) },
     { key: 'symbol', label: 'Symbol', sortable: true },
@@ -803,12 +777,6 @@ function getAssetRows(
   })
 
   return Array.from(rows.values())
-}
-
-function matchesTradeTab(order: OrderResponse, activeTab: TradeOrderTab) {
-  if (activeTab === 'OPEN') return !['FILLED', 'CANCELED', 'REJECTED'].includes(order.status)
-  if (activeTab === 'FILLED') return order.status === 'FILLED'
-  return ['FILLED', 'CANCELED', 'REJECTED'].includes(order.status)
 }
 
 function formatAmount(value: Amount | null | undefined, currency?: string) {

@@ -14,8 +14,18 @@ const binanceMarketData = readFileSync(
 const marketSources = `${markets}\n${binanceMarketData}`
 const orders = readFileSync(join(pagesDir, 'orders', 'OrdersPage.tsx'), 'utf8')
 const positions = readFileSync(join(pagesDir, 'positions', 'PositionsPage.tsx'), 'utf8')
-const accountPagesPath = join(pagesDir, 'account', 'AccountPages.tsx')
-const accountPages = existsSync(accountPagesPath) ? readFileSync(accountPagesPath, 'utf8') : ''
+const accountPagesPath = join(pagesDir, '..', 'shared-widgets', 'account', 'AccountPagesContent.tsx')
+const accountControllerPath = join(pagesDir, '..', 'routes', 'account', 'useAccountRouteController.ts')
+const accountRoutePath = join(pagesDir, '..', 'routes', 'account', 'AccountRoutes.tsx')
+const accountViewPaths = [
+  join(pagesDir, '..', 'pc', 'pages', 'account', 'PcAccountDataCollection.tsx'),
+  join(pagesDir, '..', 'mobile', 'pages', 'account', 'MobileAccountDataCollection.tsx')
+]
+const accountContent = existsSync(accountPagesPath) ? readFileSync(accountPagesPath, 'utf8') : ''
+const accountController = readFileSync(accountControllerPath, 'utf8')
+const accountRoute = readFileSync(accountRoutePath, 'utf8')
+const accountViews = accountViewPaths.map((path) => readFileSync(path, 'utf8')).join('\n')
+const accountPages = `${accountContent}\n${accountController}\n${accountRoute}\n${accountViews}`
 const wallet = readFileSync(join(pagesDir, 'wallet', 'WalletPage.tsx'), 'utf8')
 const accountApi = readFileSync(join(projectRoot, 'packages', 'frontend-core', 'src', 'api', 'accountApi.ts'), 'utf8')
 const tradingTypes = readFileSync(join(projectRoot, 'packages', 'frontend-core', 'src', 'models', 'trading.ts'), 'utf8')
@@ -265,12 +275,12 @@ describe('prototype auth and account center', () => {
   it('creates the account shell and only the live account pages', () => {
     assert.equal(existsSync(accountPagesPath), true)
     assert.match(accountPages, /AccountShell/)
-    assert.match(accountPages, /AccountOverviewPage/)
-    assert.match(accountPages, /AccountAssetsPage/)
-    assert.match(accountPages, /FundingRecordsPage/)
-    assert.match(accountPages, /TradeOrdersPage/)
-    assert.match(accountPages, /KycPage/)
-    assert.match(accountPages, /AccountSettingsPage/)
+    assert.match(accountPages, /AccountOverviewContent/)
+    assert.match(accountPages, /AccountAssetsContent/)
+    assert.match(accountPages, /FundingRecordsContent/)
+    assert.match(accountPages, /TradeOrdersContent/)
+    assert.match(accountPages, /KycContent/)
+    assert.match(accountPages, /AccountSettingsContent/)
     assert.match(accountPages, /\/account\/overview/)
     assert.match(accountPages, /\/account\/assets/)
     assert.match(accountPages, /\/account\/orders\/funding/)
@@ -283,6 +293,7 @@ describe('prototype auth and account center', () => {
   it('connects account pages to the authenticated trading session instead of static placeholders', () => {
     assert.match(accountPages, /useTranslatedAccountData/)
     assert.match(accountPages, /DataTable/)
+    assert.match(accountPages, /DataCardList/)
     assert.match(accountPages, /LoadingState/)
     assert.match(accountPages, /LoginRequiredState/)
     assert.match(accountPages, /ApiErrorState/)
@@ -324,7 +335,7 @@ describe('prototype auth and account center', () => {
   })
 
   it('marks KYC as coming soon for internal testing instead of exposing a live-looking entry', () => {
-    const kycPage = accountPages.slice(accountPages.indexOf('export function KycPage'), accountPages.indexOf('export function AccountSettingsPage'))
+    const kycPage = accountPages.slice(accountPages.indexOf('export function KycContent'), accountPages.indexOf('export function AccountSettingsContent'))
 
     assert.match(kycPage, /Coming soon/)
     assert.match(kycPage, /Internal test/)

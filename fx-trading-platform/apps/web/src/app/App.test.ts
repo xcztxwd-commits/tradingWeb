@@ -48,12 +48,12 @@ describe('prototype-driven app shell and routes', () => {
     }
 
     assert.match(source, /<Route path="\/account" element=\{<Navigate to="\/account\/overview" replace \/>\} \/>/)
-    assert.match(source, /AccountOverviewPage/)
-    assert.match(source, /AccountAssetsPage/)
-    assert.match(source, /FundingRecordsPage/)
-    assert.match(source, /TradeOrdersPage/)
-    assert.match(source, /KycPage/)
-    assert.match(source, /AccountSettingsPage/)
+    assert.match(source, /<AccountRoute mode="overview" \/>/)
+    assert.match(source, /<AccountRoute mode="assets" \/>/)
+    assert.match(source, /<AccountRoute mode="funding-records" \/>/)
+    assert.match(source, /<AccountRoute mode="trade-records" \/>/)
+    assert.match(source, /<AccountRoute mode="kyc" \/>/)
+    assert.match(source, /<AccountRoute mode="account-settings" \/>/)
   })
 
   it('uses login-aware navigation and dedicated dropdown menus', () => {

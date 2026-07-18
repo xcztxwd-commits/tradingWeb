@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import {
   createAccountDataController,
@@ -8,6 +8,7 @@ import {
 import type { AccountSessionData } from './accountSessionModels.ts'
 
 type UseAccountDataOptions = {
+  enabled?: boolean
   refreshMs?: number
   dependencies?: AccountDataControllerDependencies
 }
@@ -25,20 +26,25 @@ const emptyData: Omit<AccountSessionData, 'account'> = {
 }
 
 export function useAccountData({
+  enabled = true,
   refreshMs = 15_000,
   dependencies = defaultAccountDataControllerDependencies
 }: UseAccountDataOptions = {}) {
-  const [controller] = useState(() => createAccountDataController(dependencies, { refreshMs }))
+  const controller = useMemo(
+    () => createAccountDataController(dependencies, { refreshMs }),
+    [dependencies, enabled, refreshMs]
+  )
   const [snapshot, setSnapshot] = useState(controller.getSnapshot)
 
   useEffect(() => {
+    if (!enabled) return
     const unsubscribe = controller.subscribe(setSnapshot)
     void controller.start()
     return () => {
       unsubscribe()
       controller.dispose()
     }
-  }, [controller])
+  }, [controller, enabled])
 
   const data = snapshot.data
   return {

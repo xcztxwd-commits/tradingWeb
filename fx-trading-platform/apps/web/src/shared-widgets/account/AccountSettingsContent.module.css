@@ -320,20 +320,16 @@
   outline: 0;
 }
 
-@media (max-width: 900px) {
-  .settingsGrid {
-    grid-template-columns: 1fr;
-  }
+:global([data-account-platform="mobile"]) .settingsGrid {
+  grid-template-columns: 1fr;
 }
 
-@media (max-width: 560px) {
-  .surfaceHeader,
-  .securityEntry,
-  .linkGrid {
-    grid-template-columns: 1fr;
-  }
+:global([data-account-platform="mobile"]) .surfaceHeader,
+:global([data-account-platform="mobile"]) .securityEntry,
+:global([data-account-platform="mobile"]) .linkGrid {
+  grid-template-columns: 1fr;
+}
 
-  .securityEntry {
-    align-items: stretch;
-  }
+:global([data-account-platform="mobile"]) .securityEntry {
+  align-items: stretch;
 }

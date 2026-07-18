@@ -1,18 +1,18 @@
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router-dom'
+import type { DataViewColumn } from '@fx-platform/ui'
 
-import { DataTable, type DataTableColumn } from '../../components/user-page/DataTable'
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
 import { formatApiError } from '../../components/user-page/userPageModels'
-import { useTranslatedAccountData } from '../../routes/shared/useTranslatedAccountData'
+import type { AccountRouteModel } from '../../routes/account/accountRoute.types'
+import type { AccountDataCollectionComponent } from './dataCollection.types'
 import { toNumber, type AccountSummary, type Amount, type LedgerEntry, type OrderResponse, type PositionResponse } from '@fx-platform/frontend-core'
 
-export function DashboardPage() {
-  const navigate = useNavigate()
+export function DashboardContent({ model, DataCollection }: { model: AccountRouteModel; DataCollection: AccountDataCollectionComponent }) {
+  const navigate = model.navigateTo
   const { t } = useTranslation()
   const { account, orders, positions, ledgerEntries, sessionMode, sessionError, loginRequired, retrySession } =
-    useTranslatedAccountData()
+    model.accountData
 
   const openPositions = useMemo(() => positions.filter((position) => position.status !== 'CLOSED'), [positions])
   const recentOrders = useMemo(() => orders.slice(0, 8), [orders])
@@ -26,7 +26,7 @@ export function DashboardPage() {
     () => getRiskSummary(account, openPositionCount, pendingOrderCount, t),
     [account, openPositionCount, pendingOrderCount, t]
   )
-  const orderColumns = useMemo<Array<DataTableColumn<OrderResponse>>>(
+  const orderColumns = useMemo<Array<DataViewColumn<OrderResponse>>>(
     () => [
       { key: 'createdAt', label: t('common.time'), sortable: true, render: (order) => formatTime(order.createdAt) },
       { key: 'symbol', label: 'Symbol', sortable: true },
@@ -37,7 +37,7 @@ export function DashboardPage() {
     ],
     [t]
   )
-  const ledgerColumns = useMemo<Array<DataTableColumn<LedgerEntry>>>(
+  const ledgerColumns = useMemo<Array<DataViewColumn<LedgerEntry>>>(
     () => [
       { key: 'createdAt', label: t('common.time'), sortable: true, render: (entry) => formatTime(entry.createdAt) },
       { key: 'entryType', label: t('common.type'), sortable: true },
@@ -47,7 +47,7 @@ export function DashboardPage() {
     ],
     [t]
   )
-  const positionColumns = useMemo<Array<DataTableColumn<PositionResponse>>>(
+  const positionColumns = useMemo<Array<DataViewColumn<PositionResponse>>>(
     () => [
       { key: 'symbol', label: 'Symbol', sortable: true },
       { key: 'side', label: 'Side', sortable: true },
@@ -174,7 +174,7 @@ export function DashboardPage() {
       <div className="user-page__split">
         <section className="user-page__events">
           <h2>{t('dashboard.recentOrders')}</h2>
-          <DataTable
+          <DataCollection
             rows={recentOrders}
             columns={orderColumns}
             rowKey={(order) => order.id}
@@ -186,7 +186,7 @@ export function DashboardPage() {
 
         <section className="user-page__events">
           <h2>{t('dashboard.recentLedger')}</h2>
-          <DataTable
+          <DataCollection
             rows={recentLedgerEntries}
             columns={ledgerColumns}
             rowKey={(entry) => entry.id}
@@ -199,7 +199,7 @@ export function DashboardPage() {
 
       <section className="user-page__events">
         <h2>{t('positions.current')}</h2>
-        <DataTable
+        <DataCollection
           rows={openPositions}
           columns={positionColumns}
           rowKey={(position) => position.id}

@@ -5,17 +5,20 @@ import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const settingsPagePath = join(currentDir, 'SettingsPage.tsx')
-const settingsStylesPath = join(currentDir, 'SettingsPage.module.css')
-const appPath = join(currentDir, '..', '..', 'app', 'App.tsx')
+const srcDir = join(currentDir, '..', '..')
+const settingsPagePath = join(srcDir, 'shared-widgets', 'account', 'SettingsContent.tsx')
+const settingsStylesPath = join(srcDir, 'shared-widgets', 'account', 'AccountSettingsContent.module.css')
+const settingsPreferencesPath = join(currentDir, 'settingsPreferences.ts')
+const controllerPath = join(currentDir, 'useAccountRouteController.ts')
+const appPath = join(srcDir, 'app', 'App.tsx')
 
 describe('SettingsPage theme controls', () => {
   it('mounts a real settings page instead of a placeholder route', () => {
     assert.equal(existsSync(settingsPagePath), true, 'SettingsPage.tsx should exist')
     const appSource = readFileSync(appPath, 'utf8')
 
-    assert.match(appSource, /const SettingsPage = lazy/)
-    assert.match(appSource, /<Route path="\/settings" element=\{<SettingsPage \/>\} \/>/)
+    assert.match(appSource, /import \{ AccountRoute \} from '\.\.\/routes\/account\/AccountRoutes'/)
+    assert.match(appSource, /<Route path="\/settings" element=\{<AccountRoute mode="settings" \/>\} \/>/)
     assert.doesNotMatch(appSource, /<Route path="\/settings" element=\{<PlaceholderPage title="设置" \/>\}/)
   })
 
@@ -45,11 +48,13 @@ describe('SettingsPage theme controls', () => {
   it('turns static preferences into persisted controls', () => {
     const source = readFileSync(settingsPagePath, 'utf8')
     const styles = readFileSync(settingsStylesPath, 'utf8')
+    const persistenceSource = `${readFileSync(settingsPreferencesPath, 'utf8')}\n${readFileSync(controllerPath, 'utf8')}`
 
-    assert.match(source, /settingsStorageKey = 'fx\.settings\.preferences\.v1'/)
-    assert.match(source, /useState\(\(\) => loadSettingsPreferences\(\)\)/)
-    assert.match(source, /window\.localStorage\.getItem\(settingsStorageKey\)/)
-    assert.match(source, /window\.localStorage\.setItem\(settingsStorageKey, JSON\.stringify\(nextPreferences\)\)/)
+    assert.match(persistenceSource, /settingsStorageKey = 'fx\.settings\.preferences\.v1'/)
+    assert.match(persistenceSource, /useState\(\(\) => loadSettingsPreferences\(\)\)/)
+    assert.match(persistenceSource, /window\.localStorage\.getItem\(settingsStorageKey\)/)
+    assert.match(persistenceSource, /window\.localStorage\.setItem\(settingsStorageKey, JSON\.stringify\(nextPreferences\)\)/)
+    assert.doesNotMatch(source, /localStorage|useState/)
     assert.match(source, /PreferenceToggle/)
     assert.match(source, /PreferenceSelect/)
     assert.match(source, /PreferenceSegmentedControl/)
@@ -70,7 +75,7 @@ describe('SettingsPage theme controls', () => {
   })
 
   it('uses tokenized page styling', () => {
-    assert.equal(existsSync(settingsStylesPath), true, 'SettingsPage.module.css should exist')
+    assert.equal(existsSync(settingsStylesPath), true, 'AccountSettingsContent.module.css should exist')
     const styles = readFileSync(settingsStylesPath, 'utf8')
 
     assert.match(styles, /var\(--user-page-bg(?:,|\))/)

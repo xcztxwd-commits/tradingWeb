@@ -1,75 +1,28 @@
 import { Bell, CandlestickChart, Eye, LayoutTemplate, LockKeyhole, MonitorCog, ShieldCheck } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
 import { LanguageSwitcher } from '../../components/LanguageSwitcher'
-import styles from './SettingsPage.module.css'
+import type { AccountRouteModel } from '../../routes/account/accountRoute.types'
+import {
+  accountPanelFocusOptions,
+  defaultOrderTypeOptions,
+  loginAlertModeOptions,
+  mobileTableModeOptions,
+  numberFontOptions,
+  pnlDisplayOptions,
+  quickEntryOptions,
+  slippageAlertOptions,
+  tableDensityOptions,
+  terminalLayoutOptions,
+  tradeNotificationsOptions
+} from '../../routes/account/settingsPreferences'
+import styles from './AccountSettingsContent.module.css'
 
-const settingsStorageKey = 'fx.settings.preferences.v1'
-
-const accountPanelFocusOptions = ['currentOrders', 'accountInfo', 'fundOverview'] as const
-const loginAlertModeOptions = ['everyLogin', 'unusualLogin', 'off'] as const
-const mobileTableModeOptions = ['cardList', 'summaryCards'] as const
-const numberFontOptions = ['Tabular figures', 'System default'] as const
-const pnlDisplayOptions = ['colorAndSign', 'signOnly', 'valueOnly'] as const
-const quickEntryOptions = ['marketsOrdersPositions', 'walletSecuritySettings'] as const
-const slippageAlertOptions = ['0.30%', '0.50%', '1.00%'] as const
-const tableDensityOptions = ['compact', 'standard', 'comfortable'] as const
-const terminalLayoutOptions = ['chartFirst', 'orderFirst'] as const
-const tradeNotificationsOptions = ['inApp', 'silent'] as const
-const defaultOrderTypeOptions = ['Limit', 'Market'] as const
-
-type SettingsPreferences = {
-  accountPanelFocus: (typeof accountPanelFocusOptions)[number]
-  defaultOrderType: (typeof defaultOrderTypeOptions)[number]
-  fundReviewNotifications: boolean
-  loginAlertMode: (typeof loginAlertModeOptions)[number]
-  mobileTableMode: (typeof mobileTableModeOptions)[number]
-  numberFont: (typeof numberFontOptions)[number]
-  pnlDisplay: (typeof pnlDisplayOptions)[number]
-  priceProtection: boolean
-  quickEntry: (typeof quickEntryOptions)[number]
-  requireOrderConfirm: boolean
-  riskAlerts: boolean
-  slippageAlert: (typeof slippageAlertOptions)[number]
-  tableDensity: (typeof tableDensityOptions)[number]
-  terminalLayout: (typeof terminalLayoutOptions)[number]
-  tradeNotifications: (typeof tradeNotificationsOptions)[number]
-}
-
-const defaultPreferences: SettingsPreferences = {
-  accountPanelFocus: 'currentOrders',
-  defaultOrderType: 'Limit',
-  fundReviewNotifications: true,
-  loginAlertMode: 'everyLogin',
-  mobileTableMode: 'cardList',
-  numberFont: 'Tabular figures',
-  pnlDisplay: 'colorAndSign',
-  priceProtection: true,
-  quickEntry: 'marketsOrdersPositions',
-  requireOrderConfirm: true,
-  riskAlerts: true,
-  slippageAlert: '0.50%',
-  tableDensity: 'standard',
-  terminalLayout: 'chartFirst',
-  tradeNotifications: 'inApp'
-}
-
-export function SettingsPage() {
+export function SettingsContent({ model }: { model: AccountRouteModel }) {
   const { t } = useTranslation()
-  const [preferences, setPreferences] = useState(() => loadSettingsPreferences())
-  const [saveNoticeId, setSaveNoticeId] = useState(0)
-
-  const updatePreference = <Key extends keyof SettingsPreferences>(key: Key, value: SettingsPreferences[Key]) => {
-    setPreferences((current) => {
-      const nextPreferences = { ...current, [key]: value } as SettingsPreferences
-      saveSettingsPreferences(nextPreferences)
-      return nextPreferences
-    })
-    setSaveNoticeId((current) => current + 1)
-  }
+  const { preferences, saveNoticeId, updatePreference } = model.settings
 
   return (
     <section className={`${styles.page} user-page`} aria-labelledby="settings-title">
@@ -261,7 +214,6 @@ export function SettingsPage() {
     </section>
   )
 }
-
 function SettingsSurface({
   children,
   description,
@@ -368,70 +320,4 @@ function PreferenceSegmentedControl<T extends string>({
       </div>
     </fieldset>
   )
-}
-
-function loadSettingsPreferences(): SettingsPreferences {
-  try {
-    if (typeof window === 'undefined') return defaultPreferences
-    const storedPreferences = window.localStorage.getItem(settingsStorageKey)
-    if (!storedPreferences) return defaultPreferences
-    return normalizeSettingsPreferences(JSON.parse(storedPreferences))
-  } catch {
-    return defaultPreferences
-  }
-}
-
-function normalizeSettingsPreferences(storedPreferences: Partial<Record<keyof SettingsPreferences, unknown>>) {
-  return {
-    accountPanelFocus: pickStoredOption(
-      storedPreferences.accountPanelFocus,
-      accountPanelFocusOptions,
-      defaultPreferences.accountPanelFocus
-    ),
-    defaultOrderType: pickStoredOption(
-      storedPreferences.defaultOrderType,
-      defaultOrderTypeOptions,
-      defaultPreferences.defaultOrderType
-    ),
-    fundReviewNotifications:
-      typeof storedPreferences.fundReviewNotifications === 'boolean'
-        ? storedPreferences.fundReviewNotifications
-        : defaultPreferences.fundReviewNotifications,
-    loginAlertMode: pickStoredOption(storedPreferences.loginAlertMode, loginAlertModeOptions, defaultPreferences.loginAlertMode),
-    mobileTableMode: pickStoredOption(
-      storedPreferences.mobileTableMode,
-      mobileTableModeOptions,
-      defaultPreferences.mobileTableMode
-    ),
-    numberFont: pickStoredOption(storedPreferences.numberFont, numberFontOptions, defaultPreferences.numberFont),
-    pnlDisplay: pickStoredOption(storedPreferences.pnlDisplay, pnlDisplayOptions, defaultPreferences.pnlDisplay),
-    priceProtection:
-      typeof storedPreferences.priceProtection === 'boolean' ? storedPreferences.priceProtection : defaultPreferences.priceProtection,
-    quickEntry: pickStoredOption(storedPreferences.quickEntry, quickEntryOptions, defaultPreferences.quickEntry),
-    requireOrderConfirm:
-      typeof storedPreferences.requireOrderConfirm === 'boolean'
-        ? storedPreferences.requireOrderConfirm
-        : defaultPreferences.requireOrderConfirm,
-    riskAlerts: typeof storedPreferences.riskAlerts === 'boolean' ? storedPreferences.riskAlerts : defaultPreferences.riskAlerts,
-    slippageAlert: pickStoredOption(storedPreferences.slippageAlert, slippageAlertOptions, defaultPreferences.slippageAlert),
-    tableDensity: pickStoredOption(storedPreferences.tableDensity, tableDensityOptions, defaultPreferences.tableDensity),
-    terminalLayout: pickStoredOption(storedPreferences.terminalLayout, terminalLayoutOptions, defaultPreferences.terminalLayout),
-    tradeNotifications: pickStoredOption(
-      storedPreferences.tradeNotifications,
-      tradeNotificationsOptions,
-      defaultPreferences.tradeNotifications
-    )
-  } satisfies SettingsPreferences
-}
-
-function pickStoredOption<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
-  return typeof value === 'string' && options.includes(value as T) ? (value as T) : fallback
-}
-
-function saveSettingsPreferences(nextPreferences: SettingsPreferences) {
-  try {
-    window.localStorage.setItem(settingsStorageKey, JSON.stringify(nextPreferences))
-  } catch {
-    // Settings remain usable in restricted browser contexts.
-  }
 }
