@@ -1,3 +1,11 @@
+.terminalSkeleton {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr);
+  gap: 1px;
+  background: var(--trading-page-bg, var(--theme-background));
+}
+
 .orderBookSkeleton,
 .tableSkeleton {
   --terminal-skeleton-surface: var(--trading-surface-2);
@@ -58,6 +66,10 @@
 }
 
 @media (max-width: 760px) {
+  .terminalSkeleton {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .orderBookSkeleton,
   .tableSkeleton {
     min-height: 150px;

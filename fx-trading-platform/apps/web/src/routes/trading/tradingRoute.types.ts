@@ -1,17 +1,11 @@
-import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from '../../pages/trading/chartSettings'
+import type { ChartSettings, ChartType, DrawingMagnetMode, DrawingTool, IndicatorSettings } from '../../shared-widgets/trading/chartSettings'
 import type { AccountSummary, LedgerEntry, OcoOrderPayload, OrderPayload, OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
 import type { TradingMarket, TradingPeriod, TradingQuote } from '@fx-platform/frontend-core'
 import type { TradingBalances, TradingSessionMode } from '@fx-platform/frontend-core'
-import type {
-  TradingDropSide,
-  TradingLayout,
-  TradingLayoutPreset,
-  TradingPanelId,
-  TradingSplitDirection
-} from '../../stores/layoutStore'
 import type { AccountTransferResponse, BatchActionResponse, FundingSettlement, OcoOrderGroupResponse, Trade } from '@fx-platform/shared-types'
-import type { TradingMarketDataStatusView } from '../../pages/trading/tradingPageMarketDataStatus'
-import type { PerpetualTradingControlsModel } from '../../pages/trading/usePerpetualTradingControls'
+import type { TradingMarketDataStatusView } from '../../shared-widgets/trading/tradingPageMarketDataStatus'
+import type { PerpetualTradingControlsModel } from '../../shared-widgets/trading/usePerpetualTradingControls'
+import type { TradePanelControllerModel } from '../../shared-widgets/trading/order-form/useTradePanelController'
 import type { TradingProduct } from '../../app/tradingRoutes'
 
 export type ChartThemeMode = 'dark' | 'light'
@@ -46,18 +40,6 @@ export type TradingAccountPanelData = {
   onCloseAllPositions: () => Promise<BatchActionResponse>
 }
 
-export type TradingWorkspaceLayoutControls = {
-  layout: TradingLayout
-  activePreset: TradingLayoutPreset | null
-  applyPreset: (preset: TradingLayoutPreset) => void
-  beginSplitResize: (path: string, direction: TradingSplitDirection, containerSize: number) => void
-  resizeByDelta: (delta: { deltaX: number; deltaY: number }) => void
-  endResize: () => void
-  movePanel: (sourceId: TradingPanelId, targetId: TradingPanelId, side: TradingDropSide) => void
-  resetLayout: () => void
-  resetSignal: number
-}
-
 export type TradingRouteModel = {
   accountPanel: TradingAccountPanelData
   accountId?: string
@@ -66,8 +48,10 @@ export type TradingRouteModel = {
   chartSettings: ChartSettings
   chartThemeMode: ChartThemeMode
   chartTitle: string
+  controllerSentinel: string
   indicators: string[]
   loginRequired: boolean
+  marketDrawerOpen: boolean
   market: TradingMarket
   markets: TradingMarket[]
   favorites: Set<string>
@@ -80,9 +64,14 @@ export type TradingRouteModel = {
   onRetrySession: () => Promise<void> | void
   onSelectSymbol: (symbol: string) => void
   onFavorite: (symbol: string) => void
+  closeMarketDrawer: () => void
+  closeOrderSheet: () => void
+  closeQuoteDrawer: () => void
+  orderSheetOpen: boolean
   product: TradingProduct
   quote: TradingQuote
   quotes: Record<string, TradingQuote>
+  quoteDrawerOpen: boolean
   sessionError?: string | null
   sessionReady: boolean
   sessionStatusLabel: string
@@ -97,10 +86,6 @@ export type TradingRouteModel = {
   tradePricePrefill: { id: number; price: number } | null
   terminalLoading: boolean
   token: string | null
+  tradePanel: TradePanelControllerModel
   tradePanelSessionMode: TradingSessionMode
-}
-
-/** Temporary name used only while the current views are migrated in Task 15. */
-export type TradingTerminalViewProps = TradingRouteModel & {
-  workspaceLayoutControls: TradingWorkspaceLayoutControls
 }

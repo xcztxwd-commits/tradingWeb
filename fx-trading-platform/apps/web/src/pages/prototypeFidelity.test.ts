@@ -38,7 +38,7 @@ const styles = readFileSync(join(srcDir, 'styles.css'), 'utf8')
 const themeStyles = readFileSync(join(webRoot, '..', '..', 'packages', 'ui', 'src', 'theme', 'theme.css'), 'utf8')
 const homeStyles = readFileSync(join(sharedHomeDir, 'HomeContent.module.css'), 'utf8')
 const authStyles = readFileSync(join(srcDir, 'shared-widgets', 'auth', 'AuthPageContent.module.css'), 'utf8')
-const tradingStyles = readFileSync(join(pagesDir, 'trading', 'TradingPage.module.css'), 'utf8')
+const tradingStyles = readFileSync(join(srcDir, 'routes', 'trading', 'TradingRoute.module.css'), 'utf8')
 
 const mojibakePattern =
   /鐢ㄦ埛|琛屾儏|鐧诲綍|娉ㄥ唽|閭|鎵嬫満|璧勯噾|鎬昏|浜ゆ槗|鍏呭€|鎻愮幇|甯傚€|鍔犲瘑|韬唤|甯歌/

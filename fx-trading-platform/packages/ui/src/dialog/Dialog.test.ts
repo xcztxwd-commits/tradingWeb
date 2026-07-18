@@ -11,7 +11,7 @@ const projectRoot = resolve(currentDir, '../../../..')
 const componentSource = readFileSync(resolve(currentDir, 'Dialog.tsx'), 'utf8')
 const styles = readFileSync(resolve(currentDir, 'Dialog.module.css'), 'utf8')
 const transferSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/wallet/TransferDialog.tsx'), 'utf8')
-const orderSource = readFileSync(resolve(projectRoot, 'apps/web/src/features/trading/components/OrderConfirmationDialog.tsx'), 'utf8')
+const orderSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/trading/order-form/OrderConfirmationDialog.tsx'), 'utf8')
 
 describe('overlay close decisions', () => {
   it('allows configured Escape and backdrop closes', () => {

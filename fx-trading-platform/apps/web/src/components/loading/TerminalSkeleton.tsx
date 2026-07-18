@@ -7,6 +7,15 @@ type SkeletonRowsProps = {
   rows?: number
 }
 
+export function TerminalSkeleton() {
+  return (
+    <div className={styles.terminalSkeleton} role="status" aria-live="polite">
+      <OrderBookSkeleton rows={8} />
+      <TableSkeleton rows={4} />
+    </div>
+  )
+}
+
 export function OrderBookSkeleton({ rows = 14 }: SkeletonRowsProps) {
   const { t } = useTranslation()
 

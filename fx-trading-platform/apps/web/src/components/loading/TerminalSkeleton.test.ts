@@ -13,6 +13,7 @@ describe('shared terminal skeleton components', () => {
     assert.equal(existsSync(componentPath), true)
 
     const source = readFileSync(componentPath, 'utf8')
+    assert.match(source, /export function TerminalSkeleton/)
     assert.match(source, /export function OrderBookSkeleton/)
     assert.match(source, /export function TableSkeleton/)
     assert.match(source, /role="status"/)

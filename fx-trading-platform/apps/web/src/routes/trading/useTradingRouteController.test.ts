@@ -5,53 +5,53 @@ import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
+const webSrc = join(currentDir, '..', '..')
 const routeTypesSource = readFileSync(join(currentDir, 'tradingRoute.types.ts'), 'utf8')
 const controllerSource = readFileSync(join(currentDir, 'useTradingRouteController.ts'), 'utf8')
-const pageSource = readFileSync(join(currentDir, '..', '..', 'pages', 'trading', 'TradingPage.tsx'), 'utf8')
+const routeSource = readFileSync(join(currentDir, 'TradingRoute.tsx'), 'utf8')
+const pcSource = readFileSync(join(webSrc, 'pc', 'pages', 'trading', 'PcTradingTerminal.tsx'), 'utf8')
+const mobileSource = readFileSync(join(webSrc, 'mobile', 'pages', 'trading', 'MobileTradingTerminal.tsx'), 'utf8')
+const tradePanelControllerSource = readFileSync(
+  join(webSrc, 'shared-widgets', 'trading', 'order-form', 'useTradePanelController.ts'),
+  'utf8'
+)
 
 describe('trading route controller contract', () => {
   it('keeps the shared route model independent from PC workspace layout state', () => {
-    const sharedModel = sourceBetween(routeTypesSource, 'export type TradingRouteModel = {', '/** Temporary name')
-    const compatibilityModel = sourceBetween(routeTypesSource, 'export type TradingTerminalViewProps', '\n}')
-
     for (const field of [
       'accountPanel', 'accountId', 'balances', 'chartCallbacks', 'chartSettings', 'chartThemeMode',
-      'chartTitle', 'indicators', 'loginRequired', 'market', 'markets', 'favorites', 'marketDataStatusView',
-      'onLoginRequired', 'onOpenMarkets', 'onOpenQuote', 'onOpenTrade', 'onSelectPrice', 'onRetrySession',
-      'onSelectSymbol', 'onFavorite', 'product', 'quote', 'quotes', 'sessionError', 'sessionReady',
-      'sessionStatusLabel', 'sessionStatusText', 'submitOrder', 'submitOco', 'perpetualControls', 'symbol',
-      'tradeMinOrderAmount', 'tradePricePrecision', 'tradeQuantityPrecision', 'tradePricePrefill',
-      'terminalLoading', 'token', 'tradePanelSessionMode'
+      'chartTitle', 'controllerSentinel', 'indicators', 'loginRequired', 'market', 'markets', 'favorites',
+      'marketDataStatusView', 'onLoginRequired', 'onOpenMarkets', 'onOpenQuote', 'onOpenTrade',
+      'onSelectPrice', 'onRetrySession', 'onSelectSymbol', 'onFavorite', 'product', 'quote', 'quotes',
+      'sessionError', 'sessionReady', 'sessionStatusLabel', 'sessionStatusText', 'submitOrder',
+      'submitOco', 'perpetualControls', 'symbol', 'tradePanel', 'tradeMinOrderAmount',
+      'tradePricePrecision', 'tradeQuantityPrecision', 'tradePricePrefill', 'terminalLoading',
+      'token', 'tradePanelSessionMode'
     ]) {
-      assert.match(sharedModel, new RegExp(`\\b${field}[?]?:`), `missing TradingRouteModel.${field}`)
+      assert.match(routeTypesSource, new RegExp(`\\b${field}[?]?:`), `missing TradingRouteModel.${field}`)
     }
-    assert.doesNotMatch(sharedModel, /workspaceLayoutControls/)
-    assert.match(compatibilityModel, /TradingRouteModel/)
-    assert.match(compatibilityModel, /workspaceLayoutControls: TradingWorkspaceLayoutControls/)
+    assert.doesNotMatch(routeTypesSource, /workspaceLayoutControls|TradingTerminalViewProps|layoutStore/)
+    assert.match(pcSource, /useResizableLayout\(\)/)
+    assert.doesNotMatch(mobileSource, /useResizableLayout|TradingWorkspace/)
   })
 
-  it('owns one trading session and market runtime above both current views', () => {
-    assert.match(controllerSource, /useTradingSession\(\)/)
-    assert.match(controllerSource, /useTradingQuoteMap\(quoteMarkets,\s*token,\s*handleQuoteStatus\)/)
-    assert.match(controllerSource, /startQuoteMarketDataAdapter\(selectedSymbol, token\)/)
-    assert.match(controllerSource, /return \{[\s\S]*model:[\s\S]*sourceNotice/)
-    assert.match(pageSource, /useTradingRouteController\(\{\s*product\s*\}\)/)
-    assert.doesNotMatch(pageSource, /useTradingSession\(\)/)
-    assert.doesNotMatch(pageSource, /useTradingQuoteMap\(/)
-    assert.doesNotMatch(pageSource, /startQuoteMarketDataAdapter\(/)
+  it('owns one trading session, market runtime and trade form above both views', () => {
+    assert.equal((controllerSource.match(/useTradingSession\(\)/g) ?? []).length, 1)
+    assert.equal((controllerSource.match(/useTradingQuoteMap\(quoteMarkets,\s*token,\s*handleQuoteStatus\)/g) ?? []).length, 1)
+    assert.equal((controllerSource.match(/startQuoteMarketDataAdapter\(selectedSymbol, token\)/g) ?? []).length, 1)
+    assert.equal((controllerSource.match(/useTradePanelController\(/g) ?? []).length, 1)
+    assert.match(tradePanelControllerSource, /const buyForm = useTradeForm/)
+    assert.match(tradePanelControllerSource, /const sellForm = useTradeForm/)
+    assert.match(tradePanelControllerSource, /const \[confirmation, setConfirmation\]/)
+    assert.match(tradePanelControllerSource, /useTradeSubmit\(/)
+    assert.doesNotMatch(`${pcSource}\n${mobileSource}`, /useTradingSession|useTradingQuoteMap|useTradePanelController/)
   })
 
-  it('adapts the same route model to desktop and mobile without rebuilding controllers', () => {
-    assert.match(pageSource, /const viewProps: TradingTerminalViewProps = \{[\s\S]*\.\.\.model,[\s\S]*workspaceLayoutControls/)
-    assert.match(pageSource, /<TradingDesktopView \{\.\.\.viewProps\} \/>/)
-    assert.match(pageSource, /<TradingMobileView \{\.\.\.viewProps\} \/>/)
+  it('adapts the exact same model through PlatformView without rebuilding controllers', () => {
+    assert.match(routeSource, /const controller = useTradingRouteController\(\{ product \}\)/)
+    assert.match(routeSource, /<PlatformView[\s\S]*model=\{controller\.model\}/)
+    assert.match(pcSource, /\{ model \}: \{ model: TradingRouteModel \}/)
+    assert.match(mobileSource, /\{ model \}: \{ model: TradingRouteModel \}/)
+    assert.match(routeSource, /data-controller-sentinel=\{controller\.model\.controllerSentinel\}/)
   })
 })
-
-function sourceBetween(source: string, start: string, end: string) {
-  const startIndex = source.indexOf(start)
-  assert.notEqual(startIndex, -1, `Missing source marker: ${start}`)
-  const endIndex = source.indexOf(end, startIndex + start.length)
-  assert.notEqual(endIndex, -1, `Missing source marker: ${end}`)
-  return source.slice(startIndex, endIndex)
-}

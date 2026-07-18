@@ -9,7 +9,7 @@ const projectRoot = resolve(currentDir, '../../../..')
 const componentSource = readFileSync(resolve(currentDir, 'IconButton.tsx'), 'utf8')
 const componentStyles = readFileSync(resolve(currentDir, 'IconButton.module.css'), 'utf8')
 const packageIndexSource = readFileSync(resolve(currentDir, '../index.ts'), 'utf8')
-const toolbarSource = readFileSync(resolve(projectRoot, 'apps/web/src/pages/trading/components/ChartTopToolbar.tsx'), 'utf8')
+const toolbarSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/trading/components/ChartTopToolbar.tsx'), 'utf8')
 
 describe('IconButton component contract', () => {
   it('renders a non-submit accessible button and forwards disabled/custom attributes', () => {

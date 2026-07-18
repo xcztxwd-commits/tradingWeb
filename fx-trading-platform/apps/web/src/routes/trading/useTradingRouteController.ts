@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useTheme } from '@fx-platform/ui'
@@ -27,21 +27,22 @@ import {
   formatTradingChartTitle,
   getTradingMarketsForProduct,
   mergeWithLocalTradingMarkets
-} from '../../pages/trading/tradingPageMarketSelection'
+} from '../../shared-widgets/trading/tradingPageMarketSelection'
 import {
   getTradingSessionStatusLabel,
   getTradingSessionStatusText
-} from '../../pages/trading/tradingPageSessionStatus'
+} from '../../shared-widgets/trading/tradingPageSessionStatus'
 import {
   getTradeMinOrderAmount,
   getTradePricePrecision,
   getTradeQuantityPrecision,
   mergeMarketRules
-} from '../../pages/trading/tradingPageTradeRules'
-import { usePerpetualTradingControls } from '../../pages/trading/usePerpetualTradingControls'
-import { useTradingChartSettings } from '../../pages/trading/useTradingChartSettings'
-import { useTradingMarketDataStatus } from '../../pages/trading/useTradingMarketDataStatus'
-import { useTradingQuoteMap } from '../../pages/trading/useTradingQuotes'
+} from '../../shared-widgets/trading/tradingPageTradeRules'
+import { usePerpetualTradingControls } from '../../shared-widgets/trading/usePerpetualTradingControls'
+import { useTradingChartSettings } from '../../shared-widgets/trading/useTradingChartSettings'
+import { useTradingMarketDataStatus } from '../../shared-widgets/trading/useTradingMarketDataStatus'
+import { useTradingQuoteMap } from '../../shared-widgets/trading/useTradingQuotes'
+import { useTradePanelController } from '../../shared-widgets/trading/order-form/useTradePanelController'
 import { translateCoreMessage } from '../shared/translateCoreMessage'
 import type { TradingRouteModel } from './tradingRoute.types'
 
@@ -51,6 +52,7 @@ type TradingRouteControllerOptions = {
 
 export function useTradingRouteController({ product }: TradingRouteControllerOptions) {
   const { t } = useTranslation()
+  const controllerSentinel = useId()
   const navigate = useNavigate()
   const { symbol: routeSymbol } = useParams<{ symbol?: string }>()
   const routedSymbol = normalizeTradingProductSymbol(product, routeSymbol) ?? defaultTradingSymbols[product]
@@ -144,7 +146,6 @@ export function useTradingRouteController({ product }: TradingRouteControllerOpt
   const tradeMinOrderAmount = getTradeMinOrderAmount(selectedMarketWithRules)
   const tradePricePrecision = getTradePricePrecision(selectedMarketWithRules)
   const tradeQuantityPrecision = getTradeQuantityPrecision(selectedMarketWithRules, tradeMinOrderAmount)
-
   useEffect(() => startQuoteMarketDataAdapter(selectedSymbol, token), [selectedSymbol, token])
   useEffect(() => {
     setTradePricePrefill(null)
@@ -244,31 +245,36 @@ export function useTradingRouteController({ product }: TradingRouteControllerOpt
     setTradePricePrefill({ id: Date.now(), price })
   }, [])
 
+  const tradePanel = useTradePanelController({
+    accountId, balances, loginRequired, sessionError, sessionMode, sessionReady,
+    adapterSettings: perpetualControls.adapterSettings,
+    category: selectedMarketWithRules.category,
+    leverage: selectedMarketWithRules.leverage,
+    minOrderAmount: tradeMinOrderAmount,
+    productType: selectedMarketWithRules.productType,
+    rules: selectedMarketWithRules.rules,
+    symbol: selectedSymbol,
+    settingsReady: perpetualControls.ready,
+    onLoginRequired: handleTradeLoginRequired, onRetrySession: retrySession,
+    onSubmitOco: submitOco, onSubmitOrder: submitOrder,
+    pricePrecision: tradePricePrecision, pricePrefill: tradePricePrefill,
+    quantityPrecision: tradeQuantityPrecision
+  })
+
   const accountPanel = {
-    account,
-    ledgerEntries,
+    account, ledgerEntries, orders, trades, positions, positionHistory,
+    fundingSettlements, transfers, sessionReady,
     loading: terminalLoading,
-    orders,
-    trades,
-    positions,
-    positionHistory,
-    fundingSettlements,
-    transfers,
-    sessionReady,
     onCancelAllOrders: cancelAllOrders,
     onCloseAllPositions: closeAllPositions,
     onClosePosition: closePosition
   }
   const routeModel: TradingRouteModel = {
-    accountPanel,
-    accountId,
-    balances,
-    chartCallbacks,
-    chartSettings,
-    chartThemeMode,
+    accountPanel, accountId, balances,
+    chartCallbacks, chartSettings, chartThemeMode, indicators,
     chartTitle: formatTradingChartTitle(selectedMarketWithRules, t),
-    indicators,
-    loginRequired,
+    controllerSentinel,
+    loginRequired, marketDrawerOpen,
     market: selectedMarketWithRules,
     favorites: favoriteSymbols,
     marketDataStatusView: marketDataStatusView,
@@ -281,23 +287,18 @@ export function useTradingRouteController({ product }: TradingRouteControllerOpt
     onRetrySession: retrySession,
     onSelectSymbol: selectSymbol,
     onFavorite: toggleFavorite,
-    product,
+    closeMarketDrawer: () => setMarketDrawerOpen(false),
+    closeOrderSheet: () => setOrderSheetOpen(false),
+    closeQuoteDrawer: () => setQuoteDrawerOpen(false),
+    orderSheetOpen,
+    product, quotes, quoteDrawerOpen,
     quote: selectedQuote,
-    quotes,
-    sessionError,
-    sessionReady,
-    sessionStatusLabel,
-    sessionStatusText,
-    submitOrder,
-    submitOco,
+    sessionError, sessionReady, sessionStatusLabel, sessionStatusText,
+    submitOrder, submitOco,
     perpetualControls,
     symbol: selectedSymbol,
-    tradeMinOrderAmount,
-    tradePricePrecision,
-    tradeQuantityPrecision,
-    tradePricePrefill,
-    terminalLoading,
-    token,
+    tradeMinOrderAmount, tradePricePrecision, tradeQuantityPrecision, tradePricePrefill,
+    terminalLoading, token, tradePanel,
     tradePanelSessionMode: sessionMode
   }
 

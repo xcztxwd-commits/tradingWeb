@@ -56,9 +56,12 @@ const requiredFiles = [
   'docs/architecture.md',
   'apps/web/package.json',
   'apps/web/src/app/App.tsx',
-  'apps/web/src/pages/trading/TradingPage.tsx',
-  'apps/web/src/pages/trading/components/KLineChartPanel.tsx',
-  'apps/web/src/features/trading/components/TradePanel.tsx',
+  'apps/web/src/routes/trading/TradingRoute.tsx',
+  'apps/web/src/pc/pages/trading/PcTradingTerminal.tsx',
+  'apps/web/src/mobile/pages/trading/MobileTradingTerminal.tsx',
+  'apps/web/src/shared-widgets/trading/components/KLineChartPanel.tsx',
+  'apps/web/src/shared-widgets/trading/market-data/MarketSidePanel.tsx',
+  'apps/web/src/shared-widgets/trading/order-form/TradePanel.tsx',
   'packages/frontend-core/src/market/tradingMarketApi.ts',
   'packages/frontend-core/src/market/tradingMarketAdapters.ts',
   'packages/frontend-core/src/market/tradingModels.ts',
@@ -79,7 +82,12 @@ const requiredFiles = [
 const retiredFiles = [
   'apps/web/src/pages/trade/TradePage.tsx',
   'apps/web/src/components/chart/KLineChartWrapper.tsx',
-  'apps/web/src/components/order-panel/OrderPanel.tsx'
+  'apps/web/src/components/order-panel/OrderPanel.tsx',
+  'apps/web/src/pages/trading/TradingPage.tsx',
+  'apps/web/src/pages/trading/components/KLineChartPanel.tsx',
+  'apps/web/src/pages/trading/components/TerminalSkeleton.tsx',
+  'apps/web/src/features/trading/components/TradePanel.tsx',
+  'apps/web/src/components/market-side-panel/MarketSidePanel.tsx'
 ]
 
 const contentChecks = [
@@ -120,9 +128,9 @@ const contentChecks = [
   ['apps/web/src/app/App.tsx', 'path="/trading" element={<LegacyTradingRedirect />}'],
   ['apps/web/src/app/App.tsx', 'path="/trade/spot/:symbol?"'],
   ['apps/web/src/app/App.tsx', 'path="/trade/perpetual/:symbol?"'],
-  ['apps/web/src/components/market-side-panel/MarketSidePanel.tsx', '../loading/TerminalSkeleton'],
+  ['apps/web/src/shared-widgets/trading/market-data/MarketSidePanel.tsx', '../../../components/loading/TerminalSkeleton'],
   ['apps/web/src/components/loading/TerminalSkeleton.tsx', 'export function OrderBookSkeleton'],
-  ['apps/web/src/pages/trading/components/TerminalSkeleton.tsx', 'components/loading/TerminalSkeleton'],
+  ['apps/web/src/routes/trading/TradingRoute.tsx', '../../components/loading/TerminalSkeleton'],
   ['packages/frontend-core/src/api/marketApi.ts', '/api/market'],
   ['packages/frontend-core/src/market/marketStream.ts', '/topic/market/quotes/'],
   ['packages/frontend-core/src/api/tradingApi.ts', '/close?accountId='],
@@ -143,9 +151,9 @@ const forbiddenContentChecks = [
 ]
 
 const forbiddenFrontendImports = [
-  ['apps/web/src/components/market-side-panel/MarketSidePanel.tsx', '../../pages/trading'],
-  ['apps/web/src/components/market-side-panel/quoteMarketDataAdapter.ts', '../../pages/trading'],
-  ['apps/web/src/components/market-side-panel/quoteMarketDataSnapshot.ts', '../../pages/trading']
+  ['apps/web/src/shared-widgets/trading/market-data/MarketSidePanel.tsx', '/pages/trading'],
+  ['apps/web/src/shared-widgets/trading/market-data/quoteMarketDataAdapter.ts', '/pages/trading'],
+  ['apps/web/src/shared-widgets/trading/market-data/quoteMarketDataSnapshot.ts', '/pages/trading']
 ]
 
 const failures = []

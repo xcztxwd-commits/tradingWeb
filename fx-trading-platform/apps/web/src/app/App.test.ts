@@ -15,7 +15,7 @@ const styles = readFileSync(join(currentDir, '..', 'styles.css'), 'utf8')
 const navigationPath = join(currentDir, 'navigation.ts')
 const navigationSource = existsSync(navigationPath) ? readFileSync(navigationPath, 'utf8') : ''
 const mobileTerminalStyles = readFileSync(
-  join(currentDir, '..', 'pages', 'trading', 'mobile', 'MobileTradingTerminal.module.css'),
+  join(currentDir, '..', 'mobile', 'pages', 'trading', 'shell', 'MobileTradingTerminal.module.css'),
   'utf8'
 )
 const enLocale = readFileSync(join(currentDir, '..', 'i18n', 'locales', 'en-US.ts'), 'utf8')
@@ -26,8 +26,8 @@ describe('prototype-driven app shell and routes', () => {
   it('keeps the homepage at root and exposes only canonical Spot and Perpetual terminals', () => {
     assert.match(source, /import \{ HomeRoute \} from '\.\.\/routes\/home\/HomeRoute'/)
     assert.match(source, /<Route path="\/" element=\{<HomeRoute \/>\} \/>/)
-    assert.match(source, /<Route path="\/trade\/spot\/:symbol\?" element=\{<TradingPage product="spot" \/>\} \/>/)
-    assert.match(source, /<Route path="\/trade\/perpetual\/:symbol\?" element=\{<TradingPage product="perpetual" \/>\} \/>/)
+    assert.match(source, /<Route path="\/trade\/spot\/:symbol\?" element=\{<TradingRoute product="spot" \/>\} \/>/)
+    assert.match(source, /<Route path="\/trade\/perpetual\/:symbol\?" element=\{<TradingRoute product="perpetual" \/>\} \/>/)
     assert.match(source, /<Route path="\/trading" element=\{<LegacyTradingRedirect \/>\} \/>/)
     assert.match(source, /<Route path="\/trade\/:product\/:symbol\?" element=\{<Navigate to=\{resolveSafeTradingPath\(null\)\} replace \/>\} \/>/)
     assert.doesNotMatch(source, /path="\/admin"/)

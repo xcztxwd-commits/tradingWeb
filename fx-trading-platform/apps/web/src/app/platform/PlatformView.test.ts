@@ -10,7 +10,7 @@ const currentDir = dirname(fileURLToPath(import.meta.url))
 const appDir = join(currentDir, '..')
 const appShellSource = readFileSync(join(appDir, 'AppShell.tsx'), 'utf8')
 const platformViewSource = readFileSync(join(currentDir, 'PlatformView.tsx'), 'utf8')
-const tradingPageSource = readFileSync(join(appDir, '..', 'pages', 'trading', 'TradingPage.tsx'), 'utf8')
+const tradingRouteSource = readFileSync(join(appDir, '..', 'routes', 'trading', 'TradingRoute.tsx'), 'utf8')
 const pcShellSource = readFileSync(join(appDir, '..', 'pc', 'shell', 'PcShellChrome.tsx'), 'utf8')
 const mobileShellSource = readFileSync(join(appDir, '..', 'mobile', 'shell', 'MobileShellChrome.tsx'), 'utf8')
 
@@ -38,13 +38,11 @@ describe('PlatformView', () => {
   })
 
   it('keeps the trading controller stable while only its current view changes', () => {
-    const controllerIndex = tradingPageSource.indexOf('useTradingRouteController({ product })')
-    const deviceIndex = tradingPageSource.indexOf('useDeviceClass()')
-
-    assert.ok(controllerIndex >= 0 && controllerIndex < deviceIndex)
-    assert.match(tradingPageSource, /deviceClass === 'pc' \? <TradingDesktopView/)
-    assert.match(tradingPageSource, /deviceClass === 'mobile' \? <TradingMobileView/)
-    assert.doesNotMatch(tradingPageSource, /useMobileTerminalViewport|window\.innerWidth|matchMedia/)
+    assert.ok(tradingRouteSource.indexOf('useTradingRouteController({ product })') < tradingRouteSource.indexOf('<PlatformView'))
+    assert.match(tradingRouteSource, /model=\{controller\.model\}/)
+    assert.match(tradingRouteSource, /pc=\{PcTradingTerminal\}/)
+    assert.match(tradingRouteSource, /mobile=\{MobileTradingTerminal\}/)
+    assert.doesNotMatch(tradingRouteSource, /useDeviceClass|useMobileTerminalViewport|window\.innerWidth|matchMedia/)
   })
 })
 

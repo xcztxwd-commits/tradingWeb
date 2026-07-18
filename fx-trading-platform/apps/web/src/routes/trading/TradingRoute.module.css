@@ -1,0 +1,81 @@
+.page {
+  --trading-page-bg: var(--theme-background);
+  --trading-surface: var(--theme-surface);
+  --trading-surface-2: color-mix(in srgb, var(--theme-surface) 84%, var(--theme-background));
+  --trading-surface-3: var(--theme-surface-elevated);
+  --trading-surface-raised: var(--theme-surface-elevated);
+  --trading-field-bg: color-mix(in srgb, var(--theme-surface-elevated) 74%, var(--theme-background));
+  --trading-border: var(--theme-border);
+  --trading-border-soft: color-mix(in srgb, var(--theme-border) 58%, transparent);
+  --trading-border-strong: color-mix(in srgb, var(--theme-border) 74%, var(--theme-text-muted));
+  --trading-text: var(--theme-text-secondary);
+  --trading-text-strong: var(--theme-text-primary);
+  --trading-heading: var(--theme-text-primary);
+  --trading-muted: var(--theme-text-muted);
+  --trading-subtle: color-mix(in srgb, var(--theme-text-muted) 76%, var(--theme-background));
+  --trading-faint: color-mix(in srgb, var(--theme-text-muted) 52%, var(--theme-background));
+  --trading-accent: var(--theme-primary);
+  --trading-accent-soft: color-mix(in srgb, var(--theme-primary) 14%, transparent);
+  --trading-accent-border: color-mix(in srgb, var(--theme-primary) 42%, transparent);
+  --trading-accent-text: var(--theme-background);
+  --trading-buy: var(--theme-buy);
+  --trading-buy-strong: var(--theme-chart-candle-up);
+  --trading-sell: var(--theme-sell);
+  --trading-sell-strong: var(--theme-chart-candle-down);
+  --trading-depth-ask: var(--theme-order-book-ask-bg);
+  --trading-depth-bid: var(--theme-order-book-bid-bg);
+  --trading-chart-grid-horizontal: var(--theme-chart-grid);
+  --trading-chart-grid-vertical: color-mix(in srgb, var(--theme-chart-grid) 72%, var(--theme-background));
+  position: relative;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: var(--trading-page-bg);
+  color: var(--trading-text);
+  font-family: BinanceNova, Arial, sans-serif;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+:global(:root[data-theme='minimal-white']) .page {
+  --trading-muted: var(--theme-text-secondary);
+  --trading-subtle: var(--theme-text-secondary);
+  --trading-faint: var(--theme-text-muted);
+  --trading-accent-text: var(--theme-background);
+}
+
+.page :global(.trade-panel) {
+  --tp-bg: var(--trading-surface);
+  --tp-surface: var(--trading-surface);
+  --tp-surface-2: var(--trading-field-bg);
+  --tp-surface-3: var(--trading-surface-2);
+  --tp-border: var(--trading-border);
+  --tp-border-strong: var(--trading-border-strong);
+  --tp-text: var(--trading-text-strong);
+  --tp-muted: var(--trading-muted);
+  --tp-subtle: var(--trading-subtle);
+  --tp-buy: var(--trading-buy);
+  --tp-buy-hover: var(--trading-buy-strong);
+  --tp-sell: var(--trading-sell);
+  --tp-sell-hover: var(--trading-sell-strong);
+  --tp-focus: var(--trading-accent);
+  --tp-warning: var(--trading-accent);
+  border: 1px solid var(--trading-border);
+  background: var(--trading-surface);
+  color: var(--trading-text-strong);
+}
+
+.page :global(.trade-panel__session-error),
+.page :global(.trade-panel__notice) {
+  border-color: color-mix(in srgb, var(--trading-sell) 34%, transparent);
+  background: color-mix(in srgb, var(--trading-sell) 10%, transparent);
+  color: var(--trading-sell);
+}
+
+@media (max-width: 900px) {
+  .page {
+    min-height: 100dvh;
+    padding: var(--space-0);
+  }
+}

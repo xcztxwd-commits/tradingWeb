@@ -13,7 +13,9 @@ import { AppShell } from './AppShell'
 import { LegacyTradingRedirect } from './LegacyTradingRedirect'
 import { resolveSafeTradingPath } from './tradingRoutes'
 
-const TradingPage = lazy(() => import('../pages/trading/TradingPage').then((module) => ({ default: module.TradingPage })))
+const TradingRoute = lazy(() =>
+  import('../routes/trading/TradingRoute').then((module) => ({ default: module.TradingRoute }))
+)
 
 export function App() {
   return (
@@ -23,8 +25,8 @@ export function App() {
           <Route path="/" element={<HomeRoute />} />
           <Route path="/trade" element={<LegacyTradingRedirect />} />
           <Route path="/trading" element={<LegacyTradingRedirect />} />
-          <Route path="/trade/spot/:symbol?" element={<TradingPage product="spot" />} />
-          <Route path="/trade/perpetual/:symbol?" element={<TradingPage product="perpetual" />} />
+          <Route path="/trade/spot/:symbol?" element={<TradingRoute product="spot" />} />
+          <Route path="/trade/perpetual/:symbol?" element={<TradingRoute product="perpetual" />} />
           <Route path="/trade/:product/:symbol?" element={<Navigate to={resolveSafeTradingPath(null)} replace />} />
           <Route path="/login" element={<AuthRoute mode="login" />} />
           <Route path="/register" element={<AuthRoute mode="register" />} />

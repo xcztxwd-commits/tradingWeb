@@ -8,8 +8,8 @@ const currentDir = dirname(fileURLToPath(import.meta.url))
 const projectRoot = resolve(currentDir, '../../../..')
 const componentSource = readFileSync(resolve(currentDir, 'Drawer.tsx'), 'utf8')
 const styles = readFileSync(resolve(currentDir, 'Drawer.module.css'), 'utf8')
-const adapterSource = readFileSync(resolve(projectRoot, 'apps/web/src/pages/trading/components/MobilePanels.tsx'), 'utf8')
-const tradingSource = readFileSync(resolve(projectRoot, 'apps/web/src/pages/trading/TradingPage.tsx'), 'utf8')
+const adapterSource = readFileSync(resolve(projectRoot, 'apps/web/src/mobile/pages/trading/MobilePanels.tsx'), 'utf8')
+const tradingSource = readFileSync(resolve(projectRoot, 'apps/web/src/mobile/pages/trading/MobileTradingTerminal.tsx'), 'utf8')
 
 describe('Drawer component contract', () => {
   it('owns open state, title semantics, side, backdrop, Escape and focus restoration', () => {
@@ -33,7 +33,7 @@ describe('Drawer component contract', () => {
     assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)/u)
   })
 
-  it('is used through the temporary trading adapter for both current drawers', () => {
+  it('is used through the Mobile trading adapter for both current drawers', () => {
     assert.match(adapterSource, /import \{ Drawer \} from '@fx-platform\/ui'/u)
     assert.match(adapterSource, /return \(\s*<Drawer/u)
     assert.ok((tradingSource.match(/<MobileDrawer/gu) ?? []).length >= 2)
