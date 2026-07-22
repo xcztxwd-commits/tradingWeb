@@ -401,6 +401,10 @@ describe('real USDT demo browser smoke contract', () => {
 
   it('keeps browser orders valid and proves the mobile order sheet is actually visible', () => {
     const text = source()
+    const openRouteSource = text.slice(
+      text.indexOf('async function openBrowserTradeRoute'),
+      text.indexOf('async function submitBrowserOrder')
+    )
 
     assert.match(text, /LIMIT pending cancel[\s\S]*?quantity: '0\.001'/)
     assert.match(
@@ -412,6 +416,8 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /\[data-testid="mobile-trade-action"\]/)
     assert.match(text, /section\[role="dialog"\] > dl/)
     assert.match(text, /button\?\.previousElementSibling[\s\S]*\$\{label\} ready submit control/)
+    assert.doesNotMatch(openRouteSource, /section\[data-price-precision\] strong/)
+    assert.match(openRouteSource, /submitButtons\.every[\s\S]*button\.previousElementSibling/)
     assert.match(text, /resulting REST order[\s\S]*\$\{label\} browser submission settled/)
     assert.match(text, /panel\?\.querySelector\('\[role="status"\]'\)\?\.textContent/)
     assert.match(text, /browser state: \$\{JSON\.stringify\(diagnostic\)\}/)
@@ -438,6 +444,10 @@ describe('real USDT demo browser smoke contract', () => {
     assert.notEqual(confirmationIndex, -1)
     assert.ok(submitSource.indexOf('try {') < readySubmitIndex)
     assert.match(submitSource, /panel\?\.querySelector\('\[role="status"\]'\)\?\.textContent/)
+    assert.match(submitSource, /action: button\?\.getAttribute\('data-trading-action'\)/)
+    assert.match(submitSource, /tokenPresent: Boolean\(localStorage\.getItem\('fx-platform-auth-token'\)\)/)
+    assert.match(submitSource, /session: panel\?\.querySelector\('\[aria-live="polite"\]'\)\?\.textContent/)
+    assert.match(submitSource, /settingsBusy: settings\?\.getAttribute\('aria-busy'\)/)
     assert.match(submitSource, /browser state: \$\{JSON\.stringify\(diagnostic\)\}/)
   })
 

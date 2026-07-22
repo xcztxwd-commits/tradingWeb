@@ -5567,13 +5567,14 @@ async function openBrowserTradeRoute(page, route, symbol) {
   await waitForPageReady(page, route)
   await page.waitForFunction((panelSelector) => {
     const panel = document.querySelector(panelSelector)
+    const submitButtons = [...(panel?.querySelectorAll('[data-trading-action="submit-order"]') ?? [])]
     return Boolean(
       panel
         && document.querySelector('[data-source]')
         && !panel.querySelector('[data-trading-action="login-required"]')
-        && panel.querySelectorAll('[data-trading-action="submit-order"]').length === 2
-        && [...panel.querySelectorAll('section[data-price-precision] strong')]
-          .some((value) => !value.textContent?.trim().startsWith('-'))
+        && submitButtons.length === 2
+        && submitButtons.every((button) => [...(button.previousElementSibling?.querySelectorAll('strong') ?? [])]
+          .some((value) => !value.textContent?.trim().startsWith('-')))
     )
   }, `real order controls ${route}`, TRADE_PANEL_SELECTOR)
   const actual = await api(`/api/market/quotes/${symbol}`)
@@ -5678,14 +5679,27 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
       const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
       const section = sections[targetSide === 'buy' ? 0 : 1]
       const button = section?.querySelector('[data-trading-action="submit-order"]')
+      const balance = button?.previousElementSibling
+      const settings = document.querySelector('[aria-label="Perpetual trading settings"]')
       return {
         button: button ? [button.textContent?.trim(), button.disabled, button.getAttribute('title')] : null,
+        action: button?.getAttribute('data-trading-action') ?? null,
+        balance: [...(balance?.querySelectorAll('strong') ?? [])].map((value) => value.textContent?.trim()),
         inputs: [...(section?.querySelectorAll('input') ?? [])].map((input) => ({
           label: input.getAttribute('aria-label'),
           disabled: input.disabled,
           value: input.value
         })),
         notice: panel?.querySelector('[role="status"]')?.textContent?.trim() ?? null,
+        session: panel?.querySelector('[aria-live="polite"]')?.textContent?.trim() ?? null,
+        sessionAlert: panel?.querySelector('[role="alert"]')?.textContent?.trim() ?? null,
+        settingsBusy: settings?.getAttribute('aria-busy') ?? null,
+        settingsControls: [...(settings?.querySelectorAll('select, input, button') ?? [])].map((control) => ({
+          label: control.getAttribute('aria-label'),
+          disabled: control.disabled
+        })),
+        source: document.querySelector('[data-source]')?.textContent?.trim() ?? null,
+        tokenPresent: Boolean(localStorage.getItem('fx-platform-auth-token')),
         skipConfirm: localStorage.getItem('fx-trade-confirm-skip')
       }
     }, TRADE_PANEL_SELECTOR, side)
