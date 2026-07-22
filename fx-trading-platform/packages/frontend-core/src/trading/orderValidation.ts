@@ -33,8 +33,12 @@ const validationMessageKeys: Record<OrderValidationErrorKey, string> = {
 export function validateOrder(form: TradeFormState, options: ValidationOptions): OrderValidationResult {
   const errors: OrderValidationErrorKey[] = []
   const price = toNumber(form.price)
-  const amount = toNumber(form.amount)
   const total = getOrderNotional(form, options.market)
+  const orderPrice = form.orderType === 'market' ? options.market.lastPrice : price
+  const quoteQuantity = usesQuoteBudgetMarketBuy(form, options.market) || usesQuoteQuantity(form, options.market)
+  const amount = quoteQuantity && total > 0 && orderPrice > 0
+    ? total / (orderPrice * getMarketUnitSize(options.market))
+    : toNumber(form.amount)
   const requiredMargin = getRequiredMargin(form, options.market)
   const quoteBalance = options.balances[options.market.quoteAsset] ?? 0
   const baseBalance = options.balances[options.market.baseAsset] ?? 0

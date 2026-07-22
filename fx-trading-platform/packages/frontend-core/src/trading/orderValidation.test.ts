@@ -57,6 +57,39 @@ describe('trade form model', () => {
     assert.equal(focused.price, '60610')
   })
 
+  it('validates a quote-budget market buy against a recovered quote before effects run', () => {
+    const unavailableMarket = {
+      ...mockMarket,
+      bestBid: 0,
+      bestAsk: 0,
+      lastPrice: 0,
+      tradable: false
+    }
+    const recoveredMarket = {
+      ...mockMarket,
+      bestBid: 49_999,
+      bestAsk: 50_001,
+      lastPrice: 50_000,
+      quoteTimestamp: 1_780_000_000_000,
+      tradable: true
+    }
+    const entered = deriveTradeForm(
+      { ...createInitialTradeForm('buy', unavailableMarket), orderType: 'market', price: '' },
+      { total: '10' },
+      'total',
+      unavailableMarket
+    )
+
+    assert.equal(entered.amount, '')
+    assert.deepEqual(validateOrder(entered, {
+      balances: mockBalances,
+      market: recoveredMarket,
+      minAmount: 0.0001,
+      minNotional: 5,
+      now: recoveredMarket.quoteTimestamp
+    }).errors, [])
+  })
+
   it('fills buy and sell amounts from percentage balances', () => {
     const buyForm = applyPercent(
       { ...createInitialTradeForm('buy', mockMarket), orderType: 'limit', price: '50000' },
