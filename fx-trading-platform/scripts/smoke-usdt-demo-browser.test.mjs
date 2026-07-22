@@ -66,6 +66,10 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, new RegExp(escapeRegExp('/api/accounts')))
   })
 
+  it('disables the Chromium sandbox only when the smoke runs as root', () => {
+    assert.match(source(), /\.\.\.\(process\.getuid\?\.\(\) === 0 \? \['--no-sandbox'\] : \[\]\)/)
+  })
+
   it('covers public primary, OKX failover, local fallback, and recovery source jumps', () => {
     const text = source()
 

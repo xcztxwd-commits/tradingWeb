@@ -5933,6 +5933,7 @@ async function launchBrowser() {
   const userDataDir = await mkdtemp(join(tmpdir(), 'fx-usdt-demo-smoke-'))
   const child = spawn(executable, [
     '--headless=new',
+    ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${userDataDir}`,
     '--disable-gpu',
