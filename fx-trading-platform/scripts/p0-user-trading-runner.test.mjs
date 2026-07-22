@@ -3432,16 +3432,24 @@ test('standalone canonical owns snapshots restores and releases Redis exactly on
   assert.equal(completedText.includes('before-perp'), false)
 })
 
-test('canonical backend uses MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED and never the obsolete key', () => {
+test('canonical backend binds its admin login and provider-sync configuration', () => {
   assert.equal(typeof smokeContracts.buildCanonicalBackendEnvironment, 'function')
   const environment = smokeContracts.buildCanonicalBackendEnvironment({
     databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_platform_smoke_review1',
     inheritedEnv: {
       PATH: 'trusted-path',
+      ADMIN_SMOKE_EMAIL: 'canonical-admin@example.invalid',
+      ADMIN_SMOKE_PASSWORD: 'canonical-admin-password',
+      ADMIN_BOOTSTRAP_ENABLED: 'false',
+      ADMIN_BOOTSTRAP_EMAIL: 'poisoned-admin@example.invalid',
+      ADMIN_BOOTSTRAP_PASSWORD: 'poisoned-admin-password',
       PROVIDER_INSTRUMENT_SYNC_ENABLED: 'true',
       MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED: 'true'
     }
   })
+  assert.equal(environment.ADMIN_BOOTSTRAP_ENABLED, 'true')
+  assert.equal(environment.ADMIN_BOOTSTRAP_EMAIL, 'canonical-admin@example.invalid')
+  assert.equal(environment.ADMIN_BOOTSTRAP_PASSWORD, 'canonical-admin-password')
   assert.equal(environment.MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED, 'false')
   assert.equal(Object.hasOwn(environment, 'PROVIDER_INSTRUMENT_SYNC_ENABLED'), false)
   assert.equal(environment.PATH, 'trusted-path')
