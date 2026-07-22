@@ -131,6 +131,7 @@ const CANONICAL_ADMIN_AUTHORITIES = [
   'trading:account:force-cleanup'
 ]
 const CANONICAL_PROCESS_LOG_TAIL_BYTES = 200_000
+const TRADE_PANEL_SELECTOR = '[data-platform-view="pc"] [data-panel-id="trade"]'
 
 // Human-readable bootstrap evidence retained in the report: docker compose, not an in-memory substitute.
 const STARTUP_COMMANDS = [
@@ -5549,12 +5550,17 @@ async function runBrowserMinimalTradingLoop(mode) {
 async function openBrowserTradeRoute(page, route, symbol) {
   await page.navigate(`${webBaseUrl}${route}`)
   await waitForPageReady(page, route)
-  await page.waitForFunction(() => Boolean(
-    document.querySelector('.trade-panel')
-      && document.querySelector('[data-source]')
-      && !document.querySelector('.trade-panel__submit--login')
-      && [...document.querySelectorAll('.trade-panel__balance strong')].some((value) => !value.textContent?.trim().startsWith('-'))
-  ), `real order controls ${route}`)
+  await page.waitForFunction((panelSelector) => {
+    const panel = document.querySelector(panelSelector)
+    return Boolean(
+      panel
+        && document.querySelector('[data-source]')
+        && !panel.querySelector('[data-trading-action="login-required"]')
+        && panel.querySelectorAll('[data-trading-action="submit-order"]').length === 2
+        && [...panel.querySelectorAll('section[data-price-precision] strong')]
+          .some((value) => !value.textContent?.trim().startsWith('-'))
+    )
+  }, `real order controls ${route}`, TRADE_PANEL_SELECTOR)
   const actual = await api(`/api/market/quotes/${symbol}`)
   await page.waitForFunction(
     (provider) => document.body.textContent?.toUpperCase().includes(provider.toUpperCase()),
@@ -5565,20 +5571,25 @@ async function openBrowserTradeRoute(page, route, symbol) {
 
 async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = false, label }) {
   const beforeIds = new Set((await orders({ size: 500 })).map((order) => order.id))
-  const tabSelected = await page.evaluate((index) => {
-    const tabs = document.querySelector('.trade-panel__order-tabs')
+  const tabSelected = await page.evaluate((panelSelector, index) => {
+    const panel = document.querySelector(panelSelector)
+    const tabs = panel?.querySelector('[role="tablist"] [role="tab"]')?.closest('[role="tablist"]')
     const button = tabs?.querySelectorAll('button')[index]
     button?.click()
     return Boolean(button)
-  }, tabIndex)
+  }, TRADE_PANEL_SELECTOR, tabIndex)
   assert(tabSelected, `${label} order-type tab must be available`)
-  await page.waitForFunction((index) => {
-    const button = document.querySelector('.trade-panel__order-tabs')?.querySelectorAll('button')[index]
+  await page.waitForFunction((panelSelector, index) => {
+    const panel = document.querySelector(panelSelector)
+    const tabs = panel?.querySelector('[role="tablist"] [role="tab"]')?.closest('[role="tablist"]')
+    const button = tabs?.querySelectorAll('button')[index]
     return button?.getAttribute('aria-selected') === 'true'
-  }, `${label} order-type tab selected`, tabIndex)
+  }, `${label} order-type tab selected`, TRADE_PANEL_SELECTOR, tabIndex)
   for (let index = 0; index < values.length; index += 1) {
-    const changed = await page.evaluate((targetSide, inputIndex, value) => {
-      const section = document.querySelector(`.trade-panel__side--${targetSide}`)
+    const changed = await page.evaluate((panelSelector, targetSide, inputIndex, value) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
       const inputs = [...(section?.querySelectorAll('input[inputmode="decimal"]:not([disabled])') ?? [])]
       const input = inputs[inputIndex]
       if (!input) return false
@@ -5586,35 +5597,41 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
       input.dispatchEvent(new Event('input', { bubbles: true }))
       input.dispatchEvent(new Event('change', { bubbles: true }))
       return true
-    }, side, index, values[index])
+    }, TRADE_PANEL_SELECTOR, side, index, values[index])
     assert(changed, `${label} input ${index} must be editable`)
     await sleep(50)
   }
   if (reduceOnly) {
-    const checked = await page.evaluate((targetSide) => {
-      const input = document.querySelector(`.trade-panel__side--${targetSide} .trade-panel__perpetual-options input[type="checkbox"]`)
+    const checked = await page.evaluate((panelSelector, targetSide) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
+      const input = section?.querySelector('section[aria-label="Perpetual order options"] input[type="checkbox"]')
       if (!input) return false
       if (!input.checked) input.click()
       return input.checked
-    }, side)
+    }, TRADE_PANEL_SELECTOR, side)
     assert(checked, `${label} must visibly enable reduce-only`)
   }
-  const clicked = await page.evaluate((targetSide) => {
-    const button = document.querySelector(`.trade-panel__submit--${targetSide}`)
+  const clicked = await page.evaluate((panelSelector, targetSide) => {
+    const panel = document.querySelector(panelSelector)
+    const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+    const section = sections[targetSide === 'buy' ? 0 : 1]
+    const button = section?.querySelector('[data-trading-action="submit-order"]')
     if (!button || button.disabled) return false
     button.click()
     return true
-  }, side)
+  }, TRADE_PANEL_SELECTOR, side)
   assert(clicked, `${label} submit control must be enabled`)
   const confirmationState = await waitFor(() => page.evaluate(() => {
-    if (document.querySelector('.trade-panel__confirm')) return 'dialog'
+    if (document.querySelector('section[role="dialog"] > dl')) return 'dialog'
     return localStorage.getItem('fx-trade-confirm-skip') === 'true' ? 'skipped' : null
   }), `${label} confirmation`, 5000)
   if (confirmationState === 'dialog') {
     const confirmed = await page.evaluate(() => {
-      const dialog = document.querySelector('.trade-panel__confirm')
+      const dialog = document.querySelector('section[role="dialog"] > dl')?.closest('section[role="dialog"]')
       const skip = dialog?.querySelector('input[type="checkbox"]')
-      const submit = dialog?.querySelector('.trade-panel__confirm-submit')
+      const submit = dialog?.querySelector('footer button:last-of-type')
       if (!dialog || !skip || !submit) return false
       if (!skip.checked) skip.click()
       submit.click()
@@ -5636,12 +5653,20 @@ async function cancelBrowserOrder(page, orderId, label) {
   const clicked = await waitFor(() => page.evaluate((targetOrderId) => {
     const actions = [...document.querySelectorAll('[data-order-id]')]
       .find((element) => element.getAttribute('data-order-id') === targetOrderId)
-    const button = actions?.querySelector('button.table-action--danger:not([disabled])')
+    const button = actions?.querySelectorAll(':scope > button')[2]
     if (!button) return false
     button.click()
     return true
   }, orderId), `${label} UI action`, 15000)
   assert(clicked, `${label} must click the real Orders-page action`)
+  const confirmed = await waitFor(() => page.evaluate(() => {
+    const dialog = document.getElementById('order-cancel-title')?.closest('section[role="dialog"]')
+    const button = dialog?.querySelector('button:not([disabled])')
+    if (!button) return false
+    button.click()
+    return true
+  }), `${label} confirmation`, 5000)
+  assert(confirmed, `${label} must confirm the real Orders-page action`)
   const canceled = await waitFor(async () => {
     const order = (await orders({ size: 500 })).find((candidate) => candidate.id === orderId)
     return order && ['CANCELED', 'CANCELLED'].includes(order.status) ? order : false
@@ -5757,21 +5782,25 @@ async function captureWebCriticalPaths(page, mode, viewport, runtimeErrors, netw
       }
       if (viewport.mobile) {
         const opened = await page.evaluate(() => {
-          const actionBar = document.querySelector('nav[class*="actionBar"]')
-          const tradeButton = actionBar?.querySelector('button:nth-of-type(2)')
+          const tradeButton = document.querySelector('[data-testid="mobile-trade-action"]')
           tradeButton?.click()
           return Boolean(tradeButton)
         })
         assert(opened, `${route} mobile Trade action must be available`)
         await page.waitForFunction(() => {
-          const panel = document.querySelector('.trade-panel')
-          const layer = panel?.closest('[aria-hidden]')
+          const layer = document.getElementById('mobile-order-sheet-title')?.closest('[aria-hidden]')
+          const side = layer?.querySelector('section[data-price-precision]')
+          const panel = side?.parentElement?.closest('section[aria-label]')
           const rect = panel?.getBoundingClientRect()
           return layer?.getAttribute('aria-hidden') === 'false'
             && Boolean(rect && rect.width > 0 && rect.height > 0)
         }, 'mobile real order sheet')
       } else {
-        await page.waitForFunction(() => Boolean(document.querySelector('.trade-panel')), 'desktop real order controls')
+        await page.waitForFunction(
+          (panelSelector) => Boolean(document.querySelector(panelSelector)?.querySelector('section[data-price-precision]')),
+          'desktop real order controls',
+          TRADE_PANEL_SELECTOR
+        )
       }
     }
     await assertPageLayout(page, route)

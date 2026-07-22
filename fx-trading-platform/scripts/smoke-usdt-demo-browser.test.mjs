@@ -377,9 +377,18 @@ describe('real USDT demo browser smoke contract', () => {
 
     assert.match(text, /LIMIT pending cancel[\s\S]*?quantity: '0\.001'/)
     assert.match(text, /values: \[aligned\(spotLast \* 0\.5, spotTick, 'floor'\), '0\.001'\]/)
+    assert.match(text, /TRADE_PANEL_SELECTOR = '\[data-platform-view="pc"\] \[data-panel-id="trade"\]'/)
+    assert.match(text, /\[data-trading-action="submit-order"\]/)
+    assert.match(text, /\[data-testid="mobile-trade-action"\]/)
+    assert.match(text, /section\[role="dialog"\] > dl/)
+    assert.doesNotMatch(text, /\.trade-panel/)
+    assert.doesNotMatch(text, /\.table-action--danger/)
+    assert.doesNotMatch(text, /class\*=["']actionBar/)
     assert.match(text, /closest\('\[aria-hidden\]'\)/)
     assert.match(text, /getAttribute\('aria-hidden'\) === 'false'/)
     assert.match(text, /mobile real order sheet[\s\S]*getBoundingClientRect|getBoundingClientRect[\s\S]*mobile real order sheet/)
+    assert.match(text, /getElementById\('order-cancel-title'\)/)
+    assert.match(text, /resulting REST state/)
   })
 
   it('refreshes LAST_PRICE for each backend OCO matrix and keeps exact ledger, funding, and batch invariants', () => {
