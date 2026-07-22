@@ -4721,6 +4721,7 @@ async function runProtectionAndFundingJourney() {
     reason: 'Task18 deterministic real FIXED fallback funding source'
   })
   clearFundingRatesForSymbol(FALLBACK_FUNDING_SYMBOL)
+  const fallbackConfig = await waitForFundingConfigSource(FALLBACK_FUNDING_SYMBOL, 'FIXED', 'LOCAL_SIMULATED', fallbackFundingPhaseStartedAt, 75000)
   const fallbackRate = await waitForRealFundingRate(
     FALLBACK_FUNDING_SYMBOL,
     ['fixed'],
@@ -4729,9 +4730,8 @@ async function runProtectionAndFundingJourney() {
     fallbackFundingPhaseStartedAt,
     15000
   )
-  const fallbackConfig = await fundingConfig(FALLBACK_FUNDING_SYMBOL)
-  assert(fallbackConfig.actualSource === 'FIXED', `fallback funding config must expose actualSource=FIXED, got ${fallbackConfig.actualSource}`)
-  assert(fallbackConfig.sourceMode === 'LOCAL_SIMULATED', `fallback funding config must expose LOCAL_SIMULATED, got ${fallbackConfig.sourceMode}`)
+  assert(fallbackConfig.actualSource === 'FIXED', 'fallback funding config must expose actualSource=FIXED')
+  assert(fallbackConfig.sourceMode === 'LOCAL_SIMULATED', 'fallback funding config must expose LOCAL_SIMULATED')
   await isolatePreparedFundingRate(FALLBACK_FUNDING_SYMBOL, fallbackRate)
   await assertNoForeignOpenPositions(FALLBACK_FUNDING_SYMBOL, 'funding fallback-source settlement')
   await createOrder('funding fallback LONG position', {
@@ -4875,14 +4875,15 @@ async function prepareSelectedFundingRate() {
   const externalPhaseStartedAt = Date.now()
   clearFundingRatesForSymbol(PERP_SYMBOL)
   try {
+    const config = await waitForFundingConfigSource(PERP_SYMBOL, ['BINANCE', 'OKX'], 'PUBLIC_EXTERNAL', null, 45000)
+    const expectedProviders = config.actualSource === 'BINANCE' ? ['binance-usdm'] : ['okx-swap']
     const rate = await waitForRealFundingRate(
       PERP_SYMBOL,
-      ['binance-usdm', 'okx-swap'],
+      expectedProviders,
       null,
       45000,
       externalPhaseStartedAt
     )
-    const config = await fundingConfig(PERP_SYMBOL)
     const expectedActualSource = rate.providerCode === 'binance-usdm' ? 'BINANCE' : 'OKX'
     assert(config.actualSource === expectedActualSource, `selected funding config must expose actualSource=${expectedActualSource}, got ${config.actualSource}`)
     assert(config.sourceMode === 'PUBLIC_EXTERNAL', `selected external funding must expose PUBLIC_EXTERNAL, got ${config.sourceMode}`)
@@ -4910,6 +4911,7 @@ async function prepareSelectedFundingRate() {
       reason: 'Task18 selected-source fallback after external funding unavailability'
     })
     clearFundingRatesForSymbol(PERP_SYMBOL)
+    const fixedConfig = await waitForFundingConfigSource(PERP_SYMBOL, 'FIXED', 'LOCAL_SIMULATED', fixedPhaseStartedAt, 75000)
     const rate = await waitForRealFundingRate(
       PERP_SYMBOL,
       ['fixed'],
@@ -4918,9 +4920,8 @@ async function prepareSelectedFundingRate() {
       fixedPhaseStartedAt,
       15000
     )
-    const fixedConfig = await fundingConfig(PERP_SYMBOL)
-    assert(fixedConfig.actualSource === 'FIXED', `selected funding fallback must expose actualSource=FIXED, got ${fixedConfig.actualSource}`)
-    assert(fixedConfig.sourceMode === 'LOCAL_SIMULATED', `selected funding fallback must expose LOCAL_SIMULATED, got ${fixedConfig.sourceMode}`)
+    assert(fixedConfig.actualSource === 'FIXED', 'selected funding fallback must expose actualSource=FIXED')
+    assert(fixedConfig.sourceMode === 'LOCAL_SIMULATED', 'selected funding fallback must expose LOCAL_SIMULATED')
     await isolatePreparedFundingRate(PERP_SYMBOL, rate)
     return { rate, externalUnavailable: true }
   }
@@ -5071,6 +5072,20 @@ function adminSymbolFor(symbol) {
 function fundingConfig(symbol) {
   const adminSymbol = adminSymbolFor(symbol)
   return adminApi(`/api/admin/market/symbols/${adminSymbol.id}/funding-config`)
+}
+
+async function waitForFundingConfigSource(symbol, expectedSource, expectedMode, asOfOrAfterMs, timeoutMs) {
+  const expectedSources = Array.isArray(expectedSource) ? expectedSource : [expectedSource]
+  return waitFor(async () => {
+    const candidate = await fundingConfig(symbol)
+    const currentEnough = asOfOrAfterMs === null
+      || (candidate.asOf && Date.parse(candidate.asOf) >= asOfOrAfterMs)
+    return expectedSources.includes(candidate.actualSource)
+      && candidate.sourceMode === expectedMode
+      && currentEnough
+      ? candidate
+      : false
+  }, `active ${expectedSources.join('/')} funding config for ${symbol}`, timeoutMs)
 }
 
 async function snapshotFundingConfig(symbol) {
