@@ -4521,8 +4521,8 @@ async function runPerpetualJourney() {
   assert(!TERMINAL_ORDER_STATUSES.has(pending.status), 'Perp pending order must retain its margin hold')
   const duringPending = await accountFundsSnapshot()
   assert(
-    number(duringPending.summary.freeMargin) < number(beforePending.summary.freeMargin),
-    'pending Perp order must reduce free margin while its hold is active'
+    number(duringPending.summary.usedMargin) > number(beforePending.summary.usedMargin),
+    'pending Perp order must increase used margin while its hold is active'
   )
   assert(
     duringPending.ledger.some((entry) => entry.entryType === 'ORDER_HOLD' && entry.referenceId === pending.id),
@@ -4530,7 +4530,7 @@ async function runPerpetualJourney() {
   )
   await api(`/api/trading/orders/${pending.id}/cancel`, { method: 'POST', token: userToken })
   const afterPending = await accountFundsSnapshot()
-  assert(number(afterPending.summary.freeMargin) >= number(beforePending.summary.freeMargin) - 0.01, 'cancel pending Perp order must release margin hold')
+  assert(number(afterPending.summary.usedMargin) <= number(beforePending.summary.usedMargin) + 0.01, 'cancel pending Perp order must restore used margin')
   assert(
     afterPending.ledger.some((entry) => entry.entryType === 'ORDER_RELEASE' && entry.referenceId === pending.id),
     'cancel pending Perp order must create its order-linked margin release ledger entry'
