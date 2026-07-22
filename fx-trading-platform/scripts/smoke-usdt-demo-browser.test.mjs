@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
+import { assertNewestFirstProtectionResize } from './smoke-usdt-demo-browser.mjs'
+
 const scriptsDir = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(scriptsDir, '..')
 const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8'))
@@ -15,6 +17,10 @@ const legacyScriptPath = join(scriptsDir, 'smoke-btcusdt-perp-50x.mjs')
 function source() {
   assert.equal(existsSync(scriptPath), true, 'USDT demo browser smoke script must exist')
   return readFileSync(scriptPath, 'utf8')
+}
+
+function protection(id, protectionType, createdAt, quantity) {
+  return { id, protectionType, createdAt, quantity, status: 'PENDING_ACTIVATION' }
 }
 
 describe('real USDT demo browser smoke contract', () => {
@@ -301,16 +307,41 @@ describe('real USDT demo browser smoke contract', () => {
     }
   })
 
-  it('checks both quote and base-asset OCO holds and a contiguous newest-first protection suffix', () => {
+  it('checks both OCO hold assets and per-type newest-first protection suffixes', () => {
     const text = source()
 
     assert.match(text, /OCO peer cancellation must release shared USDT hold/)
     assert.match(text, /OCO peer cancellation must release shared BTC hold/)
+    assert.match(text, /protectionsByType/)
+    assert.match(text, /order\.protectionType/)
     assert.match(text, /changedFlags/)
     assert.match(text, /slice\(firstChanged\)/)
     assert.match(text, /expectedReduction/)
-    assert.match(text, /remainingProtectionCapacity/)
-    assert.match(text, /triggeredCommitment/)
+    assert.match(text, /remainingPositionQuantity/)
+    assert.doesNotMatch(text, /triggeredCommitment/)
+  })
+
+  it('validates newest-first protection resize independently for TP and SL', () => {
+    const before = [
+      protection('tp-old', 'TAKE_PROFIT', '2026-01-01T00:00:01Z', 0.006),
+      protection('sl-old', 'STOP_LOSS', '2026-01-01T00:00:02Z', 0.006),
+      protection('tp-new', 'TAKE_PROFIT', '2026-01-01T00:00:03Z', 0.006),
+      protection('sl-new', 'STOP_LOSS', '2026-01-01T00:00:04Z', 0.006)
+    ]
+    const after = before.map((order) => (
+      order.id.endsWith('new') ? { ...order, quantity: 0.004 } : order
+    ))
+
+    assert.doesNotThrow(() => assertNewestFirstProtectionResize(before, after, 0.01))
+    const wrongOrder = before.map((order) => (
+      order.id === 'tp-old' || order.id === 'sl-new'
+        ? { ...order, quantity: 0.004 }
+        : order
+    ))
+    assert.throws(
+      () => assertNewestFirstProtectionResize(before, wrongOrder, 0.01),
+      /contiguous newest-order suffix/
+    )
   })
 
   it('repeats real UI and state-linked Spot/Perpetual loops in the three executable source modes', () => {

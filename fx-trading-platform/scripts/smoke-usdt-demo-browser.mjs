@@ -4617,7 +4617,7 @@ async function runProtectionAndFundingJourney() {
   await updateSymbolSettings(PERP_SYMBOL, { leverage: 10, marginMode: 'CROSS', quantityUnit: 'BASE' })
   await assertNoForeignOpenPositions(PERP_SYMBOL, 'funding selected-source settlement')
   await createOrder('protection parent position', {
-    symbol: PERP_SYMBOL, side: 'BUY', orderType: 'MARKET', quantity: '0.05', quantityUnit: 'BASE', leverage: 10,
+    symbol: PERP_SYMBOL, side: 'BUY', orderType: 'MARKET', quantity: '0.02', quantityUnit: 'BASE', leverage: 10,
     positionSide: 'BOTH', marginMode: 'CROSS'
   })
   let position = (await openPositions(PERP_SYMBOL))[0]
@@ -4679,13 +4679,8 @@ async function runProtectionAndFundingJourney() {
   assert(position, 'a single protection trigger must not close the whole parent position')
   const beforeResize = await orders({ symbol: PERP_SYMBOL, size: 200 })
   const trackedBefore = beforeResize
-    .filter((order) => created.some((candidate) => candidate.id === order.id) && order.status === 'PENDING_ACTIVATION')
-    .toSorted((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
-  const triggeredCommitment = beforeResize
     .filter((order) => created.some((candidate) => candidate.id === order.id)
-      && order.status !== 'PENDING_ACTIVATION'
       && !TERMINAL_ORDER_STATUSES.has(order.status))
-    .reduce((sum, order) => sum + number(order.quantity), 0)
   await api(`/api/trading/positions/${position.id}/close?accountId=${accountId}`, {
     method: 'POST', token: userToken,
     body: { quantity: String(Math.max(0.001, number(position.lots) * 0.5)), quantityUnit: 'BASE', clientOrderId: smokeKey('protection-partial-close') }
@@ -4696,7 +4691,7 @@ async function runProtectionAndFundingJourney() {
   assertNewestFirstProtectionResize(
     trackedBefore,
     afterResize,
-    Math.max(0, number(resizedPosition.lots) - triggeredCommitment)
+    number(resizedPosition.lots)
   )
 
   const protectionCancel = await api('/api/trading/orders/cancel-all', {
@@ -4835,28 +4830,40 @@ async function createDirectionalNearProtection(positionId, direction, tick) {
   throw lastDirectionError
 }
 
-function assertNewestFirstProtectionResize(before, after, remainingProtectionCapacity) {
+export function assertNewestFirstProtectionResize(before, after, remainingPositionQuantity) {
   const byId = new Map(after.map((order) => [order.id, order]))
-  const changedFlags = before.map((order) => {
-    const current = byId.get(order.id)
-    return !current
-      || current.status !== order.status
-      || Math.abs(number(current.quantity) - number(order.quantity)) > 0.00000001
-  })
-  const firstChanged = changedFlags.indexOf(true)
-  assert(firstChanged >= 0, 'partial close must auto-resize or cancel protection levels')
-  assert(
-    changedFlags.slice(firstChanged).every(Boolean),
-    'protection newest-first auto-resize must change one contiguous newest-order suffix without gaps'
-  )
-  const beforeQuantity = before.reduce((sum, order) => sum + number(order.quantity), 0)
-  const afterQuantity = before.reduce((sum, order) => {
-    const current = byId.get(order.id)
-    return sum + (current && !TERMINAL_ORDER_STATUSES.has(current.status) ? number(current.quantity) : 0)
-  }, 0)
-  const expectedReduction = Math.max(0, beforeQuantity - remainingProtectionCapacity)
-  assertNear(beforeQuantity - afterQuantity, expectedReduction, 0.00000001, 'newest-first protection reduction amount')
-  assert(afterQuantity <= remainingProtectionCapacity + 0.00000001, 'active protection quantity must not exceed the remaining position capacity')
+  const protectionsByType = Map.groupBy(before, (order) => order.protectionType)
+  let resizingTypeCount = 0
+  for (const [protectionType, protections] of protectionsByType) {
+    assert(protectionType, 'tracked protection must declare its protection type')
+    const oldestFirst = protections.toSorted((left, right) =>
+      Date.parse(left.createdAt) - Date.parse(right.createdAt)
+        || String(left.id).localeCompare(String(right.id)))
+    const changedFlags = oldestFirst.map((order) => {
+      const current = byId.get(order.id)
+      return !current
+        || current.status !== order.status
+        || Math.abs(number(current.quantity) - number(order.quantity)) > 0.00000001
+    })
+    const beforeQuantity = oldestFirst.reduce((sum, order) => sum + number(order.quantity), 0)
+    const afterQuantity = oldestFirst.reduce((sum, order) => {
+      const current = byId.get(order.id)
+      return sum + (current && !TERMINAL_ORDER_STATUSES.has(current.status) ? number(current.quantity) : 0)
+    }, 0)
+    const expectedReduction = Math.max(0, beforeQuantity - remainingPositionQuantity)
+    if (expectedReduction > 0.00000001) {
+      resizingTypeCount += 1
+      const firstChanged = changedFlags.indexOf(true)
+      assert(firstChanged >= 0, `partial close must auto-resize or cancel ${protectionType} levels`)
+      assert(
+        changedFlags.slice(firstChanged).every(Boolean),
+        `${protectionType} newest-first auto-resize must change one contiguous newest-order suffix without gaps`
+      )
+    }
+    assertNear(beforeQuantity - afterQuantity, expectedReduction, 0.00000001, `${protectionType} newest-first protection reduction amount`)
+    assert(afterQuantity <= remainingPositionQuantity + 0.00000001, `active ${protectionType} quantity must not exceed the remaining position capacity`)
+  }
+  assert(resizingTypeCount > 0, 'partial close must require at least one protection type to resize')
 }
 
 async function assertNoForeignOpenPositions(symbol, label) {
