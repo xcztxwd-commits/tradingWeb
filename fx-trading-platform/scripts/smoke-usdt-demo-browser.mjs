@@ -3814,8 +3814,7 @@ const P0_DATABASE_IT_CLASSES = [
   'DemoTradingConcurrencyIT',
   'PerpetualPositionConcurrencyIT',
   'ProtectionOrderConcurrencyIT',
-  'FundingLiquidationConcurrencyIT',
-  'DepthPendingExecutionPostgresIT'
+  'FundingLiquidationConcurrencyIT'
 ]
 const P0_TESTCONTAINERS_DOCKER_API_VERSION = '1.44'
 

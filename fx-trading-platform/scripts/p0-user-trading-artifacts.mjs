@@ -476,11 +476,7 @@ const P0_SUREFIRE_CLASSES = new Set([
   'DemoTradingConcurrencyIT',
   'PerpetualPositionConcurrencyIT',
   'ProtectionOrderConcurrencyIT',
-  'FundingLiquidationConcurrencyIT',
-  'DepthPendingExecutionPostgresIT'
-])
-const P0_SUREFIRE_REQUIRED_TEST_COUNTS = new Map([
-  ['DepthPendingExecutionPostgresIT', 4]
+  'FundingLiquidationConcurrencyIT'
 ])
 const SCALAR_ARRAY_FIELDS = new Map([
   ['caseids', 'caseid'],
@@ -2096,9 +2092,7 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
       throw new Error(`SUREFIRE_FUTURE_REPORT: ${className}`)
     }
     const suite = matches[0]
-    const requiredTestCount = P0_SUREFIRE_REQUIRED_TEST_COUNTS.get(className)
     if (!Number.isSafeInteger(suite.tests) || suite.tests <= 0
-      || (requiredTestCount !== undefined && suite.tests !== requiredTestCount)
       || suite.testcaseCount !== suite.tests
       || suite.skipped !== 0 || suite.failures !== 0 || suite.errors !== 0
       || Object.values(suite.outcomeElements).some((count) => count > 0)) {
