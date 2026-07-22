@@ -280,6 +280,26 @@ class PerpetualPendingOrderExecutionTest {
   }
 
   @Test
+  void lowerCurrentLeverageThatRequiresMoreHoldStaysPendingBeforeClaim() {
+    Fixture fixture = stubCandidate(bundle("99", "101", "110", "110"), "10.15151505");
+    fixture.setting().setLeverage(5);
+    org.mockito.Mockito.doReturn(risk("20.30303010", 5))
+        .when(perpetualOrderRiskService)
+        .evaluate(any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), any(), any());
+
+    int filled = service().executePendingOrders();
+
+    assertAll(
+        () -> assertThat(filled).isZero(),
+        () -> assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING),
+        () -> assertThat(fixture.order().getHoldAmount()).isEqualByComparingTo("10.15151505"));
+    verify(orderRepository, never()).claimPending(any());
+    verify(orderFillService, never()).recordPerpetualOrderHoldIncrease(any(), any(), any());
+    verify(orderFillService, never()).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
+  }
+
+  @Test
   void pendingFillUsesCurrentLockedLeverageWithoutRewritingOrderAuditSnapshot() {
     Fixture fixture = stubCandidate(bundle("99", "101", "110", "110"), "10.15151505");
     fixture.setting().setLeverage(20);

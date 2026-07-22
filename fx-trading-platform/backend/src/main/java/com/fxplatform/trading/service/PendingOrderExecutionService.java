@@ -533,6 +533,14 @@ public class PendingOrderExecutionService {
         .max(BigDecimal.ZERO);
     boolean internalIsolatedClose = isInternalIsolatedClose(lockedOrder, fillRisk);
     if (holdIncrease.signum() > 0
+        && fillRisk.openingBase().signum() > 0
+        && lockedOrder.getLeverage() != null
+        && fillRisk.leverage() < lockedOrder.getLeverage()) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Current Perpetual leverage requires more hold than the order snapshot");
+    }
+    if (holdIncrease.signum() > 0
         && !internalIsolatedClose
         && accountRisk.crossAvailable().compareTo(holdIncrease) < 0) {
       throw new BusinessException(
