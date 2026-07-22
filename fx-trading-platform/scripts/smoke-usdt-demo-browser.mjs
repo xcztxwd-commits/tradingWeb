@@ -5628,20 +5628,20 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
     }, TRADE_PANEL_SELECTOR, side)
     assert(checked, `${label} must visibly enable reduce-only`)
   }
-  const clicked = await waitFor(() => page.evaluate((panelSelector, targetSide) => {
-    const panel = document.querySelector(panelSelector)
-    const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
-    const section = sections[targetSide === 'buy' ? 0 : 1]
-    const button = section?.querySelector('[data-trading-action="submit-order"]')
-    const balance = button?.previousElementSibling
-    const ready = [...(balance?.querySelectorAll('strong') ?? [])]
-      .some((value) => !value.textContent?.trim().startsWith('-'))
-    if (!button || button.disabled || !ready) return false
-    button.click()
-    return true
-  }, TRADE_PANEL_SELECTOR, side), `${label} ready submit control`, 15000)
-  assert(clicked, `${label} submit control must be enabled`)
   try {
+    const clicked = await waitFor(() => page.evaluate((panelSelector, targetSide) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
+      const button = section?.querySelector('[data-trading-action="submit-order"]')
+      const balance = button?.previousElementSibling
+      const ready = [...(balance?.querySelectorAll('strong') ?? [])]
+        .some((value) => !value.textContent?.trim().startsWith('-'))
+      if (!button || button.disabled || !ready) return false
+      button.click()
+      return true
+    }, TRADE_PANEL_SELECTOR, side), `${label} ready submit control`, 15000)
+    assert(clicked, `${label} submit control must be enabled`)
     const confirmationState = await waitFor(() => page.evaluate(() => {
       if (document.querySelector('section[role="dialog"] > dl')) return 'dialog'
       return localStorage.getItem('fx-trade-confirm-skip') === 'true' ? 'skipped' : null

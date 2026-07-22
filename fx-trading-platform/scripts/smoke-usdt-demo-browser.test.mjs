@@ -431,10 +431,12 @@ describe('real USDT demo browser smoke contract', () => {
       text.indexOf('async function submitBrowserOrder'),
       text.indexOf('async function cancelBrowserOrder')
     )
+    const readySubmitIndex = submitSource.indexOf('const clicked = await waitFor')
     const confirmationIndex = submitSource.indexOf('const confirmationState = await waitFor')
 
+    assert.notEqual(readySubmitIndex, -1)
     assert.notEqual(confirmationIndex, -1)
-    assert.ok(submitSource.indexOf('try {') < confirmationIndex)
+    assert.ok(submitSource.indexOf('try {') < readySubmitIndex)
     assert.match(submitSource, /panel\?\.querySelector\('\[role="status"\]'\)\?\.textContent/)
     assert.match(submitSource, /browser state: \$\{JSON\.stringify\(diagnostic\)\}/)
   })
