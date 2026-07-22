@@ -451,6 +451,24 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(submitSource, /browser state: \$\{JSON\.stringify\(diagnostic\)\}/)
   })
 
+  it('retains browser route readiness diagnostics', () => {
+    const text = source()
+    const openRouteSource = text.slice(
+      text.indexOf('async function openBrowserTradeRoute'),
+      text.indexOf('async function submitBrowserOrder')
+    )
+
+    assert.match(openRouteSource, /route state: \$\{JSON\.stringify\(diagnostic\)\}/)
+    assert.match(openRouteSource, /button\.getAttribute\('data-trading-action'\)/)
+    assert.match(openRouteSource, /button\.previousElementSibling\?\.querySelectorAll\('strong'\)/)
+    assert.match(openRouteSource, /settings\?\.getAttribute\('aria-busy'\)/)
+    assert.match(openRouteSource, /localStorage\.getItem\('fx-platform-auth-token'\)/)
+    assert.match(openRouteSource, /performance\.getEntriesByType\('resource'\)/)
+    assert.match(openRouteSource, /querySelectorAll\('\[data-source\]'\)/)
+    assert.match(openRouteSource, /getAttribute\('data-stale'\)/)
+    assert.match(openRouteSource, /\[aria-label\$="market side panel"\] \[role="status"\]/)
+  })
+
   it('refreshes LAST_PRICE for each backend OCO matrix and keeps exact ledger, funding, and batch invariants', () => {
     const text = source()
 

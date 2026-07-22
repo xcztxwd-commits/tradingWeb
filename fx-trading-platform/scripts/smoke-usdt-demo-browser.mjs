@@ -5565,24 +5565,73 @@ async function runBrowserMinimalTradingLoop(mode) {
 async function openBrowserTradeRoute(page, route, symbol) {
   await page.navigate(`${webBaseUrl}${route}`)
   await waitForPageReady(page, route)
-  await page.waitForFunction((panelSelector) => {
-    const panel = document.querySelector(panelSelector)
-    const submitButtons = [...(panel?.querySelectorAll('[data-trading-action="submit-order"]') ?? [])]
-    return Boolean(
-      panel
-        && document.querySelector('[data-source]')
-        && !panel.querySelector('[data-trading-action="login-required"]')
-        && submitButtons.length === 2
-        && submitButtons.every((button) => [...(button.previousElementSibling?.querySelectorAll('strong') ?? [])]
-          .some((value) => !value.textContent?.trim().startsWith('-')))
+  try {
+    await page.waitForFunction((panelSelector) => {
+      const panel = document.querySelector(panelSelector)
+      const submitButtons = [...(panel?.querySelectorAll('[data-trading-action="submit-order"]') ?? [])]
+      return Boolean(
+        panel
+          && document.querySelector('[data-source]')
+          && !panel.querySelector('[data-trading-action="login-required"]')
+          && submitButtons.length === 2
+          && submitButtons.every((button) => [...(button.previousElementSibling?.querySelectorAll('strong') ?? [])]
+            .some((value) => !value.textContent?.trim().startsWith('-')))
+      )
+    }, `real order controls ${route}`, TRADE_PANEL_SELECTOR)
+    const actual = await api(`/api/market/quotes/${symbol}`)
+    await page.waitForFunction(
+      (provider) => document.body.textContent?.toUpperCase().includes(provider.toUpperCase()),
+      `actual provider visible ${route}`,
+      actual.providerCode
     )
-  }, `real order controls ${route}`, TRADE_PANEL_SELECTOR)
-  const actual = await api(`/api/market/quotes/${symbol}`)
-  await page.waitForFunction(
-    (provider) => document.body.textContent?.toUpperCase().includes(provider.toUpperCase()),
-    `actual provider visible ${route}`,
-    actual.providerCode
-  )
+  } catch (error) {
+    const diagnostic = await page.evaluate((panelSelector) => {
+      const panel = document.querySelector(panelSelector)
+      const settings = document.querySelector('[aria-label="Perpetual trading settings"]')
+      const sources = [...document.querySelectorAll('[data-source]')].map((source) => ({
+        source: source.getAttribute('data-source'),
+        stale: source.getAttribute('data-stale'),
+        text: source.textContent?.trim(),
+        container: source.closest('[aria-label]')?.getAttribute('aria-label') ?? null
+      }))
+      const buttons = [...(panel?.querySelectorAll('[data-trading-action]') ?? [])].map((button) => ({
+        action: button.getAttribute('data-trading-action'),
+        text: button.textContent?.trim(),
+        disabled: button.disabled,
+        title: button.getAttribute('title'),
+        balance: [...(button.previousElementSibling?.querySelectorAll('strong') ?? [])]
+          .map((value) => value.textContent?.trim())
+      }))
+      const marketResources = performance.getEntriesByType('resource')
+        .filter((entry) => entry.name.includes('/api/market/'))
+        .slice(-20)
+        .map((entry) => ({
+          name: entry.name.replace(window.location.origin, ''),
+          duration: Math.round(entry.duration),
+          responseEnd: Math.round(entry.responseEnd)
+        }))
+      return {
+        pathname: window.location.pathname,
+        panelPresent: Boolean(panel),
+        panelText: panel?.textContent?.trim().slice(0, 600) ?? null,
+        sources,
+        marketStatus: document.querySelector('[aria-label$="market side panel"] [role="status"]')?.textContent?.trim() ?? null,
+        buttons,
+        session: panel?.querySelector('[aria-live="polite"]')?.textContent?.trim() ?? null,
+        sessionAlert: panel?.querySelector('[role="alert"]')?.textContent?.trim() ?? null,
+        settingsBusy: settings?.getAttribute('aria-busy') ?? null,
+        settingsControls: [...(settings?.querySelectorAll('select, input, button') ?? [])].map((control) => ({
+          label: control.getAttribute('aria-label'),
+          disabled: control.disabled,
+          value: control.value
+        })),
+        tokenPresent: Boolean(localStorage.getItem('fx-platform-auth-token')),
+        marketResources
+      }
+    }, TRADE_PANEL_SELECTOR)
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`${message}; route state: ${JSON.stringify(diagnostic)}`)
+  }
 }
 
 async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = false, label }) {
