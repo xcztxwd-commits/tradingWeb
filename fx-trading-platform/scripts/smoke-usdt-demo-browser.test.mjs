@@ -376,7 +376,10 @@ describe('real USDT demo browser smoke contract', () => {
     const text = source()
 
     assert.match(text, /LIMIT pending cancel[\s\S]*?quantity: '0\.001'/)
-    assert.match(text, /values: \[aligned\(spotLast \* 0\.5, spotTick, 'floor'\), '0\.001'\]/)
+    assert.match(
+      text,
+      /assertOrderTradeUsesMode\(spotMarket[\s\S]*?const spotLimitQuote = await api\(`\/api\/market\/quotes\/\$\{SPOT_SYMBOL\}`\)[\s\S]*?const spotLimitLast = number\(spotLimitQuote\.mid \?\? spotLimitQuote\.ask\)[\s\S]*?values: \[aligned\(spotLimitLast \* 0\.5, spotTick, 'floor'\), '0\.001'\]/
+    )
     assert.match(text, /TRADE_PANEL_SELECTOR = '\[data-platform-view="pc"\] \[data-panel-id="trade"\]'/)
     assert.match(text, /\[data-trading-action="submit-order"\]/)
     assert.match(text, /\[data-testid="mobile-trade-action"\]/)

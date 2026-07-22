@@ -5495,9 +5495,7 @@ async function runBrowserMinimalTradingLoop(mode) {
   try {
     await installBrowserSession(page, webBaseUrl, { 'fx-platform-auth-token': userToken })
 
-    const spotQuote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
     const spotRules = await api(`/api/market/symbols/${SPOT_SYMBOL}/rules`)
-    const spotLast = number(spotQuote.mid ?? spotQuote.ask)
     const spotTick = number(spotRules.tickSize ?? 0.1)
     await openBrowserTradeRoute(page, `/trade/spot/${encodeURIComponent(SPOT_SYMBOL)}?ui-loop=${runId}`, SPOT_SYMBOL)
     const spotExecutionStartedAt = new Date().toISOString()
@@ -5508,9 +5506,11 @@ async function runBrowserMinimalTradingLoop(mode) {
     })
     assert(spotMarket.status === 'FILLED', `${mode.id} browser Spot MARKET must fill`)
     await assertOrderTradeUsesMode(spotMarket, mode, 'spot', spotExecutionQuote, SPOT_SYMBOL, 300)
+    const spotLimitQuote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
+    const spotLimitLast = number(spotLimitQuote.mid ?? spotLimitQuote.ask)
     const spotLimit = await submitBrowserOrder(page, {
       side: 'buy', tabIndex: 0,
-      values: [aligned(spotLast * 0.5, spotTick, 'floor'), '0.001'],
+      values: [aligned(spotLimitLast * 0.5, spotTick, 'floor'), '0.001'],
       label: `${mode.id} browser Spot LIMIT`
     })
     assert(!TERMINAL_ORDER_STATUSES.has(spotLimit.status), `${mode.id} browser Spot LIMIT must remain cancelable`)
