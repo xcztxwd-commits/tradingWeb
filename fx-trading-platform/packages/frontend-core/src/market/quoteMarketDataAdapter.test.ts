@@ -40,4 +40,11 @@ describe('quote market data adapter', () => {
     assert.match(adapterSource, /matchesExpectedMarketSource/)
     assert.doesNotMatch(adapterSource, /expectedSource = undefined/)
   })
+
+  it('refreshes an expired bundle when realtime events are unavailable', () => {
+    assert.match(
+      adapterSource,
+      /expiryTimer = globalThis\.setTimeout\(\(\) => \{\s*if \(!disposed\) \{\s*store\.reset\(unavailableSnapshot\('stale', snapshot\.source\)\)\s*void refreshBundle\(\)\s*\}/
+    )
+  })
 })

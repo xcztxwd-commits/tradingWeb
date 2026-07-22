@@ -71,7 +71,10 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
 
     const expiresIn = Date.parse(snapshot.source.expiresAt) - Date.now()
     expiryTimer = globalThis.setTimeout(() => {
-      if (!disposed) store.reset(unavailableSnapshot('stale', snapshot.source))
+      if (!disposed) {
+        store.reset(unavailableSnapshot('stale', snapshot.source))
+        void refreshBundle()
+      }
     }, Math.max(0, expiresIn))
   }
 
