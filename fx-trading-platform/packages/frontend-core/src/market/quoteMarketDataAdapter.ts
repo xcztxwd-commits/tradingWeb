@@ -67,7 +67,10 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
       }
     }
     store.reset(snapshot)
-    if (snapshot.status !== 'ready' || !snapshot.source) return
+    if (snapshot.status !== 'ready' || !snapshot.source) {
+      if (snapshot.status === 'stale') scheduleBundleRefresh()
+      return
+    }
 
     const expiresIn = Date.parse(snapshot.source.expiresAt) - Date.now()
     expiryTimer = globalThis.setTimeout(() => {

@@ -47,4 +47,11 @@ describe('quote market data adapter', () => {
       /expiryTimer = globalThis\.setTimeout\(\(\) => \{\s*if \(!disposed\) \{\s*store\.reset\(unavailableSnapshot\('stale', snapshot\.source\)\)\s*void refreshBundle\(\)\s*\}/
     )
   })
+
+  it('retries when a slow refresh returns an already expired bundle', () => {
+    assert.match(
+      adapterSource,
+      /store\.reset\(snapshot\)\s*if \(snapshot\.status !== 'ready' \|\| !snapshot\.source\) \{\s*if \(snapshot\.status === 'stale'\) scheduleBundleRefresh\(\)\s*return\s*\}/
+    )
+  })
 })
