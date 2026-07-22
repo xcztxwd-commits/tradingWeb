@@ -425,6 +425,20 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /resulting REST state/)
   })
 
+  it('retains browser state when order confirmation cannot start', () => {
+    const text = source()
+    const submitSource = text.slice(
+      text.indexOf('async function submitBrowserOrder'),
+      text.indexOf('async function cancelBrowserOrder')
+    )
+    const confirmationIndex = submitSource.indexOf('const confirmationState = await waitFor')
+
+    assert.notEqual(confirmationIndex, -1)
+    assert.ok(submitSource.indexOf('try {') < confirmationIndex)
+    assert.match(submitSource, /panel\?\.querySelector\('\[role="status"\]'\)\?\.textContent/)
+    assert.match(submitSource, /browser state: \$\{JSON\.stringify\(diagnostic\)\}/)
+  })
+
   it('refreshes LAST_PRICE for each backend OCO matrix and keeps exact ledger, funding, and batch invariants', () => {
     const text = source()
 

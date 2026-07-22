@@ -5641,23 +5641,23 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
     return true
   }, TRADE_PANEL_SELECTOR, side), `${label} ready submit control`, 15000)
   assert(clicked, `${label} submit control must be enabled`)
-  const confirmationState = await waitFor(() => page.evaluate(() => {
-    if (document.querySelector('section[role="dialog"] > dl')) return 'dialog'
-    return localStorage.getItem('fx-trade-confirm-skip') === 'true' ? 'skipped' : null
-  }), `${label} confirmation`, 5000)
-  if (confirmationState === 'dialog') {
-    const confirmed = await page.evaluate(() => {
-      const dialog = document.querySelector('section[role="dialog"] > dl')?.closest('section[role="dialog"]')
-      const skip = dialog?.querySelector('input[type="checkbox"]')
-      const submit = dialog?.querySelector('footer button:last-of-type')
-      if (!dialog || !skip || !submit) return false
-      if (!skip.checked) skip.click()
-      submit.click()
-      return true
-    })
-    assert(confirmed, `${label} confirmation dialog must submit`)
-  }
   try {
+    const confirmationState = await waitFor(() => page.evaluate(() => {
+      if (document.querySelector('section[role="dialog"] > dl')) return 'dialog'
+      return localStorage.getItem('fx-trade-confirm-skip') === 'true' ? 'skipped' : null
+    }), `${label} confirmation`, 5000)
+    if (confirmationState === 'dialog') {
+      const confirmed = await page.evaluate(() => {
+        const dialog = document.querySelector('section[role="dialog"] > dl')?.closest('section[role="dialog"]')
+        const skip = dialog?.querySelector('input[type="checkbox"]')
+        const submit = dialog?.querySelector('footer button:last-of-type')
+        if (!dialog || !skip || !submit) return false
+        if (!skip.checked) skip.click()
+        submit.click()
+        return true
+      })
+      assert(confirmed, `${label} confirmation dialog must submit`)
+    }
     const created = await waitFor(async () => {
       const created = (await orders({ size: 500 }))
         .filter((order) => !beforeIds.has(order.id))
