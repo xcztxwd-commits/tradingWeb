@@ -381,6 +381,7 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /\[data-trading-action="submit-order"\]/)
     assert.match(text, /\[data-testid="mobile-trade-action"\]/)
     assert.match(text, /section\[role="dialog"\] > dl/)
+    assert.match(text, /button\?\.previousElementSibling[\s\S]*\$\{label\} ready submit control/)
     assert.doesNotMatch(text, /\.trade-panel/)
     assert.doesNotMatch(text, /\.table-action--danger/)
     assert.doesNotMatch(text, /class\*=["']actionBar/)
