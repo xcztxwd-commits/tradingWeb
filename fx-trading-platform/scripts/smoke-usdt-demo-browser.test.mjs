@@ -255,16 +255,22 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /await expectUnsafeMarginReduction\(isolated\.id\)/)
   })
 
-  it('binds the isolated canonical admin to the exact funding configuration authority', () => {
+  it('binds the isolated canonical admin to every authority used by the journey', () => {
     const text = source()
 
     assert.match(text, /function grantCanonicalAdminAuthority/)
     for (const table of ['admin.roles', 'admin.menus', 'admin.role_menu_permissions', 'admin.user_roles']) {
       assert.match(text, new RegExp(escapeRegExp(table)))
     }
-    assert.match(text, /'canonical admin bootstrap user', 10000\)\s+grantCanonicalAdminAuthority/)
-    assert.match(text, /grantCanonicalAdminAuthority\('market:symbol:update'\)\s+adminToken = await login/)
-    assert.match(text, /adminAuthorities\.includes\('market:symbol:update'\)/)
+    for (const authority of [
+      'market:symbol:update',
+      'trading:account:demo-reset',
+      'trading:account:force-cleanup'
+    ]) {
+      assert.match(text, new RegExp(escapeRegExp(`'${authority}'`)))
+    }
+    assert.match(text, /for \(const authority of CANONICAL_ADMIN_AUTHORITIES\)\s+grantCanonicalAdminAuthority\(authority\)/)
+    assert.match(text, /CANONICAL_ADMIN_AUTHORITIES\.every\(\(authority\) => adminAuthorities\.includes\(authority\)\)/)
     assert.match(text, /SELECT count\(\*\) FROM user_role_upsert/)
     assert.doesNotMatch(text, /grantCanonicalAdminAuthority\(['"]\*['"]\)/)
   })

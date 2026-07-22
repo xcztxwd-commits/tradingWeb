@@ -125,6 +125,11 @@ const P0_DEFAULT_REDIS_KEYS = [...P0_SPOT_SYMBOLS, ...P0_PERP_SYMBOLS]
 const FORBIDDEN_PRODUCTS = ['FOREX', 'INVERSE_PERP', 'OPTION']
 const SOURCE_METADATA_FIELDS = ['providerCode', 'providerSymbol', 'sourceMode', 'asOf', 'expiresAt', 'stale']
 const TERMINAL_ORDER_STATUSES = new Set(['FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED'])
+const CANONICAL_ADMIN_AUTHORITIES = [
+  'market:symbol:update',
+  'trading:account:demo-reset',
+  'trading:account:force-cleanup'
+]
 const CANONICAL_PROCESS_LOG_TAIL_BYTES = 200_000
 
 // Human-readable bootstrap evidence retained in the report: docker compose, not an in-memory substitute.
@@ -4042,9 +4047,12 @@ async function bootstrapIdentityAndAccount() {
         AND status = 'ACTIVE'
     `) === '1',
     'canonical admin bootstrap user', 10000)
-  grantCanonicalAdminAuthority('market:symbol:update')
+  for (const authority of CANONICAL_ADMIN_AUTHORITIES) grantCanonicalAdminAuthority(authority)
   adminToken = await login(adminEmail, adminPassword, true)
-  assert(adminAuthorities.includes('market:symbol:update'), 'canonical admin must receive market:symbol:update')
+  assert(
+    CANONICAL_ADMIN_AUTHORITIES.every((authority) => adminAuthorities.includes(authority)),
+    'canonical admin must receive every required journey authority'
+  )
   const registration = await api('/api/auth/register', {
     method: 'POST',
     body: { email: userEmail, phone: null, password: userPassword }
@@ -4078,7 +4086,7 @@ async function bootstrapIdentityAndAccount() {
 }
 
 function grantCanonicalAdminAuthority(authority) {
-  assert(authority === 'market:symbol:update', 'canonical admin authority must stay narrowly scoped')
+  assert(CANONICAL_ADMIN_AUTHORITIES.includes(authority), 'canonical admin authority must stay narrowly scoped')
   const bound = runDbSql(`
     WITH admin_user AS (
       SELECT id FROM auth.users WHERE lower(email) = lower('${sqlLiteral(adminEmail)}')
