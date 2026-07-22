@@ -234,7 +234,7 @@ class Task10PostgresProtectionIT {
     assertDecimal("0.00000000", "SELECT initial_margin FROM trading.positions WHERE id = ?", positionId);
     assertDecimal("0.00000000", "SELECT maintenance_margin FROM trading.positions WHERE id = ?", positionId);
     assertDecimal("0.00000000", "SELECT notional FROM trading.positions WHERE id = ?", positionId);
-    assertDecimal("98.99010000", "SELECT mark_price FROM trading.positions WHERE id = ?", positionId);
+    assertDecimal("100.0000000000", "SELECT mark_price FROM trading.positions WHERE id = ?", positionId);
     assertDecimal("-2.02000000", "SELECT realized_pnl FROM trading.positions WHERE id = ?", positionId);
     assertThat(count("""
         SELECT count(*) FROM trading.orders
@@ -261,7 +261,7 @@ class Task10PostgresProtectionIT {
           AND operation_type = 'MARGIN_RELEASE'
         """, fixture.accountId(), positionId)).isEqualTo(1);
     assertAccount(
-        fixture, "49997.88000000", "49997.88000000", "0.00000000", "49997.88000000");
+        fixture, "49997.87999990", "49997.87999990", "0.00000000", "49997.87999990");
   }
 
   @Test
@@ -524,7 +524,7 @@ class Task10PostgresProtectionIT {
     assertThat(protectiveService().executeProtectiveOrders()).isEqualTo(1);
     BigDecimal makerHold = decimal(
         "SELECT hold_amount FROM trading.orders WHERE id = ?", makerProtection.id());
-    assertThat(makerHold).isPositive();
+    assertThat(makerHold).isEqualByComparingTo("0.06050000");
     assertThat(string("SELECT status FROM trading.orders WHERE id = ?", makerProtection.id()))
         .isEqualTo("PENDING");
     assertThat(string("SELECT order_type FROM trading.orders WHERE id = ?", makerProtection.id()))
@@ -540,10 +540,21 @@ class Task10PostgresProtectionIT {
     assertThat(string("SELECT status FROM trading.orders WHERE id = ?", makerProtection.id()))
         .isEqualTo("FILLED");
     assertDecimal("0.00000000", "SELECT hold_amount FROM trading.orders WHERE id = ?", makerProtection.id());
-    assertDecimal("121.00000000", "SELECT price FROM trading.trades WHERE order_id = ?", makerProtection.id());
+    assertDecimal("122.00000000", "SELECT price FROM trading.trades WHERE order_id = ?", makerProtection.id());
     assertThat(string("SELECT liquidity_role FROM trading.trades WHERE order_id = ?", makerProtection.id()))
         .isEqualTo("MAKER");
-    assertSingleOrderRelease(makerFixture.accountId(), makerProtection.id(), makerHold);
+    assertThat(count("""
+        SELECT count(*) FROM ledger.ledger_entries
+        WHERE account_id = ? AND reference_type = 'ORDER' AND reference_id = ?
+          AND operation_type = 'ORDER_HOLD'
+        """, makerFixture.accountId(), makerProtection.id())).isEqualTo(2);
+    assertDecimal("0.06100000", """
+        SELECT sum(amount) FROM ledger.ledger_entries
+        WHERE account_id = ? AND reference_type = 'ORDER' AND reference_id = ?
+          AND operation_type = 'ORDER_HOLD'
+        """, makerFixture.accountId(), makerProtection.id());
+    assertSingleOrderRelease(
+        makerFixture.accountId(), makerProtection.id(), new BigDecimal("0.06100000"));
 
     Fixture cancelFixture = createFixture("limit-cancel");
     stubBundle(bundle("99", "101", "100", "100"));

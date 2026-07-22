@@ -56,6 +56,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -246,23 +247,36 @@ class PerpetualPendingOrderExecutionTest {
   }
 
   @Test
-  void priceGapBeyondStoredHoldRollsBackClaimAndLeavesOrderPending() {
+  void priceGapBeyondStoredHoldTopsUpMarginAndFills() {
     Fixture fixture = stubCandidate(bundle("99", "150", "110", "110"), "10.15151505");
+    AtomicReference<BigDecimal> holdAtFill = new AtomicReference<>();
     org.mockito.Mockito.doReturn(risk("15.07500000"))
         .when(perpetualOrderRiskService)
         .evaluate(any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), any(), any());
+    org.mockito.Mockito.doAnswer(invocation -> {
+      holdAtFill.set(fixture.order().getHoldAmount());
+      return filled(fixture.order());
+    }).when(orderFillService).fillPerpetual(
+        eq(fixture.order()),
+        eq(fixture.account()),
+        eq(fixture.fill()),
+        eq(new BigDecimal("110")),
+        eq(10),
+        eq("Pending Perpetual order hold"));
 
     int filled = service().executePendingOrders();
 
     assertAll(
-        () -> assertThat(filled).isZero(),
-        () -> assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING),
-        () -> assertThat(fixture.order().getHoldAmount()).isEqualByComparingTo("10.15151505"));
-    verify(orderRepository, never()).claimPending(any());
-    verify(orderFillService, never()).fillPerpetual(
-        any(), any(), any(), any(), anyInt(), anyString());
-    verify(orderEventService, never()).record(
-        any(), anyString(), any(), any(), any(), anyString());
+        () -> assertThat(filled).isEqualTo(1),
+        () -> assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.FILLED),
+        () -> assertThat(holdAtFill.get()).isEqualByComparingTo("15.07500000"),
+        () -> assertThat(fixture.account().getUsedMargin()).isEqualByComparingTo("15.07500000"),
+        () -> assertThat(fixture.account().getFreeMargin()).isEqualByComparingTo("49984.92500000"));
+    verify(orderRepository).claimPending(fixture.order().getId());
+    verify(orderFillService).recordPerpetualOrderHoldIncrease(
+        fixture.account(),
+        new BigDecimal("4.92348495"),
+        fixture.order().getId());
   }
 
   @Test

@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
@@ -38,11 +39,16 @@ public interface OrderRepository extends FxBaseMapper<OrderEntity> {
   }
 
   /** 按用户和幂等键查询订单，避免重复提交。 */
-  default Optional<OrderEntity> findByUserIdAndIdempotencyKey(UUID userId, String idempotencyKey) {
-    return Optional.ofNullable(selectOne(new LambdaQueryWrapper<OrderEntity>()
-        .eq(OrderEntity::getUserId, userId)
-        .eq(OrderEntity::getIdempotencyKey, idempotencyKey)));
-  }
+  @Select("""
+      SELECT *
+      FROM trading.orders
+      WHERE user_id = #{userId}
+        AND idempotency_key = #{idempotencyKey}
+      """)
+  @Options(flushCache = Options.FlushCachePolicy.TRUE)
+  Optional<OrderEntity> findByUserIdAndIdempotencyKey(
+      @Param("userId") UUID userId,
+      @Param("idempotencyKey") String idempotencyKey);
 
   default Optional<OrderEntity> findByUserIdAndId(UUID userId, UUID orderId) {
     return Optional.ofNullable(selectOne(new LambdaQueryWrapper<OrderEntity>()

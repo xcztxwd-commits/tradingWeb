@@ -528,10 +528,16 @@ public class PendingOrderExecutionService {
             quantity,
             path == FullFillExecutionPath.RESTING_LIMIT ? currentPrice(lockedOrder) : null),
         candidate.snapshot());
-    if (orZero(lockedOrder.getHoldAmount()).compareTo(fillRisk.holdAmount()) < 0) {
+    BigDecimal holdIncrease = orZero(fillRisk.holdAmount())
+        .subtract(orZero(lockedOrder.getHoldAmount()))
+        .max(BigDecimal.ZERO);
+    boolean internalIsolatedClose = isInternalIsolatedClose(lockedOrder, fillRisk);
+    if (holdIncrease.signum() > 0
+        && !internalIsolatedClose
+        && accountRisk.crossAvailable().compareTo(holdIncrease) < 0) {
       throw new BusinessException(
-          ErrorCode.ORDER_HOLD_INVALID,
-          "Stored Perpetual order hold does not cover the canonical fill");
+          ErrorCode.INSUFFICIENT_MARGIN,
+          "Fresh available margin cannot cover the pending trigger hold increase");
     }
 
     fullFillCoordinator.requireFresh(fullFill);
@@ -541,6 +547,17 @@ public class PendingOrderExecutionService {
     }
     lockedOrder.setStatus(OrderStatus.WORKING);
     try {
+      if (holdIncrease.signum() > 0) {
+        account.setUsedMargin(orZero(account.getUsedMargin()).add(holdIncrease));
+        if (!internalIsolatedClose) {
+          account.setFreeMargin(orZero(account.getFreeMargin()).subtract(holdIncrease));
+        }
+        lockedOrder.setHoldAmount(orZero(lockedOrder.getHoldAmount()).add(holdIncrease));
+        orderFillService.recordPerpetualOrderHoldIncrease(
+            account,
+            holdIncrease,
+            lockedOrder.getId());
+      }
       for (PositionEntity position : accountPositions) {
         positionRepository.save(position);
       }
@@ -559,6 +576,17 @@ public class PendingOrderExecutionService {
     }
     recordFill(lockedOrder);
     return true;
+  }
+
+  private static boolean isInternalIsolatedClose(
+      OrderEntity order,
+      PerpetualOrderRiskService.OrderRisk fillRisk
+  ) {
+    return order.getParentPositionId() != null
+        && order.getMarginMode() == MarginMode.ISOLATED
+        && fillRisk.marginMode() == MarginMode.ISOLATED
+        && fillRisk.openingBase().signum() == 0
+        && fillRisk.closingBase().signum() > 0;
   }
 
   private void requirePreparedAccountRiskFresh(
@@ -635,7 +663,10 @@ public class PendingOrderExecutionService {
           ErrorCode.REDUCE_ONLY_EXCEEDS_POSITION,
           "Aggregate Isolated close orders exceed the current position slot");
     }
-    if (aggregateHolds.compareTo(fillRisk.isolatedHoldCapacity()) >= 0) {
+    BigDecimal freshIncrease = orZero(fillRisk.holdAmount())
+        .subtract(orZero(order.getHoldAmount()))
+        .max(BigDecimal.ZERO);
+    if (aggregateHolds.add(freshIncrease).compareTo(fillRisk.isolatedHoldCapacity()) >= 0) {
       throw new BusinessException(
           ErrorCode.MARGIN_REDUCTION_UNSAFE,
           "Aggregate Isolated close holds exceed the current position risk buffer");

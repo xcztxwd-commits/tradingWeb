@@ -60,6 +60,18 @@ public class OrderFillService {
   private static final Set<String> CRYPTO_BASES = Set.of(
       "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "OKB", "BCH", "LTC");
 
+  void recordPerpetualOrderHoldIncrease(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID orderId
+  ) {
+    ledgerService.recordOrderHold(
+        account,
+        amount,
+        orderId,
+        "Pending Perpetual trigger margin increased");
+  }
+
   @Autowired
   public OrderFillService(
       OrderRepository orderRepository,
