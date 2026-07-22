@@ -125,6 +125,7 @@ const P0_DEFAULT_REDIS_KEYS = [...P0_SPOT_SYMBOLS, ...P0_PERP_SYMBOLS]
 const FORBIDDEN_PRODUCTS = ['FOREX', 'INVERSE_PERP', 'OPTION']
 const SOURCE_METADATA_FIELDS = ['providerCode', 'providerSymbol', 'sourceMode', 'asOf', 'expiresAt', 'stale']
 const TERMINAL_ORDER_STATUSES = new Set(['FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED'])
+const CANONICAL_PROCESS_LOG_TAIL_BYTES = 200_000
 
 // Human-readable bootstrap evidence retained in the report: docker compose, not an in-memory substitute.
 const STARTUP_COMMANDS = [
@@ -647,8 +648,8 @@ function startManagedProcess(label, command, args, cwd, extraEnv = {}, inherited
     output: ''
   }
   processLogs.push(log)
-  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
-  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
+  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
+  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
   managedProcesses.push(child)
   return child
 }
@@ -5952,8 +5953,8 @@ async function launchBrowser() {
   observeLocalChildSpawn(child, { label: 'browser' })
   const log = { label: 'browser', command: executable, output: '' }
   processLogs.push(log)
-  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
-  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
+  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
+  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
   await child.p0SpawnReady
   await waitFor(async () => {
     assertProcessRunning(child)
@@ -8013,8 +8014,8 @@ export function startP0ManagedProcess(
     output: ''
   }
   processLogs.push(log)
-  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
-  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
+  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
+  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
   managedProcesses.push(child)
   bindP0AbortToManagedProcess(child, signal, label)
   return child

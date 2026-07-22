@@ -48,6 +48,16 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /MARKET_TEST_CONTROL_ENABLED["']?:?\s*["']?true/i)
   })
 
+  it('retains enough canonical process output to preserve the first server exception', () => {
+    const text = source()
+    const boundedProcessLogs = text.match(
+      /appendTail\(log\.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES\)/g
+    ) ?? []
+
+    assert.match(text, /const CANONICAL_PROCESS_LOG_TAIL_BYTES = 200_000/)
+    assert.equal(boundedProcessLogs.length, 6)
+  })
+
   it('uses real HTTP and WebSocket traffic without browser API interception or mocks', () => {
     const text = source()
 
