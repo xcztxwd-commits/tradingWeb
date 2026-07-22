@@ -5036,8 +5036,7 @@ function shiftPositionOpenedBeforeFunding(positionId, rate) {
   const updated = number(runDbSql(`
     WITH updated AS (
       UPDATE trading.positions
-      SET opened_at = to_timestamp(${rate.fundingTimeMs} / 1000.0) - interval '1 millisecond',
-          updated_at = now()
+      SET opened_at = to_timestamp(${rate.fundingTimeMs} / 1000.0) - interval '1 millisecond'
       WHERE id = '${sqlLiteral(positionId)}'
         AND account_id = '${sqlLiteral(accountId)}'
         AND status = 'OPEN'
@@ -5053,8 +5052,7 @@ function restorePositionOpenedAt(positionId, originalOpenedAtMicros) {
   const restored = number(runDbSql(`
     WITH restored AS (
       UPDATE trading.positions
-      SET opened_at = to_timestamp(${originalOpenedAtMicros} / 1000000.0),
-          updated_at = now()
+      SET opened_at = to_timestamp(${originalOpenedAtMicros} / 1000000.0)
       WHERE id = '${sqlLiteral(positionId)}'
         AND account_id = '${sqlLiteral(accountId)}'
       RETURNING id

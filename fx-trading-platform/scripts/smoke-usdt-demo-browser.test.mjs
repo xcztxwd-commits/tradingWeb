@@ -217,6 +217,7 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /waitForRealFundingRate/)
     assert.match(text, /DELETE FROM trading\.funding_rates/)
     assert.doesNotMatch(text, /INSERT INTO trading\.funding_rates/)
+    assert.doesNotMatch(text, /SET opened_at =[\s\S]{0,200}updated_at/)
     assert.doesNotMatch(text, /UPDATE market\.symbols\s+SET maintenance_margin_rate/is)
     assert.doesNotMatch(text, /installLiquidationRiskFixture/)
     assert.match(text, /CREATE DATABASE/)
