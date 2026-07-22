@@ -4088,7 +4088,7 @@ async function assertP0Catalog() {
       method: 'POST', token: userToken, body: orderBody({
         symbol: forbiddenSymbol(productType), side: 'BUY', orderType: 'MARKET', quantity: '1', quantityUnit: 'BASE'
       })
-    }, ['PRODUCT_NOT_ALLOWED', 'SYMBOL_NOT_FOUND', 'SYMBOL_NOT_TRADABLE'])
+    }, ['PRODUCT_NOT_ALLOWED', 'SYMBOL_NOT_ALLOWED', 'SYMBOL_NOT_FOUND', 'SYMBOL_NOT_TRADABLE'])
   }
   return { spot: spot.map((symbol) => symbol.symbol), perp: perp.map((symbol) => symbol.symbol), forbidden: FORBIDDEN_PRODUCTS }
 }

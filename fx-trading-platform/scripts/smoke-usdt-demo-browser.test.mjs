@@ -154,6 +154,13 @@ describe('real USDT demo browser smoke contract', () => {
     }
   })
 
+  it('accepts the demo guard error for forbidden non-whitelisted symbols', () => {
+    assert.match(
+      source(),
+      /\['PRODUCT_NOT_ALLOWED', 'SYMBOL_NOT_ALLOWED', 'SYMBOL_NOT_FOUND', 'SYMBOL_NOT_TRADABLE'\]/
+    )
+  })
+
   it('asserts REST and PostgreSQL state rather than relying only on visible text', () => {
     const text = source()
 
