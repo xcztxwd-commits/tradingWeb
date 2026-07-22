@@ -233,6 +233,16 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /for \(const positionId of positionIdSet\)/)
   })
 
+  it('retries stale position versions without accepting them as margin safety evidence', () => {
+    const text = source()
+
+    assert.match(text, /async function expectUnsafeMarginReduction/)
+    assert.match(text, /for \(let attempt = 0; attempt < 3; attempt \+= 1\)/)
+    assert.match(text, /if \(error\.code !== 'POSITION_VERSION_CONFLICT'\) return error/)
+    assert.match(text, /unsafe margin reduction safety could not be verified after 3 fresh position versions/)
+    assert.match(text, /await expectUnsafeMarginReduction\(isolated\.id\)/)
+  })
+
   it('cannot report PASS until provider state is restored and browser targets are closed', () => {
     const text = source()
 

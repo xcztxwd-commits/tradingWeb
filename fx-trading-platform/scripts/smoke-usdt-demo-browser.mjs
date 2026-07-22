@@ -4413,6 +4413,19 @@ async function runTransferJourney() {
   return { spotToPerp: spotToPerp.transferId, perpToSpot: perpToSpot.transferId }
 }
 
+async function expectUnsafeMarginReduction(positionId) {
+  const acceptedCodes = ['MARGIN_REDUCTION_UNSAFE', 'INSUFFICIENT_MARGIN', 'POSITION_VERSION_CONFLICT']
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const current = (await openPositions(SETTINGS_SYMBOL)).find((position) => position.id === positionId)
+    assert(current, 'unsafe margin reduction requires the isolated position to remain open')
+    const error = await expectApiError(`/api/trading/positions/${positionId}/margin`, {
+      method: 'POST', token: userToken, body: { action: 'REDUCE', amount: '1000000', expectedVersion: current.version }
+    }, acceptedCodes)
+    if (error.code !== 'POSITION_VERSION_CONFLICT') return error
+  }
+  throw new Error('unsafe margin reduction safety could not be verified after 3 fresh position versions')
+}
+
 async function runPerpetualJourney() {
   await cancelAndCloseAll('perp-journey-baseline')
   await updatePositionMode('ONE_WAY')
@@ -4515,9 +4528,7 @@ async function runPerpetualJourney() {
     'Isolated margin reduce must create an exact +1 release position-linked ledger entry'
   )
   // unsafe reduction visibly rejects while the preceding safe reduction succeeds.
-  await expectApiError(`/api/trading/positions/${isolated.id}/margin`, {
-    method: 'POST', token: userToken, body: { action: 'REDUCE', amount: '1000000', expectedVersion: isolated.version }
-  }, ['MARGIN_REDUCTION_UNSAFE', 'INSUFFICIENT_MARGIN'])
+  await expectUnsafeMarginReduction(isolated.id)
 
   const originalQuantity = number(isolated.lots)
   await api(`/api/trading/positions/${isolated.id}/close?accountId=${accountId}`, {
