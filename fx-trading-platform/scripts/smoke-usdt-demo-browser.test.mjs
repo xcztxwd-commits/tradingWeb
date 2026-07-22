@@ -132,6 +132,17 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(bundleSource, /Perp bundle must not mix providers: \$\{JSON\.stringify\(perpProviders\)\}/)
   })
 
+  it('waits for committed higher-priority provider failure evidence', () => {
+    const providerHealthSource = source().match(
+      /async function assertHigherPriorityProvidersUnavailable\([\s\S]*?\r?\n\}\r?\n\r?\nasync function runFullP0Journey/
+    )?.[0]
+
+    assert.ok(providerHealthSource)
+    assert.match(providerHealthSource, /const unavailable = await waitFor\(async \(\) => \{/)
+    assert.match(providerHealthSource, /const providers = await adminApi\('\/api\/admin\/market\/data-providers'\)/)
+    assert.match(providerHealthSource, /`\$\{mode\.id\} \$\{product\} higher-priority provider health`, 5000\)/)
+  })
+
   it('captures Web and Admin desktop/mobile evidence for every mode', () => {
     const text = source()
 

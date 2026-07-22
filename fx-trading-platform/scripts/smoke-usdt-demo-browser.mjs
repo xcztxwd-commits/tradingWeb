@@ -4307,32 +4307,34 @@ async function assertHigherPriorityProvidersUnavailable(mode, product, quote, st
   const higherPriorityCodes = priorities.slice(0, actualIndex)
   if (higherPriorityCodes.length === 0) return []
 
-  const providers = await adminApi('/api/admin/market/data-providers')
   const requestedAtMs = Date.parse(startedAt)
   const startedAtMs = sourceModeStartedAtMs > 0
     ? Math.min(requestedAtMs, sourceModeStartedAtMs)
     : requestedAtMs
-  const unavailable = higherPriorityCodes.map((code) => {
-    const provider = providers.find((candidate) => candidate.code === code)
-    assert(provider, `${mode.id} ${product} missing health evidence for higher-priority provider ${code}`)
-    const lastFailureAtMs = Date.parse(provider.lastFailureAt)
-    const lastSuccessAtMs = Date.parse(provider.lastSuccessAt)
-    assert(
-      String(provider.healthStatus).toUpperCase() === 'DOWN'
-        && number(provider.failureCount) > 0
-        && Number.isFinite(lastFailureAtMs)
-        && lastFailureAtMs >= startedAtMs - 1000
-        && (!Number.isFinite(lastSuccessAtMs) || lastSuccessAtMs <= lastFailureAtMs),
-      `${mode.id} ${product} selected ${quote.providerCode} without a current DOWN state and latest failure for higher-priority ${code}`
-    )
-    return {
-      code,
-      healthStatus: provider.healthStatus,
-      failureCount: provider.failureCount,
-      lastFailureAt: provider.lastFailureAt,
-      lastSuccessAt: provider.lastSuccessAt
-    }
-  })
+  const unavailable = await waitFor(async () => {
+    const providers = await adminApi('/api/admin/market/data-providers')
+    return higherPriorityCodes.map((code) => {
+      const provider = providers.find((candidate) => candidate.code === code)
+      assert(provider, `${mode.id} ${product} missing health evidence for higher-priority provider ${code}`)
+      const lastFailureAtMs = Date.parse(provider.lastFailureAt)
+      const lastSuccessAtMs = Date.parse(provider.lastSuccessAt)
+      assert(
+        String(provider.healthStatus).toUpperCase() === 'DOWN'
+          && number(provider.failureCount) > 0
+          && Number.isFinite(lastFailureAtMs)
+          && lastFailureAtMs >= startedAtMs - 1000
+          && (!Number.isFinite(lastSuccessAtMs) || lastSuccessAtMs <= lastFailureAtMs),
+        `${mode.id} ${product} selected ${quote.providerCode} without a current DOWN state and latest failure for higher-priority ${code}`
+      )
+      return {
+        code,
+        healthStatus: provider.healthStatus,
+        failureCount: provider.failureCount,
+        lastFailureAt: provider.lastFailureAt,
+        lastSuccessAt: provider.lastSuccessAt
+      }
+    })
+  }, `${mode.id} ${product} higher-priority provider health`, 5000)
   sourceEvidence.push({
     mode: mode.id,
     product,
