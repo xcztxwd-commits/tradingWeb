@@ -5643,12 +5643,20 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
     assert(confirmed, `${label} confirmation dialog must submit`)
   }
   try {
-    return await waitFor(async () => {
+    const created = await waitFor(async () => {
       const created = (await orders({ size: 500 }))
         .filter((order) => !beforeIds.has(order.id))
         .toSorted((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
       return created[0] ?? false
     }, `${label} resulting REST order`, 15000)
+    await page.waitForFunction((panelSelector, targetSide) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
+      const button = section?.querySelector('[data-trading-action="submit-order"]')
+      return Boolean(button && !button.disabled)
+    }, `${label} browser submission settled`, TRADE_PANEL_SELECTOR, side)
+    return created
   } catch (error) {
     const diagnostic = await page.evaluate((panelSelector, targetSide) => {
       const panel = document.querySelector(panelSelector)

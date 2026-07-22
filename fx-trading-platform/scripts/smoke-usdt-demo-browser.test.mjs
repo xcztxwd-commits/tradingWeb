@@ -385,6 +385,7 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /\[data-testid="mobile-trade-action"\]/)
     assert.match(text, /section\[role="dialog"\] > dl/)
     assert.match(text, /button\?\.previousElementSibling[\s\S]*\$\{label\} ready submit control/)
+    assert.match(text, /resulting REST order[\s\S]*\$\{label\} browser submission settled/)
     assert.match(text, /panel\?\.querySelector\('\[role="status"\]'\)\?\.textContent/)
     assert.match(text, /browser state: \$\{JSON\.stringify\(diagnostic\)\}/)
     assert.doesNotMatch(text, /\.trade-panel/)
