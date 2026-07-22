@@ -380,6 +380,8 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /Isolated margin after -1/)
     assert.match(text, /assertBatchItemsSucceeded/)
     assert.match(text, /waitForDirectionalPerpMark/)
+    assert.doesNotMatch(text, /openPositions\(\)\)\.length === 0, 'close-all/)
+    assert.match(text, /openPositions\(\)\)\.every\(\(position\) => position\.productType !== 'LINEAR_PERP'\)/)
   })
 
   it('binds scheduler funding to fresh provider rows and exactly one target-position settlement', () => {

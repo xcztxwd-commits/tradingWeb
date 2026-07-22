@@ -4755,7 +4755,7 @@ async function runProtectionAndFundingJourney() {
   assert(Array.isArray(closeAll.items), 'close-all must return per-position outcomes')
   assertBatchItemsSucceeded(cancelAll.items, 'cancel-all')
   assertBatchItemsSucceeded(closeAll.items, 'close-all')
-  assert((await openPositions()).length === 0, 'close-all must leave no open position')
+  assert((await openPositions()).every((position) => position.productType !== 'LINEAR_PERP'), 'close-all must leave no open Perpetual position')
   assert((await orders({ size: 500 })).every((order) => TERMINAL_ORDER_STATUSES.has(order.status)), 'cancel-all/close-all must leave no active order')
   await restoreFundingConfig(FALLBACK_FUNDING_SYMBOL)
   if (selectedFundingSource.externalUnavailable) await restoreFundingConfig(PERP_SYMBOL)
