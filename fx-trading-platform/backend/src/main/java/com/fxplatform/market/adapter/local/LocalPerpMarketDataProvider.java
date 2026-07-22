@@ -89,7 +89,8 @@ public class LocalPerpMarketDataProvider implements MarketDataProviderAdapter {
     QuoteResponse spot = generator.quote(spotSymbol, tick, now);
     BigDecimal index = spot.mid();
     BigDecimal premium = simulatedPremium.max(premiumLimit.negate()).min(premiumLimit);
-    BigDecimal mark = index.multiply(BigDecimal.ONE.add(premium));
+    BigDecimal mark = index.multiply(BigDecimal.ONE.add(premium))
+        .setScale(10, RoundingMode.HALF_UP);
     BigDecimal halfSpread = spot.ask().subtract(spot.bid()).divide(BigDecimal.valueOf(2), 10, RoundingMode.HALF_UP);
     BigDecimal bid = mark.subtract(halfSpread).max(BigDecimal.ZERO).setScale(10, RoundingMode.HALF_UP);
     BigDecimal ask = mark.add(halfSpread).setScale(10, RoundingMode.HALF_UP);
