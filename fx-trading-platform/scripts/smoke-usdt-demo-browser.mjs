@@ -4470,6 +4470,21 @@ async function expectUnsafeMarginReduction(positionId) {
   throw new Error('unsafe margin reduction safety could not be verified after 3 fresh position versions')
 }
 
+async function updatePositionMarginWithFreshVersion(positionId, action, amount) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const current = (await openPositions(SETTINGS_SYMBOL)).find((position) => position.id === positionId)
+    assert(current, 'position margin update requires the isolated position to remain open')
+    try {
+      return await api(`/api/trading/positions/${positionId}/margin`, {
+        method: 'POST', token: userToken, body: { action, amount, expectedVersion: current.version }
+      })
+    } catch (error) {
+      if (error.code !== 'POSITION_VERSION_CONFLICT') throw error
+    }
+  }
+  throw new Error(`${action} position margin update could not complete after 3 fresh position versions`)
+}
+
 async function runPerpetualJourney() {
   await cancelAndCloseAll('perp-journey-baseline')
   await updatePositionMode('ONE_WAY')
@@ -4550,15 +4565,11 @@ async function runPerpetualJourney() {
   })
   let isolated = (await openPositions(SETTINGS_SYMBOL))[0]
   const marginBefore = number(isolated.marginHeld)
-  const added = await api(`/api/trading/positions/${isolated.id}/margin`, {
-    method: 'POST', token: userToken, body: { action: 'ADD', amount: '10', expectedVersion: isolated.version }
-  })
+  const added = await updatePositionMarginWithFreshVersion(isolated.id, 'ADD', '10')
   assertNear(number(added.positionMargin), marginBefore + 10, 0.000001, 'Isolated margin after +10')
   isolated = (await openPositions(SETTINGS_SYMBOL))[0]
   assertNear(number(isolated.marginHeld), marginBefore + 10, 0.000001, 'persisted Isolated margin after +10')
-  const reduced = await api(`/api/trading/positions/${isolated.id}/margin`, {
-    method: 'POST', token: userToken, body: { action: 'REDUCE', amount: '1', expectedVersion: isolated.version }
-  })
+  const reduced = await updatePositionMarginWithFreshVersion(isolated.id, 'REDUCE', '1')
   assertNear(number(reduced.positionMargin), marginBefore + 9, 0.000001, 'Isolated margin after -1')
   isolated = (await openPositions(SETTINGS_SYMBOL))[0]
   assertNear(number(isolated.marginHeld), marginBefore + 9, 0.000001, 'persisted Isolated margin after -1')
