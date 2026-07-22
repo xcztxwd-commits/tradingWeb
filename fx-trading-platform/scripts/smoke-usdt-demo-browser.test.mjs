@@ -251,6 +251,7 @@ describe('real USDT demo browser smoke contract', () => {
     for (const table of ['admin.roles', 'admin.menus', 'admin.role_menu_permissions', 'admin.user_roles']) {
       assert.match(text, new RegExp(escapeRegExp(table)))
     }
+    assert.match(text, /'canonical admin bootstrap user', 10000\)\s+grantCanonicalAdminAuthority/)
     assert.match(text, /grantCanonicalAdminAuthority\('market:symbol:update'\)\s+adminToken = await login/)
     assert.match(text, /adminAuthorities\.includes\('market:symbol:update'\)/)
     assert.match(text, /SELECT count\(\*\) FROM user_role_upsert/)

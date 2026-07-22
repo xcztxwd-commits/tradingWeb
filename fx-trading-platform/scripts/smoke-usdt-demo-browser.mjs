@@ -4033,6 +4033,15 @@ export async function executeP0SuiteLifecycle({ options, operations }) {
 }
 
 async function bootstrapIdentityAndAccount() {
+  await waitFor(
+    () => runDbSql(`
+      SELECT count(*)
+      FROM auth.users
+      WHERE lower(email) = lower('${sqlLiteral(adminEmail)}')
+        AND role = 'ADMIN'
+        AND status = 'ACTIVE'
+    `) === '1',
+    'canonical admin bootstrap user', 10000)
   grantCanonicalAdminAuthority('market:symbol:update')
   adminToken = await login(adminEmail, adminPassword, true)
   assert(adminAuthorities.includes('market:symbol:update'), 'canonical admin must receive market:symbol:update')
