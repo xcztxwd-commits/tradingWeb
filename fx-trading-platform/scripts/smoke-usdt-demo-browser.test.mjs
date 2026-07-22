@@ -65,6 +65,21 @@ describe('real USDT demo browser smoke contract', () => {
     assert.equal(boundedProcessLogs.length, 6)
   })
 
+  it('drains managed process logs while PostgreSQL fixtures wait on locks', () => {
+    const text = source()
+    const helper = text.match(
+      /async function runDbSql\(sql\) \{[\s\S]*?\r?\n\}\r?\n\r?\nasync function dropSmokeDatabase/
+    )?.[0]
+
+    assert.ok(helper)
+    assert.match(helper, /await runLocalCommand\(/)
+    assert.doesNotMatch(helper, /spawnSync\(/)
+    assert.match(
+      text,
+      /async \(\) => \(await runDbSql\(`[\s\S]*?`\)\) === '1',[\s\S]*?'canonical admin bootstrap user'/
+    )
+  })
+
   it('uses real HTTP and WebSocket traffic without browser API interception or mocks', () => {
     const text = source()
 
@@ -212,7 +227,7 @@ describe('real USDT demo browser smoke contract', () => {
     ]) {
       assert.match(text, new RegExp(escapeRegExp(table)))
     }
-    assert.match(text, /docker["']?,\s*\[[^\]]*exec[^\]]*psql/s)
+    assert.match(text, /command: 'docker'[\s\S]*args: \['exec', '-i', postgresContainerId, 'psql'/)
   })
 
   it('keeps deterministic funding and liquidation fixtures isolated and reversible', () => {
@@ -265,7 +280,7 @@ describe('real USDT demo browser smoke contract', () => {
   it('binds the isolated canonical admin to every authority used by the journey', () => {
     const text = source()
 
-    assert.match(text, /function grantCanonicalAdminAuthority/)
+    assert.match(text, /async function grantCanonicalAdminAuthority/)
     for (const table of ['admin.roles', 'admin.menus', 'admin.role_menu_permissions', 'admin.user_roles']) {
       assert.match(text, new RegExp(escapeRegExp(table)))
     }
@@ -276,7 +291,7 @@ describe('real USDT demo browser smoke contract', () => {
     ]) {
       assert.match(text, new RegExp(escapeRegExp(`'${authority}'`)))
     }
-    assert.match(text, /for \(const authority of CANONICAL_ADMIN_AUTHORITIES\)\s+grantCanonicalAdminAuthority\(authority\)/)
+    assert.match(text, /for \(const authority of CANONICAL_ADMIN_AUTHORITIES\)\s+await grantCanonicalAdminAuthority\(authority\)/)
     assert.match(text, /CANONICAL_ADMIN_AUTHORITIES\.every\(\(authority\) => adminAuthorities\.includes\(authority\)\)/)
     assert.match(text, /SELECT count\(\*\) FROM user_role_upsert/)
     assert.doesNotMatch(text, /grantCanonicalAdminAuthority\(['"]\*['"]\)/)

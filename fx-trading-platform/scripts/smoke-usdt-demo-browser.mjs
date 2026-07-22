@@ -607,7 +607,7 @@ async function ensureBackendServer() {
     const response = await rawJson('/actuator/health').catch(() => null)
     return response?.status === 'UP'
   }, 'real backend /actuator/health', 180000)
-  await waitFor(() => number(runDbSql(`
+  await waitFor(async () => number(await runDbSql(`
     SELECT count(*)
     FROM pg_stat_activity
     WHERE datname = current_database()
@@ -4040,15 +4040,15 @@ export async function executeP0SuiteLifecycle({ options, operations }) {
 
 async function bootstrapIdentityAndAccount() {
   await waitFor(
-    () => runDbSql(`
+    async () => (await runDbSql(`
       SELECT count(*)
       FROM auth.users
       WHERE lower(email) = lower('${sqlLiteral(adminEmail)}')
         AND role = 'ADMIN'
         AND status = 'ACTIVE'
-    `) === '1',
+    `)) === '1',
     'canonical admin bootstrap user', 10000)
-  for (const authority of CANONICAL_ADMIN_AUTHORITIES) grantCanonicalAdminAuthority(authority)
+  for (const authority of CANONICAL_ADMIN_AUTHORITIES) await grantCanonicalAdminAuthority(authority)
   adminToken = await login(adminEmail, adminPassword, true)
   assert(
     CANONICAL_ADMIN_AUTHORITIES.every((authority) => adminAuthorities.includes(authority)),
@@ -4064,7 +4064,7 @@ async function bootstrapIdentityAndAccount() {
   const demo = accounts.find((account) => account.accountType === 'DEMO' && account.status === 'ACTIVE')
   assert(demo, 'registration must create one ACTIVE DEMO account')
   accountId = demo.id
-  const databaseIdentity = runDbSql(`
+  const databaseIdentity = await runDbSql(`
     SELECT current_database() || '|' || (
       SELECT count(*)
       FROM core.trading_accounts
@@ -4086,9 +4086,9 @@ async function bootstrapIdentityAndAccount() {
   return { userId, accountId, spotUsdt: spotUsdt.total, perpUsdt: summary.balance }
 }
 
-function grantCanonicalAdminAuthority(authority) {
+async function grantCanonicalAdminAuthority(authority) {
   assert(CANONICAL_ADMIN_AUTHORITIES.includes(authority), 'canonical admin authority must stay narrowly scoped')
-  const bound = runDbSql(`
+  const bound = await runDbSql(`
     WITH admin_user AS (
       SELECT id FROM auth.users WHERE lower(email) = lower('${sqlLiteral(adminEmail)}')
     ), role_upsert AS (
@@ -4724,7 +4724,7 @@ async function runProtectionAndFundingJourney() {
     fixedFundingIntervalMinutes: 1,
     reason: 'Task18 deterministic real FIXED fallback funding source'
   })
-  clearFundingRatesForSymbol(FALLBACK_FUNDING_SYMBOL)
+  await clearFundingRatesForSymbol(FALLBACK_FUNDING_SYMBOL)
   const fallbackConfig = await waitForFundingConfigSource(FALLBACK_FUNDING_SYMBOL, 'FIXED', 'LOCAL_SIMULATED', fallbackFundingPhaseStartedAt, 75000)
   const fallbackRate = await waitForRealFundingRate(
     FALLBACK_FUNDING_SYMBOL,
@@ -4876,7 +4876,7 @@ export function assertNewestFirstProtectionResize(before, after, remainingPositi
 }
 
 async function assertNoForeignOpenPositions(symbol, label) {
-  const count = number(runDbSql(`
+  const count = number(await runDbSql(`
     SELECT count(*)
     FROM trading.positions
     WHERE symbol = '${sqlLiteral(symbol)}'
@@ -4889,7 +4889,7 @@ async function assertNoForeignOpenPositions(symbol, label) {
 async function prepareSelectedFundingRate() {
   await applySourceMode(SOURCE_MODES.find((mode) => mode.id === 'BINANCE_PUBLIC'))
   const externalPhaseStartedAt = Date.now()
-  clearFundingRatesForSymbol(PERP_SYMBOL)
+  await clearFundingRatesForSymbol(PERP_SYMBOL)
   try {
     const config = await waitForFundingConfigSource(PERP_SYMBOL, ['BINANCE', 'OKX'], 'PUBLIC_EXTERNAL', null, 45000)
     const expectedProviders = config.actualSource === 'BINANCE' ? ['binance-usdm'] : ['okx-swap']
@@ -4926,7 +4926,7 @@ async function prepareSelectedFundingRate() {
       fixedFundingIntervalMinutes: 1,
       reason: 'Task18 selected-source fallback after external funding unavailability'
     })
-    clearFundingRatesForSymbol(PERP_SYMBOL)
+    await clearFundingRatesForSymbol(PERP_SYMBOL)
     const fixedConfig = await waitForFundingConfigSource(PERP_SYMBOL, 'FIXED', 'LOCAL_SIMULATED', fixedPhaseStartedAt, 75000)
     const rate = await waitForRealFundingRate(
       PERP_SYMBOL,
@@ -4951,7 +4951,7 @@ async function waitForRealFundingRate(
   createdAtOrAfterMs = null,
   minimumNextFundingLeadMs = 0
 ) {
-  return waitFor(() => {
+  return waitFor(async () => {
     const providerPredicate = expectedProviderCodes?.length
       ? `AND provider_code IN (${expectedProviderCodes.map((code) => `'${sqlLiteral(code)}'`).join(',')})`
       : ''
@@ -4964,7 +4964,7 @@ async function waitForRealFundingRate(
     const nextFundingLeadPredicate = minimumNextFundingLeadMs > 0
       ? `AND next_funding_time >= now() + (${Number(minimumNextFundingLeadMs)} * interval '1 millisecond')`
       : ''
-    const row = runDbSql(`
+    const row = await runDbSql(`
       SELECT id::text || '|' || funding_rate::text || '|'
         || floor(extract(epoch FROM funding_time) * 1000)::bigint || '|'
         || floor(extract(epoch FROM next_funding_time) * 1000)::bigint || '|'
@@ -5018,12 +5018,12 @@ async function settleRealFundingRateForLong(position, rate, label) {
     fundingSettlements()
   ])
   const settlementIdsBefore = new Set(settlementsBefore.map((settlement) => settlement.id))
-  const originalOpenedAtMicros = shiftPositionOpenedBeforeFunding(position.id, rate)
+  const originalOpenedAtMicros = await shiftPositionOpenedBeforeFunding(position.id, rate)
   let settlement
   try {
     settlement = await waitFundingSettlement(rate, position, settlementIdsBefore)
   } finally {
-    restorePositionOpenedAt(position.id, originalOpenedAtMicros)
+    await restorePositionOpenedAt(position.id, originalOpenedAtMicros)
   }
   const after = await accountSummary()
   assertNear(
@@ -5041,8 +5041,8 @@ async function settleRealFundingRateForLong(position, rate, label) {
   return { rate, settlement, balanceBefore: before.balance, balanceAfter: after.balance }
 }
 
-function shiftPositionOpenedBeforeFunding(positionId, rate) {
-  const originalOpenedAtMicros = runDbSql(`
+async function shiftPositionOpenedBeforeFunding(positionId, rate) {
+  const originalOpenedAtMicros = await runDbSql(`
     SELECT floor(extract(epoch FROM opened_at) * 1000000)::bigint
     FROM trading.positions
     WHERE id = '${sqlLiteral(positionId)}'
@@ -5050,7 +5050,7 @@ function shiftPositionOpenedBeforeFunding(positionId, rate) {
       AND status = 'OPEN'
   `)
   assert(originalOpenedAtMicros, `funding fixture position ${positionId} must be an open position owned by the smoke account`)
-  const updated = number(runDbSql(`
+  const updated = number(await runDbSql(`
     WITH updated AS (
       UPDATE trading.positions
       SET opened_at = to_timestamp(${rate.fundingTimeMs} / 1000.0) - interval '1 millisecond'
@@ -5065,8 +5065,8 @@ function shiftPositionOpenedBeforeFunding(positionId, rate) {
   return originalOpenedAtMicros
 }
 
-function restorePositionOpenedAt(positionId, originalOpenedAtMicros) {
-  const restored = number(runDbSql(`
+async function restorePositionOpenedAt(positionId, originalOpenedAtMicros) {
+  const restored = number(await runDbSql(`
     WITH restored AS (
       UPDATE trading.positions
       SET opened_at = to_timestamp(${originalOpenedAtMicros} / 1000000.0)
@@ -5125,8 +5125,8 @@ async function updateFundingConfig(symbol, patch) {
   })
 }
 
-function clearFundingRatesForSymbol(symbol) {
-  runDbSql(`DELETE FROM trading.funding_rates WHERE symbol = '${sqlLiteral(symbol)}'`)
+async function clearFundingRatesForSymbol(symbol) {
+  await runDbSql(`DELETE FROM trading.funding_rates WHERE symbol = '${sqlLiteral(symbol)}'`)
 }
 
 async function isolatePreparedFundingRate(symbol, rate) {
@@ -5134,7 +5134,7 @@ async function isolatePreparedFundingRate(symbol, rate) {
     fixedFundingIntervalMinutes: 525600,
     reason: 'Isolate the prepared Task18 funding cycle while its smoke position is open'
   })
-  const deleted = number(runDbSql(`
+  const deleted = number(await runDbSql(`
     WITH deleted AS (
       DELETE FROM trading.funding_rates
       WHERE symbol = '${sqlLiteral(symbol)}'
@@ -5143,7 +5143,7 @@ async function isolatePreparedFundingRate(symbol, rate) {
     )
     SELECT count(*) FROM deleted
   `))
-  const nearCompetingRates = number(runDbSql(`
+  const nearCompetingRates = number(await runDbSql(`
     SELECT count(*)
     FROM trading.funding_rates
     WHERE symbol = '${sqlLiteral(symbol)}'
@@ -5255,7 +5255,7 @@ async function runIsolatedLiquidation() {
     ledger,
     'Isolated liquidation'
   )
-  const notifications = runDbSql(`
+  const notifications = await runDbSql(`
     SELECT count(*)
     FROM trading.order_events event
     JOIN trading.orders orders ON orders.id = event.order_id
@@ -5284,7 +5284,7 @@ async function runCrossLiquidation() {
   const opened = await openPositions()
   const openedCross = opened.filter((position) => position.marginMode === 'CROSS')
   assert(openedCross.length >= 2, 'Cross liquidation fixture must have at least two Cross positions')
-  installAccountScopedCrossShortfallFixture()
+  await installAccountScopedCrossShortfallFixture()
   await waitFor(async () => (await openPositions()).every((position) => position.marginMode !== 'CROSS'), 'Cross liquidation closes all Cross positions', 30000)
   const after = await accountSummary()
   assert(number(after.balance) >= 0, 'Cross liquidation shortfall keeps balance at zero, never negative')
@@ -5312,7 +5312,7 @@ async function runCrossLiquidation() {
   const chargePairs = evidence.liquidationOrders
     .map((order) => `('${sqlLiteral(order.id)}','${sqlLiteral(order.parentPositionId)}')`)
     .join(',')
-  const settledCharges = number(runDbSql(`
+  const settledCharges = number(await runDbSql(`
     SELECT count(*)
     FROM trading.cross_liquidation_charges
     WHERE account_id = '${sqlLiteral(accountId)}'
@@ -5324,8 +5324,8 @@ async function runCrossLiquidation() {
   return { closed: openedCross.map((position) => position.id), shortfall: shortfall.length, balance: after.balance }
 }
 
-function installAccountScopedCrossShortfallFixture() {
-  const updated = number(runDbSql(`
+async function installAccountScopedCrossShortfallFixture() {
+  const updated = number(await runDbSql(`
     WITH updated AS (
       UPDATE core.trading_accounts
       SET balance = 0,
@@ -6505,7 +6505,7 @@ async function assertDatabaseState() {
     openPositions(),
     api(`/api/trading/funding/settlements?accountId=${accountId}&page=0&size=1000`, { token: userToken })
   ])
-  const raw = runDbSql(`
+  const raw = await runDbSql(`
     SELECT json_build_object(
       'wallets', (SELECT count(*) FROM core.wallet_balances WHERE account_id = '${sqlLiteral(accountId)}'),
       'assetLedger', (SELECT count(*) FROM ledger.asset_ledger_entries WHERE account_id = '${sqlLiteral(accountId)}'),
@@ -6525,17 +6525,22 @@ async function assertDatabaseState() {
   return { rest: rest.map((rows) => pageContent(rows).length), db }
 }
 
-function runDbSql(sql) {
+async function runDbSql(sql) {
   const postgresContainerId = canonicalComposeIdentity?.postgres?.id
   if (typeof postgresContainerId !== 'string' || !/^[a-f0-9]{64}$/.test(postgresContainerId)) {
     throw new Error('P0_VERIFIED_POSTGRES_CONTAINER_REQUIRED')
   }
-  const result = spawnSync('docker', ['exec', postgresContainerId, 'psql', '-U', 'postgres', '-d', smokeDatabase, '-tA', '-v', 'ON_ERROR_STOP=1', '-c', sql], {
-    encoding: 'utf8',
-    windowsHide: true
+  const result = await runLocalCommand({
+    id: 'canonical-db-sql',
+    command: 'docker',
+    args: ['exec', '-i', postgresContainerId, 'psql', '-U', 'postgres', '-d', smokeDatabase, '-tA', '-v', 'ON_ERROR_STOP=1', '-f', '-'],
+    cwd: projectRoot,
+    stdin: `${sql}\n`,
+    shell: false,
+    signal: shutdownController.signal
   })
-  if (result.status !== 0) throw new Error(`PostgreSQL assertion/fixture failed:\n${result.error?.message ?? result.stderr ?? result.stdout}`)
-  return result.stdout.trim()
+  if (result.status !== 0 || result.signal) throw new Error(`PostgreSQL assertion/fixture failed:\n${result.stderr ?? result.stdout}`)
+  return String(result.stdout ?? '').trim()
 }
 
 async function dropSmokeDatabase() {
