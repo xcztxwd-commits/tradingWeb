@@ -4338,10 +4338,12 @@ async function runSpotJourney() {
   assert(triggeredStop.status === 'FILLED', `Spot STOP_MARKET must trigger and fill, got ${triggeredStop.status}`)
 
   const beforeBuyOcoWallets = await walletBalances()
+  const buyOcoQuote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
+  const buyOcoLast = number(buyOcoQuote.mid ?? buyOcoQuote.last ?? buyOcoQuote.ask)
   const buyOco = await createOco('BUY OCO', 'BUY', {
     quantity: '0.0001',
-    limitPrice: aligned(last * 0.9998, tick, 'floor'),
-    stopTriggerPrice: aligned(last * 1.0002, tick, 'ceil')
+    limitPrice: aligned(buyOcoLast * 0.9998, tick, 'floor'),
+    stopTriggerPrice: aligned(buyOcoLast * 1.0002, tick, 'ceil')
   })
   const buyOutcome = await waitOcoOutcome(buyOco.contingencyGroupId)
   assertOcoOutcome(buyOutcome, 'BUY OCO')
@@ -4352,10 +4354,12 @@ async function runSpotJourney() {
   )
 
   const beforeSellOcoWallets = afterBuyOcoWallets
+  const sellOcoQuote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
+  const sellOcoLast = number(sellOcoQuote.mid ?? sellOcoQuote.last ?? sellOcoQuote.ask)
   const sellOco = await createOco('SELL OCO', 'SELL', {
     quantity: '0.0001',
-    limitPrice: aligned(last * 1.0002, tick, 'ceil'),
-    stopTriggerPrice: aligned(last * 0.9998, tick, 'floor')
+    limitPrice: aligned(sellOcoLast * 1.0002, tick, 'ceil'),
+    stopTriggerPrice: aligned(sellOcoLast * 0.9998, tick, 'floor')
   })
   const sellOutcome = await waitOcoOutcome(sellOco.contingencyGroupId)
   assertOcoOutcome(sellOutcome, 'SELL OCO')

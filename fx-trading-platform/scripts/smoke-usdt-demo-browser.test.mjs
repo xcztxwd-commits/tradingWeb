@@ -298,11 +298,11 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /mobile real order sheet[\s\S]*getBoundingClientRect|getBoundingClientRect[\s\S]*mobile real order sheet/)
   })
 
-  it('uses the backend OCO matrices and exact ledger, funding, and batch invariants', () => {
+  it('refreshes LAST_PRICE for each backend OCO matrix and keeps exact ledger, funding, and batch invariants', () => {
     const text = source()
 
-    assert.match(text, /BUY OCO[\s\S]*limitPrice: aligned\(last \* 0\.9998[\s\S]*stopTriggerPrice: aligned\(last \* 1\.0002/)
-    assert.match(text, /SELL OCO[\s\S]*limitPrice: aligned\(last \* 1\.0002[\s\S]*stopTriggerPrice: aligned\(last \* 0\.9998/)
+    assert.match(text, /const buyOcoQuote = await api\(`\/api\/market\/quotes\/\$\{SPOT_SYMBOL\}`\)[\s\S]*const buyOcoLast = number\(buyOcoQuote\.mid \?\? buyOcoQuote\.last \?\? buyOcoQuote\.ask\)[\s\S]*BUY OCO[\s\S]*limitPrice: aligned\(buyOcoLast \* 0\.9998[\s\S]*stopTriggerPrice: aligned\(buyOcoLast \* 1\.0002/)
+    assert.match(text, /const sellOcoQuote = await api\(`\/api\/market\/quotes\/\$\{SPOT_SYMBOL\}`\)[\s\S]*const sellOcoLast = number\(sellOcoQuote\.mid \?\? sellOcoQuote\.last \?\? sellOcoQuote\.ask\)[\s\S]*SELL OCO[\s\S]*limitPrice: aligned\(sellOcoLast \* 1\.0002[\s\S]*stopTriggerPrice: aligned\(sellOcoLast \* 0\.9998/)
     assert.match(text, /for \(const transfer of \[spotToPerp, perpToSpot\]\)/)
     assert.match(text, /pending Perp order must reduce free margin/)
     assert.match(text, /Isolated margin after \+10/)
