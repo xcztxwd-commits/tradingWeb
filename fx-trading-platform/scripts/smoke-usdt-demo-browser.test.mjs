@@ -120,6 +120,18 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, new RegExp(escapeRegExp('/provider-bindings/')))
   })
 
+  it('retries whole source bundles across provider transitions with provider diagnostics', () => {
+    const bundleSource = source().match(
+      /async function assertBundleSources\(modeId\) \{[\s\S]*?\r?\n\}\r?\n\r?\nfunction assertSourceMetadata/
+    )?.[0]
+
+    assert.ok(bundleSource)
+    assert.match(bundleSource, /const bundle = await waitFor\(async \(\) => \{/)
+    assert.match(bundleSource, /`\$\{modeId\} source bundle consistency`, 30000\)/)
+    assert.match(bundleSource, /Spot bundle must not mix providers: \$\{JSON\.stringify\(spotProviders\)\}/)
+    assert.match(bundleSource, /Perp bundle must not mix providers: \$\{JSON\.stringify\(perpProviders\)\}/)
+  })
+
   it('captures Web and Admin desktop/mobile evidence for every mode', () => {
     const text = source()
 

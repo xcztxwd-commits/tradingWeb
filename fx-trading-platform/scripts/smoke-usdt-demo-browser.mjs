@@ -4236,25 +4236,40 @@ async function verifyProviderBindingsRestored() {
 async function assertBundleSources(modeId) {
   const mode = SOURCE_MODES.find((candidate) => candidate.id === modeId)
   const startedAt = new Date().toISOString()
-  const [spotQuote, spotDepth, spotTrades, perpQuote, perpDepth, perpTrades, perpReference] = await Promise.all([
-    api(`/api/market/quotes/${SPOT_SYMBOL}`),
-    api(`/api/market/order-book/${SPOT_SYMBOL}`),
-    api(`/api/market/trades/${SPOT_SYMBOL}`),
-    api(`/api/market/quotes/${PERP_SYMBOL}`),
-    api(`/api/market/order-book/${PERP_SYMBOL}`),
-    api(`/api/market/trades/${PERP_SYMBOL}`),
-    api(`/api/market/perpetuals/${PERP_SYMBOL}/reference`)
-  ])
-  const spotTradeSource = Array.isArray(spotTrades) ? spotTrades[0] : spotTrades
-  const perpTradeSource = Array.isArray(perpTrades) ? perpTrades[0] : perpTrades
-  for (const [label, payload] of [
-    ['spot quote', spotQuote], ['spot depth', spotDepth], ['spot trades', spotTradeSource],
-    ['perp quote', perpQuote], ['perp depth', perpDepth], ['perp trades', perpTradeSource], ['perp reference', perpReference]
-  ]) assertSourceMetadata(payload, label)
-  assert([spotQuote, spotDepth, spotTradeSource].every((payload) => payload.providerCode === spotQuote.providerCode), 'Spot bundle must not mix providers')
-  assert([perpQuote, perpDepth, perpTradeSource, perpReference].every((payload) => payload.providerCode === perpQuote.providerCode), 'Perp bundle must not mix providers')
-  assert(mode.expectedSpot.includes(spotQuote.providerCode), `${modeId} unexpected Spot provider ${spotQuote.providerCode}`)
-  assert(mode.expectedPerp.includes(perpQuote.providerCode), `${modeId} unexpected Perp provider ${perpQuote.providerCode}`)
+  const bundle = await waitFor(async () => {
+    const [spotQuote, spotDepth, spotTrades, perpQuote, perpDepth, perpTrades, perpReference] = await Promise.all([
+      api(`/api/market/quotes/${SPOT_SYMBOL}`),
+      api(`/api/market/order-book/${SPOT_SYMBOL}`),
+      api(`/api/market/trades/${SPOT_SYMBOL}`),
+      api(`/api/market/quotes/${PERP_SYMBOL}`),
+      api(`/api/market/order-book/${PERP_SYMBOL}`),
+      api(`/api/market/trades/${PERP_SYMBOL}`),
+      api(`/api/market/perpetuals/${PERP_SYMBOL}/reference`)
+    ])
+    const spotTradeSource = Array.isArray(spotTrades) ? spotTrades[0] : spotTrades
+    const perpTradeSource = Array.isArray(perpTrades) ? perpTrades[0] : perpTrades
+    for (const [label, payload] of [
+      ['spot quote', spotQuote], ['spot depth', spotDepth], ['spot trades', spotTradeSource],
+      ['perp quote', perpQuote], ['perp depth', perpDepth], ['perp trades', perpTradeSource], ['perp reference', perpReference]
+    ]) assertSourceMetadata(payload, label)
+    const spotProviders = {
+      quote: spotQuote.providerCode,
+      depth: spotDepth.providerCode,
+      trades: spotTradeSource.providerCode
+    }
+    const perpProviders = {
+      quote: perpQuote.providerCode,
+      depth: perpDepth.providerCode,
+      trades: perpTradeSource.providerCode,
+      reference: perpReference.providerCode
+    }
+    assert(new Set(Object.values(spotProviders)).size === 1, `Spot bundle must not mix providers: ${JSON.stringify(spotProviders)}`)
+    assert(new Set(Object.values(perpProviders)).size === 1, `Perp bundle must not mix providers: ${JSON.stringify(perpProviders)}`)
+    assert(mode.expectedSpot.includes(spotQuote.providerCode), `${modeId} unexpected Spot provider ${spotQuote.providerCode}`)
+    assert(mode.expectedPerp.includes(perpQuote.providerCode), `${modeId} unexpected Perp provider ${perpQuote.providerCode}`)
+    return { spotQuote, perpQuote }
+  }, `${modeId} source bundle consistency`, 30000)
+  const { spotQuote, perpQuote } = bundle
   const [spotHigherPriorityFailures, perpHigherPriorityFailures] = await Promise.all([
     assertHigherPriorityProvidersUnavailable(mode, 'spot', spotQuote, startedAt),
     assertHigherPriorityProvidersUnavailable(mode, 'perp', perpQuote, startedAt)
