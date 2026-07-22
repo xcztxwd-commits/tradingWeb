@@ -5277,7 +5277,7 @@ async function runCrossLiquidation() {
     positionSide: 'BOTH', marginMode: 'CROSS'
   })
   await createOrder('Cross liquidation XRP leg', {
-    symbol: 'XRPUSDT-PERP', side: 'BUY', orderType: 'MARKET', quantity: '10000', quantityUnit: 'BASE', leverage: 100,
+    symbol: 'XRPUSDT-PERP', side: 'BUY', orderType: 'MARKET', quantity: '100', quantityUnit: 'BASE', leverage: 100,
     positionSide: 'BOTH', marginMode: 'CROSS'
   })
   const opened = await openPositions()

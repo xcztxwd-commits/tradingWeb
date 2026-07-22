@@ -241,6 +241,13 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /for \(const positionId of positionIdSet\)/)
   })
 
+  it('keeps the cross liquidation fixture within the global quantity limit', () => {
+    const text = source()
+
+    assert.match(text, /createOrder\('Cross liquidation XRP leg', \{[\s\S]{0,200}quantity: '100'/)
+    assert.doesNotMatch(text, /createOrder\('Cross liquidation XRP leg', \{[\s\S]{0,200}quantity: '10000'/)
+  })
+
   it('retries stale position versions without accepting them as margin safety evidence', () => {
     const text = source()
 
