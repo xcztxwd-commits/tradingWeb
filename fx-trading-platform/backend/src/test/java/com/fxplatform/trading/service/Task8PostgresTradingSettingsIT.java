@@ -224,12 +224,13 @@ class Task8PostgresTradingSettingsIT {
           id, user_id, account_id, symbol, side, order_type, status, lots,
           idempotency_key, client_order_id, quantity, remaining_quantity,
           product_type, position_mode, position_side, margin_mode, quantity_unit,
-          original_quantity, base_quantity, time_in_force, reduce_only, order_origin
+          original_quantity, base_quantity, time_in_force, reduce_only, order_origin,
+          leverage
         ) VALUES (
           ?, ?, ?, ?, 'BUY', 'LIMIT', ?, 0.01,
           ?, ?, 0.01, 0.01,
           ?, 'ONE_WAY', 'BOTH', 'CROSS', 'BASE',
-          0.01, 0.01, 'GTC', false, 'USER'
+          0.01, 0.01, 'GTC', false, 'USER', 10
         )
         """, id, fixture.userId(), fixture.accountId(), symbol, status, key, key, productType);
     return id;

@@ -15,6 +15,7 @@ import com.fxplatform.trading.repository.FundingRateRepository;
 import com.fxplatform.trading.repository.FundingSettlementRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -82,13 +83,13 @@ class Task11PostgresFundingIT {
         INSERT INTO trading.positions (
           id, account_id, symbol, product_type, position_mode, position_side,
           margin_mode, side, lots, open_price, current_price, mark_price,
-          settlement_asset, margin_asset, status, opened_at
+          settlement_asset, margin_asset, leverage, status, opened_at
         ) VALUES (
           ?, ?, ?, 'LINEAR_PERP', 'ONE_WAY', 'BOTH',
           'CROSS', 'BUY', 1, 50000, 50000, 50000,
-          'USDT', 'USDT', 'OPEN', ?
+          'USDT', 'USDT', 10, 'OPEN', ?
         )
-        """, positionId, accountId, SYMBOL, OPENED_AT);
+        """, positionId, accountId, SYMBOL, Timestamp.from(OPENED_AT));
   }
 
   @AfterEach
@@ -97,7 +98,7 @@ class Task11PostgresFundingIT {
     jdbcTemplate.update(
         "DELETE FROM trading.funding_rates WHERE symbol = ? AND funding_time = ?",
         SYMBOL,
-        FUNDING_TIME);
+        Timestamp.from(FUNDING_TIME));
     jdbcTemplate.update("DELETE FROM trading.positions WHERE id = ?", positionId);
     jdbcTemplate.update("DELETE FROM core.trading_accounts WHERE id = ?", accountId);
     jdbcTemplate.update("DELETE FROM auth.users WHERE id = ?", userId);
