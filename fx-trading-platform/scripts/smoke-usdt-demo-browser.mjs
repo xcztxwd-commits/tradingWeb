@@ -4089,12 +4089,14 @@ function grantCanonicalAdminAuthority(authority) {
       FROM role_upsert CROSS JOIN menu_upsert
       ON CONFLICT (role_id, menu_id) DO UPDATE SET enabled = true, updated_at = now()
       RETURNING role_id
+    ), user_role_upsert AS (
+      INSERT INTO admin.user_roles (user_id, role_id)
+      SELECT admin_user.id, permission_upsert.role_id
+      FROM admin_user CROSS JOIN permission_upsert
+      ON CONFLICT (user_id, role_id) DO UPDATE SET user_id = excluded.user_id
+      RETURNING 1
     )
-    INSERT INTO admin.user_roles (user_id, role_id)
-    SELECT admin_user.id, permission_upsert.role_id
-    FROM admin_user CROSS JOIN permission_upsert
-    ON CONFLICT (user_id, role_id) DO UPDATE SET user_id = excluded.user_id
-    RETURNING 1
+    SELECT count(*) FROM user_role_upsert
   `)
   assert(bound === '1', 'canonical admin authority binding must affect exactly one user')
 }

@@ -253,6 +253,7 @@ describe('real USDT demo browser smoke contract', () => {
     }
     assert.match(text, /grantCanonicalAdminAuthority\('market:symbol:update'\)\s+adminToken = await login/)
     assert.match(text, /adminAuthorities\.includes\('market:symbol:update'\)/)
+    assert.match(text, /SELECT count\(\*\) FROM user_role_upsert/)
     assert.doesNotMatch(text, /grantCanonicalAdminAuthority\(['"]\*['"]\)/)
   })
 
