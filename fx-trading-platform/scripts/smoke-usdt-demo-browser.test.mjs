@@ -244,6 +244,18 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /await expectUnsafeMarginReduction\(isolated\.id\)/)
   })
 
+  it('binds the isolated canonical admin to the exact funding configuration authority', () => {
+    const text = source()
+
+    assert.match(text, /function grantCanonicalAdminAuthority/)
+    for (const table of ['admin.roles', 'admin.menus', 'admin.role_menu_permissions', 'admin.user_roles']) {
+      assert.match(text, new RegExp(escapeRegExp(table)))
+    }
+    assert.match(text, /grantCanonicalAdminAuthority\('market:symbol:update'\)\s+adminToken = await login/)
+    assert.match(text, /adminAuthorities\.includes\('market:symbol:update'\)/)
+    assert.doesNotMatch(text, /grantCanonicalAdminAuthority\(['"]\*['"]\)/)
+  })
+
   it('cannot report PASS until provider state is restored and browser targets are closed', () => {
     const text = source()
 

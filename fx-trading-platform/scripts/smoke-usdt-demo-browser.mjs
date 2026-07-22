@@ -4033,7 +4033,9 @@ export async function executeP0SuiteLifecycle({ options, operations }) {
 }
 
 async function bootstrapIdentityAndAccount() {
+  grantCanonicalAdminAuthority('market:symbol:update')
   adminToken = await login(adminEmail, adminPassword, true)
+  assert(adminAuthorities.includes('market:symbol:update'), 'canonical admin must receive market:symbol:update')
   const registration = await api('/api/auth/register', {
     method: 'POST',
     body: { email: userEmail, phone: null, password: userPassword }
@@ -4064,6 +4066,37 @@ async function bootstrapIdentityAndAccount() {
   assertNear(number(summary.balance), INITIAL_PERP_USDT, 0.000001, 'initial Perpetual USDT')
   assert(assetLedger.some((entry) => entry.entryType === 'DEMO_INIT'), 'Spot asset ledger must contain DEMO_INIT')
   return { userId, accountId, spotUsdt: spotUsdt.total, perpUsdt: summary.balance }
+}
+
+function grantCanonicalAdminAuthority(authority) {
+  assert(authority === 'market:symbol:update', 'canonical admin authority must stay narrowly scoped')
+  const bound = runDbSql(`
+    WITH admin_user AS (
+      SELECT id FROM auth.users WHERE lower(email) = lower('${sqlLiteral(adminEmail)}')
+    ), role_upsert AS (
+      INSERT INTO admin.roles (role_name, role_code, enabled, description)
+      VALUES ('P0 canonical funding admin', 'p0-canonical-funding-admin', true, 'Isolated canonical smoke authority')
+      ON CONFLICT (role_code) DO UPDATE SET enabled = true, updated_at = now()
+      RETURNING id
+    ), menu_upsert AS (
+      INSERT INTO admin.menus (menu_name, permission_key, menu_type, enabled)
+      VALUES ('P0 canonical funding configuration', '${sqlLiteral(authority)}', 'BUTTON', true)
+      ON CONFLICT (permission_key) DO UPDATE SET enabled = true, updated_at = now()
+      RETURNING id
+    ), permission_upsert AS (
+      INSERT INTO admin.role_menu_permissions (role_id, menu_id, buttons, enabled)
+      SELECT role_upsert.id, menu_upsert.id, '[]'::jsonb, true
+      FROM role_upsert CROSS JOIN menu_upsert
+      ON CONFLICT (role_id, menu_id) DO UPDATE SET enabled = true, updated_at = now()
+      RETURNING role_id
+    )
+    INSERT INTO admin.user_roles (user_id, role_id)
+    SELECT admin_user.id, permission_upsert.role_id
+    FROM admin_user CROSS JOIN permission_upsert
+    ON CONFLICT (user_id, role_id) DO UPDATE SET user_id = excluded.user_id
+    RETURNING 1
+  `)
+  assert(bound === '1', 'canonical admin authority binding must affect exactly one user')
 }
 
 async function login(email, password, admin = false) {
