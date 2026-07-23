@@ -39,10 +39,10 @@ import {
   runCase
 } from './p0-user-trading-cases.mjs'
 import * as p0CaseContracts from './p0-user-trading-cases.mjs'
+import * as financialOracles from './p0-user-trading-oracles.mjs'
 import * as smokeContracts from './smoke-usdt-demo-browser.mjs'
 import './p0-user-trading-advanced-cases.mjs'
 import './p0-user-trading-core-cases.mjs'
-import './p0-user-trading-oracles.mjs'
 import './p0-user-trading-order-cases.mjs'
 
 const specPath = new URL(
@@ -50,6 +50,357 @@ const specPath = new URL(
   import.meta.url
 )
 const artifactsScript = fileURLToPath(new URL('./p0-user-trading-artifacts.mjs', import.meta.url))
+
+const BTC_RULES = Object.freeze({
+  tickSize: '0.01',
+  stepSize: '0.00001',
+  minQty: '0.0001',
+  contractSize: '1',
+  contractMultiplier: '1'
+})
+
+test('financial oracle: BigInt fixed-point uses explicit rounding and rule-derived grids', () => {
+  assert.equal(typeof financialOracles.roundDecimal, 'function')
+  assert.equal(financialOracles.roundDecimal('1.005', 2, 'HALF_UP'), '1.01')
+  assert.equal(financialOracles.roundDecimal('-1.005', 2, 'HALF_UP'), '-1.01')
+  assert.equal(financialOracles.roundDecimal('1.009', 2, 'DOWN'), '1.00')
+  assert.equal(financialOracles.divideDecimal('2', '3', 8, 'HALF_UP'), '0.66666667')
+  assert.equal(financialOracles.divideDecimal('2', '3', 8, 'DOWN'), '0.66666666')
+  assert.throws(
+    () => financialOracles.roundDecimal(1.005, 2, 'HALF_UP'),
+    /decimal string/
+  )
+  assert.equal(
+    financialOracles.floorToStep('0.019998', financialOracles.effectiveQuantityStep(BTC_RULES)),
+    '0.0199'
+  )
+  assert.deepEqual(financialOracles.tolerancesFromRules(BTC_RULES), {
+    price: '0.005',
+    quantity: '0.00005',
+    amount: '0.0000005'
+  })
+  assert.equal(financialOracles.withinTolerance('1.0000004', '1', '0.0000005'), true)
+  assert.equal(financialOracles.withinTolerance('1.0000006', '1', '0.0000005'), false)
+  assert.equal(financialOracles.alignPriceToTick('50000.019', BTC_RULES), '50000.01')
+  assert.equal(financialOracles.quantityFromUnit({
+    unit: 'QUOTE',
+    quantity: '500',
+    authorityMark: '50000',
+    rules: BTC_RULES
+  }), '0.0100')
+  assert.equal(financialOracles.quantityFromUnit({
+    unit: 'CONTRACTS',
+    quantity: '3',
+    authorityMark: '50000',
+    rules: {
+      ...BTC_RULES,
+      contractSize: '0.001',
+      contractMultiplier: '1'
+    }
+  }), '0.0030')
+  assert.throws(
+    () => financialOracles.quantityFromUnit({
+      unit: 'CONTRACTS',
+      quantity: '3.5',
+      authorityMark: '50000',
+      rules: BTC_RULES
+    }),
+    /integral/
+  )
+})
+
+test('financial oracle: Spot BUY floors gross base and charges the fee in base', () => {
+  assert.equal(typeof financialOracles.spotBuyOracle, 'function')
+  assert.deepEqual(financialOracles.spotBuyOracle({
+    quoteBudget: '1000',
+    fillPrice: '50005',
+    feeRate: '0.0005',
+    rules: BTC_RULES
+  }), {
+    effectiveStep: '0.0001',
+    grossBase: '0.0199',
+    quoteSpent: '995.09950000',
+    baseFee: '0.00000995',
+    netBase: '0.01989005',
+    cumulativeGrossQuoteCost: '995.09950000',
+    currentNetBase: '0.01989005',
+    averageCost: '50030.01500750',
+    feeAsset: 'BASE',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.0000005'
+    }
+  })
+})
+
+test('financial oracle: Spot SELL keeps quote fee inside realized PnL and checks wallet invariant', () => {
+  assert.equal(typeof financialOracles.spotSellOracle, 'function')
+  assert.deepEqual(financialOracles.spotSellOracle({
+    soldBase: '0.006',
+    fillPrice: '54994.5',
+    feeRate: '0.0005',
+    averageCost: '50030.01500750',
+    rules: BTC_RULES
+  }), {
+    grossQuote: '329.96700000',
+    quoteFee: '0.16498350',
+    netQuote: '329.80201650',
+    costBasis: '300.18009005',
+    realizedPnl: '29.62192646',
+    feeAsset: 'QUOTE',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.0000005'
+    }
+  })
+  assert.deepEqual(financialOracles.walletBalanceOracle({
+    total: '329.80201650',
+    available: '300',
+    locked: '29.80201650',
+    rules: BTC_RULES
+  }), {
+    balanced: true,
+    nonNegative: true,
+    valid: true,
+    tolerance: '0.0000005'
+  })
+  assert.equal(financialOracles.walletBalanceOracle({
+    total: '1',
+    available: '-0.01',
+    locked: '1.01',
+    rules: BTC_RULES
+  }).valid, false)
+})
+
+test('financial oracle: linear Perp long and short use directional gross PnL', () => {
+  assert.equal(typeof financialOracles.perpPositionOracle, 'function')
+  const long = financialOracles.perpPositionOracle({
+    side: 'LONG',
+    quantity: '0.010',
+    entryPrice: '50000',
+    markPrice: '55000',
+    leverage: '50',
+    positionMargin: '10',
+    maintenanceMarginRate: '0.005',
+    rules: BTC_RULES
+  })
+  assert.deepEqual(long, {
+    entryNotional: '500.00000000',
+    markNotional: '550.00000000',
+    initialMargin: '10.00000000',
+    maintenanceMargin: '2.75000000',
+    unrealizedPnl: '50.00000000',
+    roiPercent: '500.00000000',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.0000005'
+    }
+  })
+  assert.equal(financialOracles.perpPositionOracle({
+    side: 'SHORT',
+    quantity: '0.010',
+    entryPrice: '50000',
+    markPrice: '45000',
+    leverage: '100',
+    positionMargin: '5',
+    maintenanceMarginRate: '0.005',
+    rules: BTC_RULES
+  }).unrealizedPnl, '50.00000000')
+  assert.deepEqual(financialOracles.perpCloseOracle({
+    side: 'LONG',
+    quantity: '0.003',
+    entryPrice: '50000',
+    closeFillPrice: '54994.5',
+    closeFeeRate: '0.0005',
+    openingFee: '0.075',
+    fundingCashflow: '0.01',
+    rules: BTC_RULES
+  }), {
+    grossRealizedPnl: '14.98350000',
+    closeFee: '0.08249175',
+    cashDelta: '14.83600825',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.0000005'
+    }
+  })
+})
+
+test('financial oracle: 30% partial close only realizes and releases the closed quantity', () => {
+  assert.equal(typeof financialOracles.partialCloseOracle, 'function')
+  assert.deepEqual(financialOracles.partialCloseOracle({
+    side: 'LONG',
+    originalQuantity: '0.010',
+    oldMargin: '10',
+    entryPrice: '50000',
+    closeFillPrice: '55000',
+    closeFeeRate: '0.0005',
+    previousPositionRealizedPnl: '2',
+    rules: BTC_RULES
+  }), {
+    entryPrice: '50000',
+    closedQuantity: '0.0030',
+    remainingQuantity: '0.0070',
+    releasedMargin: '3.00000000',
+    remainingMargin: '7.00000000',
+    tradeRealizedPnl: '15.00000000',
+    positionRealizedPnl: '17.00000000',
+    closeFee: '0.08250000',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.0000005'
+    }
+  })
+  assert.throws(
+    () => financialOracles.partialCloseOracle({
+      side: 'LONG',
+      originalQuantity: '0.0001',
+      oldMargin: '1',
+      entryPrice: '50000',
+      closeFillPrice: '55000',
+      closeFeeRate: '0.0005',
+      rules: BTC_RULES
+    }),
+    /30%.*step/
+  )
+})
+
+test('financial oracle: projected net applies closing-side slippage and never re-deducts opening fee', () => {
+  assert.equal(typeof financialOracles.projectedNetOracle, 'function')
+  assert.deepEqual(financialOracles.projectedNetOracle({
+    side: 'LONG',
+    quantity: '0.010',
+    entryPrice: '50000',
+    closingBid: '55000',
+    closingAsk: '55010',
+    executionPath: 'MARKET',
+    openingFee: '0.25',
+    rules: BTC_RULES
+  }), {
+    liquidityRole: 'TAKER',
+    projectedCloseFill: '54994.50000000',
+    projectedGrossPnl: '49.94500000',
+    projectedCloseFee: '0.27497250',
+    projectedNetFromNow: '49.67002750',
+    projectedWholeTradeNet: '49.42002750',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.0000005'
+    }
+  })
+  assert.deepEqual(financialOracles.projectedNetOracle({
+    side: 'LONG',
+    quantity: '0.010',
+    entryPrice: '50000',
+    closingBid: '55000',
+    closingAsk: '55010',
+    executionPath: 'RESTING_LIMIT',
+    limitPrice: '54000',
+    rules: BTC_RULES
+  }), {
+    liquidityRole: 'MAKER',
+    projectedCloseFill: '55000.00000000',
+    projectedGrossPnl: '50.00000000',
+    projectedCloseFee: '0.11000000',
+    projectedNetFromNow: '49.89000000',
+    projectedWholeTradeNet: '49.89000000',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.0000005'
+    }
+  })
+})
+
+test('financial oracle: isolated liquidation flips only at the long and short equity boundary', () => {
+  assert.equal(typeof financialOracles.isolatedLiquidationOracle, 'function')
+  const isolated = (side, markPrice) => financialOracles.isolatedLiquidationOracle({
+    side,
+    quantity: '1',
+    entryPrice: '100',
+    markPrice,
+    marginHeld: '10',
+    fundingPnl: '0',
+    maintenanceMarginRate: '0.01',
+    rules: BTC_RULES
+  })
+  assert.equal(isolated('LONG', '90.96').liquidatable, false)
+  assert.equal(isolated('LONG', '90.95').liquidatable, true)
+  assert.equal(isolated('LONG', '90.95').estimatedLiquidationPrice, '90.95502779')
+  assert.equal(isolated('SHORT', '108.85').liquidatable, false)
+  assert.equal(isolated('SHORT', '108.86').liquidatable, true)
+  assert.equal(isolated('SHORT', '108.86').estimatedLiquidationPrice, '108.85700148')
+  assert.equal(financialOracles.isolatedLiquidationOracle({
+    side: 'LONG',
+    quantity: '1',
+    entryPrice: '100',
+    markPrice: '100',
+    marginHeld: '1.05',
+    maintenanceMarginRate: '0.01',
+    rules: BTC_RULES
+  }).liquidatable, true)
+})
+
+test('financial oracle: cross boundary is account-wide and liquidation shortfall includes unpaid fee', () => {
+  assert.equal(typeof financialOracles.crossLiquidationOracle, 'function')
+  const cross = (markPrice) => financialOracles.crossLiquidationOracle({
+    perpBalance: '20',
+    isolatedPrincipal: '10',
+    positions: [{
+      side: 'LONG',
+      quantity: '1',
+      entryPrice: '100',
+      markPrice,
+      maintenanceMarginRate: '0.01'
+    }],
+    rules: BTC_RULES
+  })
+  assert.equal(cross('90.96').liquidatable, false)
+  assert.equal(cross('90.95').liquidatable, true)
+  assert.equal(financialOracles.crossLiquidationOracle({
+    perpBalance: '1.05',
+    positions: [{
+      side: 'LONG',
+      quantity: '1',
+      entryPrice: '100',
+      markPrice: '100',
+      maintenanceMarginRate: '0.01'
+    }],
+    rules: BTC_RULES
+  }).liquidatable, true)
+  assert.deepEqual(cross('90.95'), {
+    crossEquity: '0.95000000',
+    crossMaintenance: '0.90950000',
+    estimatedCloseTakerFees: '0.04547500',
+    crossThreshold: '0.95497500',
+    liquidatable: true,
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.0000005'
+    }
+  })
+  assert.deepEqual(financialOracles.liquidationFeeOracle({
+    filledQuantity: '1',
+    executionPrice: '90.95',
+    liquidationFeeRate: '0.002',
+    collectionCapacity: '0.1',
+    uncoveredCoreDebit: '0.05',
+    rules: BTC_RULES
+  }), {
+    nominalLiquidationFee: '0.18190000',
+    chargedLiquidationFee: '0.10000000',
+    uncollectedLiquidationFee: '0.08190000',
+    bankruptcyShortfall: '0.13190000',
+    tolerance: '0.0000005'
+  })
+})
 
 const EXPECTED_EXECUTION_MANIFEST = {
   'AUTH-01': {
