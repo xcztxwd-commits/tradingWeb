@@ -5676,15 +5676,18 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
     }, `${label} input ${index} controlled state`, TRADE_PANEL_SELECTOR, side, index, values[index])
   }
   if (reduceOnly) {
-    const checked = await page.evaluate((panelSelector, targetSide) => {
+    const checked = await waitFor(() => page.evaluate((panelSelector, targetSide) => {
       const panel = document.querySelector(panelSelector)
       const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
       const section = sections[targetSide === 'buy' ? 0 : 1]
       const input = section?.querySelector('section[aria-label="Perpetual order options"] input[type="checkbox"]')
-      if (!input) return false
-      if (!input.checked) input.click()
+      if (!input || input.disabled) return false
+      if (!input.checked) {
+        input.click()
+        return false
+      }
       return input.checked
-    }, TRADE_PANEL_SELECTOR, side)
+    }, TRADE_PANEL_SELECTOR, side), `${label} reduce-only control`, 15000)
     assert(checked, `${label} must visibly enable reduce-only`)
   }
   try {
@@ -5731,6 +5734,7 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
         .toSorted((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
       return created[0] ?? false
     }, `${label} resulting REST order`, 15000)
+    if (reduceOnly) assert(created.reduceOnly === true, `${label} resulting order must be reduce-only`)
     await page.waitForFunction((panelSelector, targetSide) => {
       const panel = document.querySelector(panelSelector)
       const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
