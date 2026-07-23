@@ -1988,7 +1988,7 @@ export async function dropOwnedDatabase({ segmentName, runToken, postgres, signa
   await requireOwnedDatabase({ segmentName, runToken, postgres, signal })
   throwIfP0Aborted(signal)
   await postgres.executeAdminSql(
-    `DROP DATABASE ${quotedDatabaseIdentifier(segmentName)}`,
+    `DROP DATABASE ${quotedDatabaseIdentifier(segmentName)} WITH (FORCE)`,
     { sensitive: false, ...(signal === undefined ? {} : { signal }) }
   )
   throwIfP0Aborted(signal)
@@ -5706,7 +5706,15 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
       return localStorage.getItem('fx-trade-confirm-skip') === 'true' ? 'skipped' : null
     }), `${label} confirmation`, 5000)
     if (confirmationState === 'dialog') {
-      const confirmed = await page.evaluate(() => {
+      const confirmed = await waitFor(() => page.evaluate((panelSelector, targetSide) => {
+        const panel = document.querySelector(panelSelector)
+        const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+        const section = sections[targetSide === 'buy' ? 0 : 1]
+        const button = section?.querySelector('[data-trading-action="submit-order"]')
+        const balance = button?.previousElementSibling
+        const ready = [...(balance?.querySelectorAll('strong') ?? [])]
+          .some((value) => !value.textContent?.trim().startsWith('-'))
+        if (!button || button.disabled || !ready) return false
         const dialog = document.querySelector('section[role="dialog"] > dl')?.closest('section[role="dialog"]')
         const skip = dialog?.querySelector('input[type="checkbox"]')
         const submit = dialog?.querySelector('footer button:last-of-type')
@@ -5714,7 +5722,7 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
         if (!skip.checked) skip.click()
         submit.click()
         return true
-      })
+      }, TRADE_PANEL_SELECTOR, side), `${label} ready confirmation`, 15000)
       assert(confirmed, `${label} confirmation dialog must submit`)
     }
     const created = await waitFor(async () => {

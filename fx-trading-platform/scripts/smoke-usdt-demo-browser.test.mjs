@@ -473,6 +473,30 @@ describe('real USDT demo browser smoke contract', () => {
     assert.doesNotMatch(submitSource, /await sleep\(50\)/)
   })
 
+  it('rechecks live browser order readiness atomically when confirming', () => {
+    const text = source()
+    const submitSource = text.slice(
+      text.indexOf('async function submitBrowserOrder'),
+      text.indexOf('async function cancelBrowserOrder')
+    )
+    const confirmationSource = submitSource.slice(
+      submitSource.indexOf("if (confirmationState === 'dialog')"),
+      submitSource.indexOf('const created = await waitFor')
+    )
+    const readinessIndex = confirmationSource.indexOf('if (!button || button.disabled || !ready) return false')
+    const confirmClickIndex = confirmationSource.indexOf('submit.click()')
+
+    assert.match(
+      confirmationSource,
+      /const confirmed = await waitFor\(\(\) => page\.evaluate\(\(panelSelector, targetSide\) => \{/
+    )
+    assert.match(confirmationSource, /button\?\.previousElementSibling/)
+    assert.notEqual(readinessIndex, -1)
+    assert.notEqual(confirmClickIndex, -1)
+    assert.ok(readinessIndex < confirmClickIndex)
+    assert.match(confirmationSource, /}, TRADE_PANEL_SELECTOR, side\), `\$\{label\} ready confirmation`, 15000\)/)
+  })
+
   it('retains browser route readiness diagnostics', () => {
     const text = source()
     const openRouteSource = text.slice(

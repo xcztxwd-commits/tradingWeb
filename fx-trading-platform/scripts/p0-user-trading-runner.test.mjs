@@ -1419,7 +1419,7 @@ test('database ownership is strictly quoted read back and required before alter 
     { type: 'read', database: segmentName },
     {
       type: 'sql',
-      sql: `DROP DATABASE "${segmentName}"`,
+      sql: `DROP DATABASE "${segmentName}" WITH (FORCE)`,
       options: { sensitive: false }
     }
   ])
@@ -3069,7 +3069,7 @@ test('managed backend receives verified compose credentials and exact database i
       if (match) { databases.get(match[1]).ownerMarker = match[2]; return }
       match = sql.match(/^ALTER DATABASE "([a-z0-9_]+)" SET timezone TO 'UTC'$/)
       if (match) { databases.get(match[1]).timezone = 'UTC'; return }
-      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)"$/)
+      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)" WITH \(FORCE\)$/)
       if (match) { databases.delete(match[1]); return }
       throw new Error(`UNEXPECTED_SQL: ${sql}`)
     },
@@ -4612,7 +4612,7 @@ test('cleanup recovers every planned database from the active journal', async (t
         return state ? { segmentName, ownerMarker: state.ownerMarker } : null
       },
       async executeAdminSql(sql) {
-        const match = sql.match(/^DROP DATABASE "([a-z0-9_]+)"$/)
+        const match = sql.match(/^DROP DATABASE "([a-z0-9_]+)" WITH \(FORCE\)$/)
         if (!match) throw new Error(`UNEXPECTED_SQL: ${sql}`)
         databases.delete(match[1])
       }
@@ -6662,7 +6662,7 @@ test('default P0 dependency factory wires local adapters and main injects it', a
         databases.get(match[1]).timezone = 'UTC'
         return
       }
-      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)"$/)
+      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)" WITH \(FORCE\)$/)
       if (match) {
         databases.delete(match[1])
         return
@@ -6925,7 +6925,7 @@ test('canonical child consumes parent database ownership and enforces marker cle
         databases.get(match[1]).timezone = 'UTC'
         return
       }
-      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)"$/)
+      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)" WITH \(FORCE\)$/)
       if (match) {
         databases.delete(match[1])
         return
@@ -17376,7 +17376,7 @@ test('default cleanup revalidates persisted compose and container identity befor
       fixture.persistedIdentity.postgres.id,
       fixture.persistedIdentity.postgres.id
     ],
-    dropSql: `DROP DATABASE "${fixture.database}";\n`,
+    dropSql: `DROP DATABASE "${fixture.database}" WITH (FORCE);\n`,
     redisCommands: expectedRedisTransactions.flat(),
     redisBindings: Array.from(
       { length: expectedRedisTransactions.flat().length },
