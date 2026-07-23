@@ -20107,6 +20107,52 @@ test('default report phase emits nonempty typed evidence or fails closed', async
   })))
 })
 
+test('default dependencies provide built-in typed report boundary evidence', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-review1-s10-default-report-writer-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const runId = 'p0-review1-s10-default-report-writer-a1'
+  const ownerToken = 'p0-review1-s10-default-report-writer-owner-token-a1'
+  const ownerId = createHash('sha256').update(ownerToken).digest('hex')
+  const runRoot = join(root, runId)
+  const moduleUrl = new URL(
+    `./smoke-usdt-demo-browser.mjs?default-report-writer=${Date.now()}`,
+    import.meta.url
+  ).href
+  const source = `
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    const contracts = await import(${JSON.stringify(moduleUrl)})
+    const dependencies = contracts.createDefaultP0Dependencies({
+      artifactBase: ${JSON.stringify(root)},
+      inheritedEnv: {}
+    })
+    const result = await dependencies.phaseOperations.writeReport(
+      {
+        runRoot: ${JSON.stringify(runRoot)},
+        ownerId: ${JSON.stringify(ownerId)},
+        options: { runId: ${JSON.stringify(runId)} }
+      },
+      { scope: 'CONTROL' }
+    )
+    process.stdout.write(JSON.stringify(result))
+  `
+  const child = spawnSync(process.execPath, ['--input-type=module', '--eval', source], {
+    encoding: 'utf8'
+  })
+
+  assert.equal(child.status, 0, child.stderr)
+  assert.deepEqual(JSON.parse(child.stdout), {
+    status: 'PASS',
+    kind: 'P0_REPORT_BOUNDARY',
+    scope: 'CONTROL',
+    finalWriter: 'PENDING',
+    identity: {
+      runId,
+      ownerId,
+      reportPath: join(runRoot, 'report.json')
+    }
+  })
+})
+
 function createS11ReportPhaseBoundaryFixture(t, label) {
   const root = mkdtempSync(join(tmpdir(), `p0-review1-s11-report-boundary-${label}-`))
   t.after(() => rmSync(root, { recursive: true, force: true }))

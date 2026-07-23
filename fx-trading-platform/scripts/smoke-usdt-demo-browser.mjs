@@ -3644,6 +3644,20 @@ function validateP0ControlOutcome(
   return outcome
 }
 
+function defaultP0ReportPhaseWriter(context, plan) {
+  return {
+    status: 'PASS',
+    kind: 'P0_REPORT_BOUNDARY',
+    scope: plan.scope,
+    finalWriter: 'PENDING',
+    identity: {
+      runId: context.options?.runId ?? context.runId,
+      ownerId: context.ownerId,
+      reportPath: resolve(context.runRoot, 'report.json')
+    }
+  }
+}
+
 export async function executeP0ReportPhaseBoundary({
   context,
   plan,
@@ -9615,7 +9629,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
         return executeP0ReportPhaseBoundary({
           context,
           plan,
-          writePhaseReport: runtime.writePhaseReport,
+          writePhaseReport: runtime.writePhaseReport ?? defaultP0ReportPhaseWriter,
           signal
         })
       }
