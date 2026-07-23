@@ -61,19 +61,10 @@ public class MarketTestControlService {
   }
 
   public Optional<QuoteResponse> overrideQuote(String symbol) {
-    String normalizedSymbol = normalizeSymbol(symbol);
-    OverrideState state = overrides.get(normalizedSymbol);
-    if (state == null) {
-      return Optional.empty();
-    }
-    if (!state.expiresAt().isAfter(clock.instant())) {
-      overrides.remove(normalizedSymbol, state);
-      return Optional.empty();
-    }
-    return Optional.of(state.quote(clock.millis()));
+    return activeOverride(symbol).map(state -> state.quote(clock.millis()));
   }
 
-  public SpotMarketBundle applyOverride(SpotMarketBundle providerBundle) {
+  public SpotMarketBundle applySpotOverride(SpotMarketBundle providerBundle) {
     return overrideQuote(providerBundle.platformSymbol())
         .map(quote -> new SpotMarketBundle(
             providerBundle.platformSymbol(),
@@ -95,7 +86,7 @@ public class MarketTestControlService {
         .orElse(providerBundle);
   }
 
-  public PerpetualMarketBundle applyOverride(PerpetualMarketBundle providerBundle) {
+  public PerpetualMarketBundle applyPerpetualOverride(PerpetualMarketBundle providerBundle) {
     return overrideQuote(providerBundle.platformSymbol())
         .map(quote -> new PerpetualMarketBundle(
             providerBundle.platformSymbol(),
@@ -131,6 +122,19 @@ public class MarketTestControlService {
       throw new BusinessException("MARKET_TEST_CONTROL_INVALID_SYMBOL", "Symbol is required");
     }
     return SymbolNormalizer.normalize(symbol);
+  }
+
+  private Optional<OverrideState> activeOverride(String requestedSymbol) {
+    String symbol = normalizeSymbol(requestedSymbol);
+    OverrideState state = overrides.get(symbol);
+    if (state == null) {
+      return Optional.empty();
+    }
+    if (!state.expiresAt().isAfter(clock.instant())) {
+      overrides.remove(symbol, state);
+      return Optional.empty();
+    }
+    return Optional.of(state);
   }
 
   private void validateQuote(BigDecimal bid, BigDecimal ask) {

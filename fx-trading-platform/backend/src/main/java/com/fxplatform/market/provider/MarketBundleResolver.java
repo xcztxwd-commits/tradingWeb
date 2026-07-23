@@ -110,7 +110,7 @@ public class MarketBundleResolver {
           if (matchesCandidate(providerBundle, candidate) && validator.valid(providerBundle)) {
             SpotMarketBundle authorityBundle = testControlService == null
                 ? providerBundle
-                : testControlService.applyOverride(providerBundle);
+                : testControlService.applySpotOverride(providerBundle);
             if (validator.valid(authorityBundle)) {
               recordSuccess(candidate, MarketBundleAssembler.quote(providerBundle, clock), startedAt);
               selectionTracker.recordSelection(
@@ -147,7 +147,7 @@ public class MarketBundleResolver {
           if (matchesCandidate(providerBundle, candidate) && validator.valid(providerBundle)) {
             PerpetualMarketBundle authorityBundle = testControlService == null
                 ? providerBundle
-                : testControlService.applyOverride(providerBundle);
+                : testControlService.applyPerpetualOverride(providerBundle);
             if (validator.valid(authorityBundle)) {
               recordSuccess(candidate, MarketBundleAssembler.quote(providerBundle, clock), startedAt);
               selectionTracker.recordSelection(

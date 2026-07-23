@@ -50,27 +50,27 @@ class MarketTestControlServiceTest {
   }
 
   @Test
-  void overrideExpiresAfterTtl() {
+  void expiredOverrideReturnsOriginalProviderBundle() {
     MarketTestControlProperties properties = enabledProperties();
     MutableClock clock = new MutableClock(Instant.parse("2026-06-17T00:00:00Z"));
     MarketTestControlService service = service(properties, clock, Mockito.mock(RealtimeBackfillService.class));
     SpotMarketBundle spot = spotBundle();
     PerpetualMarketBundle perp = perpBundle();
 
-    assertThat(service.applyOverride(spot)).isSameAs(spot);
-    assertThat(service.applyOverride(perp)).isSameAs(perp);
+    assertThat(service.applySpotOverride(spot)).isSameAs(spot);
+    assertThat(service.applyPerpetualOverride(perp)).isSameAs(perp);
 
     service.startOverride(request("BTCUSDT", Duration.ofSeconds(1)));
     service.startOverride(request("BTCUSDT-PERP", Duration.ofSeconds(1)));
     clock.advance(Duration.ofSeconds(2));
 
     assertThat(service.overrideQuote("BTCUSDT")).isEmpty();
-    assertThat(service.applyOverride(spot)).isSameAs(spot);
-    assertThat(service.applyOverride(perp)).isSameAs(perp);
+    assertThat(service.applySpotOverride(spot)).isSameAs(spot);
+    assertThat(service.applyPerpetualOverride(perp)).isSameAs(perp);
   }
 
   @Test
-  void configuredTtlCannotExceedHardFiveMinuteLimit() {
+  void configuredMaxTtlCannotRaiseFiveMinuteSafetyCap() {
     MarketTestControlProperties properties = enabledProperties();
     properties.setMaxTtl(Duration.ofHours(1));
     MutableClock clock = new MutableClock(Instant.parse("2026-06-17T00:00:00Z"));
@@ -83,18 +83,15 @@ class MarketTestControlServiceTest {
   }
 
   @Test
-  void activeOverrideChangesOnlyAuthorityPrices() {
+  void activeOverrideRewritesSpotExecutionPricesAndPreservesProviderBundle() {
     MarketTestControlProperties properties = enabledProperties();
     MutableClock clock = new MutableClock(Instant.parse("2026-06-17T00:00:00Z"));
     MarketTestControlService service = service(properties, clock, Mockito.mock(RealtimeBackfillService.class));
     SpotMarketBundle spot = spotBundle();
-    PerpetualMarketBundle perp = perpBundle();
 
     service.startOverride(request("BTCUSDT", Duration.ofMinutes(1)));
-    service.startOverride(request("BTCUSDT-PERP", Duration.ofMinutes(1)));
 
-    SpotMarketBundle overriddenSpot = service.applyOverride(spot);
-    PerpetualMarketBundle overriddenPerp = service.applyOverride(perp);
+    SpotMarketBundle overriddenSpot = service.applySpotOverride(spot);
     assertThat(overriddenSpot)
         .usingRecursiveComparison()
         .ignoringFields("bid", "ask", "last")
@@ -104,6 +101,18 @@ class MarketTestControlServiceTest {
     assertThat(overriddenSpot.last()).isEqualByComparingTo("101.0000000000");
     assertThat(overriddenSpot.providerCode()).isEqualTo("binance");
     assertThat(overriddenSpot.sourceMode()).isEqualTo(MarketSourceMode.PUBLIC_EXTERNAL);
+  }
+
+  @Test
+  void activeOverrideRewritesPerpetualExecutionAndRiskPrices() {
+    MarketTestControlProperties properties = enabledProperties();
+    MutableClock clock = new MutableClock(Instant.parse("2026-06-17T00:00:00Z"));
+    MarketTestControlService service = service(properties, clock, Mockito.mock(RealtimeBackfillService.class));
+    PerpetualMarketBundle perp = perpBundle();
+
+    service.startOverride(request("BTCUSDT-PERP", Duration.ofMinutes(1)));
+
+    PerpetualMarketBundle overriddenPerp = service.applyPerpetualOverride(perp);
     assertThat(overriddenPerp)
         .usingRecursiveComparison()
         .ignoringFields("bid", "ask", "last", "mark", "index")
