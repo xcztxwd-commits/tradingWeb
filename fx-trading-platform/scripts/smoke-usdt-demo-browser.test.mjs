@@ -473,6 +473,21 @@ describe('real USDT demo browser smoke contract', () => {
     assert.doesNotMatch(submitSource, /await sleep\(50\)/)
   })
 
+  it('waits for transient market readiness before enabling reduce-only', () => {
+    const text = source()
+    const submitSource = text.slice(
+      text.indexOf('async function submitBrowserOrder'),
+      text.indexOf('async function cancelBrowserOrder')
+    )
+
+    assert.match(
+      submitSource,
+      /const checked = await waitFor\(\(\) => page\.evaluate\([\s\S]*input\.disabled[\s\S]*`\$\{label\} reduce-only control`, 15000\)/
+    )
+    assert.match(submitSource, /if \(!input\.checked\) \{\s*input\.click\(\)\s*return false\s*\}/)
+    assert.match(submitSource, /if \(reduceOnly\) assert\(created\.reduceOnly === true/)
+  })
+
   it('rechecks live browser order readiness atomically when confirming', () => {
     const text = source()
     const submitSource = text.slice(
