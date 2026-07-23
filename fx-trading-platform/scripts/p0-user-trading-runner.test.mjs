@@ -6483,8 +6483,8 @@ test('P0 lifecycle cleans exactly once on signal gate case and report failures',
     'signals:install',
     'prepare',
     'execute',
-    'report',
     'cleanup',
+    'report',
     'signals:remove'
   ])
 
@@ -6593,8 +6593,8 @@ test('P0 entry connects ownership phases dispatch report and exactly once cleanu
   assert.ok(events.indexOf('canonical-cleanup') < events.indexOf('authority'))
   assert.ok(events.indexOf('authority') < events.indexOf('case:AUTH-01'))
   assert.ok(events.indexOf('case:UI-02') < events.indexOf('report-phase'))
-  assert.ok(events.indexOf('report-phase') < events.indexOf('report:60'))
-  assert.ok(events.indexOf('report:60') < events.indexOf('cleanup'))
+  assert.ok(events.indexOf('report-phase') < events.indexOf('cleanup'))
+  assert.ok(events.indexOf('cleanup') < events.indexOf('report:60'))
   assert.equal(events.at(-1), 'signals:remove')
 
   let failedCleanupCalls = 0

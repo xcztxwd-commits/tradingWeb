@@ -4008,32 +4008,41 @@ export async function executeP0SuiteLifecycle({ options, operations }) {
       if (interruptionError) throw interruptionError
       execution = await operations.execute(prepared, { signal: controller.signal })
       if (interruptionError) throw interruptionError
-      report = await operations.writeReport(execution, prepared, { signal: controller.signal })
-      if (interruptionError) throw interruptionError
     }
   } catch (error) {
     failure = interruptionError ?? error
-  } finally {
+  }
+  try {
+    const cleanupSignal = AbortSignal.timeout(30000)
+    cleanup = await operations.cleanup(prepared, {
+      error: failure,
+      interrupted: Boolean(interruptionError),
+      signal: cleanupSignal
+    })
+  } catch (error) {
+    failure = failure
+      ? new AggregateError([failure, error], 'P0_RUN_AND_CLEANUP_FAILED')
+      : error
+  }
+  if (!failure && interruptionError) failure = interruptionError
+  if (!failure && options.phase !== 'cleanup') {
     try {
-      const cleanupSignal = AbortSignal.timeout(30000)
-      cleanup = await operations.cleanup(prepared, {
-        error: failure,
-        interrupted: Boolean(interruptionError),
-        signal: cleanupSignal
+      report = await operations.writeReport(execution, prepared, {
+        signal: controller.signal
       })
+      if (interruptionError) throw interruptionError
     } catch (error) {
-      failure = failure
-        ? new AggregateError([failure, error], 'P0_RUN_AND_CLEANUP_FAILED')
-        : error
-    }
-    try {
-      await removeSignalHandlers()
-    } catch (error) {
-      failure = failure
-        ? new AggregateError([failure, error], 'P0_RUN_AND_SIGNAL_CLEANUP_FAILED')
-        : error
+      failure = interruptionError ?? error
     }
   }
+  try {
+    await removeSignalHandlers()
+  } catch (error) {
+    failure = failure
+      ? new AggregateError([failure, error], 'P0_RUN_AND_SIGNAL_CLEANUP_FAILED')
+      : error
+  }
+  if (!failure && interruptionError) failure = interruptionError
   if (failure) throw failure
   return { execution, report, cleanup }
 }
