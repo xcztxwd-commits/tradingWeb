@@ -4028,7 +4028,8 @@ export async function executeP0SuiteLifecycle({ options, operations }) {
   if (!failure && options.phase !== 'cleanup') {
     try {
       report = await operations.writeReport(execution, prepared, {
-        signal: controller.signal
+        signal: controller.signal,
+        cleanup
       })
       if (interruptionError) throw interruptionError
     } catch (error) {

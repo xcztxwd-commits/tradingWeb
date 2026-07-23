@@ -6982,7 +6982,11 @@ test('P0 lifecycle cleans exactly once on signal gate case and report failures',
       },
       async prepare() { successEvents.push('prepare'); return { prepared: true } },
       async execute() { successEvents.push('execute'); return { executed: true } },
-      async writeReport() { successEvents.push('report'); return { verdict: 'PASS' } },
+      async writeReport(_execution, _prepared, details) {
+        successEvents.push('report')
+        assert.deepEqual(details.cleanup, { status: 'CLEANED' })
+        return { verdict: 'PASS' }
+      },
       async cleanup() { successEvents.push('cleanup'); return { status: 'CLEANED' } }
     }
   })
@@ -7082,8 +7086,9 @@ test('P0 entry connects ownership phases dispatch report and exactly once cleanu
       return { id: definition.id, status: 'TEST_SENTINEL' }
     },
     handlers: Object.create(null),
-    async writeReport(execution, prepared) {
+    async writeReport(execution, prepared, details) {
       events.push(`report:${prepared.caseResults.length}`)
+      assert.deepEqual(details.cleanup, { status: 'CLEANED' })
       return { verdict: execution.plan.verdict }
     },
     async cleanup() {
