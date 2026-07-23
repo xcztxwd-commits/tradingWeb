@@ -7069,11 +7069,14 @@ export async function captureCheckpoint(context, name, scope = {}) {
   const networkEvidence = []
   const eventEvidence = []
   const artifactHashes = {}
+  const subrunSuffix = scope.subrunIdentity
+    ? `-${safeName(scope.subrunIdentity)}`
+    : ''
   for (let index = 0; index < pages.length; index += 1) {
     const page = pages[index]
     page.assertEvidenceClean(`${caseId}/${name}`)
     const suffix = index === 0 ? '' : `-${index + 1}`
-    const filename = `${safeName(name)}${suffix}.png`
+    const filename = `${safeName(name)}${subrunSuffix}${suffix}.png`
     const screenshot = await page.send('Page.captureScreenshot', {
       format: 'png',
       captureBeyondViewport: false
@@ -11248,14 +11251,52 @@ export async function runP0Suite(options, dependencies) {
               const executeEntry = async (
                 entry,
                 selectedSubruns = entry.selectedSubruns,
-                profileAttempt = 1
+                profileAttempt = 1,
+                fragment = false
               ) => {
                 const definition = {
                   ...entry.definition,
                   requiredSubruns: selectedSubruns
                 }
+                let caseContext = p0Context
+                if (fragment
+                  && p0Context?.run?.artifactRoot
+                  && typeof p0Context?.evidence?.captureCheckpoint === 'function'
+                  && typeof p0Context?.evidence?.writeCaseResultAtomic === 'function') {
+                  const evidence = p0Context.evidence
+                  const profile = selectedSubruns[0].profile
+                  const subrunIdentity = `${
+                    selectedSubruns.map(({ id }) => id).join('-')
+                  }-p${profileAttempt}`
+                  caseContext = {
+                    ...p0Context,
+                    evidence: {
+                      ...evidence,
+                      captureCheckpoint(checkpointContext, name, scope = {}) {
+                        return evidence.captureCheckpoint.call(
+                          evidence,
+                          checkpointContext,
+                          name,
+                          { ...scope, subrunIdentity }
+                        )
+                      },
+                      writeCaseResultAtomic(_path, result) {
+                        return evidence.writeCaseResultAtomic.call(
+                          evidence,
+                          join(
+                            p0Context.run.artifactRoot,
+                            safeName(entry.id),
+                            'fragments',
+                            `${safeName(profile)}-${profileAttempt}.json`
+                          ),
+                          result
+                        )
+                      }
+                    }
+                  }
+                }
                 throwIfP0Aborted(signal)
-                const result = await dispatchCase(definition, p0Context, handlers, {
+                const result = await dispatchCase(definition, caseContext, handlers, {
                   signal,
                   attempt: 1,
                   profileAttempt
@@ -11284,14 +11325,23 @@ export async function runP0Suite(options, dependencies) {
                     const selectedSubruns = entry.selectedSubruns
                       .filter((subrun) => subrun.profile === profile)
                     fragmentsByEntry.get(entry.id).push(
-                      await executeEntry(entry, selectedSubruns, attempt)
+                      await executeEntry(entry, selectedSubruns, attempt, true)
                     )
                   }
                 }
                 for (const entry of entries) {
                   const fragments = fragmentsByEntry.get(entry.id)
                   if (fragments.length === 0) fragments.push(await executeEntry(entry))
-                  prepared.caseResults.push(mergeP0CaseFragments(entry, fragments))
+                  const merged = mergeP0CaseFragments(entry, fragments)
+                  writeCaseResultAtomic(
+                    join(
+                      p0Context?.run?.artifactRoot ?? prepared.runRoot,
+                      safeName(entry.id),
+                      'result.json'
+                    ),
+                    merged
+                  )
+                  prepared.caseResults.push(merged)
                 }
                 return
               }

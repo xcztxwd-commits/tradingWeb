@@ -1329,7 +1329,7 @@ test('default P0 dispatch builds one context and injects the owned AUTH handlers
   assert.match(smokeSource, /createP0Context/)
   assert.match(smokeSource, /CASE_HANDLERS/)
   assert.match(smokeSource, /const p0Context = dependencies\.createP0Context/)
-  assert.match(smokeSource, /dispatchCase\(definition, p0Context, handlers/)
+  assert.match(smokeSource, /dispatchCase\(definition, caseContext, handlers/)
 })
 
 test('default P0 DB oracle follows the active profile database', async (t) => {
@@ -1692,6 +1692,7 @@ test('AUTH fragments satisfy the merge contract and hash every checkpoint screen
 test('AUTH failure fragments retain the formal terminal fields', async () => {
   const definition = P0_CASES.find(({ id }) => id === 'AUTH-01')
   let persisted
+  let persistedPath
   const context = {
     run: {
       runId: 'p0-auth-failure-fragment-a1',
@@ -1705,7 +1706,10 @@ test('AUTH failure fragments retain the formal terminal fields', async () => {
       async launchBrowser() { throw new Error('AUTH_BROWSER_START_FAILED') }
     },
     evidence: {
-      writeCaseResultAtomic(_path, result) { persisted = result }
+      writeCaseResultAtomic(path, result) {
+        persistedPath = path
+        persisted = result
+      }
     }
   }
 
@@ -1729,6 +1733,10 @@ test('AUTH failure fragments retain the formal terminal fields', async () => {
     durationMs: persisted.durationMs,
     artifactHashes: {}
   }])
+  assert.equal(
+    persistedPath,
+    join(context.run.artifactRoot, 'AUTH-01', 'result.json')
+  )
 })
 
 function authRun(runId) {
@@ -7063,7 +7071,7 @@ function formalP0CaseFragment(definition, subruns, {
   }
 }
 
-test('multi-profile cases dispatch profile slices and merge exact subrun evidence once', async () => {
+test('multi-profile cases persist one canonical merged result after exact subrun dispatch', async (t) => {
   const options = p0CaseContracts.parseP0Cli([
     '--suite=p0',
     '--run-id=p0-s4-multi-profile-slice-a1',
@@ -7076,12 +7084,62 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
   const expectedProfiles = [...new Set(entry.selectedSubruns.map(({ profile }) => profile))]
   const dispatches = []
   const fragments = []
+  const canonicalDuringDispatch = []
   let activeProfile = null
+  const runRoot = mkdtempSync(join(tmpdir(), 'p0-s4-multi-profile-slice-'))
+  t.after(() => rmSync(runRoot, { recursive: true, force: true }))
+  const page = {
+    assertEvidenceClean() {},
+    async send(method) {
+      assert.equal(method, 'Page.captureScreenshot')
+      return { data: Buffer.from(`checkpoint:${activeProfile}`).toString('base64') }
+    },
+    snapshotEvidence() {
+      return { networkEvidence: [], eventEvidence: [] }
+    }
+  }
+  const p0Context = {
+    run: { artifactRoot: runRoot },
+    evidence: {
+      captureCheckpoint: smokeContracts.captureCheckpoint,
+      writeCaseResultAtomic
+    }
+  }
+  const handlers = {
+    async [entry.definition.handlerId](context, definition, details) {
+      assert.equal(definition.id, entry.id)
+      assert.equal(definition.requiredSubruns.length > 0, true)
+      assert.equal(definition.requiredSubruns.every(({ profile }) => (
+        profile === activeProfile
+      )), true)
+      dispatches.push(activeProfile)
+      assert.equal(details.profileAttempt, dispatches.length)
+      const checkpoint = await context.evidence.captureCheckpoint(context, 'final', {
+        caseId: definition.id,
+        pages: [page]
+      })
+      const fragment = formalP0CaseFragment(
+        definition,
+        definition.requiredSubruns,
+        {
+          durationMs: definition.requiredSubruns.length,
+          artifactHashes: checkpoint.artifactHashes
+        }
+      )
+      context.evidence.writeCaseResultAtomic(
+        join(runRoot, definition.id, 'result.json'),
+        fragment
+      )
+      canonicalDuringDispatch.push(existsSync(join(runRoot, definition.id, 'result.json')))
+      fragments.push(fragment)
+      return fragment
+    }
+  }
   const dependencies = {
     installSignalHandlers() { return () => {} },
     async initializeOwnership() {
       return {
-        runRoot: resolve(tmpdir(), options.runId),
+        runRoot,
         options,
         ownerToken: 'p0-s4-multi-profile-owner-token-a1',
         ownerId: 'a'.repeat(64),
@@ -7091,6 +7149,7 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
         caseResults: []
       }
     },
+    createP0Context() { return p0Context },
     phaseOperations: {
       async runPreflight() { return { id: 'AUTH-01', status: 'PASS' } },
       async runAuthority() { return { id: 'AUTH-03', status: 'PASS' } },
@@ -7104,20 +7163,7 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
         return exactP0ReportPhaseEvidence(context, plan)
       }
     },
-    async dispatchCase(definition) {
-      assert.equal(definition.id, entry.id)
-      assert.equal(definition.requiredSubruns.length > 0, true)
-      assert.equal(definition.requiredSubruns.every(({ profile }) => profile === activeProfile), true)
-      dispatches.push(activeProfile)
-      const fragment = formalP0CaseFragment(
-        definition,
-        definition.requiredSubruns,
-        { durationMs: definition.requiredSubruns.length }
-      )
-      fragments.push(fragment)
-      return fragment
-    },
-    handlers: Object.create(null),
+    handlers,
     async writeReport(execution) { return { caseResults: execution.caseResults } },
     async cleanup() { return { status: 'CLEANED' } }
   }
@@ -7139,6 +7185,24 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
   assert.deepEqual(
     merged.subruns.map(({ id }) => id),
     entry.selectedSubruns.map(({ id }) => id)
+  )
+  assert.deepEqual(canonicalDuringDispatch, expectedProfiles.map(() => false))
+  assert.deepEqual(
+    readdirSync(join(runRoot, entry.id, 'fragments')).toSorted(),
+    expectedProfiles.map((profile, index) => `${profile}-${index + 1}.json`).toSorted()
+  )
+  assert.deepEqual(
+    Object.keys(merged.artifactHashes).toSorted(),
+    entry.selectedSubruns.map((subrun, index) => (
+      `${entry.id}/final-${subrun.id}-p${index + 1}.png`
+    )).toSorted()
+  )
+  const canonicalPath = join(runRoot, entry.id, 'result.json')
+  const expectedCanonicalPath = join(runRoot, 'expected-canonical.json')
+  writeCaseResultAtomic(expectedCanonicalPath, merged)
+  assert.equal(
+    readFileSync(canonicalPath, 'utf8'),
+    readFileSync(expectedCanonicalPath, 'utf8')
   )
   assert.equal(typeof smokeContracts.mergeP0CaseFragments, 'function')
   assert.throws(
