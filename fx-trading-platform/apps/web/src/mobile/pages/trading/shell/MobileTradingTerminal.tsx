@@ -110,7 +110,7 @@ export function MobileTradingTerminal({
           <List size={17} aria-hidden="true" />
           <span>{t('markets.title')}</span>
         </button>
-        <button type="button" className={styles.tradeAction} onClick={onOpenTrade}>
+        <button type="button" className={styles.tradeAction} data-testid="mobile-trade-action" onClick={onOpenTrade}>
           <ShoppingBag size={17} aria-hidden="true" />
           <span>{t('trading.trade')}</span>
         </button>

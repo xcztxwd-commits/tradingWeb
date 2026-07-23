@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
@@ -15,6 +15,11 @@ const controllerSource = readFileSync(join(currentDir, 'useMarketsRouteControlle
 const contentSource = readFileSync(join(webSrc, 'shared-widgets', 'market', 'MarketsContent.tsx'), 'utf8')
 const pcSource = readFileSync(join(webSrc, 'pc', 'pages', 'markets', 'PcMarketsPage.tsx'), 'utf8')
 const mobileSource = readFileSync(join(webSrc, 'mobile', 'pages', 'markets', 'MobileMarketsPage.tsx'), 'utf8')
+const collectionPropsPath = join(webSrc, 'shared-widgets', 'market', 'marketCollection.types.ts')
+const pcTablePath = join(webSrc, 'pc', 'pages', 'markets', 'PcMarketTable.tsx')
+const mobileListPath = join(webSrc, 'mobile', 'pages', 'markets', 'MobileMarketList.tsx')
+const pcTableSource = existsSync(pcTablePath) ? readFileSync(pcTablePath, 'utf8') : ''
+const mobileListSource = existsSync(mobileListPath) ? readFileSync(mobileListPath, 'utf8') : ''
 
 const markets = [
   market({ symbol: 'BTCUSDT', name: 'Bitcoin', category: 'crypto', favorite: true, last: 70_000, changePercent: 2, volume: '100' }),
@@ -60,11 +65,29 @@ describe('markets route platform contract', () => {
     assert.match(routeSource, /<PlatformView[\s\S]*model=\{model\}/)
     assert.doesNotMatch(routeSource, /^import .*\/(?:pc|mobile)\//m)
     assert.match(pcSource, /data-platform-view="pc"/)
-    assert.match(pcSource, /MarketTable/)
-    assert.doesNotMatch(pcSource, /MarketMobileList/)
+    assert.match(pcSource, /PcMarketTable/)
+    assert.doesNotMatch(pcSource, /MobileMarketList/)
     assert.match(mobileSource, /data-platform-view="mobile"/)
-    assert.match(mobileSource, /MarketMobileList/)
-    assert.doesNotMatch(mobileSource, /MarketTable/)
+    assert.match(mobileSource, /MobileMarketList/)
+    assert.doesNotMatch(mobileSource, /PcMarketTable/)
+  })
+
+  it('owns each market collection adapter in its platform directory', () => {
+    assert.equal(existsSync(collectionPropsPath), true)
+    assert.equal(existsSync(pcTablePath), true)
+    assert.equal(existsSync(mobileListPath), true)
+
+    assert.doesNotMatch(contentSource, /export function (?:MarketTable|MarketMobileList)/)
+    assert.match(pcTableSource, /export function PcMarketTable/)
+    assert.match(pcTableSource, /<table>/)
+    assert.match(pcTableSource, /data-market-collection="pc-table"/)
+    assert.doesNotMatch(pcTableSource, /MobileMarketList/)
+    assert.match(mobileListSource, /export function MobileMarketList/)
+    assert.match(mobileListSource, /aria-label="移动端行情列表"/)
+    assert.match(mobileListSource, /data-market-collection="mobile-list"/)
+    assert.doesNotMatch(mobileListSource, /PcMarketTable|<table>/)
+    assert.doesNotMatch(`${pcTableSource}\n${mobileListSource}`, /fetchMarket|fetchBinance|subscribeQuote|useMarketFavorites/)
+    assert.match(contentSource, /data-market-page-tab=\{tab\.value\}/)
   })
 })
 

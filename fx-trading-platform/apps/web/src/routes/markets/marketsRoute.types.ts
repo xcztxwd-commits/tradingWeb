@@ -5,7 +5,7 @@ import type {
   TradingMarket
 } from '@fx-platform/frontend-core'
 
-import type { ApiErrorView } from '../../components/user-page/userPageModels'
+import type { ApiErrorView } from '../../shared-widgets/data/userPageModels'
 
 export type MarketPageTab = 'overview' | 'trading-data' | 'ai-picks' | 'token-unlocks'
 export type TradingDataTab = 'rankings' | 'usdt-contracts' | 'coin-contracts' | 'options'

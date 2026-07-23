@@ -108,7 +108,7 @@ export type BinanceFuturesChartPanelModel = {
 
 export type BinanceFuturesChartSeries = {
   label: string
-  color: string
+  tone: BinanceFuturesChartTone
   values: number[]
   type: 'line' | 'area' | 'bar'
   suffix?: string
@@ -116,6 +116,8 @@ export type BinanceFuturesChartSeries = {
   compact?: boolean
   precision?: number
 }
+
+export type BinanceFuturesChartTone = 'accent' | 'neutral' | 'buy' | 'sell'
 
 export type BinanceFuturesDashboard = {
   referenceMarket: TradingMarket
@@ -268,10 +270,10 @@ function openInterestPanel(rows: BinanceOpenInterestPoint[]): BinanceFuturesChar
     switchLabels: ['单边', '双边'],
     labels: labelsFrom(rows, (row) => row.timestamp),
     series: [
-      { label: '持仓总数量(BTC)', color: '#fcd535', values: valuesFrom(rows, (row) => numberValue(row.sumOpenInterest)), type: 'bar' },
+      { label: '持仓总数量(BTC)', tone: 'accent', values: valuesFrom(rows, (row) => numberValue(row.sumOpenInterest)), type: 'bar' },
       {
         label: '持仓总价值(USDT)',
-        color: '#eaecef',
+        tone: 'neutral',
         values: valuesFrom(rows, (row) => numberValue(row.sumOpenInterestValue) / 1_000_000),
         type: 'line',
         suffix: 'M',
@@ -286,7 +288,7 @@ function longShortPanel(title: string, subtitle: string, rows: BinanceLongShortP
     title,
     subtitle,
     labels: labelsFrom(rows, (row) => row.timestamp),
-    series: [{ label: subtitle, color: '#fcd535', values: valuesFrom(rows, (row) => numberValue(row.longShortRatio)), type: 'line', precision: 3 }]
+    series: [{ label: subtitle, tone: 'accent', values: valuesFrom(rows, (row) => numberValue(row.longShortRatio)), type: 'line', precision: 3 }]
   }
 }
 
@@ -295,8 +297,8 @@ function takerBuySellPanel(rows: BinanceTakerBuySellPoint[]): BinanceFuturesChar
     title: '合约主动买卖量',
     labels: labelsFrom(rows, (row) => row.timestamp),
     series: [
-      { label: '主动卖出量(BTC)', color: '#f6465d', values: valuesFrom(rows, (row) => numberValue(row.sellVol)), type: 'bar', precision: 0 },
-      { label: '主动买入量(BTC)', color: '#0ecb81', values: valuesFrom(rows, (row) => numberValue(row.buyVol)), type: 'bar', precision: 0 }
+      { label: '主动卖出量(BTC)', tone: 'sell', values: valuesFrom(rows, (row) => numberValue(row.sellVol)), type: 'bar', precision: 0 },
+      { label: '主动买入量(BTC)', tone: 'buy', values: valuesFrom(rows, (row) => numberValue(row.buyVol)), type: 'bar', precision: 0 }
     ]
   }
 }
@@ -306,9 +308,9 @@ function basisPanel(rows: BinanceBasisPoint[]): BinanceFuturesChartPanelModel {
     title: '基差',
     labels: labelsFrom(rows, (row) => row.timestamp),
     series: [
-      { label: '合约价格', color: '#fcd535', values: valuesFrom(rows, (row) => numberValue(row.futuresPrice)), type: 'line', prefix: '$', compact: true },
-      { label: '价格指数', color: '#2ebd85', values: valuesFrom(rows, (row) => numberValue(row.indexPrice)), type: 'line', prefix: '$', compact: true },
-      { label: '基差', color: '#f6465d', values: valuesFrom(rows, (row) => numberValue(row.basis)), type: 'line', precision: 2 }
+      { label: '合约价格', tone: 'accent', values: valuesFrom(rows, (row) => numberValue(row.futuresPrice)), type: 'line', prefix: '$', compact: true },
+      { label: '价格指数', tone: 'buy', values: valuesFrom(rows, (row) => numberValue(row.indexPrice)), type: 'line', prefix: '$', compact: true },
+      { label: '基差', tone: 'sell', values: valuesFrom(rows, (row) => numberValue(row.basis)), type: 'line', precision: 2 }
     ]
   }
 }
@@ -321,7 +323,7 @@ function fundingRatePanel(rows: BinanceFundingRatePoint[], latestRate: number): 
     series: [
       {
         label: '资金费率',
-        color: '#fcd535',
+        tone: 'accent',
         values: valuesFrom(rows, (row) => numberValue(row.fundingRate) * 100),
         type: 'bar',
         suffix: '%',
@@ -338,7 +340,7 @@ function openInterestMarketCapRatioPanel(rows: BinanceOpenInterestPoint[], lastP
     series: [
       {
         label: '委托价格',
-        color: '#fcd535',
+        tone: 'accent',
         values: valuesFrom(rows, () => lastPrice),
         type: 'line',
         prefix: '$',
@@ -346,7 +348,7 @@ function openInterestMarketCapRatioPanel(rows: BinanceOpenInterestPoint[], lastP
       },
       {
         label: '比率',
-        color: '#2ebd85',
+        tone: 'buy',
         values: valuesFrom(rows, (row) => {
           const openInterestValue = numberValue(row.sumOpenInterestValue)
           const circulatingSupply = numberValue(row.CMCCirculatingSupply)

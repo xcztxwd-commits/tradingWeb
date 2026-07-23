@@ -9,6 +9,8 @@ import {
 import { paginateRows, sortRows } from '@fx-platform/frontend-core'
 
 import type { AccountDataCollectionProps } from '../../../shared-widgets/account/dataCollection.types'
+import surfaceStyles from '../../../shared-widgets/data/UserPageSurface.module.css'
+import { cssModuleClasses as css } from '../../../shared-widgets/data/cssModuleClasses'
 import styles from './PcAccountPages.module.css'
 
 export function PcAccountDataCollection<T extends object>({
@@ -67,9 +69,9 @@ function EmptyState({ message, action }: { message: string; action?: AccountData
       <strong>{message}</strong>
       <span>{t('common.continueActionHint')}</span>
       {action ? action.href ? (
-        <a className="table-action table-action--primary" href={action.href}>{action.label}</a>
+        <a className={css(surfaceStyles, "table-action", "table-action--primary")} href={action.href}>{action.label}</a>
       ) : (
-        <button type="button" className="table-action table-action--primary" onClick={action.onClick}>{action.label}</button>
+        <button type="button" className={css(surfaceStyles, "table-action", "table-action--primary")} onClick={action.onClick}>{action.label}</button>
       ) : null}
     </>
   )
@@ -81,8 +83,8 @@ function Pagination({ page, total, totalPages, setPage }: { page: number; total:
     <div className={styles.pagination}>
       <span>{t('common.pageSummary', { total, page, totalPages })}</span>
       <div>
-        <button type="button" className="table-action table-action--secondary" disabled={page <= 1} onClick={() => setPage((value) => getNextPage(value, -1, totalPages))}>{t('common.previousPage')}</button>
-        <button type="button" className="table-action table-action--secondary" disabled={page >= totalPages} onClick={() => setPage((value) => getNextPage(value, 1, totalPages))}>{t('common.nextPage')}</button>
+        <button type="button" className={css(surfaceStyles, "table-action", "table-action--secondary")} disabled={page <= 1} onClick={() => setPage((value) => getNextPage(value, -1, totalPages))}>{t('common.previousPage')}</button>
+        <button type="button" className={css(surfaceStyles, "table-action", "table-action--secondary")} disabled={page >= totalPages} onClick={() => setPage((value) => getNextPage(value, 1, totalPages))}>{t('common.nextPage')}</button>
       </div>
     </div>
   )

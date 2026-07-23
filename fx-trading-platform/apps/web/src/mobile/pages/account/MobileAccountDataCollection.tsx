@@ -4,6 +4,8 @@ import { DataCardList, getNextPage } from '@fx-platform/ui'
 import { paginateRows } from '@fx-platform/frontend-core'
 
 import type { AccountDataCollectionProps } from '../../../shared-widgets/account/dataCollection.types'
+import surfaceStyles from '../../../shared-widgets/data/UserPageSurface.module.css'
+import { cssModuleClasses as css } from '../../../shared-widgets/data/cssModuleClasses'
 import styles from './MobileAccountPages.module.css'
 
 export function MobileAccountDataCollection<T extends object>({
@@ -32,8 +34,8 @@ export function MobileAccountDataCollection<T extends object>({
       <div className={styles.pagination}>
         <span>{t('common.pageSummary', { total: paged.total, page: paged.page, totalPages: paged.totalPages })}</span>
         <div>
-          <button type="button" className="table-action table-action--secondary" disabled={paged.page <= 1} onClick={() => setPage((value) => getNextPage(value, -1, paged.totalPages))}>{t('common.previousPage')}</button>
-          <button type="button" className="table-action table-action--secondary" disabled={paged.page >= paged.totalPages} onClick={() => setPage((value) => getNextPage(value, 1, paged.totalPages))}>{t('common.nextPage')}</button>
+          <button type="button" className={css(surfaceStyles, "table-action", "table-action--secondary")} disabled={paged.page <= 1} onClick={() => setPage((value) => getNextPage(value, -1, paged.totalPages))}>{t('common.previousPage')}</button>
+          <button type="button" className={css(surfaceStyles, "table-action", "table-action--secondary")} disabled={paged.page >= paged.totalPages} onClick={() => setPage((value) => getNextPage(value, 1, paged.totalPages))}>{t('common.nextPage')}</button>
         </div>
       </div>
     </section>
@@ -47,9 +49,9 @@ function EmptyState({ message, action }: { message: string; action?: AccountData
       <strong>{message}</strong>
       <span>{t('common.continueActionHint')}</span>
       {action ? action.href ? (
-        <a className="table-action table-action--primary" href={action.href}>{action.label}</a>
+        <a className={css(surfaceStyles, "table-action", "table-action--primary")} href={action.href}>{action.label}</a>
       ) : (
-        <button type="button" className="table-action table-action--primary" onClick={action.onClick}>{action.label}</button>
+        <button type="button" className={css(surfaceStyles, "table-action", "table-action--primary")} onClick={action.onClick}>{action.label}</button>
       ) : null}
     </>
   )

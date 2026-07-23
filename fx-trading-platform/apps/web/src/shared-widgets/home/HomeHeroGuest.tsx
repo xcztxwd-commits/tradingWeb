@@ -31,7 +31,7 @@ export function HomeHeroGuest({ users, metricCards }: HomeHeroGuestProps) {
               <LaurelDecoration className={styles.laurelLeft} />
               <div className={styles.promoTextFlip}>
                 <div className={styles.promoTextInner}>
-                  <div className={`${styles.promoTextFace} ${styles.promoTextFront}`}>
+                  <div className={styles.promoTextFace}>
                     <strong className={styles.promoRank}>{card.frontRank}</strong>
                     <span className={styles.promoLabel}>{card.frontLabel}</span>
                   </div>

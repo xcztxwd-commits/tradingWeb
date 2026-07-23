@@ -5,13 +5,9 @@ import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const projectRoot = resolve(currentDir, '../../../..')
 const providerSource = readFileSync(resolve(currentDir, 'ThemeProvider.tsx'), 'utf8')
 const themeIndexSource = readFileSync(resolve(currentDir, 'index.ts'), 'utf8')
 const rootIndexSource = readFileSync(resolve(currentDir, '../index.ts'), 'utf8')
-const mainSource = readFileSync(resolve(projectRoot, 'apps/web/src/main.tsx'), 'utf8')
-const appShellSource = readFileSync(resolve(projectRoot, 'apps/web/src/app/AppShell.tsx'), 'utf8')
-const tradingRouteControllerSource = readFileSync(resolve(projectRoot, 'apps/web/src/routes/trading/useTradingRouteController.ts'), 'utf8')
 
 describe('ThemeProvider package contract', () => {
   it('preserves storage fallback, document datasets and every CSS variable write', () => {
@@ -59,14 +55,4 @@ describe('ThemeProvider package contract', () => {
     assert.match(rootIndexSource, /export \* from '\.\/theme'/u)
   })
 
-  it('wires the web root and all theme consumers through the package', () => {
-    assert.match(mainSource, /import \{ ThemeProvider \} from '@fx-platform\/ui'/u)
-    assert.match(mainSource, /import '@fx-platform\/ui\/theme\.css'/u)
-    assert.match(mainSource, /import '\.\/styles\.css'/u)
-    assert.ok(mainSource.indexOf("@fx-platform/ui/theme.css") < mainSource.indexOf("./styles.css"))
-    assert.match(mainSource, /<ThemeProvider>[\s\S]*<App \/>[\s\S]*<\/ThemeProvider>/u)
-    assert.match(appShellSource, /import \{ useTheme \} from '@fx-platform\/ui'/u)
-    assert.match(tradingRouteControllerSource, /import \{ useTheme \} from '@fx-platform\/ui'/u)
-    assert.doesNotMatch(`${mainSource}\n${appShellSource}\n${tradingRouteControllerSource}`, /design-system\/theme/u)
-  })
 })

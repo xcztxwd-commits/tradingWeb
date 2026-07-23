@@ -75,7 +75,6 @@ export function MobileTradingTerminal({ model }: { model: TradingRouteModel }) {
       <MobileDrawer open={model.quoteDrawerOpen} side="right" title="Quote" onClose={model.closeQuoteDrawer}>
         <RightTradingPanel
           symbol={model.symbol}
-          token={model.token}
           loading={model.terminalLoading}
           onSelectPrice={model.onSelectPrice}
         />

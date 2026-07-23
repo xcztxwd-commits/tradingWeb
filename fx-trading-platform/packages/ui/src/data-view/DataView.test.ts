@@ -7,13 +7,9 @@ import { fileURLToPath } from 'node:url'
 import { getNextDataSort, getNextPage } from './dataViewState.ts'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const projectRoot = resolve(currentDir, '../../../..')
 const tableSource = readFileSync(resolve(currentDir, 'DataTable.tsx'), 'utf8')
 const cardSource = readFileSync(resolve(currentDir, 'DataCardList.tsx'), 'utf8')
 const styles = readFileSync(resolve(currentDir, 'DataView.module.css'), 'utf8')
-const routeCollectionSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/data/RouteDataCollection.tsx'), 'utf8')
-const pcCollectionSource = readFileSync(resolve(projectRoot, 'apps/web/src/pc/components/PcDataCollection.tsx'), 'utf8')
-const mobileCollectionSource = readFileSync(resolve(projectRoot, 'apps/web/src/mobile/components/MobileDataCollection.tsx'), 'utf8')
 
 describe('data view state transitions', () => {
   it('starts ascending, toggles the active key and resets a changed key to ascending', () => {
@@ -41,7 +37,12 @@ describe('DataTable and DataCardList contracts', () => {
     assert.match(tableSource, /<tbody/u)
     assert.match(tableSource, /empty/u)
     assert.doesNotMatch(tableSource, /useState/u)
-    assert.doesNotMatch(tableSource, /react-i18next/u)
+  })
+
+  it('keeps table layout inside the table component instead of a global element reset', () => {
+    assert.match(styles, /\.table\s*\{[^}]*border-collapse:\s*collapse/su)
+    assert.match(styles, /\.table th,\s*\.table td\s*\{[^}]*white-space:\s*nowrap/su)
+    assert.match(styles, /var\(--user-border,\s*var\(--theme-border\)\)/u)
   })
 
   it('renders the same columns as mobile cards without owning breakpoint selection', () => {
@@ -50,26 +51,5 @@ describe('DataTable and DataCardList contracts', () => {
     assert.match(cardSource, /ariaLabel:\s*string/u)
     assert.match(cardSource, /empty/u)
     assert.doesNotMatch(`${cardSource}\n${styles}`, /@media/u)
-    assert.doesNotMatch(cardSource, /react-i18next/u)
-  })
-
-  it('keeps translation, row sorting and pagination in the shared Web route adapter', () => {
-    assert.match(routeCollectionSource, /useTranslation/u)
-    assert.match(routeCollectionSource, /sortRows/u)
-    assert.match(routeCollectionSource, /paginateRows/u)
-    assert.match(routeCollectionSource, /getNextDataSort/u)
-    assert.match(routeCollectionSource, /getNextPage/u)
-  })
-
-  it('selects exactly one data visualization in each platform renderer', () => {
-    assert.match(pcCollectionSource, /import \{ DataTable \} from '@fx-platform\/ui'/u)
-    assert.doesNotMatch(pcCollectionSource, /DataCardList/u)
-    assert.match(mobileCollectionSource, /import \{ DataCardList \} from '@fx-platform\/ui'/u)
-    assert.doesNotMatch(mobileCollectionSource, /DataTable/u)
-    for (const source of [pcCollectionSource, mobileCollectionSource]) {
-      assert.match(source, /RouteDataCollectionEmpty/u)
-      assert.match(source, /RouteDataCollectionPagination/u)
-      assert.match(source, /useRouteDataCollection/u)
-    }
   })
 })

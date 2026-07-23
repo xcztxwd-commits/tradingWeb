@@ -8,14 +8,12 @@ import type { AccountDataCollectionComponent } from './dataCollection.types'
 
 type AccountRouteContentProps = {
   model: AccountRouteModel
-  platform: 'pc' | 'mobile'
   expectedMode: AccountRouteMode
   renderDataCollection: AccountDataCollectionComponent
 }
 
 export function AccountRouteContent({
   model,
-  platform,
   expectedMode,
   renderDataCollection: DataCollection
 }: AccountRouteContentProps) {
@@ -44,5 +42,5 @@ export function AccountRouteContent({
     }
   })()
 
-  return <div data-account-platform={platform}>{content}</div>
+  return content
 }

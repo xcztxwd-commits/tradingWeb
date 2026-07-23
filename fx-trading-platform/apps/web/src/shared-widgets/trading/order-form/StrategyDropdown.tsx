@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { PrimaryOrderType } from '@fx-platform/frontend-core'
+import styles from './TradePanel.module.css'
 
 type Props = {
   active: boolean
@@ -27,10 +28,10 @@ export function StrategyDropdown({ active, orderType, onChange }: Props) {
   }, [active, orderType])
 
   return (
-    <div className="trade-panel__strategy">
+    <div className={styles['trade-panel__strategy']}>
       <button
         type="button"
-        className={`trade-panel__order-tab ${active ? 'trade-panel__order-tab--active' : ''}`}
+        className={`${styles['trade-panel__order-tab']} ${active ? styles['trade-panel__order-tab--active'] : ''}`}
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
@@ -39,14 +40,14 @@ export function StrategyDropdown({ active, orderType, onChange }: Props) {
       </button>
 
       {open ? (
-        <div className="trade-panel__strategy-menu" role="menu">
+        <div className={styles['trade-panel__strategy-menu']} role="menu">
           {strategyChoices.map((option) => {
             const optionActive = active && option.orderType === orderType
             return (
               <button
                 key={option.id}
                 type="button"
-                className={`trade-panel__strategy-item ${optionActive ? 'trade-panel__strategy-item--active' : ''}`}
+                className={`${styles['trade-panel__strategy-item']} ${optionActive ? styles['trade-panel__strategy-item--active'] : ''}`}
                 role="menuitem"
                 onClick={() => {
                   setOpen(false)

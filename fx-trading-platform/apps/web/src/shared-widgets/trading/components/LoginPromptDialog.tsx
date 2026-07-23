@@ -28,7 +28,7 @@ export function LoginPromptDialog({ open, sessionMode, sessionError, onClose, on
       }}
     >
       <section className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="trading-login-title">
-        <button className={styles.closeButton} type="button" aria-label={t('trading.closeLoginPrompt')} onClick={onClose}>
+        <button className={styles.closeButton} type="button" aria-label={t('trading.closeLoginPrompt')} data-trading-action="close-login-prompt" onClick={onClose}>
           <X size={19} aria-hidden="true" />
         </button>
 
@@ -60,7 +60,7 @@ export function LoginPromptDialog({ open, sessionMode, sessionError, onClose, on
         ) : null}
 
         <div className={styles.actions}>
-          <button className={styles.primaryButton} type="button" onClick={onLogin}>
+          <button className={styles.primaryButton} type="button" data-trading-action="go-to-login" onClick={onLogin}>
             {t('trading.goLogin')}
           </button>
           <button className={styles.secondaryButton} type="button" onClick={showRetry ? onRetry : onClose}>

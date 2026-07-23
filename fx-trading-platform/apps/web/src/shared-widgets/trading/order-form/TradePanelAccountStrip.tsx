@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
+import styles from './TradePanel.module.css'
+
 type Props = {
   accountStatus: string
 }
@@ -8,7 +10,7 @@ export function TradePanelAccountStrip({ accountStatus }: Props) {
   const { t } = useTranslation()
 
   return (
-    <div className="trade-panel__account-strip" aria-label={t('trading.tradingMode')}>
+    <div className={styles['trade-panel__account-strip']} aria-label={t('trading.tradingMode')}>
       <span>
         <strong>{t('trading.spot')}</strong>
         <small>Cash</small>

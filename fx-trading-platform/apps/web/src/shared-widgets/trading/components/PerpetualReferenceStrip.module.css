@@ -5,8 +5,8 @@
   justify-content: space-between;
   gap: 14px;
   padding: 7px 12px;
-  border-bottom: 1px solid #e6e9ef;
-  background: #ffffff;
+  border-bottom: 1px solid var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast);
 }
 
 .metrics {
@@ -24,7 +24,7 @@
 
 .metrics dt {
   overflow: hidden;
-  color: #7b8494;
+  color: var(--theme-text-muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -33,7 +33,7 @@
 .metrics dd {
   overflow: hidden;
   margin: 2px 0 0;
-  color: #1f2937;
+  color: var(--theme-text-contrast);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   font-weight: 600;

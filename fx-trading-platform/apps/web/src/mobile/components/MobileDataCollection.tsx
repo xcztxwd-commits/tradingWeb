@@ -12,7 +12,7 @@ export function MobileDataCollection<T extends object>(props: RouteDataCollectio
   const { t } = useTranslation()
   const state = useRouteDataCollection(props.rows, props.pageSize)
   return (
-    <div className="route-data-collection route-data-collection--mobile">
+    <div>
       <DataCardList
         rows={state.paged.items}
         columns={props.columns}

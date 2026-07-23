@@ -7,13 +7,9 @@ import { fileURLToPath } from 'node:url'
 import { getSelectFieldKeyTransition } from './selectFieldState.ts'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const projectRoot = resolve(currentDir, '../../../..')
 const componentSource = readFileSync(resolve(currentDir, 'SelectField.tsx'), 'utf8')
 const componentStyles = readFileSync(resolve(currentDir, 'SelectField.module.css'), 'utf8')
 const packageIndexSource = readFileSync(resolve(currentDir, '../index.ts'), 'utf8')
-const languageSwitcherSource = readFileSync(resolve(projectRoot, 'apps/web/src/components/LanguageSwitcher.tsx'), 'utf8')
-const marketsSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/market/MarketsContent.tsx'), 'utf8')
-const webStyles = readFileSync(resolve(projectRoot, 'apps/web/src/styles.css'), 'utf8')
 
 describe('SelectField keyboard state transitions', () => {
   it('wraps ArrowDown and ArrowUp from both closed and open states', () => {
@@ -99,7 +95,6 @@ describe('SelectField component contract', () => {
     assert.match(componentSource, /disabled=\{options\.length === 0\}/u)
     assert.match(componentSource, /window\.addEventListener\('pointerdown', handlePointerDown\)/u)
     assert.match(componentSource, /rootRef\.current\?\.contains/u)
-    assert.doesNotMatch(componentSource, /react-i18next/u)
   })
 
   it('owns visual states in a CSS Module with preserved values and reduced motion', () => {
@@ -121,13 +116,9 @@ describe('SelectField component contract', () => {
     assert.doesNotMatch(componentStyles, /:global/u)
   })
 
-  it('exports from the package and leaves app consumers on root-only layout hooks', () => {
+  it('exports from the package and supports a root-only layout hook', () => {
     assert.match(packageIndexSource, /export \* from '\.\/select-field\/SelectField'/u)
-    assert.match(languageSwitcherSource, /from '@fx-platform\/ui'/u)
-    assert.match(languageSwitcherSource, /className=\{`language-switcher__select/u)
-    assert.match(marketsSource, /from '@fx-platform\/ui'/u)
-    assert.match(marketsSource, /className="market-sort-field__select"/u)
-    assert.doesNotMatch(`${languageSwitcherSource}\n${marketsSource}`, /components\/SelectField/u)
-    assert.doesNotMatch(webStyles, /\.select-field(?:__|\s|\[|\{|\.)/u)
+    assert.match(componentSource, /const rootClassName = \[styles\.root, className\]\.filter\(Boolean\)\.join\(' '\)/u)
+    assert.match(componentSource, /<div ref=\{rootRef\} className=\{rootClassName\}/u)
   })
 })

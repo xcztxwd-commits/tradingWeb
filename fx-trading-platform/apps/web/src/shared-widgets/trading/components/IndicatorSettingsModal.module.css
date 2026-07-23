@@ -1,13 +1,13 @@
 .layer {
-  --chart-bg: var(--trading-surface-2, #050505);
-  --panel-bg: var(--trading-surface, #151515);
-  --panel-bg-light: var(--trading-surface-3, #1f1f1f);
-  --border-color: var(--trading-border, #2b2b2b);
-  --text-primary: var(--trading-text-strong, #f2f2f2);
-  --text-secondary: var(--trading-muted, #999);
-  --green: var(--trading-buy, #16c784);
-  --red: var(--trading-sell, #ea3943);
-  --accent: var(--trading-accent, #ffffff);
+  --chart-bg: var(--trading-surface-2);
+  --panel-bg: var(--trading-surface);
+  --panel-bg-light: var(--trading-surface-3);
+  --border-color: var(--trading-border);
+  --text-primary: var(--trading-text-strong);
+  --text-secondary: var(--trading-muted);
+  --green: var(--trading-buy);
+  --red: var(--trading-sell);
+  --accent: var(--trading-accent);
 
   position: fixed;
   inset: 0;
@@ -15,7 +15,7 @@
   display: grid;
   place-items: center;
   padding: 20px;
-  background: rgba(0, 0, 0, 0.42);
+  background: var(--theme-overlay-medium);
   animation: indicatorLayerIn 160ms ease-out;
 }
 
@@ -25,11 +25,11 @@
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
-  border: 1px solid var(--trading-border-strong, #333);
+  border: 1px solid var(--trading-border-strong);
   border-radius: 6px;
   background: var(--panel-bg);
   color: var(--text-primary);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.62);
+  box-shadow: 0 24px 70px var(--theme-shadow-strong);
   transform-origin: center top;
   animation: indicatorModalIn 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
@@ -37,7 +37,7 @@
 .header,
 .tabs,
 .footer {
-  border-bottom: 1px solid var(--trading-border-strong, #333);
+  border-bottom: 1px solid var(--trading-border-strong);
 }
 
 .header,
@@ -89,10 +89,10 @@
 .tabs button:focus-visible,
 .indicatorList button:focus-visible,
 .footer button:focus-visible {
-  outline: 2px solid var(--trading-accent-border, rgba(255, 255, 255, 0.38));
+  outline: 2px solid var(--trading-accent-border);
   outline-offset: 2px;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--trading-accent-soft, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
 }
 
 .header button:active,
@@ -206,7 +206,7 @@
 }
 
 .sourcePill {
-  border: 1px solid var(--trading-border-strong, #3a3a3a);
+  border: 1px solid var(--trading-border-strong);
   border-radius: 999px;
   color: var(--text-secondary);
   padding: 2px 7px;
@@ -242,9 +242,9 @@
 .lineRow select {
   min-width: 0;
   height: 34px;
-  border: 1px solid var(--trading-border-strong, #333);
+  border: 1px solid var(--trading-border-strong);
   border-radius: 5px;
-  background: var(--trading-field-bg, #363636);
+  background: var(--trading-field-bg);
   color: var(--text-primary);
   padding: 0 10px;
   font-size: 13px;
@@ -263,10 +263,10 @@
 .lineRow input[type='color']:focus-visible,
 .volumeColors input[type='color']:focus-visible,
 .styleGrid input[type='color']:focus-visible {
-  outline: 2px solid var(--trading-accent-border, rgba(255, 255, 255, 0.38));
+  outline: 2px solid var(--trading-accent-border);
   outline-offset: 2px;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--trading-accent-soft, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
 }
 
 .lineRow select option {
@@ -296,9 +296,9 @@
 .styleGrid select {
   min-width: 0;
   height: 34px;
-  border: 1px solid var(--trading-border-strong, #333);
+  border: 1px solid var(--trading-border-strong);
   border-radius: 5px;
-  background: var(--trading-field-bg, #363636);
+  background: var(--trading-field-bg);
   color: var(--text-primary);
   padding: 0 10px;
   font-size: 13px;
@@ -319,9 +319,9 @@
 .styleGrid input[type='color'] {
   width: 34px;
   height: 34px;
-  border: 1px solid var(--trading-border-strong, #333);
+  border: 1px solid var(--trading-border-strong);
   border-radius: 5px;
-  background: var(--trading-surface-2, #101010);
+  background: var(--trading-surface-2);
   padding: 3px;
   cursor: pointer;
   transition:
@@ -365,7 +365,7 @@
 }
 
 .footer {
-  border-top: 1px solid var(--trading-border-strong, #333);
+  border-top: 1px solid var(--trading-border-strong);
   border-bottom: 0;
   padding: 12px 20px;
 }
@@ -386,7 +386,7 @@
 
 .resetButton,
 .cancelButton {
-  border-color: var(--trading-border-strong, #444) !important;
+  border-color: var(--trading-border-strong) !important;
 }
 
 .actions {
@@ -398,7 +398,7 @@
 .confirmButton {
   border-color: var(--accent) !important;
   background: var(--accent) !important;
-  color: var(--trading-accent-text, #050505) !important;
+  color: var(--trading-accent-text) !important;
 }
 
 @media (max-width: 760px) {

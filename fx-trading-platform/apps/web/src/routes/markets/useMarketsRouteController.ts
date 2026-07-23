@@ -13,7 +13,7 @@ import {
   type TradingMarket
 } from '@fx-platform/frontend-core'
 
-import { formatApiError, type ApiErrorView } from '../../components/user-page/userPageModels'
+import { formatApiError, type ApiErrorView } from '../../shared-widgets/data/userPageModels'
 import type {
   FuturesViewMode,
   MarketPageTab,

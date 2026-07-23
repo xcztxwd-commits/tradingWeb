@@ -400,7 +400,7 @@
   border: 1px solid var(--trading-border-strong);
   border-radius: 6px;
   background: var(--trading-surface);
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 14px 34px var(--theme-shadow-medium);
   transform-origin: top right;
   animation: marketPopoverIn 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }

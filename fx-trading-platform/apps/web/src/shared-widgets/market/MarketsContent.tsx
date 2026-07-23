@@ -1,9 +1,9 @@
-import { ChevronDown, LayoutGrid, List, Search, Star } from 'lucide-react'
+import { ChevronDown, LayoutGrid, List, Search } from 'lucide-react'
 import { useMemo, useState, type ComponentType, type PointerEvent } from 'react'
 import { SelectField, type SelectFieldOption } from '@fx-platform/ui'
 
 import { AssetMark } from '../asset/AssetMark'
-import { ApiErrorState, LoadingState } from '../../components/user-page/PageState'
+import { ApiErrorState, LoadingState } from '../data/PageState'
 import {
   type BinanceFuturesChartPanelModel,
   type BinanceFuturesChartSeries,
@@ -14,14 +14,17 @@ import type { TradingMarket } from '@fx-platform/frontend-core'
 import type {
   MarketPageTab,
   MarketsRouteModel,
-  MarketSortDirection as SortDirection,
   MarketSortKey as SortKey,
   MarketUniverseTab,
   MarketZoneTab,
   TradingDataTab
 } from '../../routes/markets/marketsRoute.types'
-import { marketCap, marketTurnover as turnover, parseCompactNumber } from '../../routes/markets/marketsRouteModel'
+import { marketCap, marketTurnover as turnover } from '../../routes/markets/marketsRouteModel'
 import { isMarketTradingEnabled } from '../../routes/markets/marketTradingTarget'
+import { chartTheme, futuresChartColor } from '../trading/chartTheme.ts'
+import type { MarketCollectionProps } from './marketCollection.types'
+import { compactMarketNumber, formatSignedPercent } from './marketFormatters'
+import styles from './MarketsContent.module.css'
 
 type FuturesPeriodTab = MarketsRouteModel['futures']['period']
 
@@ -75,15 +78,6 @@ const marketZoneTabs: Array<{ value: MarketZoneTab; label: string; badge?: strin
 ]
 const forexMarketZoneTabs = marketZoneTabs.filter((tab) => tab.value === 'all')
 
-const marketColumns: Array<{ key: SortKey | 'action'; label: string; sortable?: boolean }> = [
-  { key: 'symbol', label: '名称', sortable: true },
-  { key: 'price', label: '价格', sortable: true },
-  { key: 'change', label: '24h涨跌', sortable: true },
-  { key: 'volume', label: '24h成交量', sortable: true },
-  { key: 'marketCap', label: '市值', sortable: true },
-  { key: 'action', label: '操作' }
-]
-
 const marketSortOptions: Array<SelectFieldOption<SortKey>> = [
   { value: 'volume', label: '24h成交量' },
   { value: 'change', label: '24h涨跌' },
@@ -91,16 +85,6 @@ const marketSortOptions: Array<SelectFieldOption<SortKey>> = [
   { value: 'marketCap', label: '市值' },
   { value: 'symbol', label: '名称' }
 ]
-
-export type MarketCollectionProps = {
-  markets: TradingMarket[]
-  favorites: Set<string>
-  sortKey: SortKey
-  sortDirection: SortDirection
-  onFavorite(symbol: string): void
-  onOpen(market: TradingMarket): void
-  onSort(key: SortKey): void
-}
 
 export type MarketCollectionComponent = ComponentType<MarketCollectionProps>
 
@@ -131,18 +115,24 @@ export function MarketsContent({
   const rankings = useMemo(() => buildRankings(hydratedMarkets), [hydratedMarkets])
 
   return (
-    <section className="user-page market-shell" aria-labelledby="markets-title">
-      <header className="market-shell__titleSrOnly">
+    <section className={`${styles['user-page']} ${styles['market-shell']}`} aria-labelledby="markets-title">
+      <header className={styles['market-shell__titleSrOnly']}>
         <div>
           <h1 id="markets-title">加密货币市场 | 币价和市值</h1>
           <p>按总览、榜单和板块筛选查看价格、24h 成交量、涨跌和估算市值，并快速进入交易终端。</p>
         </div>
-        <span className="market-shell__status">{loading ? '同步中' : '实时'}</span>
+        <span className={styles['market-shell__status']}>{loading ? '同步中' : '实时'}</span>
       </header>
 
-      <div className="market-shell__tabs" role="tablist" aria-label="行情页面导航">
+      <div className={styles['market-shell__tabs']} role="tablist" aria-label="行情页面导航">
         {marketPageTabs.map((tab) => (
-          <button key={tab.value} type="button" aria-selected={pageTab === tab.value} onClick={() => model.setPageTab(tab.value)}>
+          <button
+            key={tab.value}
+            type="button"
+            data-market-page-tab={tab.value}
+            aria-selected={pageTab === tab.value}
+            onClick={() => model.setPageTab(tab.value)}
+          >
             {tab.label}
           </button>
         ))}
@@ -169,20 +159,20 @@ export function MarketsContent({
             onZoneTab={model.setZoneTab}
           />
 
-          <section className="market-table-section" aria-labelledby="market-table-title">
-            <div className="market-table-section__head">
+          <section className={styles['market-table-section']} aria-labelledby="market-table-title">
+            <div className={styles['market-table-section__head']}>
               <div>
                 <h2 id="market-table-title">市值排名前列的代币</h2>
                 <p>桌面显示完整表格，移动端保留名称、价格、24h 涨跌、市值和成交量摘要。</p>
               </div>
-              <div className="market-table-section__actions">
+              <div className={styles['market-table-section__actions']}>
                 <MarketToolbar
                   query={query}
                   sortKey={sortKey}
                   onQuery={model.setQuery}
                   onSort={model.selectSort}
                 />
-                <span className="market-table-section__count">
+                <span className={styles['market-table-section__count']}>
                   {pagedMarkets.total} 个市场 · 每页 {pagedMarkets.pageSize} 条
                 </span>
               </div>
@@ -199,14 +189,14 @@ export function MarketsContent({
               onOpen={model.openMarket}
               onSort={model.toggleTableSort}
             />
-            <div className="table-pagination" aria-label="行情分页">
+            <div className={styles['table-pagination']} aria-label="行情分页">
               <span>
                 共 {pagedMarkets.total} 个市场 · 第 {pagedMarkets.page}/{pagedMarkets.totalPages} 页
               </span>
               <div>
                 <button
                   type="button"
-                  className="table-action table-action--secondary"
+                  className={`${styles['table-action']} ${styles['table-action--secondary']}`}
                   disabled={pagedMarkets.page <= 1}
                   onClick={() => model.changePage(-1)}
                 >
@@ -214,7 +204,7 @@ export function MarketsContent({
                 </button>
                 <button
                   type="button"
-                  className="table-action table-action--secondary"
+                  className={`${styles['table-action']} ${styles['table-action--secondary']}`}
                   disabled={pagedMarkets.page >= pagedMarkets.totalPages}
                   onClick={() => model.changePage(1)}
                 >
@@ -246,7 +236,7 @@ export function MarketsContent({
 
 function MarketSummaryDeck({ deck, onOpen }: { deck: SummaryGroup[]; onOpen: (market: TradingMarket) => void }) {
   return (
-    <div className="market-summary-grid market-rank-grid" aria-label="行情摘要">
+    <div className={`${styles['market-summary-grid']} ${styles['market-rank-grid']}`} aria-label="行情摘要">
       {deck.map((group) => (
         <SummaryCard key={group.title} group={group} onOpen={onOpen} />
       ))}
@@ -258,8 +248,8 @@ function MarketOverviewMetrics({ overview }: { overview: BinanceMarketOverview |
   if (!overview) return null
   const fearGreed = overview.metrics.fearGreed
   const cards = [
-    { label: '总市值', value: `$${compactNumber(overview.metrics.marketCap)}`, detail: 'Binance 产品流通量估算' },
-    { label: '24h 成交额', value: `$${compactNumber(overview.metrics.volume24h)}`, detail: 'USDT 市场实时汇总' },
+    { label: '总市值', value: `$${compactMarketNumber(overview.metrics.marketCap)}`, detail: 'Binance 产品流通量估算' },
+    { label: '24h 成交额', value: `$${compactMarketNumber(overview.metrics.volume24h)}`, detail: 'USDT 市场实时汇总' },
     {
       label: 'Fear & Greed',
       value: fearGreed ? `${fearGreed.value}` : '--',
@@ -269,7 +259,7 @@ function MarketOverviewMetrics({ overview }: { overview: BinanceMarketOverview |
   ]
 
   return (
-    <div className="market-overview-metrics" aria-label="Binance market overview">
+    <div className={styles['market-overview-metrics']} aria-label="Binance market overview">
       {cards.map((card) => (
         <article key={card.label}>
           <span>{card.label}</span>
@@ -283,8 +273,8 @@ function MarketOverviewMetrics({ overview }: { overview: BinanceMarketOverview |
 
 function SummaryCard({ group, onOpen }: { group: SummaryGroup; onOpen: (market: TradingMarket) => void }) {
   return (
-    <section className="market-summary-card" aria-labelledby={`summary-${group.key}`}>
-      <div className="market-summary-card__head">
+    <section className={styles['market-summary-card']} aria-labelledby={`summary-${group.key}`}>
+      <div className={styles['market-summary-card__head']}>
         <div>
           <h2 id={`summary-${group.key}`}>{group.title}</h2>
           <p>{group.description}</p>
@@ -306,13 +296,13 @@ function SummaryCard({ group, onOpen }: { group: SummaryGroup; onOpen: (market: 
 
 function RankingPreviewCard({ market, onOpen }: { market: TradingMarket; onOpen: (market: TradingMarket) => void }) {
   return (
-    <button type="button" className="market-preview-row" disabled={!isMarketTradingEnabled(market)} onClick={() => onOpen(market)}>
+    <button type="button" className={styles['market-preview-row']} disabled={!isMarketTradingEnabled(market)} onClick={() => onOpen(market)}>
       <AssetMark symbol={market.symbol} category={market.category} iconUrl={market.iconUrl} size="sm" />
       <span>
         <strong>{market.base}</strong>
         <small>{formatMarketPrice(market.symbol, market.last)}</small>
       </span>
-      <em className={market.changePercent >= 0 ? 'market-change market-change--up' : 'market-change market-change--down'}>
+      <em className={`${styles['market-change']} ${styles[market.changePercent >= 0 ? 'market-change--up' : 'market-change--down']}`}>
         {formatSignedPercent(market.changePercent)}
       </em>
     </button>
@@ -333,15 +323,15 @@ function MarketFilters({
   onZoneTab: (tab: MarketZoneTab) => void
 }) {
   return (
-    <div className="market-filter-stack" aria-label="行情筛选">
-      <div className="market-universe-tabs" role="tablist" aria-label="市场类型">
+    <div className={styles['market-filter-stack']} aria-label="行情筛选">
+      <div className={styles['market-universe-tabs']} role="tablist" aria-label="市场类型">
         {marketUniverseTabs.map((tab) => (
           <button key={tab.value} type="button" aria-selected={universeTab === tab.value} onClick={() => onUniverseTab(tab.value)}>
             {tab.label}
           </button>
         ))}
       </div>
-      <div className="market-zone-tabs" role="tablist" aria-label="板块">
+      <div className={styles['market-zone-tabs']} role="tablist" aria-label="板块">
         {zoneTabs.map((tab) => (
           <button key={tab.value} type="button" aria-selected={zoneTab === tab.value} onClick={() => onZoneTab(tab.value)}>
             {tab.label}
@@ -365,16 +355,16 @@ function MarketToolbar({
   onSort: (key: SortKey) => void
 }) {
   return (
-    <div className="market-shell__toolbar" aria-label="行情搜索和排序">
-      <label className="market-search-field">
+    <div className={styles['market-shell__toolbar']} aria-label="行情搜索和排序">
+      <label className={styles['market-search-field']}>
         <Search size={15} aria-hidden="true" />
         <span>搜索</span>
         <input value={query} onChange={(event) => onQuery(event.target.value)} placeholder="BTCUSDT" />
       </label>
-      <div className="market-sort-field">
+      <div className={styles['market-sort-field']}>
         <span id="market-sort-label">排序</span>
         <SelectField
-          className="market-sort-field__select"
+          className={styles['market-sort-field__select']}
           labelledBy="market-sort-label"
           value={sortKey}
           options={marketSortOptions}
@@ -382,129 +372,6 @@ function MarketToolbar({
         />
       </div>
     </div>
-  )
-}
-
-export function MarketTable({
-  markets,
-  favorites,
-  sortKey,
-  sortDirection,
-  onFavorite,
-  onOpen,
-  onSort
-}: MarketCollectionProps) {
-  return (
-    <div className="market-table" aria-label="行情表格">
-      <table>
-        <thead>
-          <tr>
-            {marketColumns.map((column) => (
-              <th key={column.key} aria-sort={column.key === sortKey ? toAriaSort(sortDirection) : undefined}>
-                {column.sortable ? (
-                  <button type="button" onClick={() => onSort(column.key as SortKey)}>
-                    {column.label}
-                    <span>{column.key === sortKey ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}</span>
-                  </button>
-                ) : (
-                  column.label
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {markets.map((market) => (
-            <tr key={market.symbol} onClick={() => isMarketTradingEnabled(market) && onOpen(market)}>
-              <td>
-                <FavoriteButton active={favorites.has(market.symbol) || market.favorite} symbol={market.symbol} onFavorite={onFavorite} />
-                <AssetMark symbol={market.symbol} category={market.category} iconUrl={market.iconUrl} size="sm" />
-                <span>
-                  <strong>{market.symbol}</strong>
-                  <small>{market.name}</small>
-                </span>
-              </td>
-              <td>{formatMarketPrice(market.symbol, market.last)}</td>
-              <td className={market.changePercent >= 0 ? 'market-change--up' : 'market-change--down'}>
-                {formatSignedPercent(market.changePercent)}
-              </td>
-              <td>{formatVolume(market)}</td>
-              <td>{formatMarketCap(market)}</td>
-              <td>
-                <button
-                  type="button"
-                  className="table-action table-action--secondary market-trade-action"
-                  disabled={!isMarketTradingEnabled(market)}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onOpen(market)
-                  }}
-                >
-                  交易
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-export function MarketMobileList({
-  markets,
-  favorites,
-  onFavorite,
-  onOpen
-}: MarketCollectionProps) {
-  return (
-    <div className="market-mobile-list" aria-label="移动端行情列表">
-      {markets.map((market) => (
-        <article key={market.symbol} className="market-mobile-row">
-          <button type="button" className="market-mobile-row__body" disabled={!isMarketTradingEnabled(market)} onClick={() => onOpen(market)}>
-            <AssetMark symbol={market.symbol} category={market.category} iconUrl={market.iconUrl} size="md" />
-            <span>
-              <strong>{market.symbol}</strong>
-              <small>
-                市值 {formatMarketCap(market)} · 成交量 {formatVolume(market)}
-              </small>
-            </span>
-            <span>
-              <strong>{formatMarketPrice(market.symbol, market.last)}</strong>
-              <em className={market.changePercent >= 0 ? 'market-change market-change--up' : 'market-change market-change--down'}>
-                {formatSignedPercent(market.changePercent)}
-              </em>
-            </span>
-          </button>
-          <FavoriteButton active={favorites.has(market.symbol) || market.favorite} symbol={market.symbol} onFavorite={onFavorite} />
-        </article>
-      ))}
-    </div>
-  )
-}
-
-function FavoriteButton({
-  active,
-  symbol,
-  onFavorite
-}: {
-  active: boolean
-  symbol: string
-  onFavorite: (symbol: string) => void
-}) {
-  return (
-    <button
-      type="button"
-      className="market-favorite-button"
-      aria-label={active ? `取消自选 ${symbol}` : `添加自选 ${symbol}`}
-      aria-pressed={active}
-      onClick={(event) => {
-        event.stopPropagation()
-        onFavorite(symbol)
-      }}
-    >
-      <Star size={15} aria-hidden="true" />
-    </button>
   )
 }
 
@@ -522,8 +389,8 @@ function TradingDataDashboard({
   const referenceMarket = dashboard?.referenceMarket
 
   return (
-    <div className="market-data-view" aria-label="交易数据">
-      <div className="market-data-tabs" role="tablist" aria-label="交易数据分类">
+    <div className={styles['market-data-view']} aria-label="交易数据">
+      <div className={styles['market-data-tabs']} role="tablist" aria-label="交易数据分类">
         {tradingDataTabs.map((tab) => (
           <button
             key={tab.value}
@@ -537,7 +404,7 @@ function TradingDataDashboard({
       </div>
 
       {activeTab === 'rankings' ? (
-        <div className="market-data-dashboard market-ranking-preview-grid" aria-label="排行榜">
+        <div className={`${styles['market-data-dashboard']} ${styles['market-ranking-preview-grid']}`} aria-label="排行榜">
           {rankings.map((group) => (
             <RankingCard key={group.title} group={group} onOpen={onOpen} />
           ))}
@@ -545,17 +412,17 @@ function TradingDataDashboard({
       ) : null}
 
       {activeTab === 'usdt-contracts' ? (
-        <section className="futures-data-pane" aria-label="U本位合约交易数据">
-          <div className="futures-data-toolbar">
-            <button type="button" className="futures-symbol-select" aria-label="选择合约">
-              <span className="futures-symbol-label">
+        <section className={styles['futures-data-pane']} aria-label="U本位合约交易数据">
+          <div className={styles['futures-data-toolbar']}>
+            <button type="button" className={styles['futures-symbol-select']} aria-label="选择合约">
+              <span className={styles['futures-symbol-label']}>
                 <strong>{referenceMarket?.symbol ?? 'BTCUSDT'}</strong>
                 <span>永续</span>
               </span>
               <ChevronDown size={15} aria-hidden="true" />
             </button>
 
-            <div className="futures-view-toggle" aria-label="图表视图模式">
+            <div className={styles['futures-view-toggle']} aria-label="图表视图模式">
               <button type="button" aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')}>
                 <List size={14} aria-hidden="true" />
                 List View
@@ -566,7 +433,7 @@ function TradingDataDashboard({
               </button>
             </div>
 
-            <div className="futures-period-tabs" role="tablist" aria-label="合约数据周期">
+            <div className={styles['futures-period-tabs']} role="tablist" aria-label="合约数据周期">
               {futuresPeriodTabs.map((tab) => (
                 <button
                   key={tab.value}
@@ -578,17 +445,17 @@ function TradingDataDashboard({
                   {tab.label}
                 </button>
               ))}
-              <ChevronDown className="futures-period-chevron" size={14} aria-hidden="true" />
+              <ChevronDown className={styles['futures-period-chevron']} size={14} aria-hidden="true" />
             </div>
 
-            <button type="button" className="futures-trade-cta" disabled={!referenceMarket} onClick={() => referenceMarket && onOpen(referenceMarket)}>
+            <button type="button" className={styles['futures-trade-cta']} disabled={!referenceMarket} onClick={() => referenceMarket && onOpen(referenceMarket)}>
               去合约交易
             </button>
           </div>
 
           {loading ? <LoadingState message="正在同步 Binance perpetual trading-data" /> : null}
-          {error ? <p className="market-live-note">{error}</p> : null}
-          <div className={`futures-chart-board futures-chart-board--${viewMode}`} aria-label={`${period} 合约交易数据图表`}>
+          {error ? <p className={styles['market-live-note']}>{error}</p> : null}
+          <div className={`${styles['futures-chart-board']} ${styles[`futures-chart-board--${viewMode}`]}`} aria-label={`${period} 合约交易数据图表`}>
             {futuresChartPanels.map((panel) => (
               <FuturesChartPanel key={panel.title} panel={panel} />
             ))}
@@ -601,15 +468,15 @@ function TradingDataDashboard({
 
 function RankingCard({ group, onOpen }: { group: RankingGroup; onOpen: (market: TradingMarket) => void }) {
   return (
-    <section className="market-rank-card">
-      <div className="market-rank-card__head">
+    <section className={styles['market-rank-card']}>
+      <div className={styles['market-rank-card__head']}>
         <h2>{group.title}</h2>
-        <button type="button" className="market-rank-card__filter">
+        <button type="button" className={styles['market-rank-card__filter']}>
           加密货币
           <ChevronDown size={14} aria-hidden="true" />
         </button>
       </div>
-      <div className="market-rank-card__columns" aria-hidden="true">
+      <div className={styles['market-rank-card__columns']} aria-hidden="true">
         <span>名称</span>
         <span>价格</span>
         <span>
@@ -617,17 +484,17 @@ function RankingCard({ group, onOpen }: { group: RankingGroup; onOpen: (market: 
           <ChevronDown size={11} aria-hidden="true" />
         </span>
       </div>
-      <ol className="market-rank-list">
+      <ol className={styles['market-rank-list']}>
         {group.markets.map((market, index) => (
           <li key={`${group.title}-${market.symbol}-${index}`}>
             <button type="button" disabled={!isMarketTradingEnabled(market)} onClick={() => onOpen(market)}>
-              <span className="market-rank-index">{index + 1}</span>
-              <span className="market-rank-symbol">
+              <span className={styles['market-rank-index']}>{index + 1}</span>
+              <span className={styles['market-rank-symbol']}>
                 <AssetMark symbol={market.symbol} category={market.category} size="sm" />
                 <strong>{market.displaySymbol}</strong>
               </span>
-              <span className="market-rank-price">{market.priceLabel}</span>
-              <span className={market.changePercent >= 0 ? 'market-change market-change--up' : 'market-change market-change--down'}>
+              <span className={styles['market-rank-price']}>{market.priceLabel}</span>
+              <span className={`${styles['market-change']} ${styles[market.changePercent >= 0 ? 'market-change--up' : 'market-change--down']}`}>
                 {market.changeLabel}
               </span>
             </button>
@@ -654,14 +521,14 @@ function FuturesChartPanel({ panel }: { panel: FuturesChartPanelModel }) {
   }
 
   return (
-    <article className={`futures-chart-card${panel.switchLabels ? ' futures-chart-card--tall' : ''}`}>
-      <div className="futures-chart-card__head">
+    <article className={`${styles['futures-chart-card']}${panel.switchLabels ? ` ${styles['futures-chart-card--tall']}` : ''}`}>
+      <div className={styles['futures-chart-card__head']}>
         <div>
           <h2>{panel.title}</h2>
           {panel.subtitle ? <p>{panel.subtitle}</p> : null}
         </div>
         {panel.switchLabels ? (
-          <div className="futures-chart-card__switch" aria-label={`${panel.title} 指标`}>
+          <div className={styles['futures-chart-card__switch']} aria-label={`${panel.title} 指标`}>
             {panel.switchLabels.map((label, index) => (
               <button key={label} type="button" aria-pressed={index === 0}>
                 {label}
@@ -671,32 +538,32 @@ function FuturesChartPanel({ panel }: { panel: FuturesChartPanelModel }) {
         ) : null}
       </div>
 
-      <div className="futures-chart-stage">
-        <div className="futures-chart-yaxis futures-chart-yaxis--left" aria-hidden="true">
+      <div className={styles['futures-chart-stage']}>
+        <div className={`${styles['futures-chart-yaxis']} ${styles['futures-chart-yaxis--left']}`} aria-hidden="true">
           {leftAxisLabels.map((label, index) => (
             <span key={`${panel.title}-left-${index}-${label}`}>{label}</span>
           ))}
         </div>
 
         {rightAxisLabels.length > 0 ? (
-          <div className="futures-chart-yaxis futures-chart-yaxis--right" aria-hidden="true">
+          <div className={`${styles['futures-chart-yaxis']} ${styles['futures-chart-yaxis--right']}`} aria-hidden="true">
             {rightAxisLabels.map((label, index) => (
               <span key={`${panel.title}-right-${index}-${label}`}>{label}</span>
             ))}
           </div>
         ) : null}
 
-        <div className="futures-chart-legend" aria-hidden="true">
+        <div className={styles['futures-chart-legend']} aria-hidden="true">
           {panel.series.map((series) => (
-            <span key={series.label} style={{ color: series.color }}>
-              <i style={{ background: series.color }} />
+            <span key={series.label} style={{ color: futuresChartColor(series.tone) }}>
+              <i style={{ background: futuresChartColor(series.tone) }} />
               {series.label}
             </span>
           ))}
         </div>
 
         <svg
-          className="futures-chart-svg"
+          className={styles['futures-chart-svg']}
           viewBox="0 0 100 64"
           preserveAspectRatio="none"
           role="img"
@@ -704,56 +571,56 @@ function FuturesChartPanel({ panel }: { panel: FuturesChartPanelModel }) {
           onPointerMove={handlePointerMove}
           onPointerLeave={() => setHoverIndex(panel.labels.length - 1)}
         >
-          <g className="futures-chart-grid" aria-hidden="true">
+          <g className={styles['futures-chart-grid']} aria-hidden="true">
             {futuresChartGridLines.map((y) => (
               <line key={y} x1={futuresChartXStart} x2={futuresChartXEnd} y1={y} y2={y} />
             ))}
           </g>
           {panel.series.map((series, seriesIndex) =>
             series.type === 'bar' ? (
-              <g key={series.label} className="futures-chart-bars">
+              <g key={series.label} className={styles['futures-chart-bars']}>
                 {series.values.map((value, index) => {
                   const rect = barRect(series.values, value, index, panel.labels.length, seriesIndex, panel.series.length)
-                  return <rect key={`${series.label}-${index}`} x={rect.x} y={rect.y} width={rect.width} height={rect.height} fill={series.color} />
+                  return <rect key={`${series.label}-${index}`} x={rect.x} y={rect.y} width={rect.width} height={rect.height} fill={futuresChartColor(series.tone)} />
                 })}
               </g>
             ) : (
               <g key={series.label}>
-                {series.type === 'area' ? <path className="futures-chart-area" d={areaPath(series.values)} fill={series.color} /> : null}
-                <path className="futures-chart-line" d={linePath(series.values)} stroke={series.color} />
+                {series.type === 'area' ? <path className={styles['futures-chart-area']} d={areaPath(series.values)} fill={futuresChartColor(series.tone)} /> : null}
+                <path className={styles['futures-chart-line']} d={linePath(series.values)} stroke={futuresChartColor(series.tone)} />
                 {series.values.map((_, index) => {
                   const point = linePoint(series.values, index)
-                  return <circle key={`${series.label}-marker-${index}`} className="futures-chart-marker" cx={point.x} cy={point.y} r="0.55" fill="#181a20" stroke={series.color} />
+                  return <circle key={`${series.label}-marker-${index}`} className={styles['futures-chart-marker']} cx={point.x} cy={point.y} r="0.55" fill={chartTheme.futures.markerBackground} stroke={futuresChartColor(series.tone)} />
                 })}
               </g>
             )
           )}
-          <line className="futures-chart-crosshair" x1={tooltipX} x2={tooltipX} y1="8" y2="56" />
+          <line className={styles['futures-chart-crosshair']} x1={tooltipX} x2={tooltipX} y1="8" y2="56" />
           {panel.series.map((series) =>
             series.type === 'bar' ? null : (
               <circle
                 key={`${series.label}-dot`}
-                className="futures-chart-dot"
+                className={styles['futures-chart-dot']}
                 cx={tooltipX}
                 cy={linePoint(series.values, activeIndex).y}
                 r="1.35"
-                fill={series.color}
+                fill={futuresChartColor(series.tone)}
               />
             )
           )}
         </svg>
 
-        <div className="futures-chart-axis" aria-hidden="true" style={{ gridTemplateColumns: `repeat(${axisLabels.length}, minmax(0, 1fr))` }}>
+        <div className={styles['futures-chart-axis']} aria-hidden="true" style={{ gridTemplateColumns: `repeat(${axisLabels.length}, minmax(0, 1fr))` }}>
           {axisLabels.map((label, index) => (
             <span key={`${panel.title}-${index}-${label}`}>{label}</span>
           ))}
         </div>
 
-        <div className="futures-chart-tooltip" style={{ left: `${tooltipX}%` }}>
+        <div className={styles['futures-chart-tooltip']} style={{ left: `${tooltipX}%` }}>
           <strong>{panel.labels[activeIndex]}</strong>
           {panel.series.map((series) => (
             <span key={series.label}>
-              <i style={{ background: series.color }} />
+              <i style={{ background: futuresChartColor(series.tone) }} />
               {series.label}: {formatFuturesValue(series.values[activeIndex], series)}
             </span>
           ))}
@@ -765,7 +632,7 @@ function FuturesChartPanel({ panel }: { panel: FuturesChartPanelModel }) {
 
 function MarketInsightPlaceholder({ title, description }: { title: string; description: string }) {
   return (
-    <section className="market-insight-placeholder" aria-labelledby="market-insight-title">
+    <section className={styles['market-insight-placeholder']} aria-labelledby="market-insight-title">
       <h2 id="market-insight-title">{title}</h2>
       <p>{description}</p>
     </section>
@@ -906,28 +773,6 @@ function rankingMarket(displaySymbol: string, priceLabel: string, changePercent:
   } as RankingMarket
 }
 
-function formatSignedPercent(value: number) {
-  const sign = value > 0 ? '+' : ''
-  return `${sign}${value.toFixed(2)}%`
-}
-
-function formatVolume(market: TradingMarket) {
-  return parseCompactNumber(market.volume) > 0 ? `${market.volume}` : '--'
-}
-
-function formatMarketCap(market: TradingMarket) {
-  const value = marketCap(market)
-  return value > 0 ? `$${compactNumber(value)}` : '--'
-}
-
-function compactNumber(value: number) {
-  if (value >= 1_000_000_000_000) return `${(value / 1_000_000_000_000).toFixed(2)}T`
-  if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`
-  if (value >= 1_000) return `${(value / 1_000).toFixed(2)}K`
-  return value.toFixed(2)
-}
-
 const futuresChartXStart = 6
 const futuresChartXEnd = 95
 const futuresChartXSpan = futuresChartXEnd - futuresChartXStart
@@ -947,7 +792,7 @@ function buildChartAxisLabels(series?: FuturesChartSeries) {
 
 function formatFuturesAxisValue(value: number, series: FuturesChartSeries) {
   const precision = series.precision ?? (Math.abs(value) >= 100 ? 0 : 2)
-  const core = series.compact ? compactNumber(value) : value.toLocaleString('en-US', { maximumFractionDigits: precision, minimumFractionDigits: precision })
+  const core = series.compact ? compactMarketNumber(value) : value.toLocaleString('en-US', { maximumFractionDigits: precision, minimumFractionDigits: precision })
   return `${series.prefix ?? ''}${core}${series.suffix ?? ''}`
 }
 
@@ -991,14 +836,10 @@ function barRect(values: number[], value: number, index: number, labelCount: num
 
 function formatFuturesValue(value: number, series: FuturesChartSeries) {
   const precision = series.precision ?? (Math.abs(value) >= 100 ? 0 : 2)
-  const core = series.compact ? compactNumber(value) : value.toLocaleString('en-US', { maximumFractionDigits: precision, minimumFractionDigits: precision })
+  const core = series.compact ? compactMarketNumber(value) : value.toLocaleString('en-US', { maximumFractionDigits: precision, minimumFractionDigits: precision })
   return `${series.prefix ?? ''}${core}${series.suffix ?? ''}`
 }
 
 function takeThree(markets: TradingMarket[]) {
   return markets.slice(0, 3)
-}
-
-function toAriaSort(direction: SortDirection) {
-  return direction === 'asc' ? 'ascending' : 'descending'
 }

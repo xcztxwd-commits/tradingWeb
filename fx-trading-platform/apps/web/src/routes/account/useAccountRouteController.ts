@@ -8,7 +8,7 @@ import {
   type FundOrderPayload
 } from '@fx-platform/frontend-core'
 
-import { formatApiError, type ApiErrorView } from '../../components/user-page/userPageModels'
+import { formatApiError, type ApiErrorView } from '../../shared-widgets/data/userPageModels'
 import { useTranslatedAccountData } from '../shared/useTranslatedAccountData'
 import type { AccountRouteModel, TradeOrderTab } from './accountRoute.types'
 import { getAccountRoutePath, needsAccountSession, type AccountRouteMode } from './accountRouteModel'

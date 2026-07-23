@@ -139,6 +139,19 @@ describe('api client error model', () => {
     })
   })
 
+  it('forwards an abort signal to GET requests', async () => {
+    const controller = new AbortController()
+    let capturedSignal: AbortSignal | null | undefined
+    globalThis.fetch = (async (_url, init) => {
+      capturedSignal = init?.signal
+      return jsonResponse(200, { success: true, code: 'OK', message: 'OK', data: { ok: true } })
+    }) as typeof fetch
+
+    await apiGet('/api/market/quotes/BTCUSDT', undefined, controller.signal)
+
+    assert.equal(capturedSignal, controller.signal)
+  })
+
   it('sends DELETE through the shared authenticated response and error pipeline without a body', async () => {
     let captured: { method?: string; body?: BodyInit | null; authorization: string | null } | undefined
     globalThis.fetch = (async (_url, init) => {

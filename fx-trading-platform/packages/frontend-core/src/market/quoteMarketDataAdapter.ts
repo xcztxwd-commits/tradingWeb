@@ -8,6 +8,33 @@ import { marketDataStore } from './marketDataStore.ts'
 
 type AdapterStore = typeof marketDataStore
 
+type RefreshSubscription = (symbol: string, token: string | null, onRefresh: () => void) => () => void
+
+export type QuoteMarketDataSessionDependencies = {
+  fetchQuote: (symbol: string, signal: AbortSignal) => Promise<TradingQuote>
+  fetchOrderBook: (symbol: string, signal: AbortSignal) => Promise<MarketOrderBook>
+  fetchTrades: (symbol: string, signal: AbortSignal) => Promise<MarketTradeBatch>
+  subscribeQuote: RefreshSubscription
+  subscribeOrderBook: RefreshSubscription
+  subscribeRecentTrades: RefreshSubscription
+  subscribeSourceChanges: (
+    symbol: string,
+    token: string | null,
+    onSourceChange: (event: MarketSourceChangedEvent) => void
+  ) => () => void
+}
+
+const defaultSessionDependencies: QuoteMarketDataSessionDependencies = {
+  fetchQuote: (symbol, signal) => fetchMarketQuote(symbol, undefined, signal),
+  fetchOrderBook: (symbol, signal) => fetchMarketOrderBook(symbol, signal),
+  fetchTrades: (symbol, signal) => fetchMarketRecentTradeBatch(symbol, 40, signal),
+  subscribeQuote: (symbol, token, onRefresh) => subscribeQuote(symbol, token, onRefresh),
+  subscribeOrderBook: (symbol, token, onRefresh) => subscribeOrderBook(symbol, token, onRefresh),
+  subscribeRecentTrades: (symbol, token, onRefresh) => subscribeRecentTrades(symbol, token, onRefresh),
+  subscribeSourceChanges: (symbol, token, onSourceChange) =>
+    subscribeMarketSourceChanges(symbol, token, onSourceChange)
+}
+
 type ActiveAdapterSession = {
   symbol: string
   token: string | null
@@ -41,7 +68,12 @@ export function startQuoteMarketDataAdapter(symbol: string, token: string | null
   return createRelease(session)
 }
 
-function startQuoteSession(symbol: string, token: string | null, store: AdapterStore) {
+export function startQuoteSession(
+  symbol: string,
+  token: string | null,
+  store: AdapterStore,
+  dependencies: QuoteMarketDataSessionDependencies = defaultSessionDependencies
+) {
   let latestQuote: TradingQuote | undefined
   let latestOrderBook: MarketOrderBook | undefined
   let latestTrades: MarketTradeBatch | undefined
@@ -49,6 +81,7 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
   let disposed = false
   let expiryTimer: ReturnType<typeof globalThis.setTimeout> | undefined
   let refreshTimer: ReturnType<typeof globalThis.setTimeout> | undefined
+  let refreshController: AbortController | undefined
   let refreshRunning = false
   let refreshTrailing = false
 
@@ -77,6 +110,7 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
     expiryTimer = globalThis.setTimeout(() => {
       if (!disposed) {
         store.reset(unavailableSnapshot('stale', snapshot.source))
+        refreshController?.abort()
         void refreshBundle()
       }
     }, Math.max(0, expiresIn))
@@ -89,11 +123,13 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
       return
     }
     refreshRunning = true
+    const controller = new AbortController()
+    refreshController = controller
     try {
       const [quote, orderBook, trades] = await Promise.all([
-        fetchMarketQuote(symbol),
-        fetchMarketOrderBook(symbol),
-        fetchMarketRecentTradeBatch(symbol)
+        dependencies.fetchQuote(symbol, controller.signal),
+        dependencies.fetchOrderBook(symbol, controller.signal),
+        dependencies.fetchTrades(symbol, controller.signal)
       ])
       if (disposed) return
       latestQuote = quote
@@ -103,6 +139,7 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
     } catch {
       if (!disposed) store.reset(unavailableSnapshot(expectedSource ? 'source-changing' : 'unavailable'))
     } finally {
+      if (refreshController === controller) refreshController = undefined
       refreshRunning = false
       if (!disposed && refreshTrailing) {
         refreshTrailing = false
@@ -121,10 +158,10 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
 
   void refreshBundle()
 
-  const unsubscribeQuote = subscribeQuote(symbol, token, scheduleBundleRefresh)
-  const unsubscribeOrderBook = subscribeOrderBook(symbol, token, scheduleBundleRefresh)
-  const unsubscribeRecentTrades = subscribeRecentTrades(symbol, token, scheduleBundleRefresh)
-  const unsubscribeSourceChanges = subscribeMarketSourceChanges(symbol, token, (event: MarketSourceChangedEvent) => {
+  const unsubscribeQuote = dependencies.subscribeQuote(symbol, token, scheduleBundleRefresh)
+  const unsubscribeOrderBook = dependencies.subscribeOrderBook(symbol, token, scheduleBundleRefresh)
+  const unsubscribeRecentTrades = dependencies.subscribeRecentTrades(symbol, token, scheduleBundleRefresh)
+  const unsubscribeSourceChanges = dependencies.subscribeSourceChanges(symbol, token, (event: MarketSourceChangedEvent) => {
     expectedSource = { providerCode: event.providerCode, sourceMode: event.sourceMode }
     latestQuote = undefined
     latestOrderBook = undefined
@@ -132,11 +169,13 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
     if (expiryTimer) globalThis.clearTimeout(expiryTimer)
     expiryTimer = undefined
     store.reset(unavailableSnapshot('source-changing'))
+    refreshController?.abort()
     void refreshBundle()
   })
 
   return () => {
     disposed = true
+    refreshController?.abort()
     if (expiryTimer) globalThis.clearTimeout(expiryTimer)
     if (refreshTimer) globalThis.clearTimeout(refreshTimer)
     refreshTrailing = false

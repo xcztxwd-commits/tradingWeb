@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { OrderBookSkeleton } from '../../../components/loading/TerminalSkeleton'
 import { MarketSourceBadge } from '../order-form/MarketSourceBadge'
-import { startQuoteMarketDataAdapter, useMarketDataSnapshot } from '@fx-platform/frontend-core'
+import { useMarketDataSnapshot } from '@fx-platform/frontend-core'
 import { OrderBook } from './OrderBook'
 import { OrderBookSettingsPopover } from './OrderBookSettingsPopover'
 import { OrderBookToolbar } from './OrderBookToolbar'
@@ -14,12 +14,11 @@ import styles from './MarketSidePanel.module.css'
 
 type Props = {
   symbol: string
-  token?: string | null
   loading?: boolean
   onSelectPrice?: (price: number) => void
 }
 
-export function MarketSidePanel({ symbol, token = null, loading = false, onSelectPrice }: Props) {
+export function MarketSidePanel({ symbol, loading = false, onSelectPrice }: Props) {
   const { t } = useTranslation()
   const snapshot = useMarketDataSnapshot()
   const [activeTab, setActiveTab] = useState<MarketSidePanelTab>('orderbook')
@@ -35,8 +34,6 @@ export function MarketSidePanel({ symbol, token = null, loading = false, onSelec
   const marketStatus = snapshot.status ?? (isInitialMarketSnapshot ? 'loading' : 'ready')
   const marketLoading = loading || snapshot.status === 'loading' || marketStatus === 'loading'
   const marketUnavailable = marketStatus === 'unavailable' || marketStatus === 'stale' || marketStatus === 'source-changing'
-
-  useEffect(() => startQuoteMarketDataAdapter(symbol, token), [symbol, token])
 
   useEffect(() => {
     saveOrderBookSettings(settings)

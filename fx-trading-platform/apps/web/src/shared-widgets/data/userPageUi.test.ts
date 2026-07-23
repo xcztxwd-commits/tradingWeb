@@ -5,11 +5,11 @@ import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const dataCollection = readFileSync(join(currentDir, '..', '..', 'shared-widgets', 'data', 'RouteDataCollection.tsx'), 'utf8')
+const dataCollection = readFileSync(join(currentDir, 'RouteDataCollection.tsx'), 'utf8')
 const pcCollection = readFileSync(join(currentDir, '..', '..', 'pc', 'components', 'PcDataCollection.tsx'), 'utf8')
 const mobileCollection = readFileSync(join(currentDir, '..', '..', 'mobile', 'components', 'MobileDataCollection.tsx'), 'utf8')
 const pageState = readFileSync(join(currentDir, 'PageState.tsx'), 'utf8')
-const styles = readFileSync(join(currentDir, '..', '..', 'styles.css'), 'utf8')
+const styles = readFileSync(join(currentDir, 'UserPageSurface.module.css'), 'utf8')
 
 describe('user page shared UI system', () => {
   it('uses skeleton loading states instead of a text-only loading panel', () => {
@@ -35,7 +35,11 @@ describe('user page shared UI system', () => {
   })
 
   it('announces table sorting state and next sort direction', () => {
+    assert.match(dataCollection, /useTranslation/)
+    assert.match(dataCollection, /sortRows/)
+    assert.match(dataCollection, /paginateRows/)
     assert.match(dataCollection, /getNextDataSort/)
+    assert.match(dataCollection, /getNextPage/)
     assert.match(pcCollection, /sortKey=\{state\.sortKey\}/)
     assert.match(pcCollection, /sortDirection=\{state\.sortDirection\}/)
     assert.match(pcCollection, /common\.tableSort/)

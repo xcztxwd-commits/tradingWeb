@@ -5,7 +5,7 @@ import { OrderFormSide } from './OrderFormSide'
 import { OrderTypeTabs } from './OrderTypeTabs'
 import { TradeTabs } from './TradeTabs'
 import type { TradePanelControllerModel } from './useTradePanelController'
-import './TradePanel.module.css'
+import styles from './TradePanel.module.css'
 
 export function TradePanel({
   model,
@@ -44,10 +44,10 @@ export function TradePanel({
 
   return (
     <section
-      className={`trade-panel ${compact ? 'trade-panel--compact' : ''} trade-panel--mobile-${mobileSide}`}
+      className={`${styles['trade-panel']} ${compact ? styles['trade-panel--compact'] : ''} ${styles[`trade-panel--mobile-${mobileSide}`]}`}
       aria-label={t('trading.panelForSymbol', { symbol: market.symbol })}
     >
-      <header className="trade-panel__header">
+      <header className={styles['trade-panel__header']}>
         <TradeTabs productType={market.productType} />
       </header>
 
@@ -59,24 +59,24 @@ export function TradePanel({
         onStrategyTypeChange={updateBothStrategyTypes}
       />
 
-      <div className="trade-panel__mobile-sides" role="tablist" aria-label={t('trading.sideTabs')}>
+      <div className={styles['trade-panel__mobile-sides']} role="tablist" aria-label={t('trading.sideTabs')}>
         <button
           type="button"
-          className={mobileSide === 'buy' ? 'trade-panel__mobile-side--active' : ''}
+          className={mobileSide === 'buy' ? styles['trade-panel__mobile-side--active'] : ''}
           onClick={() => setMobileSide('buy')}
         >
           {t('common.buy')}
         </button>
         <button
           type="button"
-          className={mobileSide === 'sell' ? 'trade-panel__mobile-side--active' : ''}
+          className={mobileSide === 'sell' ? styles['trade-panel__mobile-side--active'] : ''}
           onClick={() => setMobileSide('sell')}
         >
           {t('common.sell')}
         </button>
       </div>
 
-      <div className="trade-panel__forms trade-panel__forms--dual">
+      <div className={`${styles['trade-panel__forms']} ${styles['trade-panel__forms--dual']}`}>
         <OrderFormSide
           form={buyForm.form}
           market={market}
@@ -120,7 +120,7 @@ export function TradePanel({
       </div>
 
       {notice ? (
-        <footer className="trade-panel__notice" role="status">
+        <footer className={styles['trade-panel__notice']} role="status">
           <span>{notice}</span>
         </footer>
       ) : null}

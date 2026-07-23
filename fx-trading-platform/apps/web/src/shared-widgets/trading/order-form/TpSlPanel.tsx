@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
 import type { TradeField, TradeFormState } from '@fx-platform/frontend-core'
+import styles from './TradePanel.module.css'
 
 type Props = {
   form: TradeFormState
@@ -29,16 +30,16 @@ export function TpSlPanel({ form, showErrors, fieldErrors, onFieldChange }: Prop
   }
 
   return (
-    <section className="trade-panel__tpsl">
-      <div className="trade-panel__tpsl-head">
-        <label className="trade-panel__check">
+    <section className={styles['trade-panel__tpsl']}>
+      <div className={styles['trade-panel__tpsl-head']}>
+        <label className={styles['trade-panel__check']}>
           <input type="checkbox" checked={expanded} onChange={(event) => handleToggle(event.target.checked)} />
           <span>{t('trading.takeProfitStopLoss')}</span>
         </label>
       </div>
 
       {expanded ? (
-        <div className="trade-panel__tpsl-expanded">
+        <div className={styles['trade-panel__tpsl-expanded']}>
           <TpSlGroup
             title={buySide ? t('trading.takeProfit') : t('trading.bargainHunting')}
             inputs={[
@@ -96,9 +97,9 @@ function TpSlGroup({
   onFieldChange: (field: TradeField, value: string | boolean) => void
 }) {
   return (
-    <div className="trade-panel__tpsl-group">
-      <span className="trade-panel__tpsl-group-title">{title}</span>
-      <div className="trade-panel__tpsl-row">
+    <div className={styles['trade-panel__tpsl-group']}>
+      <span className={styles['trade-panel__tpsl-group-title']}>{title}</span>
+      <div className={styles['trade-panel__tpsl-row']}>
         {inputs.slice(0, 2).map((input) => (
           <TradePanelInput key={input.field} input={input} onFieldChange={onFieldChange} />
         ))}
@@ -118,8 +119,8 @@ function TradePanelInput({
   onFieldChange: (field: TradeField, value: string | boolean) => void
 }) {
   return (
-    <label className={`trade-panel__field ${full ? 'trade-panel__field--full' : ''} ${input.error ? 'trade-panel__field--invalid' : ''}`}>
-      <span className="trade-panel__control trade-panel__control--compact">
+    <label className={`${styles['trade-panel__field']} ${full ? styles['trade-panel__field--full'] : ''} ${input.error ? styles['trade-panel__field--invalid'] : ''}`}>
+      <span className={`${styles['trade-panel__control']} ${styles['trade-panel__control--compact']}`}>
         <input
           aria-label={input.placeholder}
           inputMode="decimal"
@@ -127,9 +128,9 @@ function TradePanelInput({
           value={input.value}
           onChange={(event) => onFieldChange(input.field, event.target.value)}
         />
-        {input.unit ? <span className="trade-panel__unit trade-panel__unit--dropdown">{input.unit}</span> : null}
+        {input.unit ? <span className={`${styles['trade-panel__unit']} ${styles['trade-panel__unit--dropdown']}`}>{input.unit}</span> : null}
       </span>
-      {input.error ? <span className="trade-panel__error">{input.error}</span> : null}
+      {input.error ? <span className={styles['trade-panel__error']}>{input.error}</span> : null}
     </label>
   )
 }

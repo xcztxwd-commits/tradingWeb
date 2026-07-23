@@ -2,10 +2,10 @@
   display: grid;
   gap: 6px;
   padding: 10px 12px;
-  border: 1px solid #f3d8a2;
+  border: 1px solid var(--theme-warning-border);
   border-radius: 6px;
-  color: #6b4f16;
-  background: #fff9eb;
+  color: var(--theme-warning);
+  background: var(--theme-warning-soft);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -19,11 +19,11 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  color: #3e4652;
+  color: var(--theme-text-muted);
 }
 
 .disclaimerEstimate strong {
-  color: #1f2937;
+  color: var(--theme-text-contrast);
   font-variant-numeric: tabular-nums;
 }
 
@@ -33,10 +33,10 @@
   align-items: center;
   gap: 5px;
   padding: 3px 7px;
-  border: 1px solid #b7e4cf;
+  border: 1px solid var(--theme-success-border);
   border-radius: 999px;
-  color: #167350;
-  background: #effaf5;
+  color: var(--theme-success);
+  background: var(--theme-success-soft);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -44,9 +44,9 @@
 }
 
 .sourceBadgeStale {
-  border-color: #f2c7c4;
-  color: #b3261e;
-  background: #fff4f3;
+  border-color: var(--theme-danger-border);
+  color: var(--theme-danger);
+  background: var(--theme-danger-soft);
 }
 
 .sourceDot {
@@ -66,9 +66,9 @@
   display: grid;
   gap: 10px;
   padding: 10px 12px;
-  border: 1px solid #e2e7ee;
+  border: 1px solid var(--theme-border-on-contrast);
   border-radius: 6px;
-  background: #ffffff;
+  background: var(--theme-surface-contrast);
 }
 
 .perpetualControls {
@@ -79,10 +79,10 @@
 .referenceUnavailable {
   margin: 0;
   padding: 8px 12px;
-  border: 1px solid #e2e7ee;
+  border: 1px solid var(--theme-border-on-contrast);
   border-radius: 6px;
-  color: #667085;
-  background: #ffffff;
+  color: var(--theme-text-muted);
+  background: var(--theme-surface-contrast);
   font-size: 11px;
 }
 
@@ -97,7 +97,7 @@
   display: grid;
   min-width: 0;
   gap: 4px;
-  color: #667085;
+  color: var(--theme-text-muted);
   font-size: 11px;
 }
 
@@ -109,10 +109,10 @@
   min-width: 0;
   height: 32px;
   padding: 0 8px;
-  border: 1px solid #d6dce5;
+  border: 1px solid var(--theme-border-on-contrast);
   border-radius: 4px;
-  color: #1f2937;
-  background: #ffffff;
+  color: var(--theme-text-contrast);
+  background: var(--theme-surface-contrast);
   font: inherit;
 }
 
@@ -124,7 +124,7 @@
 .settingsBar button:focus-visible,
 .protectionEditor button:focus-visible,
 .dialog button:focus-visible {
-  outline: 2px solid #7aa7ff;
+  outline: 2px solid var(--theme-info-border);
   outline-offset: 1px;
 }
 
@@ -143,17 +143,17 @@
   z-index: 1;
   grid-area: 1 / 2;
   padding-right: 8px;
-  color: #7b8494;
+  color: var(--theme-text-muted);
 }
 
 .controlStatus {
-  color: #667085;
+  color: var(--theme-text-muted);
   font-size: 11px;
   white-space: nowrap;
 }
 
 .controlError {
-  color: #b3261e;
+  color: var(--theme-danger);
   font-size: 11px;
 }
 
@@ -187,7 +187,7 @@
 }
 
 .controlHeader small {
-  color: #7b8494;
+  color: var(--theme-text-muted);
 }
 
 .compactActions button,
@@ -198,10 +198,10 @@
 .dialogActions button {
   min-height: 30px;
   padding: 5px 9px;
-  border: 1px solid #d6dce5;
+  border: 1px solid var(--theme-border-on-contrast);
   border-radius: 4px;
-  color: #344054;
-  background: #ffffff;
+  color: var(--theme-text-contrast);
+  background: var(--theme-surface-contrast);
   cursor: pointer;
 }
 
@@ -215,7 +215,7 @@
 
 .emptyControl {
   margin: 0;
-  color: #7b8494;
+  color: var(--theme-text-muted);
   font-size: 12px;
 }
 
@@ -232,18 +232,18 @@
   gap: 8px;
   margin: 0;
   padding: 8px;
-  border: 1px solid #e6e9ef;
+  border: 1px solid var(--theme-border-on-contrast);
   border-radius: 5px;
 }
 
 .protectionLevel legend {
   padding: 0 4px;
-  color: #667085;
+  color: var(--theme-text-muted);
   font-size: 10px;
 }
 
 .removeAction {
-  color: #b3261e;
+  color: var(--theme-danger);
 }
 
 .dialogLayer {
@@ -258,17 +258,17 @@
 .dialogBackdrop {
   position: absolute;
   border: 0;
-  background: rgb(16 24 40 / 45%);
+  background: var(--theme-overlay-medium);
   inset: 0;
 }
 
 .dialog {
   position: relative;
   width: min(440px, 100%);
-  border: 1px solid #e2e7ee;
+  border: 1px solid var(--theme-border-on-contrast);
   border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 18px 50px rgb(16 24 40 / 20%);
+  background: var(--theme-surface-contrast);
+  box-shadow: 0 18px 50px var(--theme-shadow-soft);
 }
 
 .dialogHeader,
@@ -277,7 +277,7 @@
 }
 
 .dialogHeader {
-  border-bottom: 1px solid #e6e9ef;
+  border-bottom: 1px solid var(--theme-border-on-contrast);
 }
 
 .dialogHeader button {
@@ -292,9 +292,9 @@
 
 .actionTabs button[aria-selected='true'],
 .segmentedControl button[aria-pressed='true'] {
-  border-color: #276ef1;
-  color: #1d55b5;
-  background: #edf4ff;
+  border-color: var(--theme-info-border);
+  color: var(--theme-info);
+  background: var(--theme-info-soft);
 }
 
 .dialogForm {
@@ -304,7 +304,7 @@
 
 .dialogForm p {
   margin: 0;
-  color: #344054;
+  color: var(--theme-text-contrast);
   font-size: 13px;
 }
 
@@ -314,9 +314,9 @@
 }
 
 .dialogActions button:last-child {
-  border-color: #276ef1;
-  color: #ffffff;
-  background: #276ef1;
+  border-color: var(--theme-info-border);
+  color: var(--theme-text-inverse);
+  background: var(--theme-info);
 }
 
 @media (max-width: 760px) {
