@@ -492,6 +492,8 @@ const INVALID_HEADER_VALUE = /[\u0000-\u0008\u000a-\u001f\u007f]/
 const RAW_HTTP_REQUEST_TARGET_FIELDS = new Set(['endpoint', 'url'])
 const RAW_HTTP_REQUEST_DETAIL_FIELDS = new Set(['headers', 'body', 'data', 'postdata', 'payload'])
 const NETWORK_REQUEST_BODY_FIELDS = new Set(['body', 'postdata', 'payload'])
+const ARTIFACT_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
+const CANONICAL_ARTIFACT_PATH = /^(?!\/)(?![A-Za-z]:)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\/\u0000-\u001f\u007f]+(?:\/[^\/\u0000-\u001f\u007f]+)*$/
 const XML_WHITESPACE = /[ \t\r\n]/
 const XML_WHITESPACE_ONLY = /^[ \t\r\n]*$/
 // Filesystem timestamp rounding can put a freshly written report slightly ahead of wall time.
@@ -514,6 +516,7 @@ const CONTRACT_STRUCTURAL_FIELDS = new Set([
   'action',
   'apievidence',
   'arbitraryevidence',
+  'artifacthashes',
   'blocker',
   'cases',
   'catalog',
@@ -556,6 +559,7 @@ const CONTRACT_STRUCTURAL_FIELDS = new Set([
   'modifiedat',
   'nested',
   'networkevidence',
+  'oracleevidence',
   'note',
   'ordinary',
   'order',
@@ -820,6 +824,7 @@ function redactValue(value, key = '') {
     return undefined
   }
   if (semanticKey === 'definitions') return sanitizeDefinitions(value)
+  if (semanticKey === 'artifacthashes') return sanitizeArtifactHashes(value)
   if (RUN_STATE_IDENTITY_KEYS.has(semanticKey)) {
     return sanitizeRunStateIdentity(semanticKey, value)
   }
@@ -874,6 +879,18 @@ function redactValue(value, key = '') {
     defineOwnData(redacted, 'value', REDACTED)
   }
   return redacted
+}
+
+function sanitizeArtifactHashes(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const sanitized = ownDataDictionary()
+  for (const [path, hash] of Object.entries(value)) {
+    if (!CANONICAL_ARTIFACT_PATH.test(path)
+      || typeof hash !== 'string'
+      || !ARTIFACT_HASH_PATTERN.test(hash)) return undefined
+    defineOwnData(sanitized, path, hash)
+  }
+  return sanitized
 }
 
 export function redactNetworkEntry(entry) {

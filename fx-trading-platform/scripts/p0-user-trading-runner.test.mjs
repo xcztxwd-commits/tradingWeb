@@ -7444,6 +7444,95 @@ test('formal case fragment merge preserves evidence and terminal status priority
   assert.equal(cropped.scopeComplete, false)
 })
 
+test('formal case fragment merge retains unified evidence and explicit hashes on disk', (t) => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const [core, target] = definition.requiredSubruns
+  const entry = {
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'p0-merged-case-evidence-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const startedAt = '2026-07-23T00:00:00.000Z'
+  const middleAt = '2026-07-23T00:00:01.000Z'
+  const finishedAt = '2026-07-23T00:00:02.000Z'
+  const fragment = (subrun, suffix, from, to) => ({
+    ...formalP0CaseFragment(definition, [subrun]),
+    commit: RUN_STATE_COMMIT_A,
+    database: 'fx_p0_user_e2e_perp_01_a1',
+    profile: subrun.profile,
+    viewport: subrun.viewport,
+    startedAt: from,
+    finishedAt: to,
+    preconditions: [{ status: 'PASS', subrunId: subrun.id }],
+    userActions: [{
+      action: `submit-${suffix}`,
+      requestRef: `${suffix}.1`,
+      subrunId: subrun.id
+    }],
+    fixtureActions: [],
+    contractProbes: [{ status: 'PASS', subrunId: subrun.id }],
+    replayProbes: [],
+    checkpoints: [{ status: 'PASS', subrunId: subrun.id }],
+    financialCalculation: {
+      status: 'PASS',
+      subrunId: subrun.id,
+      amount: suffix === 'core' ? '1.25000000' : '2.50000000'
+    },
+    uiEvidence: [{ status: 'OBSERVED', subrunId: subrun.id }],
+    networkEvidence: [{
+      method: 'POST',
+      url: 'http://127.0.0.1:18086/api/trading/orders',
+      status: 200,
+      requestId: `${suffix}.1`,
+      subrunId: subrun.id
+    }],
+    apiEvidence: [{ status: 'OBSERVED', subrunId: subrun.id }],
+    dbEvidence: [{ status: 'OBSERVED', subrunId: subrun.id }],
+    eventEvidence: [{ status: 'OBSERVED', subrunId: subrun.id }],
+    consoleErrors: [],
+    cleanup: { status: 'PASS' }
+  })
+  const merged = smokeContracts.mergeP0CaseFragments(entry, [
+    fragment(core, 'core', startedAt, middleAt),
+    fragment(target, 'target', middleAt, finishedAt)
+  ])
+
+  assert.equal(merged.commit, RUN_STATE_COMMIT_A)
+  assert.equal(merged.database, 'fx_p0_user_e2e_perp_01_a1')
+  assert.equal(merged.profile, 'UI_CORE')
+  assert.equal(merged.viewport, 'desktop')
+  assert.equal(merged.startedAt, startedAt)
+  assert.equal(merged.finishedAt, finishedAt)
+  for (const field of [
+    'preconditions',
+    'userActions',
+    'contractProbes',
+    'checkpoints',
+    'uiEvidence',
+    'networkEvidence',
+    'apiEvidence',
+    'dbEvidence',
+    'eventEvidence'
+  ]) {
+    assert.equal(merged[field].length, 2, field)
+  }
+  assert.deepEqual(merged.fixtureActions, [])
+  assert.deepEqual(merged.replayProbes, [])
+  assert.deepEqual(merged.consoleErrors, [])
+  assert.equal(merged.financialCalculation.checks.length, 2)
+  assert.deepEqual(merged.cleanup, { status: 'PASS' })
+
+  const path = join(directory, 'result.json')
+  writeCaseResultAtomic(path, merged)
+  const persisted = JSON.parse(readFileSync(path, 'utf8'))
+  assert.deepEqual(persisted.artifactHashes, merged.artifactHashes)
+  assert.equal(persisted.userActions.length, 2)
+  assert.equal(persisted.financialCalculation.checks.length, 2)
+})
+
 test('formal case fragment merge rejects metadata and artifact hash collisions', () => {
   const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
   const [core, target] = definition.requiredSubruns

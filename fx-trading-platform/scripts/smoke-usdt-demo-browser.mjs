@@ -9440,6 +9440,30 @@ const P0_CASE_STATUS_PRIORITY = {
   FAIL: 3
 }
 const P0_ARTIFACT_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
+const P0_CASE_ARRAY_EVIDENCE_FIELDS = [
+  'preconditions',
+  'userActions',
+  'fixtureActions',
+  'contractProbes',
+  'replayProbes',
+  'checkpoints',
+  'uiEvidence',
+  'networkEvidence',
+  'apiEvidence',
+  'dbEvidence',
+  'eventEvidence',
+  'oracleEvidence',
+  'consoleErrors'
+]
+const P0_CASE_STRICT_SHARED_EVIDENCE_FIELDS = [
+  'commit',
+  'authorityBundleFixture'
+]
+const P0_CASE_OPTIONAL_SHARED_EVIDENCE_FIELDS = [
+  'database',
+  'profile',
+  'viewport'
+]
 
 function isPlainP0CaseEvidence(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
@@ -9539,6 +9563,83 @@ function exactP0SubrunIdentity(left, right) {
   return left.id === right.id
     && left.profile === right.profile
     && left.viewport === right.viewport
+}
+
+function mergedP0CaseEvidence(fragments) {
+  const merged = {}
+  for (const field of P0_CASE_ARRAY_EVIDENCE_FIELDS) {
+    const values = fragments.map((fragment) => ownP0CaseEvidenceValue(fragment, field))
+    if (values.every((value) => value === undefined)) continue
+    const arrays = values.map(denseP0CaseEvidenceArray)
+    if (arrays.some((value) => value === null)) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    merged[field] = arrays.flat()
+  }
+
+  for (const field of P0_CASE_STRICT_SHARED_EVIDENCE_FIELDS) {
+    const values = fragments.map((fragment) => ownP0CaseEvidenceValue(fragment, field))
+    if (values.every((value) => value === undefined)) continue
+    if (values.some((value) => typeof value !== 'string' || value !== values[0])) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    merged[field] = values[0]
+  }
+
+  for (const field of P0_CASE_OPTIONAL_SHARED_EVIDENCE_FIELDS) {
+    const values = fragments.map((fragment) => ownP0CaseEvidenceValue(fragment, field))
+    if (values.every((value) => (
+      typeof value === 'string' && value === values[0]
+    ))) {
+      merged[field] = values[0]
+    }
+  }
+
+  const started = fragments.map((fragment) => (
+    ownP0CaseEvidenceValue(fragment, 'startedAt')
+  ))
+  const finished = fragments.map((fragment) => (
+    ownP0CaseEvidenceValue(fragment, 'finishedAt')
+  ))
+  const hasTiming = [...started, ...finished].some((value) => value !== undefined)
+  if (hasTiming) {
+    if ([...started, ...finished].some((value) => (
+      typeof value !== 'string' || !Number.isFinite(Date.parse(value))
+    ))) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    merged.startedAt = started.toSorted()[0]
+    merged.finishedAt = finished.toSorted().at(-1)
+  }
+
+  const calculations = fragments.map((fragment) => (
+    ownP0CaseEvidenceValue(fragment, 'financialCalculation')
+  ))
+  if (calculations.some((value) => value !== undefined)) {
+    if (calculations.some((value) => !isPlainP0CaseEvidence(value))) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    merged.financialCalculation = calculations.length === 1
+      ? calculations[0]
+      : { checks: calculations }
+  }
+
+  const cleanup = fragments.map((fragment) => (
+    ownP0CaseEvidenceValue(fragment, 'cleanup')
+  ))
+  if (cleanup.some((value) => value !== undefined)) {
+    if (cleanup.some((value) => (
+      !isPlainP0CaseEvidence(value)
+      || typeof ownP0CaseEvidenceValue(value, 'status') !== 'string'
+    ))) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    const statuses = cleanup.map((value) => ownP0CaseEvidenceValue(value, 'status'))
+    merged.cleanup = statuses.every((value) => value === 'PASS')
+      ? { status: 'PASS' }
+      : { status: statuses.find((value) => value !== 'PASS') }
+  }
+  return merged
 }
 
 export function mergeP0CaseFragments(entry, fragmentsValue) {
@@ -9653,6 +9754,7 @@ export function mergeP0CaseFragments(entry, fragmentsValue) {
     })
   }
   return {
+    ...mergedP0CaseEvidence(fragments),
     schemaVersion: 1,
     id: entryId,
     status,
