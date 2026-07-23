@@ -7,7 +7,6 @@ export function PcAccountPageFrame({ model, expectedMode }: { model: AccountRout
   return (
     <AccountRouteContent
       model={model}
-      platform="pc"
       expectedMode={expectedMode}
       renderDataCollection={PcAccountDataCollection}
     />

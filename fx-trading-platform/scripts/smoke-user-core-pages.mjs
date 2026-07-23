@@ -45,12 +45,15 @@ try {
       await clearBrowserSession(page)
       await page.navigate(`${webBaseUrl}${route}`)
       try {
-        await page.waitForFunction(() => Boolean(document.querySelector('.state-panel button.table-action')), `login state for ${route}`)
+        await page.waitForFunction(
+          () => Boolean(document.querySelector('[data-state-variant="login"] button[type="button"]')),
+          `login state for ${route}`
+        )
       } catch (error) {
         const diagnostics = await page.evaluate(() => ({
           href: window.location.href,
-          statePanels: [...document.querySelectorAll('.state-panel')].map((panel) => ({
-            className: panel.className,
+          stateSurfaces: [...document.querySelectorAll('[data-state-variant]')].map((panel) => ({
+            variant: panel.getAttribute('data-state-variant'),
             text: panel.textContent?.slice(0, 240)
           })),
           bodyText: document.body.textContent?.slice(0, 500),
@@ -60,7 +63,7 @@ try {
       }
       await sleep(250)
       await page.evaluate(() => {
-        const button = document.querySelector('.state-panel button.table-action')
+        const button = document.querySelector('[data-state-variant="login"] button[type="button"]')
         if (!(button instanceof HTMLButtonElement)) throw new Error('login action button not found')
         button.click()
       })
@@ -73,11 +76,11 @@ try {
       } catch (error) {
         const diagnostics = await page.evaluate(() => ({
           href: window.location.href,
-          statePanels: [...document.querySelectorAll('.state-panel')].map((panel) => ({
-            className: panel.className,
+          stateSurfaces: [...document.querySelectorAll('[data-state-variant]')].map((panel) => ({
+            variant: panel.getAttribute('data-state-variant'),
             text: panel.textContent?.slice(0, 240)
           })),
-          buttons: [...document.querySelectorAll('.state-panel button.table-action')].map((button) => ({
+          buttons: [...document.querySelectorAll('[data-state-variant="login"] button[type="button"]')].map((button) => ({
             text: button.textContent,
             disabled: button instanceof HTMLButtonElement ? button.disabled : null
           })),
@@ -113,7 +116,10 @@ try {
         },
         async (held) => {
           await page.navigate(`${webBaseUrl}${check.route}`)
-          await page.waitForFunction(() => Boolean(document.querySelector('.state-panel')), `loading state for ${check.route}`)
+          await page.waitForFunction(
+            () => Boolean(document.querySelector('[data-state-variant="loading"][role="status"]')),
+            `loading state for ${check.route}`
+          )
           assert(heldCount > 0, `${check.route} must request ${check.hold}`)
           await continueHeldRequests(page, held)
           await waitForPageReady(page, check.route)
@@ -134,15 +140,15 @@ try {
     ]
     const observed = []
     for (const check of checks) {
+      const failPaths = Array.isArray(check.fail) ? check.fail : [check.fail]
+      const failedCounts = Object.fromEntries(failPaths.map((path) => [path, 0]))
       await setAuthToken(page, context.accessToken, context.refreshToken)
-      let failedCount = 0
       await withFetchHandler(
         page,
         async (event) => {
-          const failPaths = Array.isArray(check.fail) ? check.fail : [check.fail]
           const matchedFailPath = failPaths.find((path) => event.request.url.includes(path))
           if (matchedFailPath) {
-            failedCount += 1
+            failedCounts[matchedFailPath] += 1
             return {
               responseCode: 500,
               body: {
@@ -158,21 +164,26 @@ try {
         async () => {
           await page.navigate(`${webBaseUrl}${check.route}?forcedError=${runId}`)
           try {
-            await page.waitForFunction(() => Boolean(document.querySelector('.state-panel--error')), `error state for ${check.route}`)
+            await page.waitForFunction(
+              () => Boolean(document.querySelector('[data-state-variant="error"][role="alert"]')),
+              `error state for ${check.route}`
+            )
           } catch (error) {
             const diagnostics = await page.evaluate(() => ({
               href: window.location.href,
-              statePanels: [...document.querySelectorAll('.state-panel')].map((panel) => ({
-                className: panel.className,
+              stateSurfaces: [...document.querySelectorAll('[data-state-variant]')].map((panel) => ({
+                variant: panel.getAttribute('data-state-variant'),
                 text: panel.textContent?.slice(0, 240)
               })),
               bodyText: document.body.textContent?.slice(0, 500)
             }))
             throw new Error(
-              `${error instanceof Error ? error.message : String(error)}; failedCount=${failedCount}; diagnostics=${JSON.stringify(diagnostics)}`
+              `${error instanceof Error ? error.message : String(error)}; failedCounts=${JSON.stringify(failedCounts)}; diagnostics=${JSON.stringify(diagnostics)}`
             )
           }
-          assert(failedCount > 0, `${check.route} must request ${check.fail}`)
+          for (const failPath of failPaths) {
+            assert(failedCounts[failPath] > 0, `${check.route} must request ${failPath}`)
+          }
         }
       )
       observed.push(check.route)
@@ -185,7 +196,10 @@ try {
     const network = collectNetwork(page)
     await page.navigate(`${webBaseUrl}/dashboard`)
     await waitForPageReady(page, '/dashboard')
-    await page.waitForFunction(() => document.querySelectorAll('.metric').length >= 4, 'dashboard metrics')
+    await page.waitForFunction(() => {
+      const heading = document.querySelector('main h1')
+      return (heading?.closest('section')?.querySelectorAll('strong').length ?? 0) >= 4
+    }, 'dashboard metrics')
     await page.waitForFunction((symbol) => document.body.textContent?.includes(symbol), 'dashboard real seeded symbol', context.symbol)
     assertNetwork(network, ['/api/auth/session', '/api/accounts', '/api/trading/orders', '/api/trading/positions', '/api/ledger'])
     return summarizeNetwork(network)
@@ -197,30 +211,54 @@ try {
     await page.navigate(`${webBaseUrl}/markets?real=${runId}`)
     await waitForPageReady(page, '/markets')
     await openMarketsOverviewTab(page)
-    await page.waitForFunction(() => document.querySelectorAll('tbody tr button').length >= 2, 'markets real table rows')
+    try {
+      await page.waitForFunction(() => {
+        const row = document.querySelector('[aria-labelledby="market-table-title"] tbody tr')
+        return Boolean(row?.querySelector('button[aria-pressed]')) && (row?.querySelectorAll('button[type="button"]').length ?? 0) >= 2
+      }, 'markets real table rows')
+    } catch (error) {
+      const diagnostics = await page.evaluate(() => ({
+        href: window.location.href,
+        platform: document.querySelector('[data-platform-view]')?.getAttribute('data-platform-view'),
+        tabs: [...document.querySelectorAll('[role="tablist"][aria-label]')].map((tablist) => ({
+          label: tablist.getAttribute('aria-label'),
+          buttons: [...tablist.querySelectorAll('button[aria-selected]')].map((button) => ({
+            selected: button.getAttribute('aria-selected'),
+            text: button.textContent
+          }))
+        })),
+        marketRows: document.querySelectorAll('[aria-labelledby="market-table-title"] tbody tr').length,
+        stateSurfaces: [...document.querySelectorAll('[data-state-variant]')].map((surface) => ({
+          variant: surface.getAttribute('data-state-variant'),
+          text: surface.textContent?.slice(0, 240)
+        })),
+        bodyText: document.body.textContent?.slice(0, 700)
+      }))
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; diagnostics=${JSON.stringify(diagnostics)}`)
+    }
     await waitFor(() => network.requests.some((url) => url.includes('/api/market/quotes')), 'markets quote request', 30000)
     assertNetwork(network, ['/api/market/symbols', '/api/market/quotes'])
     await page.evaluate(() => {
-      const firstActionGroup = document.querySelector('tbody tr')
-      if (!firstActionGroup) throw new Error('market row not found')
-      const buttons = [...firstActionGroup.querySelectorAll('button')]
-      const favorite = buttons[0]
+      const favorite = document.querySelector('[aria-labelledby="market-table-title"] tbody button[aria-pressed]')
       if (!(favorite instanceof HTMLButtonElement)) throw new Error('favorite button not found')
       favorite.click()
     })
     await page.waitForFunction(() => {
-      const firstButton = document.querySelector('tbody tr button')
-      return firstButton?.getAttribute('aria-pressed') === 'true'
+      const favorite = document.querySelector('[aria-labelledby="market-table-title"] tbody button[aria-pressed]')
+      return favorite?.getAttribute('aria-pressed') === 'true'
     }, 'favorite toggled')
     await page.evaluate(() => {
-      const row = document.querySelector('tbody tr')
+      const favorite = document.querySelector('[aria-labelledby="market-table-title"] tbody button[aria-pressed]')
+      const row = favorite?.closest('tr')
       if (!row) throw new Error('market row not found')
-      const buttons = [...row.querySelectorAll('button')]
-      const trade = buttons.at(-1)
+      const trade = [...row.querySelectorAll('button[type="button"]')].find((button) => !button.hasAttribute('aria-pressed'))
       if (!(trade instanceof HTMLButtonElement)) throw new Error('trade navigation button not found')
       trade.click()
     })
-    await page.waitForFunction(() => window.location.pathname === '/trading' && window.location.search.includes('symbol='), 'markets trading navigation')
+    await page.waitForFunction(() => {
+      const routeParts = window.location.pathname.split('/')
+      return routeParts[1] === 'trade' && ['spot', 'perpetual'].includes(routeParts[2]) && Boolean(routeParts[3])
+    }, 'markets trading navigation')
     return summarizeNetwork(network)
   })
 
@@ -230,36 +268,44 @@ try {
     await page.navigate(`${webBaseUrl}/orders`)
     await waitForPageReady(page, '/orders')
     await page.waitForFunction((orderId) => {
-      const actions = [...document.querySelectorAll('.user-page__actions')].find((node) => node.getAttribute('data-order-id') === orderId)
+      const actions = [...document.querySelectorAll('[data-order-id]')].find((node) => node.getAttribute('data-order-id') === orderId)
       return actions?.getAttribute('data-order-status') === 'PENDING' && actions.querySelectorAll('button').length >= 3
     }, 'orders real pending row', context.pendingOrderId)
     assertNetwork(network, ['/api/auth/session', '/api/trading/orders'])
 
     await page.evaluate((orderId) => {
-      const actions = [...document.querySelectorAll('.user-page__actions')].find((node) => node.getAttribute('data-order-id') === orderId)
+      const actions = [...document.querySelectorAll('[data-order-id]')].find((node) => node.getAttribute('data-order-id') === orderId)
       const modifyButton = actions?.querySelectorAll('button')[1]
       if (!(modifyButton instanceof HTMLButtonElement)) throw new Error('order modify button not found')
+      if (modifyButton.disabled) throw new Error('order modify button is disabled')
       modifyButton.click()
     }, context.pendingOrderId)
-    await page.waitForFunction(() => Boolean(document.querySelector('form input[name="price"]')), 'order modify form')
-    await page.evaluate(() => {
-      const price = document.querySelector('input[name="price"]')
-      const submit = document.querySelector('form button[type="submit"]')
+    await page.waitForFunction(
+      () => Boolean(document.querySelector('section[aria-label] form button[type="submit"]')),
+      'order modify form'
+    )
+    await page.evaluate((nextPrice) => {
+      const submit = document.querySelector('section[aria-label] form button[type="submit"]')
+      const form = submit?.form
+      const price = form?.querySelectorAll('input')[1]
       if (!(price instanceof HTMLInputElement)) throw new Error('order modify price input not found')
       if (!(submit instanceof HTMLButtonElement)) throw new Error('order modify submit button not found')
-      price.value = '0.00002'
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      if (!setter) throw new Error('HTMLInputElement value setter not found')
+      setter.call(price, nextPrice)
       price.dispatchEvent(new Event('input', { bubbles: true }))
+      price.dispatchEvent(new Event('change', { bubbles: true }))
       submit.click()
-    })
+    }, context.modifyPrice)
     await waitForNetworkResponse(network, (response) => response.url.includes('/api/trading/orders/') && response.method === 'PATCH' && response.status < 400, 'order modify API')
     await page.waitForFunction((orderId) => {
-      const actions = [...document.querySelectorAll('.user-page__actions')].find((node) => node.getAttribute('data-order-id') === orderId)
+      const actions = [...document.querySelectorAll('[data-order-id]')].find((node) => node.getAttribute('data-order-id') === orderId)
       const eventButton = actions?.querySelector('button')
-      return !document.querySelector('form input[name="price"]') && eventButton instanceof HTMLButtonElement && !eventButton.disabled
+      return !document.querySelector('section[aria-label] form button[type="submit"]') && eventButton instanceof HTMLButtonElement && !eventButton.disabled
     }, 'order modify refresh', context.pendingOrderId)
 
     await page.evaluate((orderId) => {
-      const actions = [...document.querySelectorAll('.user-page__actions')].find((node) => node.getAttribute('data-order-id') === orderId)
+      const actions = [...document.querySelectorAll('[data-order-id]')].find((node) => node.getAttribute('data-order-id') === orderId)
       const eventButton = actions?.querySelector('button')
       if (!(eventButton instanceof HTMLButtonElement)) throw new Error('order events button not found')
       eventButton.click()
@@ -270,48 +316,148 @@ try {
     await page.navigate(`${webBaseUrl}/orders?cancel=${runId}`)
     await waitForPageReady(page, '/orders')
     await page.waitForFunction((orderId) => {
-      const actions = [...document.querySelectorAll('.user-page__actions')].find((node) => node.getAttribute('data-order-id') === orderId)
+      const actions = [...document.querySelectorAll('[data-order-id]')].find((node) => node.getAttribute('data-order-id') === orderId)
       if (!actions || actions.getAttribute('data-order-status') !== 'PENDING') return false
       const cancel = [...actions.querySelectorAll('button')].at(-1)
       return cancel instanceof HTMLButtonElement && !cancel.disabled
     }, 'pending order row', context.pendingOrderId)
     await page.evaluate((orderId) => {
-      const actions = [...document.querySelectorAll('.user-page__actions')].find((node) => node.getAttribute('data-order-id') === orderId)
+      const actions = [...document.querySelectorAll('[data-order-id]')].find((node) => node.getAttribute('data-order-id') === orderId)
       if (!actions) throw new Error(`pending order actions not found for ${orderId}`)
       const cancel = [...actions.querySelectorAll('button')].at(-1)
       if (!(cancel instanceof HTMLButtonElement)) throw new Error('order cancel button not found')
       if (cancel.disabled) throw new Error(`order cancel button is disabled; actions=${actions.textContent?.slice(0, 240)}`)
       cancel.click()
     }, context.pendingOrderId)
+    await page.waitForFunction(
+      () => Boolean(document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby="order-cancel-title"]')),
+      'order cancel confirmation dialog'
+    )
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby="order-cancel-title"]')
+      const confirmCancel = dialog?.querySelector('button[type="button"]')
+      if (!(confirmCancel instanceof HTMLButtonElement)) throw new Error('order cancel confirmation button not found')
+      confirmCancel.click()
+    })
     await waitForNetworkResponse(network, (response) => response.url.includes('/api/trading/orders/') && response.url.includes('/cancel') && response.status < 400, 'order cancel API')
     return summarizeNetwork(network)
   })
 
-  await step('positions page shows real positions, updates TP/SL, and closes a position', async () => {
+  await step('positions page reaches canonical protection controls and closes a position', async () => {
     await setAuthToken(page, context.accessToken, context.refreshToken)
     const network = collectNetwork(page)
     await page.navigate(`${webBaseUrl}/positions`)
     await waitForPageReady(page, '/positions')
     await page.waitForFunction((positionId) => {
-      const actions = [...document.querySelectorAll('.user-page__actions')].find((node) => node.getAttribute('data-position-id') === positionId)
+      const actions = [...document.querySelectorAll('[data-position-id]')].find((node) => node.getAttribute('data-position-id') === positionId)
       return actions?.getAttribute('data-position-status') === 'OPEN'
     }, 'open position row', context.openPositionId)
     assertNetwork(network, ['/api/auth/session', '/api/trading/positions'])
 
     await page.evaluate((positionId) => {
-      const actions = [...document.querySelectorAll('.user-page__actions')].find((node) => node.getAttribute('data-position-id') === positionId)
+      const actions = [...document.querySelectorAll('[data-position-id]')].find((node) => node.getAttribute('data-position-id') === positionId)
       const button = actions?.querySelector('button')
       if (!(button instanceof HTMLButtonElement)) throw new Error('TP/SL button not found')
       button.click()
     }, context.openPositionId)
-    await page.waitForFunction(() => Boolean(document.querySelector('form input[name="stopLoss"]')), 'TP/SL form')
+
+    await page.waitForFunction(
+      (symbol) => window.location.pathname === `/trade/perpetual/${symbol}`,
+      'canonical Perpetual protection route',
+      context.symbol
+    )
+    await page.waitForFunction(() => {
+      const tabs = [...document.querySelectorAll('[role="tablist"][aria-label] button[role="tab"][aria-controls]')]
+      const positionsTab = tabs[2]
+      return positionsTab instanceof HTMLButtonElement && !positionsTab.disabled
+    }, 'canonical current positions tab')
     await page.evaluate(() => {
-      const stopLoss = document.querySelector('input[name="stopLoss"]')
-      const takeProfit = document.querySelector('input[name="takeProfit"]')
-      const submit = document.querySelector('form button[type="submit"]')
-      if (!(stopLoss instanceof HTMLInputElement)) throw new Error('stopLoss input not found')
-      if (!(takeProfit instanceof HTMLInputElement)) throw new Error('takeProfit input not found')
-      if (!(submit instanceof HTMLButtonElement)) throw new Error('TP/SL submit not found')
+      const tabs = [...document.querySelectorAll('[role="tablist"][aria-label] button[role="tab"][aria-controls]')]
+      const positionsTab = tabs[2]
+      if (!(positionsTab instanceof HTMLButtonElement)) throw new Error('current positions tab not found')
+      positionsTab.click()
+    })
+    await page.waitForFunction((symbol) => {
+      const row = [...document.querySelectorAll('[role="tabpanel"] tbody tr')]
+        .find((candidate) => candidate.textContent?.includes(symbol))
+      const action = row?.querySelector('button[title]')
+      return action instanceof HTMLButtonElement && !action.disabled
+    }, 'canonical open position row', context.symbol)
+    await page.evaluate((symbol) => {
+      const row = [...document.querySelectorAll('[role="tabpanel"] tbody tr')]
+        .find((candidate) => candidate.textContent?.includes(symbol))
+      const action = row?.querySelector('button[title]')
+      if (!(action instanceof HTMLButtonElement)) throw new Error(`position action not found for ${symbol}`)
+      action.click()
+    }, context.symbol)
+    await page.waitForFunction(
+      () => Boolean(document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')),
+      'canonical position action dialog'
+    )
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const protectionTab = [...(dialog?.querySelectorAll('[role="tablist"][aria-label="Position action type"] button[role="tab"]') ?? [])].at(-1)
+      if (!(protectionTab instanceof HTMLButtonElement)) throw new Error('TP/SL action tab not found')
+      if (protectionTab.disabled) throw new Error('TP/SL action tab is disabled')
+      protectionTab.click()
+    })
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const quantityUnit = dialog?.querySelector('form select')
+      return quantityUnit instanceof HTMLSelectElement && [...quantityUnit.options].some((option) => option.value === 'BASE')
+    }, 'protection quantity unit')
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const quantityUnit = dialog?.querySelector('form select')
+      if (!(quantityUnit instanceof HTMLSelectElement)) throw new Error('protection quantity unit not found')
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+      if (!setter) throw new Error('HTMLSelectElement value setter not found')
+      setter.call(quantityUnit, 'BASE')
+      quantityUnit.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const quantityUnit = dialog?.querySelector('form select')
+      return quantityUnit instanceof HTMLSelectElement && quantityUnit.value === 'BASE'
+    }, 'BASE protection quantity unit')
+    await page.waitForFunction(
+      () => {
+        const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+        return Boolean(dialog?.querySelector('[aria-label="Position take-profit and stop-loss protections"]'))
+      },
+      'canonical TP/SL editor'
+    )
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const editor = dialog?.querySelector('[aria-label="Position take-profit and stop-loss protections"]')
+      const addButtons = editor?.querySelectorAll('button[type="button"]:not([disabled])')
+      const addTakeProfit = addButtons?.[0]
+      const addStopLoss = addButtons?.[1]
+      if (!(addTakeProfit instanceof HTMLButtonElement)) throw new Error('add take-profit level button not found')
+      if (!(addStopLoss instanceof HTMLButtonElement)) throw new Error('add stop-loss level button not found')
+      addTakeProfit.click()
+      addStopLoss.click()
+    })
+    await page.waitForFunction(
+      () => {
+        const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+        const editor = dialog?.querySelector('[aria-label="Position take-profit and stop-loss protections"]')
+        return (editor?.querySelectorAll('fieldset input[inputmode="decimal"]').length ?? 0) >= 4
+      },
+      'canonical TP/SL level fields'
+    )
+    await page.evaluate((takeProfitPrice, stopLossPrice, quantity) => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const editor = dialog?.querySelector('[aria-label="Position take-profit and stop-loss protections"]')
+      const fields = editor?.querySelectorAll('fieldset input[inputmode="decimal"]') ?? []
+      const takeProfitTrigger = fields[0]
+      const takeProfitQuantity = fields[1]
+      const stopLossTrigger = fields[2]
+      const stopLossQuantity = fields[3]
+      if (!(takeProfitTrigger instanceof HTMLInputElement)) throw new Error('take-profit trigger input not found')
+      if (!(takeProfitQuantity instanceof HTMLInputElement)) throw new Error('take-profit quantity input not found')
+      if (!(stopLossTrigger instanceof HTMLInputElement)) throw new Error('stop-loss trigger input not found')
+      if (!(stopLossQuantity instanceof HTMLInputElement)) throw new Error('stop-loss quantity input not found')
       const setValue = (input, value) => {
         const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
         if (!setter) throw new Error('HTMLInputElement value setter not found')
@@ -319,24 +465,34 @@ try {
         input.dispatchEvent(new Event('input', { bubbles: true }))
         input.dispatchEvent(new Event('change', { bubbles: true }))
       }
-      setValue(stopLoss, stopLoss.placeholder && /^[0-9.]+$/.test(stopLoss.placeholder) ? stopLoss.placeholder : '0.50000')
-      setValue(takeProfit, takeProfit.placeholder && /^[0-9.]+$/.test(takeProfit.placeholder) ? takeProfit.placeholder : '2.00000')
-      submit.click()
+      setValue(takeProfitTrigger, takeProfitPrice)
+      setValue(takeProfitQuantity, quantity)
+      setValue(stopLossTrigger, stopLossPrice)
+      setValue(stopLossQuantity, quantity)
+    }, context.protectionTakeProfitPrice, context.protectionStopLossPrice, context.protectionQuantity)
+    await page.waitForFunction(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const confirm = dialog?.querySelector('form button[type="submit"]')
+      return confirm instanceof HTMLButtonElement && !confirm.disabled
+    }, 'enabled TP/SL confirmation')
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const confirm = dialog?.querySelector('form button[type="submit"]')
+      if (!(confirm instanceof HTMLButtonElement)) throw new Error('TP/SL confirmation not found')
+      confirm.click()
     })
     try {
-      await waitForNetworkResponse(
-        network,
-        (response) => response.url.includes('/api/trading/positions/') && response.url.includes('/protection') && response.status < 400,
-        'position protection API'
+      await waitFor(
+        () => network.responses.filter(
+          (response) => response.url.includes(`/api/trading/positions/${context.openPositionId}/protections`) && response.method === 'POST' && response.status < 400
+        ).length >= 2,
+        'position protection APIs',
+        30000
       )
     } catch (error) {
       const diagnostics = await page.evaluate(() => ({
         href: window.location.href,
-        formValues: {
-          stopLoss: document.querySelector('input[name="stopLoss"]') instanceof HTMLInputElement ? document.querySelector('input[name="stopLoss"]')?.value : null,
-          takeProfit: document.querySelector('input[name="takeProfit"]') instanceof HTMLInputElement ? document.querySelector('input[name="takeProfit"]')?.value : null
-        },
-        formError: document.querySelector('.protection-form__error')?.textContent,
+        dialogError: document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"] [role="alert"]')?.textContent,
         bodyText: document.body.textContent?.slice(0, 700)
       }))
       throw new Error(
@@ -346,24 +502,32 @@ try {
       )
     }
 
-    await page.waitForFunction((positionId) => {
-      const actions = [...document.querySelectorAll('.user-page__actions')].find((node) => node.getAttribute('data-position-id') === positionId)
-      const close = [...(actions?.querySelectorAll('button') ?? [])][1]
-      return close instanceof HTMLButtonElement && !close.disabled
-    }, 'position actions after TP/SL', context.openPositionId)
-    await page.evaluate((positionId) => {
-      const actions = [...document.querySelectorAll('.user-page__actions')].find((node) => node.getAttribute('data-position-id') === positionId)
-      const buttons = [...(actions?.querySelectorAll('button') ?? [])]
-      const close = buttons[1]
-      if (!(close instanceof HTMLButtonElement)) throw new Error('position close button not found')
-      if (close.disabled) throw new Error('position close button is disabled')
-      close.click()
-    }, context.openPositionId)
-    await page.waitForFunction(() => Boolean(document.querySelector('.confirm-dialog')), 'position close confirmation dialog')
+    await page.waitForFunction((symbol) => {
+      if (document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')) return false
+      const row = [...document.querySelectorAll('[role="tabpanel"] tbody tr')]
+        .find((candidate) => candidate.textContent?.includes(symbol))
+      const action = row?.querySelector('button[title]')
+      return action instanceof HTMLButtonElement && !action.disabled
+    }, 'position actions after TP/SL', context.symbol)
+    await page.evaluate((symbol) => {
+      const row = [...document.querySelectorAll('[role="tabpanel"] tbody tr')]
+        .find((candidate) => candidate.textContent?.includes(symbol))
+      const action = row?.querySelector('button[title]')
+      if (!(action instanceof HTMLButtonElement)) throw new Error(`position action not found for ${symbol}`)
+      action.click()
+    }, context.symbol)
+    await page.waitForFunction(
+      () => {
+        const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+        const tabs = [...(dialog?.querySelectorAll('[role="tablist"][aria-label="Position action type"] button[role="tab"]') ?? [])]
+        const confirm = dialog?.querySelector('form button[type="submit"]')
+        return tabs[1]?.getAttribute('aria-selected') === 'true' && confirm instanceof HTMLButtonElement && !confirm.disabled
+      },
+      'position close confirmation dialog'
+    )
     await page.evaluate(() => {
-      const confirmButton = document.querySelector('.confirm-dialog .table-action--danger') ?? [...document.querySelectorAll('.confirm-dialog button')].find((button) =>
-        button.textContent?.includes('确认平仓')
-      )
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const confirmButton = dialog?.querySelector('form button[type="submit"]')
       if (!(confirmButton instanceof HTMLButtonElement)) throw new Error('position close confirm button not found')
       confirmButton.click()
     })
@@ -376,7 +540,7 @@ try {
     } catch (error) {
       const diagnostics = await page.evaluate(() => ({
         href: window.location.href,
-        buttons: [...document.querySelectorAll('tbody tr .user-page__actions button')].map((button) => ({
+        buttons: [...document.querySelectorAll('[data-position-id] button[type="button"]')].map((button) => ({
           text: button.textContent,
           disabled: button instanceof HTMLButtonElement ? button.disabled : null
         })),
@@ -396,23 +560,30 @@ try {
     const network = collectNetwork(page)
     await page.navigate(`${webBaseUrl}/wallet`)
     await waitForPageReady(page, '/wallet')
-    await page.waitForFunction(() => document.querySelectorAll('.metric').length >= 4, 'wallet metrics')
+    await page.waitForFunction(
+      () => document.querySelectorAll('#wallet-overview[aria-label] strong').length >= 4,
+      'wallet metrics'
+    )
     await waitFor(() => network.requests.some((url) => url.includes('/api/finance/fund-orders')), 'wallet fund orders request', 30000)
     assertNetwork(network, ['/api/auth/session', '/api/accounts', '/api/ledger', '/api/finance/fund-orders'])
 
     await page.evaluate((note) => {
       const form = document.querySelector('#wallet-funding form')
       if (!(form instanceof HTMLFormElement)) throw new Error('fund order form not found')
-      const amount = form.querySelector('input[name="amount"]')
-      const noteInput = form.querySelector('input[name="note"]')
+      const amount = form.querySelector('input[type="number"]')
+      const noteInput = form.querySelector('input:not([type])')
       const submit = form.querySelector('button[type="submit"]')
       if (!(amount instanceof HTMLInputElement)) throw new Error('fund order amount input not found')
       if (!(noteInput instanceof HTMLInputElement)) throw new Error('fund order note input not found')
       if (!(submit instanceof HTMLButtonElement)) throw new Error('fund order submit button not found')
-      amount.value = '12.34'
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      if (!setter) throw new Error('HTMLInputElement value setter not found')
+      setter.call(amount, '12.34')
       amount.dispatchEvent(new Event('input', { bubbles: true }))
-      noteInput.value = note
+      amount.dispatchEvent(new Event('change', { bubbles: true }))
+      setter.call(noteInput, note)
       noteInput.dispatchEvent(new Event('input', { bubbles: true }))
+      noteInput.dispatchEvent(new Event('change', { bubbles: true }))
       submit.click()
     }, `smoke-${runId}`)
     await waitForNetworkResponse(network, (response) => response.url.includes('/api/finance/fund-orders') && response.method === 'POST' && response.status < 400, 'fund order create API')
@@ -442,39 +613,53 @@ async function seedUserData() {
   const account = accounts[0]
 
   const symbols = await api('/api/market/symbols')
-  const symbol = symbols.find((item) => item.enabled && item.symbol === 'EURUSD') ?? symbols.find((item) => item.enabled) ?? symbols[0]
-  assert(symbol?.symbol, 'market symbol must exist')
+  const perpetualSymbol = symbols.find((item) => item.tradable && item.symbol === 'BTCUSDT-PERP')
+  const spotSymbol = symbols.find((item) => item.tradable && item.symbol === 'BTCUSDT')
+  assert(perpetualSymbol?.symbol, 'perpetual market symbol must exist')
+  assert(spotSymbol?.symbol, 'spot market symbol must exist')
 
   const marketOrder = await api('/api/trading/orders', {
     method: 'POST',
     token: auth.accessToken,
-    body: orderPayload(account.id, symbol.symbol, 'MARKET', 'seed-position')
+    body: orderPayload(account.id, perpetualSymbol.symbol, 'MARKET', 'seed-position', undefined, 'perpetual')
   })
   assert(['FILLED', 'PARTIALLY_FILLED'].includes(marketOrder.status), `market order must fill, got ${marketOrder.status}`)
 
+  const quote = await api(`/api/market/quotes/${encodeURIComponent(spotSymbol.symbol)}`)
+  const referencePrice = Number(quote.bid ?? quote.mid ?? quote.ask)
+  assert(Number.isFinite(referencePrice) && referencePrice > 0, 'market quote must expose a positive price')
+  const pendingPrice = (Math.floor(referencePrice * 5) / 10).toFixed(1)
   const pendingOrder = await api('/api/trading/orders', {
     method: 'POST',
     token: auth.accessToken,
-    body: orderPayload(account.id, symbol.symbol, 'LIMIT', 'seed-pending', '0.00001')
+    body: orderPayload(account.id, spotSymbol.symbol, 'LIMIT', 'seed-pending', pendingPrice, 'spot')
   })
   assert(pendingOrder.status === 'PENDING', `limit order must stay PENDING, got ${pendingOrder.status}`)
 
-  const positions = await api(`/api/trading/positions?accountId=${encodeURIComponent(account.id)}`, { token: auth.accessToken })
-  const openPosition = positions.find((position) => position.status === 'OPEN')
+  const positionsPage = await api(`/api/trading/positions?accountId=${encodeURIComponent(account.id)}`, { token: auth.accessToken })
+  const openPosition = positionsPage.items.find((position) => position.status === 'OPEN')
   assert(openPosition, 'seed market order must create an open position')
+  const protectionReferencePrice = Number(openPosition.currentPrice ?? openPosition.openPrice)
+  const protectionQuantity = Number(openPosition.lots)
+  assert(Number.isFinite(protectionReferencePrice) && protectionReferencePrice > 0, 'open position must expose a positive protection reference price')
+  assert(Number.isFinite(protectionQuantity) && protectionQuantity > 0, 'open position must expose a positive protection quantity')
 
   return {
     accessToken: auth.accessToken,
     refreshToken: auth.refreshToken,
     accountId: account.id,
-    symbol: symbol.symbol,
+    symbol: perpetualSymbol.symbol,
     marketOrderId: marketOrder.id,
     openPositionId: openPosition.id,
-    pendingOrderId: pendingOrder.id
+    pendingOrderId: pendingOrder.id,
+    modifyPrice: (Number(pendingPrice) - 0.1).toFixed(1),
+    protectionTakeProfitPrice: (Math.ceil(protectionReferencePrice * 15) / 10).toFixed(1),
+    protectionStopLossPrice: (Math.floor(protectionReferencePrice * 5) / 10).toFixed(1),
+    protectionQuantity: String(protectionQuantity)
   }
 }
 
-function orderPayload(accountId, symbol, orderType, suffix, requestedPrice) {
+function orderPayload(accountId, symbol, orderType, suffix, requestedPrice, product) {
   const key = `user-pages-${suffix}-${runId}`
   return {
     accountId,
@@ -483,6 +668,9 @@ function orderPayload(accountId, symbol, orderType, suffix, requestedPrice) {
     orderType,
     lots: '0.01',
     quantity: '0.01',
+    quantityUnit: 'BASE',
+    marginMode: product === 'spot' ? 'CASH' : 'CROSS',
+    ...(product === 'spot' ? {} : { leverage: 10 }),
     price: requestedPrice,
     requestedPrice,
     clientOrderId: key,
@@ -754,7 +942,7 @@ async function waitForPageReady(page, route) {
   await page.waitForFunction(
     (expectedRoute) =>
       window.location.pathname === expectedRoute &&
-      !document.querySelector('.state-panel--error') &&
+      !document.querySelector('[data-state-variant="error"][role="alert"]') &&
       document.body.textContent &&
       document.body.textContent.length > 20,
     `page ready ${route}`,
@@ -763,9 +951,14 @@ async function waitForPageReady(page, route) {
 }
 
 async function openMarketsOverviewTab(page) {
-  await page.waitForFunction(() => Boolean(document.querySelector('.market-shell__tabs button')), 'markets tabs')
+  await page.waitForFunction(
+    () =>
+      Boolean(document.querySelector('[data-market-page-tab="overview"]')) &&
+      !document.querySelector('[data-state-variant="loading"][role="status"]'),
+    'markets tabs'
+  )
   await page.evaluate(() => {
-    const button = document.querySelector('.market-shell__tabs button')
+    const button = document.querySelector('[data-market-page-tab="overview"]')
     if (!(button instanceof HTMLButtonElement)) throw new Error('markets overview tab not found')
     if (button.getAttribute('aria-selected') !== 'true') button.click()
   })

@@ -13,6 +13,7 @@ import { PlatformView } from './platform/PlatformView'
 import { authenticatedNavItems, guestNavItems } from './navigation'
 import type { ShellChromeModel } from './shell/shellChromeModel'
 import { getShellRouteFlags } from './shell/shellRouteModel'
+import styles from './AppShell.module.css'
 
 type AppShellProps = {
   children: ReactNode
@@ -76,14 +77,14 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className={`app-shell${isTerminalRoute ? ' app-shell--terminal' : ''}${isAuthRoute ? ' app-shell--auth' : ''}`}>
+    <div className={[styles.root, isTerminalRoute && styles.terminal, isAuthRoute && styles.auth].filter(Boolean).join(' ')}>
       <PlatformView
         model={chromeModel}
         pc={PcShellChrome}
         mobile={MobileShellChrome}
         fallback={null}
       />
-      <main className="main-region">{children}</main>
+      <main className={styles.mainRegion}>{children}</main>
     </div>
   )
 }

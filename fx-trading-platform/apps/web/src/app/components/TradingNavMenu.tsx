@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 
 import { resolveTradingPath } from '../hooks/useLastTradingSymbol'
 import type { TradingProduct } from '../tradingRoutes'
+import styles from './TradingNavMenu.module.css'
 
 const tradingMenuItems: Array<{
   product: TradingProduct
@@ -15,7 +16,7 @@ const tradingMenuItems: Array<{
   { product: 'perpetual', label: 'USDT 永续', description: '五个 USDT 本位永续合约', icon: CircleDollarSign }
 ]
 
-export function TradingNavMenu() {
+export function TradingNavMenu({ triggerClassName }: { triggerClassName?: string }) {
   const navigate = useNavigate()
   const menuRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
@@ -46,7 +47,7 @@ export function TradingNavMenu() {
 
   return (
     <div
-      className="trading-nav-menu"
+      className={styles.root}
       ref={menuRef}
       onPointerEnter={(event) => {
         if (event.pointerType !== 'touch') setOpen(true)
@@ -57,7 +58,7 @@ export function TradingNavMenu() {
     >
       <button
         type="button"
-        className={`app-topbar__link trading-nav-menu__trigger${open ? ' active' : ''}`}
+        className={[triggerClassName, styles.trigger, open && styles.active].filter(Boolean).join(' ')}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(true)}
@@ -84,7 +85,7 @@ export function TradingNavMenu() {
       </button>
 
       {open ? (
-        <div className="trading-nav-menu__panel" role="menu" aria-label="交易分类">
+        <div className={styles.panel} role="menu" aria-label="交易分类">
           {tradingMenuItems.map((item, index) => {
             const Icon = item.icon
             return (
@@ -92,11 +93,11 @@ export function TradingNavMenu() {
                 key={item.product}
                 type="button"
                 role="menuitem"
-                className={index === activeIndex ? 'active' : ''}
+                className={index === activeIndex ? styles.active : undefined}
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => openProduct(item.product)}
               >
-                <span className="trading-nav-menu__icon">
+                <span className={styles.icon}>
                   <Icon size={18} aria-hidden="true" />
                 </span>
                 <span>

@@ -74,8 +74,10 @@ export function fetchMarketSymbolRulesBatch(symbols: string[]): Promise<TradingI
   )
 }
 
-export function fetchMarketQuote(symbol: string, previous?: TradingQuote) {
-  return apiGet<BackendQuote>(buildMarketQuotePath(symbol)).then((quote) => mapQuoteToTradingQuote(quote, previous))
+export function fetchMarketQuote(symbol: string, previous?: TradingQuote, signal?: AbortSignal) {
+  return apiGet<BackendQuote>(buildMarketQuotePath(symbol), undefined, signal).then((quote) =>
+    mapQuoteToTradingQuote(quote, previous)
+  )
 }
 
 export function fetchMarketQuotes(symbols: string[], previousBySymbol: Record<string, TradingQuote> = {}) {
@@ -94,16 +96,16 @@ export function fetchMarketCandles(symbol: string, period: TradingPeriod, option
   )
 }
 
-export function fetchMarketOrderBook(symbol: string) {
-  return apiGet<BackendOrderBook>(buildMarketOrderBookPath(symbol)).then(mapOrderBookToMarketData)
+export function fetchMarketOrderBook(symbol: string, signal?: AbortSignal) {
+  return apiGet<BackendOrderBook>(buildMarketOrderBookPath(symbol), undefined, signal).then(mapOrderBookToMarketData)
 }
 
 export function fetchMarketRecentTrades(symbol: string, limit = 40) {
   return apiGet<BackendRecentTrade[]>(buildMarketRecentTradesPath(symbol, limit)).then(mapRecentTradesToMarketData)
 }
 
-export function fetchMarketRecentTradeBatch(symbol: string, limit = 40) {
-  return apiGet<BackendRecentTrade[]>(buildMarketRecentTradesPath(symbol, limit)).then((trades) =>
+export function fetchMarketRecentTradeBatch(symbol: string, limit = 40, signal?: AbortSignal) {
+  return apiGet<BackendRecentTrade[]>(buildMarketRecentTradesPath(symbol, limit), undefined, signal).then((trades) =>
     mapRecentTradeBatchToMarketData(trades, symbol)
   )
 }

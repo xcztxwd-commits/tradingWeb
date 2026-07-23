@@ -5,12 +5,17 @@ import { Link } from 'react-router-dom'
 import type { DataViewColumn } from '@fx-platform/ui'
 import type { Amount, FundOrder, LedgerEntry } from '@fx-platform/frontend-core'
 
-import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
+import { ApiErrorState, LoadingState, LoginRequiredState } from '../data/PageState'
 import type { AssetRow, FundOrderForm, WalletRouteModel } from '../../routes/wallet/walletRoute.types'
 import { AssetMark } from '../asset/AssetMark'
+import { cssModuleClasses as css } from '../data/cssModuleClasses'
 import type { RouteDataCollectionRenderer } from '../data/RouteDataCollection'
 import { DemoResetDialog } from './DemoResetDialog'
 import { TransferDialog } from './TransferDialog'
+import surfaceStyles from '../data/UserPageSurface.module.css'
+import walletStyles from './WalletRouteContent.module.css'
+
+const styles = { ...surfaceStyles, ...walletStyles }
 
 export function WalletRouteContent({
   model,
@@ -22,23 +27,23 @@ export function WalletRouteContent({
   const { t } = useTranslation()
   if (model.loginRequired) {
     return (
-      <section className="user-page wallet-page wallet-login-gate">
+      <section className={css(styles, "user-page", "wallet-page", "wallet-login-gate")}>
         <LoginRequiredState message={t('assets.loginMessage')} onLogin={model.openLogin} />
       </section>
     )
   }
 
   return (
-    <section className="user-page wallet-page">
-      <header className="user-page__header wallet-page__hero">
+    <section className={css(styles, "user-page", "wallet-page")}>
+      <header className={css(styles, "user-page__header", "wallet-page__hero")}>
         <div><h1>{t('assets.walletTitle')}</h1><p>{t('assets.walletSummary')}</p></div>
-        <button type="button" className="table-action table-action--secondary" onClick={() => void model.refresh()}>
+        <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => void model.refresh()}>
           <RefreshCcw size={15} aria-hidden="true" />{t('common.refresh')}
         </button>
       </header>
 
-      <div className="wallet-workbench">
-        <aside className="wallet-sidebar" aria-label={t('assets.walletTitle')}>
+      <div className={css(styles, "wallet-workbench")}>
+        <aside className={css(styles, "wallet-sidebar")} aria-label={t('assets.walletTitle')}>
           <nav>
             <a href="#wallet-overview">{t('assets.overview')}</a>
             <a href="#wallet-assets">{t('assets.asset')}</a>
@@ -48,42 +53,42 @@ export function WalletRouteContent({
           </nav>
         </aside>
 
-        <div className="wallet-workbench__main">
+        <div className={css(styles, "wallet-workbench__main")}>
           {model.sessionMode === 'loading' ? <LoadingState message={t('assets.loadingAccount')} /> : null}
           {model.sessionMode === 'error' ? (
             <ApiErrorState error={{ title: 'WALLET_LOAD_FAILED', message: model.sessionError ?? t('assets.unavailable') }} onAction={() => void model.refresh()} />
           ) : null}
           {model.apiError ? <ApiErrorState error={model.apiError} onAction={() => void model.retryFundOrders()} /> : null}
-          {model.notice ? <div className="user-page__notice">{model.notice}</div> : null}
+          {model.notice ? <div className={css(styles, "user-page__notice")}>{model.notice}</div> : null}
 
-          <section id="wallet-overview" className="wallet-hero-grid" aria-label={t('assets.overview')}>
-            <article className="wallet-balance-card">
+          <section id="wallet-overview" className={css(styles, "wallet-hero-grid")} aria-label={t('assets.overview')}>
+            <article className={css(styles, "wallet-balance-card")}>
               <span>{t('assets.balance')}</span>
               <strong>{model.account?.balance ?? '-'}</strong>
               <small>{model.currency} · {t('assets.available')} {model.account?.freeMargin ?? '-'}</small>
-              <div className="wallet-balance-card__actions">
-                <button type="button" className="table-action table-action--primary" onClick={() => model.setFundOrderField('orderType', 'RECHARGE')}>{t('assets.deposit')}</button>
-                <button type="button" className="table-action table-action--secondary" onClick={() => model.setFundOrderField('orderType', 'WITHDRAWAL')}>{t('assets.withdraw')}</button>
+              <div className={css(styles, "wallet-balance-card__actions")}>
+                <button type="button" className={css(styles, "table-action", "table-action--primary")} onClick={() => model.setFundOrderField('orderType', 'RECHARGE')}>{t('assets.deposit')}</button>
+                <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => model.setFundOrderField('orderType', 'WITHDRAWAL')}>{t('assets.withdraw')}</button>
               </div>
             </article>
-            <div className="wallet-account-grid">
+            <div className={css(styles, "wallet-account-grid")}>
               <Metric label={t('assets.available')} value={model.account?.freeMargin} />
               <Metric label={t('assets.frozen')} value={`${model.frozenAmount.toFixed(2)} ${model.currency}`} />
               <Metric label={t('assets.usedMargin')} value={model.account?.usedMargin} />
               <Metric label={t('assets.pendingWithdrawal')} value={`${model.pendingWithdrawalAmount.toFixed(2)} ${model.currency}`} />
             </div>
-            <article className="wallet-risk-card">
+            <article className={css(styles, "wallet-risk-card")}>
               <ShieldCheck size={22} aria-hidden="true" />
               <div><strong>{t('assets.whitelist')}</strong><span>{t('assets.whitelistDescription')}</span></div>
-              <Link className="table-action table-action--secondary" to="/account/security/kyc">{t('assets.viewSecurityCenter')}</Link>
+              <Link className={css(styles, "table-action", "table-action--secondary")} to="/account/security/kyc">{t('assets.viewSecurityCenter')}</Link>
             </article>
           </section>
 
-          <div className="wallet-simulation-note" role="note"><strong>{t('assets.simulationTitle')}</strong><span>{t('assets.simulationDescription')}</span></div>
+          <div className={css(styles, "wallet-simulation-note")} role="note"><strong>{t('assets.simulationTitle')}</strong><span>{t('assets.simulationDescription')}</span></div>
 
-          <section id="wallet-assets" className="user-page__events wallet-assets-panel">
+          <section id="wallet-assets" className={css(styles, "user-page__events")}>
             <SectionHead title={t('assets.overview')} description={t('assets.overviewDescription')} icon={<WalletCards size={20} aria-hidden="true" />} />
-            <div className="user-page__metrics">
+            <div className={css(styles, "user-page__metrics")}>
               <Metric label={t('assets.balance')} value={model.account?.balance} />
               <Metric label={t('assets.available')} value={model.account?.freeMargin} />
               <Metric label={t('assets.frozen')} value={`${model.frozenAmount.toFixed(2)} ${model.currency}`} />
@@ -99,12 +104,12 @@ export function WalletRouteContent({
               emptyAction: { label: t('assets.goDeposit'), href: '/wallet' },
               pageSize: 5
             })}
-            <div className="user-page__actions">
-              <button type="button" className="table-action table-action--primary" disabled={!model.token || !model.accountId} onClick={model.openTransfer}>Transfer Spot / Perpetual</button>
-              <button type="button" className="table-action table-action--danger" disabled={!model.token || !model.accountId} onClick={model.openReset}>Reset Demo account</button>
+            <div className={css(styles, "user-page__actions")}>
+              <button type="button" className={css(styles, "table-action", "table-action--primary")} disabled={!model.token || !model.accountId} onClick={model.openTransfer}>Transfer Spot / Perpetual</button>
+              <button type="button" className={css(styles, "table-action", "table-action--danger")} disabled={!model.token || !model.accountId} onClick={model.openReset}>Reset Demo account</button>
             </div>
             {model.selectedAssetRow ? (
-              <div className="wallet-asset-detail" aria-label={t('assets.singleAssetDetail')}>
+              <div className={css(styles, "wallet-asset-detail")} aria-label={t('assets.singleAssetDetail')}>
                 <div>
                   <strong>{model.selectedAssetRow.walletType} {model.selectedAssetRow.currency} {t('assets.singleAssetDetail')}</strong>
                   <span>{t('assets.singleAssetSummary', {
@@ -113,24 +118,24 @@ export function WalletRouteContent({
                     frozen: model.selectedAssetRow.frozen
                   })}</span>
                 </div>
-                <button type="button" className="table-action table-action--secondary" onClick={() => model.setFundOrderField('orderType', 'RECHARGE')}>{t('assets.deposit')}</button>
-                <button type="button" className="table-action table-action--danger" onClick={() => model.setFundOrderField('orderType', 'WITHDRAWAL')}>{t('assets.withdraw')}</button>
+                <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => model.setFundOrderField('orderType', 'RECHARGE')}>{t('assets.deposit')}</button>
+                <button type="button" className={css(styles, "table-action", "table-action--danger")} onClick={() => model.setFundOrderField('orderType', 'WITHDRAWAL')}>{t('assets.withdraw')}</button>
               </div>
             ) : null}
           </section>
 
-          <section className="wallet-action-grid" aria-label={t('assets.quickEntries')}>
+          <section className={css(styles, "action-card-grid")} aria-label={t('assets.quickEntries')}>
             <WalletAction icon={<ArrowDownToLine size={20} aria-hidden="true" />} title={t('assets.depositEntry')} description={t('assets.depositDescription')} onClick={() => model.setFundOrderField('orderType', 'RECHARGE')} />
             <WalletAction danger icon={<ArrowUpFromLine size={20} aria-hidden="true" />} title={t('assets.withdrawEntry')} description={t('assets.withdrawDescription')} onClick={() => model.setFundOrderField('orderType', 'WITHDRAWAL')} />
-            <Link className="wallet-action-card" to="/security"><ShieldCheck size={20} aria-hidden="true" /><strong>{t('assets.whitelist')}</strong><span>{t('assets.whitelistDescription')}</span></Link>
-            <Link className="wallet-action-card" to="/settings"><SlidersHorizontal size={20} aria-hidden="true" /><strong>{t('assets.preferences')}</strong><span>{t('assets.preferencesDescription')}</span></Link>
-            <button className="wallet-action-card" type="button" disabled><BookUser size={20} aria-hidden="true" /><strong>{t('assets.addressBookEntry')}</strong><span>{t('assets.addressBookDescription')}</span></button>
+            <Link className={css(styles, "action-card")} to="/security"><ShieldCheck size={20} aria-hidden="true" /><strong>{t('assets.whitelist')}</strong><span>{t('assets.whitelistDescription')}</span></Link>
+            <Link className={css(styles, "action-card")} to="/settings"><SlidersHorizontal size={20} aria-hidden="true" /><strong>{t('assets.preferences')}</strong><span>{t('assets.preferencesDescription')}</span></Link>
+            <button className={css(styles, "action-card")} type="button" disabled><BookUser size={20} aria-hidden="true" /><strong>{t('assets.addressBookEntry')}</strong><span>{t('assets.addressBookDescription')}</span></button>
           </section>
 
-          <section id="wallet-funding" className="user-page__events">
+          <section id="wallet-funding" className={css(styles, "user-page__events")}>
             <SectionHead title={t('assets.fundOrdersTitle')} description={t('assets.fundOrdersDescription')} />
             <FundOrderFormView model={model} />
-            <div className="user-page__toolbar" aria-label={t('assets.fundOrderFilter')}>
+            <div className={css(styles, "user-page__toolbar")} aria-label={t('assets.fundOrderFilter')}>
               <label><span>{t('common.status')}</span><select value={model.statusFilter} onChange={(event) => model.setStatusFilter(event.target.value)}>{model.fundOrderStatuses.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
               <label><span>{t('common.type')}</span><select value={model.typeFilter} onChange={(event) => model.setTypeFilter(event.target.value)}>{model.fundOrderTypes.map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
             </div>
@@ -144,15 +149,15 @@ export function WalletRouteContent({
             })}
           </section>
 
-          <section id="wallet-ledger" className="user-page__events">
+          <section id="wallet-ledger" className={css(styles, "user-page__events")}>
             <SectionHead title={t('assets.ledgerTitle')} description={t('assets.ledgerDescription')} />
-            <div className="user-page__toolbar" aria-label={t('assets.ledgerFilter')}>
+            <div className={css(styles, "user-page__toolbar")} aria-label={t('assets.ledgerFilter')}>
               <FilterSelect label={t('common.type')} value={model.ledgerTypeFilter} options={model.ledgerTypeOptions} onChange={model.setLedgerTypeFilter} />
               <FilterSelect label="Wallet" value={model.ledgerWalletTypeFilter} options={model.ledgerWalletTypeOptions} onChange={model.setLedgerWalletTypeFilter} />
               <FilterSelect label={t('common.currency')} value={model.ledgerCurrencyFilter} options={model.ledgerCurrencyOptions} onChange={model.setLedgerCurrencyFilter} />
               <label><span>{t('assets.startTime')}</span><input type="date" value={model.ledgerFromDate} onChange={(event) => model.setLedgerFromDate(event.target.value)} /></label>
               <label><span>{t('assets.endTime')}</span><input type="date" value={model.ledgerToDate} onChange={(event) => model.setLedgerToDate(event.target.value)} /></label>
-              <button type="button" className="table-action table-action--secondary" onClick={model.clearLedgerFilters}>{t('common.clearFilters')}</button>
+              <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={model.clearLedgerFilters}>{t('common.clearFilters')}</button>
             </div>
             {renderDataCollection<LedgerEntry>({
               rows: model.visibleLedgerEntries,
@@ -163,12 +168,12 @@ export function WalletRouteContent({
             })}
           </section>
 
-          <section id="wallet-address-book" className="user-page__events">
+          <section id="wallet-address-book" className={css(styles, "user-page__events")}>
             <SectionHead title={t('assets.addressBookTitle')} description={t('assets.addressBookIntro')} icon={<BookUser size={20} aria-hidden="true" />} />
-            <div className="wallet-address-book">
+            <div className={css(styles, "wallet-address-book")}>
               <div><strong>{t('assets.savedWithdrawAddress')}</strong><span>{t('common.soon')}</span></div>
               <p>{t('assets.addressBookFuture')}</p>
-              <Link className="table-action table-action--secondary" to="/security">{t('assets.viewSecurityCenter')}</Link>
+              <Link className={css(styles, "table-action", "table-action--secondary")} to="/security">{t('assets.viewSecurityCenter')}</Link>
             </div>
           </section>
         </div>
@@ -203,12 +208,12 @@ function FundOrderFormView({ model }: { model: WalletRouteModel }) {
   const { t } = useTranslation()
   const form = model.fundOrderForm
   return (
-    <form className="user-page__form" onSubmit={(event) => { event.preventDefault(); void model.submitFundOrder() }}>
+    <form className={css(styles, "user-page__form")} onSubmit={(event) => { event.preventDefault(); void model.submitFundOrder() }}>
       <label><span>{t('common.type')}</span><select value={form.orderType} onChange={(event) => model.setFundOrderField('orderType', event.target.value === 'WITHDRAWAL' ? 'WITHDRAWAL' : 'RECHARGE')}><option value="RECHARGE">RECHARGE</option><option value="WITHDRAWAL">WITHDRAWAL</option></select></label>
       <label><span>{t('common.amount')}</span><input type="number" min="0.01" step="0.01" required value={form.amount} onChange={(event) => model.setFundOrderField('amount', event.target.value)} /></label>
       <label><span>{t('common.currency')}</span><select value={form.currency || model.currency} onChange={(event) => model.setFundOrderField('currency', event.target.value)}><option value={model.currency}>{model.currency}</option><option value="USDT">USDT</option><option value="USD">USD</option></select></label>
       <label><span>{t('common.note')}</span><input value={form.note} placeholder={t('assets.notePlaceholder')} onChange={(event) => model.setFundOrderField('note', event.target.value)} /></label>
-      <button type="submit" className={`table-action ${form.orderType === 'WITHDRAWAL' ? 'table-action--danger' : 'table-action--primary'}`} disabled={!model.token || !model.accountId}>{form.orderType === 'WITHDRAWAL' ? t('assets.submitWithdrawal') : t('assets.submitDeposit')}</button>
+      <button type="submit" className={css(styles, 'table-action', form.orderType === 'WITHDRAWAL' ? 'table-action--danger' : 'table-action--primary')} disabled={!model.token || !model.accountId}>{form.orderType === 'WITHDRAWAL' ? t('assets.submitWithdrawal') : t('assets.submitDeposit')}</button>
     </form>
   )
 }
@@ -217,12 +222,12 @@ function FilterSelect({ label, value, options, onChange }: { label: string; valu
   return <label><span>{label}</span><select value={value} onChange={(event) => onChange(event.target.value)}><option value="ALL">ALL</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>
 }
 function SectionHead({ title, description, icon }: { title: string; description: string; icon?: React.ReactNode }) {
-  return <div className="settings-section-head"><div><h2>{title}</h2><p>{description}</p></div>{icon}</div>
+  return <div className={css(styles, "settings-section-head")}><div><h2>{title}</h2><p>{description}</p></div>{icon}</div>
 }
 function WalletAction({ icon, title, description, onClick, danger = false }: { icon: React.ReactNode; title: string; description: string; onClick(): void; danger?: boolean }) {
-  return <button className={`wallet-action-card${danger ? ' wallet-action-card--danger' : ''}`} type="button" onClick={onClick}>{icon}<strong>{title}</strong><span>{description}</span></button>
+  return <button className={css(styles, 'action-card', danger && 'action-card--danger')} type="button" onClick={onClick}>{icon}<strong>{title}</strong><span>{description}</span></button>
 }
-function Metric({ label, value }: { label: string; value: Amount | string | number | null | undefined }) { return <div className="metric"><span>{label}</span><strong>{value ?? '-'}</strong></div> }
+function Metric({ label, value }: { label: string; value: Amount | string | number | null | undefined }) { return <div className={css(styles, "metric")}><span>{label}</span><strong>{value ?? '-'}</strong></div> }
 function createFundOrderColumns(t: TFunction): Array<DataViewColumn<FundOrder>> {
   return [
     { key: 'createdAt', label: t('common.time'), sortable: true, render: (order) => formatTime(order.createdAt) },
@@ -237,12 +242,12 @@ function createFundOrderColumns(t: TFunction): Array<DataViewColumn<FundOrder>> 
 function createAssetColumns(setSelectedAsset: (key: string) => void, t: TFunction): Array<DataViewColumn<AssetRow>> {
   return [
     { key: 'walletType', label: 'Wallet', sortable: true },
-    { key: 'currency', label: t('assets.asset'), sortable: true, render: (asset) => <span className="asset-symbol-cell"><AssetMark symbol={asset.currency} size="sm" /><strong>{asset.currency}</strong></span> },
+    { key: 'currency', label: t('assets.asset'), sortable: true, render: (asset) => <span className={css(styles, "asset-symbol-cell")}><AssetMark symbol={asset.currency} size="sm" /><strong>{asset.currency}</strong></span> },
     { key: 'balance', label: t('assets.balance'), sortable: true },
     { key: 'available', label: t('assets.available'), sortable: true },
     { key: 'frozen', label: t('assets.frozen'), sortable: true },
     { key: 'activityCount', label: t('assets.activityCount'), sortable: true },
-    { key: 'actions', label: t('common.action'), render: (asset) => <button type="button" className="table-action table-action--secondary" onClick={() => setSelectedAsset(asset.key)}>{t('common.viewDetails')}</button> }
+    { key: 'actions', label: t('common.action'), render: (asset) => <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => setSelectedAsset(asset.key)}>{t('common.viewDetails')}</button> }
   ]
 }
 function createLedgerColumns(t: TFunction): Array<DataViewColumn<LedgerEntry>> {
@@ -258,6 +263,6 @@ function createLedgerColumns(t: TFunction): Array<DataViewColumn<LedgerEntry>> {
 }
 function StatusChip({ status }: { status: string }) {
   const tone = status === 'APPROVED' ? 'positive' : status === 'PENDING_REVIEW' || status === 'PENDING' ? 'warning' : status === 'REJECTED' ? 'negative' : ''
-  return <span className={`status-chip${tone ? ` status-chip--${tone}` : ''}`}>{status}</span>
+  return <span className={css(styles, 'status-chip', tone && `status-chip--${tone}`)}>{status}</span>
 }
 function formatTime(value: string | null | undefined) { return value ? new Date(value).toLocaleString() : '-' }

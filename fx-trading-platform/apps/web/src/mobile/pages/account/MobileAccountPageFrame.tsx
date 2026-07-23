@@ -7,7 +7,6 @@ export function MobileAccountPageFrame({ model, expectedMode }: { model: Account
   return (
     <AccountRouteContent
       model={model}
-      platform="mobile"
       expectedMode={expectedMode}
       renderDataCollection={MobileAccountDataCollection}
     />

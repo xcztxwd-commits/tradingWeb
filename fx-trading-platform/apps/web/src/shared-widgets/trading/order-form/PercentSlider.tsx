@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
+import styles from './TradePanel.module.css'
+
 const percentSteps = [0, 25, 50, 75, 100]
 
 type Props = {
@@ -11,8 +13,8 @@ export function PercentSlider({ value, onChange }: Props) {
   const { t } = useTranslation()
 
   return (
-    <div className="trade-panel__percent">
-      <div className="trade-panel__range-wrap">
+    <div className={styles['trade-panel__percent']}>
+      <div className={styles['trade-panel__range-wrap']}>
         <input
           aria-label={t('trading.quantityPercent')}
           type="range"
@@ -22,15 +24,15 @@ export function PercentSlider({ value, onChange }: Props) {
           value={value}
           onChange={(event) => onChange(Number(event.target.value))}
         />
-        <span className="trade-panel__range-fill" style={{ transform: `scaleX(${value / 100})` }} />
+        <span className={styles['trade-panel__range-fill']} style={{ transform: `scaleX(${value / 100})` }} />
       </div>
-      <div className="trade-panel__percent-steps">
+      <div className={styles['trade-panel__percent-steps']}>
         {percentSteps.map((step) => (
           <button
             key={step}
             type="button"
             aria-label={`${step}%`}
-            className={step === value ? 'trade-panel__percent-step--active' : ''}
+            className={step === value ? styles['trade-panel__percent-step--active'] : ''}
             onClick={() => onChange(step)}
           />
         ))}

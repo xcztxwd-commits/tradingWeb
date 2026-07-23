@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 
 import { LanguageSwitcher } from '../../components/LanguageSwitcher'
 import type { AccountRouteModel } from '../../routes/account/accountRoute.types'
+import { cssModuleClasses as css } from '../data/cssModuleClasses'
 import {
   accountPanelFocusOptions,
   defaultOrderTypeOptions,
@@ -19,20 +20,21 @@ import {
   tradeNotificationsOptions
 } from '../../routes/account/settingsPreferences'
 import styles from './AccountSettingsContent.module.css'
+import surfaceStyles from '../data/UserPageSurface.module.css'
 
 export function SettingsContent({ model }: { model: AccountRouteModel }) {
   const { t } = useTranslation()
   const { preferences, saveNoticeId, updatePreference } = model.settings
 
   return (
-    <section className={`${styles.page} user-page`} aria-labelledby="settings-title">
-      <header className={`${styles.header} user-page__header`}>
+    <section className={`${styles.page} ${surfaceStyles['user-page']}`} aria-labelledby="settings-title">
+      <header className={`${styles.header} ${surfaceStyles['user-page__header']}`}>
         <div>
           <span>{t('settings.preferenceSettings')}</span>
           <h1 id="settings-title">{t('settings.center')}</h1>
           <p>{t('settings.centerSummary')}</p>
         </div>
-        <Link className="table-action table-action--primary" to="/security">
+        <Link className={css(surfaceStyles, "table-action", "table-action--primary")} to="/security">
           {t('security.title')}
         </Link>
       </header>
@@ -154,7 +156,7 @@ export function SettingsContent({ model }: { model: AccountRouteModel }) {
               <strong>{t('settings.accountProtectionStatus')}</strong>
               <span>{t('settings.accountProtectionDescription')}</span>
             </div>
-            <Link className="table-action table-action--secondary" to="/security">
+            <Link className={css(surfaceStyles, "table-action", "table-action--secondary")} to="/security">
               {t('assets.viewSecurityCenter')}
             </Link>
           </div>

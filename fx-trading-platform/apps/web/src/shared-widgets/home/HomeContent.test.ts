@@ -120,6 +120,15 @@ describe('prototype home page source', () => {
     assert.match(readFileSync(laurelAsset, 'utf8'), /<svg width="20" height="47"/)
   })
 
+  it('does not compose retired CSS Module keys into undefined class names', () => {
+    const source = [
+      readFileSync(join(homeComponentsDir, 'HomeHeroGuest.tsx'), 'utf8'),
+      readFileSync(join(homeComponentsDir, 'MarketPreviewPanel.tsx'), 'utf8')
+    ].join('\n')
+
+    assert.doesNotMatch(source, /styles\.(?:promoTextFront|marketPanel)/)
+  })
+
   it('matches Binance home module rhythm without using protected brand assets', () => {
     const source = [
       readFileSync(pagePath, 'utf8'),

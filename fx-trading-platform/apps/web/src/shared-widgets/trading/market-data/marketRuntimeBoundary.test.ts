@@ -17,6 +17,10 @@ describe('market runtime app boundary', () => {
     assert.doesNotMatch(sidePanelSource, /features\/market/)
   })
 
+  it('leaves market adapter lifecycle ownership to the route controller', () => {
+    assert.doesNotMatch(sidePanelSource, /startQuoteMarketDataAdapter/)
+  })
+
   it('keeps the source-changing state explicit in the app-owned translated view', () => {
     assert.match(sidePanelSource, /marketStatus === 'source-changing'/)
     assert.match(sidePanelSource, /trading\.marketDataSourceChanging/)

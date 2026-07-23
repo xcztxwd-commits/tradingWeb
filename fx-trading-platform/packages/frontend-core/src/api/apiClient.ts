@@ -52,8 +52,8 @@ export function parseApiErrorPayload(payload: unknown, status: number, requestId
   }
 }
 
-export async function apiGet<T>(path: string, token?: string): Promise<T> {
-  return request<T>(path, { method: 'GET' }, token)
+export async function apiGet<T>(path: string, token?: string, signal?: AbortSignal): Promise<T> {
+  return request<T>(path, { method: 'GET', signal }, token)
 }
 
 export async function apiPost<T>(path: string, body: unknown, token?: string): Promise<T> {

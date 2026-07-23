@@ -1,5 +1,6 @@
 import { MultiLevelProtectionEditor, type ProtectionLevel } from './MultiLevelProtectionEditor'
 import type { TradeField, TradeFormState } from '@fx-platform/frontend-core'
+import styles from './TradePanel.module.css'
 
 type Props = {
   form: TradeFormState
@@ -61,17 +62,17 @@ export function PerpetualOrderOptions({
   }
 
   return (
-    <section className="trade-panel__perpetual-options" aria-label="Perpetual order options">
+    <section aria-label="Perpetual order options">
       {positionMode === 'HEDGE' ? (
-        <label className="trade-panel__field">
-          <span className="trade-panel__field-label">Position side</span>
+        <label className={styles['trade-panel__field']}>
+          <span className={styles['trade-panel__field-label']}>Position side</span>
           <select value={form.positionSide === 'BOTH' ? (form.side === 'buy' ? 'LONG' : 'SHORT') : form.positionSide} disabled={disabled} onChange={(event) => onFieldChange('positionSide', event.target.value)}>
             <option value="LONG">Long</option>
             <option value="SHORT">Short</option>
           </select>
         </label>
       ) : null}
-      <label className="trade-panel__check">
+      <label className={styles['trade-panel__check']}>
         <input type="checkbox" checked={form.reduceOnly} disabled={disabled} onChange={(event) => onFieldChange('reduceOnly', event.target.checked)} />
         <span>Reduce only</span>
       </label>

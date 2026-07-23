@@ -225,9 +225,9 @@
 }
 
 .error {
-  border: 1px solid rgb(246 70 93 / 0.36);
-  background: rgb(246 70 93 / 0.12);
-  color: #ff707e;
+  border: 1px solid var(--theme-danger-border);
+  background: var(--theme-danger-soft);
+  color: var(--theme-danger);
 }
 
 .supportNotice {

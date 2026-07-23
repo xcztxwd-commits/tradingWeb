@@ -43,7 +43,7 @@ describe('ChartWorkspace fullscreen target', () => {
     assert.match(workspaceStyles, /\.drawingToolbarLoading\s*{[\s\S]*width:\s*46px/)
     assert.match(workspaceStyles, /\.drawingToolbarLoading\s*{[\s\S]*min-width:\s*46px/)
     assert.match(workspaceStyles, /\.drawingToolbarLoading\s*{[\s\S]*min-height:\s*320px/)
-    assert.match(workspaceStyles, /@media\s*\(max-width:\s*768px\)\s*{[\s\S]*\.drawingToolbarLoading\s*{[\s\S]*display:\s*none/)
+    assert.match(workspaceStyles, /@media\s*\(max-width:\s*900px\)\s*{[\s\S]*\.drawingToolbarLoading\s*{[\s\S]*display:\s*none/)
   })
 })
 

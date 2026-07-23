@@ -9,9 +9,15 @@ const projectRoot = resolve(pagesDir, '../../../..')
 const marketsContent = readFileSync(join(pagesDir, '..', 'shared-widgets', 'market', 'MarketsContent.tsx'), 'utf8')
 const marketsController = readFileSync(join(pagesDir, '..', 'routes', 'markets', 'useMarketsRouteController.ts'), 'utf8')
 const marketsModel = readFileSync(join(pagesDir, '..', 'routes', 'markets', 'marketsRouteModel.ts'), 'utf8')
+const pcMarketTablePath = join(pagesDir, '..', 'pc', 'pages', 'markets', 'PcMarketTable.tsx')
+const mobileMarketListPath = join(pagesDir, '..', 'mobile', 'pages', 'markets', 'MobileMarketList.tsx')
+const pcMarketTable = existsSync(pcMarketTablePath) ? readFileSync(pcMarketTablePath, 'utf8') : ''
+const mobileMarketList = existsSync(mobileMarketListPath) ? readFileSync(mobileMarketListPath, 'utf8') : ''
 const marketsViews = [
   readFileSync(join(pagesDir, '..', 'pc', 'pages', 'markets', 'PcMarketsPage.tsx'), 'utf8'),
-  readFileSync(join(pagesDir, '..', 'mobile', 'pages', 'markets', 'MobileMarketsPage.tsx'), 'utf8')
+  readFileSync(join(pagesDir, '..', 'mobile', 'pages', 'markets', 'MobileMarketsPage.tsx'), 'utf8'),
+  pcMarketTable,
+  mobileMarketList
 ].join('\n')
 const markets = `${marketsContent}\n${marketsController}\n${marketsModel}\n${marketsViews}`
 const binanceMarketData = readFileSync(
@@ -57,16 +63,25 @@ const authContent = readFileSync(join(pagesDir, '..', 'shared-widgets', 'auth', 
 const authSupport = `${authController}\n${authModel}\n${authContent}`
 const login = authSupport
 const authStyles = readFileSync(join(pagesDir, '..', 'shared-widgets', 'auth', 'AuthPageContent.module.css'), 'utf8')
-const styles = readFileSync(join(pagesDir, '..', 'styles.css'), 'utf8')
+const baseStyles = readFileSync(join(pagesDir, '..', 'styles.css'), 'utf8')
+const userPageStyles = readFileSync(join(pagesDir, '..', 'shared-widgets', 'data', 'UserPageSurface.module.css'), 'utf8')
+const accountStyles = readFileSync(join(pagesDir, '..', 'shared-widgets', 'account', 'AccountPagesContent.module.css'), 'utf8')
+const walletStyles = readFileSync(join(pagesDir, '..', 'shared-widgets', 'wallet', 'WalletRouteContent.module.css'), 'utf8')
+const styles = `${baseStyles}\n${userPageStyles}\n${accountStyles}\n${walletStyles}`
+const marketStyles = readFileSync(join(pagesDir, '..', 'shared-widgets', 'market', 'MarketsContent.module.css'), 'utf8')
 const pcMarketsStyles = readFileSync(join(pagesDir, '..', 'pc', 'pages', 'markets', 'PcMarketsPage.module.css'), 'utf8')
 const mobileMarketsStyles = readFileSync(join(pagesDir, '..', 'mobile', 'pages', 'markets', 'MobileMarketsPage.module.css'), 'utf8')
+const pcMarketTableStylesPath = join(pagesDir, '..', 'pc', 'pages', 'markets', 'PcMarketTable.module.css')
+const mobileMarketListStylesPath = join(pagesDir, '..', 'mobile', 'pages', 'markets', 'MobileMarketList.module.css')
+const pcMarketTableStyles = existsSync(pcMarketTableStylesPath) ? readFileSync(pcMarketTableStylesPath, 'utf8') : ''
+const mobileMarketListStyles = existsSync(mobileMarketListStylesPath) ? readFileSync(mobileMarketListStylesPath, 'utf8') : ''
 const selectFieldPath = join(projectRoot, 'packages', 'ui', 'src', 'select-field', 'SelectField.tsx')
 const selectField = existsSync(selectFieldPath) ? readFileSync(selectFieldPath, 'utf8') : ''
 const selectFieldCss = readFileSync(join(projectRoot, 'packages', 'ui', 'src', 'select-field', 'SelectField.module.css'), 'utf8')
-const marketSortSelectStart = styles.indexOf('.market-sort-field__select {')
-const marketSortSelectCss = styles.slice(
+const marketSortSelectStart = marketStyles.indexOf('.market-sort-field__select {')
+const marketSortSelectCss = marketStyles.slice(
   marketSortSelectStart,
-  styles.indexOf('.market-universe-tabs,', marketSortSelectStart),
+  marketStyles.indexOf('.market-universe-tabs,', marketSortSelectStart),
 )
 
 describe('prototype markets page', () => {
@@ -98,7 +113,7 @@ describe('prototype markets page', () => {
     assert.match(markets, /contract/)
     assert.match(markets, /spot/)
     assert.match(markets, /all/)
-    assert.match(markets, /MarketMobileList/)
+    assert.match(markets, /MobileMarketList/)
     assert.match(markets, /marketColumns/)
     assert.doesNotMatch(markets, /market-shell__hero/)
     assert.match(markets, /market-shell__titleSrOnly/)
@@ -108,7 +123,7 @@ describe('prototype markets page', () => {
   })
 
   it('shows the market loading state before tab-specific content renders', () => {
-    const tabsIndex = markets.indexOf('<div className="market-shell__tabs"')
+    const tabsIndex = markets.indexOf("<div className={styles['market-shell__tabs']}")
     const overviewIndex = markets.indexOf("{pageTab === 'overview'")
     const loadingIndex = markets.indexOf('{loading ? <LoadingState', tabsIndex)
 
@@ -118,7 +133,7 @@ describe('prototype markets page', () => {
   })
 
   it('shows the market API error state before tab-specific content renders', () => {
-    const tabsIndex = markets.indexOf('<div className="market-shell__tabs"')
+    const tabsIndex = markets.indexOf("<div className={styles['market-shell__tabs']}")
     const overviewIndex = markets.indexOf("{pageTab === 'overview'")
     const errorIndex = markets.indexOf('{apiError ? (', tabsIndex)
 
@@ -162,8 +177,8 @@ describe('prototype markets page', () => {
     assert.match(markets, /const marketOverviewPageSize = 20/)
     assert.match(markets, /paginateRows\(visibleMarkets, marketPage, marketOverviewPageSize\)/)
     assert.match(markets, /<MarketCollection[\s\S]*markets=\{pagedMarkets\.items\}/)
-    assert.match(marketsViews, /MarketTable/)
-    assert.match(marketsViews, /MarketMobileList/)
+    assert.match(marketsViews, /PcMarketTable/)
+    assert.match(marketsViews, /MobileMarketList/)
     assert.match(markets, /pagedMarkets\.pageSize/)
   })
 
@@ -228,10 +243,10 @@ describe('prototype markets page', () => {
     assert.match(markets, /function TradingDataDashboard\(\{[\s\S]*futures[\s\S]*MarketsRouteModel\['futures'\]/)
     assert.match(markets, /useState<TradingDataTab>\('rankings'\)/)
     assert.match(markets, /activeTab === 'rankings' \? \(/)
-    assert.match(markets, /market-data-dashboard market-ranking-preview-grid/)
+    assert.match(markets, /styles\['market-data-dashboard'\][\s\S]*styles\['market-ranking-preview-grid'\]/)
     assert.match(markets, /rankings\.map\(\(group\) =>/)
     assert.match(markets, /activeTab === 'usdt-contracts' \? \(/)
-    assert.match(markets, /<section className="futures-data-pane"/)
+    assert.match(markets, /<section className=\{styles\['futures-data-pane'\]\}/)
     assert.match(markets, /function RankingCard/)
     assert.match(markets, /function buildRankings/)
     assert.match(markets, /热门币种/)
@@ -385,19 +400,25 @@ describe('prototype auth and account center', () => {
   })
 
   it('skins user pages with theme-aware tokens and compact motion', () => {
-    assert.match(styles, /--user-page-bg:\s*var\(--bn-bg\)/)
-    assert.match(styles, /--user-surface:\s*var\(--bn-surface\)/)
-    assert.match(styles, /--user-primary:\s*var\(--theme-primary\)/)
+    assert.match(marketStyles, /--user-page-bg:\s*var\(--bn-bg\)/)
+    assert.match(marketStyles, /--user-surface:\s*var\(--bn-surface\)/)
+    assert.match(marketStyles, /--user-primary:\s*var\(--theme-primary\)/)
     assert.match(styles, /\.account-shell/)
-    assert.match(styles, /\.market-shell/)
-    assert.match(styles, /\.market-shell__titleSrOnly/)
-    assert.match(styles, /\.market-zone-tabs/)
-    assert.match(styles, /\.market-mobile-list/)
-    assert.match(styles, /\.market-ranking-preview-grid/)
-    assert.doesNotMatch(styles, /\.market-table\s*{[\s\S]*display:\s*none/)
-    assert.match(pcMarketsStyles, /market-table[\s\S]*display:\s*block/)
-    assert.match(mobileMarketsStyles, /market-mobile-list[\s\S]*display:\s*grid/)
-    assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)/)
+    assert.match(marketStyles, /\.user-page/)
+    assert.match(marketStyles, /\.table-pagination/)
+    assert.match(marketStyles, /\.table-action--secondary/)
+    assert.match(marketStyles, /\.market-shell/)
+    assert.match(marketStyles, /\.market-shell__titleSrOnly/)
+    assert.match(marketStyles, /\.market-zone-tabs/)
+    assert.match(marketStyles, /\.market-ranking-preview-grid/)
+    assert.doesNotMatch(marketsContent, /export function (?:MarketTable|MarketMobileList)/)
+    assert.doesNotMatch(marketStyles, /(?:^|[\n,])\s*\.market-table(?:\s|,|\{|:)/m)
+    assert.doesNotMatch(marketStyles, /\.market-mobile-(?:list|row)/)
+    assert.match(pcMarketTableStyles, /\.table table\s*\{[^}]*border-collapse:\s*collapse/su)
+    assert.match(mobileMarketListStyles, /\.list\s*\{[^}]*display:\s*grid/su)
+    assert.match(marketStyles, /@media \(prefers-reduced-motion:\s*reduce\)/)
+    assert.doesNotMatch(marketsContent, /className="/)
+    assert.doesNotMatch(`${marketStyles}\n${pcMarketsStyles}\n${mobileMarketsStyles}\n${pcMarketTableStyles}\n${mobileMarketListStyles}`, /:global/)
   })
 
   it('remodels wallet into a Binance-style asset dashboard without changing the funding data flow', () => {
@@ -419,7 +440,7 @@ describe('prototype auth and account center', () => {
     assert.match(wallet, /wallet-balance-card/)
     assert.match(wallet, /wallet-account-grid/)
     assert.match(wallet, /wallet-risk-card/)
-    assert.match(wallet, /wallet-action-grid/)
+    assert.match(wallet, /action-card-grid/)
     assert.match(wallet, /wallet-asset-detail/)
     assert.match(wallet, /wallet-workbench/)
     assert.match(wallet, /wallet-sidebar/)

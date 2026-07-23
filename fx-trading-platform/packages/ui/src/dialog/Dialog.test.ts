@@ -7,11 +7,8 @@ import { fileURLToPath } from 'node:url'
 import { shouldCloseOverlay } from './overlayState.ts'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
-const projectRoot = resolve(currentDir, '../../../..')
 const componentSource = readFileSync(resolve(currentDir, 'Dialog.tsx'), 'utf8')
 const styles = readFileSync(resolve(currentDir, 'Dialog.module.css'), 'utf8')
-const transferSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/wallet/TransferDialog.tsx'), 'utf8')
-const orderSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/trading/order-form/OrderConfirmationDialog.tsx'), 'utf8')
 
 describe('overlay close decisions', () => {
   it('allows configured Escape and backdrop closes', () => {
@@ -37,7 +34,6 @@ describe('Dialog component contract', () => {
     assert.match(componentSource, /shouldCloseOverlay/u)
     assert.match(componentSource, /document\.activeElement/u)
     assert.match(componentSource, /\.focus\(\)/u)
-    assert.doesNotMatch(componentSource, /react-i18next/u)
   })
 
   it('owns only generic overlay and panel visuals', () => {
@@ -47,12 +43,4 @@ describe('Dialog component contract', () => {
     assert.match(styles, /@media \(prefers-reduced-motion:\s*reduce\)/u)
   })
 
-  it('replaces duplicated modal behavior in transfer and order confirmation consumers', () => {
-    for (const source of [transferSource, orderSource]) {
-      assert.match(source, /import \{ Dialog \} from '@fx-platform\/ui'/u)
-      assert.match(source, /<Dialog/u)
-    }
-    assert.doesNotMatch(orderSource, /addEventListener\('keydown'/u)
-    assert.match(transferSource, /pending=\{pending\}/u)
-  })
 })

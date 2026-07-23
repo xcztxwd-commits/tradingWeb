@@ -1,0 +1,113 @@
+.root {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 18px;
+  color: var(--binance-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.select {
+  --select-root-width: 100%;
+  --select-root-min-width: 148px;
+  --select-button-min-height: 34px;
+  --select-button-border: 1px solid var(--bn-border);
+  --select-button-radius: var(--radii-m);
+  --select-button-background: transparent;
+  --select-button-color: var(--bn-muted);
+  --select-button-padding: 0 8px 0 10px;
+  --select-menu-right: 0;
+  --select-menu-left: auto;
+  --select-menu-min-width: 148px;
+  --select-option-min-height: 32px;
+}
+
+.compact {
+  position: relative;
+  width: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--bn-text);
+  transition: color 150ms ease;
+}
+
+.compact:hover,
+.compact:focus-within {
+  color: var(--bn-text);
+}
+
+.compact .label {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: auto;
+  height: auto;
+  justify-content: center;
+  gap: 0;
+  color: inherit;
+  pointer-events: none;
+}
+
+.compact .labelText {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.selectCompact {
+  --select-root-width: 40px;
+  --select-root-min-width: 40px;
+  --select-root-min-height: 40px;
+  --select-button-width: 40px;
+  --select-button-min-width: 40px;
+  --select-button-min-height: 40px;
+  --select-button-border: 1px solid transparent;
+  --select-button-radius: 999px;
+  --select-button-background: transparent;
+  --select-button-color: transparent;
+  --select-button-padding: 0;
+  --select-button-hover-border-color: transparent;
+  --select-button-hover-background: color-mix(in srgb, var(--theme-text-primary) 7%, transparent);
+  --select-button-hover-color: var(--bn-text);
+  --select-button-focus-outline: 0;
+  --select-button-focus-border-color: transparent;
+  --select-button-focus-background: color-mix(in srgb, var(--theme-text-primary) 7%, transparent);
+  --select-button-focus-color: var(--bn-text);
+  --select-button-open-border-color: transparent;
+  --select-button-open-background: color-mix(in srgb, var(--theme-text-primary) 7%, transparent);
+  --select-button-open-color: var(--bn-text);
+  --select-value-display: none;
+  --select-chevron-display: none;
+  --select-menu-min-width: 112px;
+}
+
+:root[data-theme='minimal-white'] .compact {
+  color: var(--theme-text-muted-on-contrast);
+}
+
+:root[data-theme='minimal-white'] .selectCompact {
+  --select-button-color: var(--theme-text-muted-on-contrast);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compact {
+    transition: none;
+  }
+}

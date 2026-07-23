@@ -1,12 +1,3 @@
 .root {
   min-width: 0;
 }
-
-.root :global(.user-page__toolbar),
-.root :global(.user-page__form) {
-  grid-template-columns: 1fr;
-}
-
-.root :global(.table-action) {
-  min-height: 44px;
-}

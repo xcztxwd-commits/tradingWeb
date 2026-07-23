@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
+import { GripVertical } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -31,7 +31,6 @@ type Props = {
   watchlist: ReactNode
   header: ReactNode
   chart: ReactNode
-  chartTitle: string
   market: ReactNode
   trade: ReactNode
   bottom: ReactNode
@@ -74,7 +73,7 @@ type ActiveDrop = {
   side: TradingDropSide
 }
 
-export function TradingWorkspace({ watchlist, header, chart, chartTitle, market, trade, bottom, layoutControls }: Props) {
+export function TradingWorkspace({ watchlist, header, chart, market, trade, bottom, layoutControls }: Props) {
   const { t } = useTranslation()
   const { layout, beginSplitResize, resizeByDelta, endResize, movePanel, resetLayout, resetSignal } = layoutControls
   const splitRefs = useRef<Record<string, HTMLDivElement | null>>({})
@@ -88,7 +87,6 @@ export function TradingWorkspace({ watchlist, header, chart, chartTitle, market,
   const initialSizingAppliedRef = useRef(false)
   const previousResetSignalRef = useRef(resetSignal)
   const [activeDrop, setActiveDrop] = useState<ActiveDrop | null>(null)
-  const [mobileChartOpen, setMobileChartOpen] = useState(false)
   const [bottomPanelTargetHeight, setBottomPanelTargetHeight] = useState<number | null>(null)
   const panelContent = { watchlist, header, chart, market, trade, bottom } satisfies Record<TradingPanelId, ReactNode>
 
@@ -214,15 +212,13 @@ export function TradingWorkspace({ watchlist, header, chart, chartTitle, market,
       )
     }
 
-    const isChartPanel = node.id === 'chart'
     const isBottomPanel = node.id === 'bottom'
     const isLockedPanel = lockedPanelIds.has(node.id)
-    const chartStateClass = isChartPanel ? (mobileChartOpen ? styles.mobileChartExpanded : styles.mobileChartCollapsed) : ''
 
     const panel = (
       <ResizablePanel
         ariaLabel={t(panelLabelKeys[node.id])}
-        className={`${styles.panelFrame} ${panelClasses[node.id]} ${chartStateClass}`}
+        className={`${styles.panelFrame} ${panelClasses[node.id]}`}
       >
         <div
           ref={(element) => {
@@ -265,18 +261,7 @@ export function TradingWorkspace({ watchlist, header, chart, chartTitle, market,
             </button>
           ) : null}
           {activeDrop?.panelId === node.id ? <span className={`${styles.dropIndicator} ${styles[activeDrop.side]}`} /> : null}
-          {isChartPanel ? (
-            <button
-              type="button"
-              className={styles.mobileChartToggle}
-              aria-expanded={mobileChartOpen}
-              onClick={() => setMobileChartOpen((open) => !open)}
-            >
-              <span>{chartTitle}</span>
-              {mobileChartOpen ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
-            </button>
-          ) : null}
-          <div className={`${styles.panelContent} ${isChartPanel ? styles.chartContent : ''}`}>
+          <div className={styles.panelContent}>
             {panelContent[node.id]}
           </div>
         </div>

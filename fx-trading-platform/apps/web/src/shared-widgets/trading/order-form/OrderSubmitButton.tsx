@@ -2,6 +2,7 @@ import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { TradeSide } from '@fx-platform/frontend-core'
+import styles from './TradePanel.module.css'
 
 type Props = {
   side: TradeSide
@@ -22,13 +23,14 @@ export function OrderSubmitButton({ side, baseAsset, canTrade, disabledReason, l
   return (
     <button
       type="button"
-      className={`trade-panel__submit trade-panel__submit--${side} ${loginRequired ? 'trade-panel__submit--login' : ''}`}
+      data-trading-action={loginRequired ? 'login-required' : 'submit-order'}
+      className={`${styles['trade-panel__submit']} ${styles[`trade-panel__submit--${side}`]} ${loginRequired ? styles['trade-panel__submit--login'] : ''}`}
       disabled={disabled}
       title={disabledReason}
       aria-label={disabledReason ?? (loginRequired ? t('auth.loginAccount') : t('trading.sideOrder', { side: sideLabel, asset: baseAsset }))}
       onClick={onClick}
     >
-      {submitting ? <Loader2 size={15} className="trade-panel__spin" aria-hidden="true" /> : null}
+      {submitting ? <Loader2 size={15} className={styles['trade-panel__spin']} aria-hidden="true" /> : null}
       {label}
     </button>
   )

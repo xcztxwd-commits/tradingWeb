@@ -1,5 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
+import styles from './TradePanel.module.css'
+
 type Props = {
   ariaLabel: string
   value: string
@@ -24,10 +26,10 @@ export function PriceInput({
   const { t } = useTranslation()
 
   return (
-    <div className="trade-panel__price-row">
-      <label className={`trade-panel__field ${error ? 'trade-panel__field--invalid' : ''}`}>
-        <span className="trade-panel__control trade-panel__control--with-stepper">
-          <span className="trade-panel__field-label">{t('common.price')}</span>
+    <div className={styles['trade-panel__price-row']}>
+      <label className={`${styles['trade-panel__field']} ${error ? styles['trade-panel__field--invalid'] : ''}`}>
+        <span className={styles['trade-panel__control']}>
+          <span className={styles['trade-panel__field-label']}>{t('common.price')}</span>
           <input
             aria-label={ariaLabel}
             inputMode="decimal"
@@ -37,14 +39,14 @@ export function PriceInput({
             onChange={(event) => onChange(event.target.value)}
             onFocus={() => onFocusChange?.(true)}
           />
-          <span className="trade-panel__unit">{unit}</span>
-          <span className="trade-panel__stepper" aria-hidden="true"><span /><span /></span>
+          <span className={styles['trade-panel__unit']}>{unit}</span>
+          <span className={styles['trade-panel__stepper']} aria-hidden="true"><span /><span /></span>
         </span>
-        {error ? <span className="trade-panel__error">{error}</span> : null}
+        {error ? <span className={styles['trade-panel__error']}>{error}</span> : null}
       </label>
       <button
         type="button"
-        className="trade-panel__best-price"
+        className={styles['trade-panel__best-price']}
         disabled={bestPriceDisabled}
         onClick={onBestPrice}
       >

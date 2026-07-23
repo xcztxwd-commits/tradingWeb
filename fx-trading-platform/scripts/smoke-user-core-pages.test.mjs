@@ -44,8 +44,14 @@ describe('user core pages smoke command', () => {
     const source = readFileSync(scriptPath, 'utf8')
 
     assert.match(source, /\{ route: '\/markets', fail: \['\/api\/market\/symbols', '\/api\/market\/binance\/overview-source'\] \}/)
-    assert.match(source, /const failPaths = Array\.isArray\(check\.fail\) \? check\.fail : \[check\.fail\]/)
+    assert.match(
+      source,
+      /await step\('error state is rendered when core API requests fail',[\s\S]*?for \(const check of checks\) \{\s*const failPaths = Array\.isArray\(check\.fail\) \? check\.fail : \[check\.fail\]\s*const failedCounts = Object\.fromEntries\(failPaths\.map\(\(path\) => \[path, 0\]\)\)\s*await setAuthToken\(page, context\.accessToken, context\.refreshToken\)\s*await withFetchHandler/u
+    )
     assert.match(source, /failPaths\.find\(\(path\) => event\.request\.url\.includes\(path\)\)/)
+    assert.match(source, /failedCounts\[matchedFailPath\] \+= 1/u)
+    assert.match(source, /for \(const failPath of failPaths\) \{\s*assert\(failedCounts\[failPath\] > 0,/u)
+    assert.doesNotMatch(source, /let failedCount = 0/u)
   })
 
   it('opens the overview tab before checking the markets table', () => {
@@ -53,8 +59,18 @@ describe('user core pages smoke command', () => {
 
     assert.match(source, /await openMarketsOverviewTab\(page\)/)
     assert.match(source, /async function openMarketsOverviewTab\(page\)/)
-    assert.match(source, /await page\.waitForFunction\(\(\) => Boolean\(document\.querySelector\('\.market-shell__tabs button'\)\), 'markets tabs'\)/)
+    assert.match(source, /\[data-market-page-tab="overview"\]/)
+    assert.doesNotMatch(source, /\[role="tablist"\]\[aria-label\] button\[aria-selected\]/)
     assert.match(source, /button\.click\(\)/)
+  })
+
+  it('waits for market data loading to settle before rendering the overview deck', () => {
+    const source = readFileSync(scriptPath, 'utf8')
+
+    assert.match(
+      source,
+      /async function openMarketsOverviewTab\(page\)[\s\S]*!document\.querySelector\('\[data-state-variant="loading"\]\[role="status"\]'\)/u
+    )
   })
 
   it('asserts the batched market quote request used by the web app', () => {
@@ -76,6 +92,14 @@ describe('user core pages smoke command', () => {
     assert.match(source, /await waitFor\(\(\) => network\.requests\.some\(\(url\) => url\.includes\('\/api\/market\/quotes'\)\), 'markets quote request', 30000\)/)
   })
 
+  it('expects market actions to navigate to the canonical product trading route', () => {
+    const source = readFileSync(scriptPath, 'utf8')
+
+    assert.match(source, /\['spot', 'perpetual'\]\.includes\(routeParts\[2\]\)/u)
+    assert.match(source, /Boolean\(routeParts\[3\]\)/u)
+    assert.doesNotMatch(source, /window\.location\.pathname === '\/trading'/u)
+  })
+
   it('waits for wallet fund order loading before asserting wallet network coverage', () => {
     const source = readFileSync(scriptPath, 'utf8')
 
@@ -86,6 +110,78 @@ describe('user core pages smoke command', () => {
     const source = readFileSync(scriptPath, 'utf8')
 
     assert.match(source, /const form = document\.querySelector\('#wallet-funding form'\)/)
+    assert.match(source, /const amount = form\.querySelector\('input\[type="number"\]'\)/u)
+    assert.match(source, /const noteInput = form\.querySelector\('input:not\(\[type\]\)'\)/u)
     assert.match(source, /const submit = form\.querySelector\('button\[type="submit"\]'\)/)
+    assert.doesNotMatch(source, /input\[name="(?:amount|note)"\]/u)
+  })
+
+  it('edits an order through its labelled form without relying on removed input classes or names', () => {
+    const source = readFileSync(scriptPath, 'utf8')
+
+    assert.match(source, /const submit = document\.querySelector\('section\[aria-label\] form button\[type="submit"\]'\)/u)
+    assert.match(source, /const form = submit\?\.form/u)
+    assert.match(source, /const price = form\?\.querySelectorAll\('input'\)\[1\]/u)
+    assert.match(source, /\}, context\.modifyPrice\)/u)
+    assert.doesNotMatch(source, /form input\[name="price"\]/u)
+  })
+
+  it('confirms order cancellation through the accessible dialog', () => {
+    const source = readFileSync(scriptPath, 'utf8')
+
+    assert.match(source, /\[role="dialog"\]\[aria-modal="true"\]\[aria-labelledby="order-cancel-title"\]/u)
+    assert.match(source, /const confirmCancel = dialog\?\.querySelector\('button\[type="button"\]'\)/u)
+    assert.match(source, /confirmCancel\.click\(\)/u)
+  })
+
+  it('manages Perpetual protection through the canonical position action dialog', () => {
+    const source = readFileSync(scriptPath, 'utf8')
+
+    assert.match(source, /window\.location\.pathname === `\/trade\/perpetual\/\$\{symbol\}`/u)
+    assert.match(source, /\[role="tablist"\]\[aria-label\] button\[role="tab"\]\[aria-controls\]/u)
+    assert.match(source, /\[role="dialog"\]\[aria-modal="true"\]\[aria-label="Position action"\]/u)
+    assert.match(source, /\[aria-label="Position take-profit and stop-loss protections"\]/u)
+    assert.match(source, /const editor = dialog\?\.querySelector\('\[aria-label="Position take-profit and stop-loss protections"\]'\)/u)
+    assert.match(source, /const quantityUnit = dialog\?\.querySelector\('form select'\)/u)
+    assert.match(source, /Object\.getOwnPropertyDescriptor\(HTMLSelectElement\.prototype, 'value'\)\?\.set/u)
+    assert.match(source, /setter\.call\(quantityUnit, 'BASE'\)/u)
+    assert.match(source, /fieldset input\[inputmode="decimal"\]/u)
+    assert.match(source, /addTakeProfit\.click\(\)[\s\S]*addStopLoss\.click\(\)/u)
+    assert.match(source, /length >= 4/u)
+    assert.match(source, /context\.protectionTakeProfitPrice, context\.protectionStopLossPrice, context\.protectionQuantity/u)
+    assert.match(source, /response\.url\.includes\(`\/api\/trading\/positions\/\$\{context\.openPositionId\}\/protections`\)/u)
+    assert.match(source, /\.filter\([\s\S]*\)\.length >= 2/u)
+    assert.doesNotMatch(source, /form input\[name="stopLoss"\]/u)
+  })
+
+  it('targets rendered UI by semantic state, identity, role, and form selectors', () => {
+    const source = readFileSync(scriptPath, 'utf8')
+    const selectors = [...source.matchAll(/querySelector(?:All)?\(\s*(['"])(.*?)\1\s*\)/gu)].map((match) => match[2])
+
+    for (const selector of selectors) {
+      assert.doesNotMatch(selector, /(^|[\s>+~])\.[_a-zA-Z]/u, `class selector is not stable in a CSS Modules UI: ${selector}`)
+    }
+    assert.match(source, /\[data-state-variant="login"\]/u)
+    assert.match(source, /\[data-state-variant="loading"\]\[role="status"\]/u)
+    assert.match(source, /\[data-state-variant="error"\]\[role="alert"\]/u)
+    assert.match(source, /\[data-order-id\]/u)
+    assert.match(source, /\[data-position-id\]/u)
+    assert.match(source, /\[role="dialog"\]\[aria-modal="true"\]/u)
+    assert.match(source, /\[data-market-page-tab="overview"\]/u)
+  })
+
+  it('seeds trades with a product allowed by demo execution', () => {
+    const source = readFileSync(scriptPath, 'utf8')
+
+    assert.match(source, /const perpetualSymbol = symbols\.find\(\(item\) => item\.tradable && item\.symbol === 'BTCUSDT-PERP'\)/u)
+    assert.match(source, /const spotSymbol = symbols\.find\(\(item\) => item\.tradable && item\.symbol === 'BTCUSDT'\)/u)
+    assert.doesNotMatch(source, /item\.enabled && item\.symbol === 'EURUSD'/)
+    assert.match(source, /orderPayload\(account\.id, perpetualSymbol\.symbol, 'MARKET', 'seed-position', undefined, 'perpetual'\)/u)
+    assert.match(source, /orderPayload\(account\.id, spotSymbol\.symbol, 'LIMIT', 'seed-pending', pendingPrice, 'spot'\)/u)
+    assert.match(source, /quantityUnit:\s*'BASE'/)
+    assert.match(source, /marginMode: product === 'spot' \? 'CASH' : 'CROSS'/u)
+    assert.match(source, /\.\.\.\(product === 'spot' \? \{\} : \{ leverage: 10 \}\)/u)
+    assert.match(source, /positionsPage\.items\.find/)
+    assert.match(source, /modifyPrice:\s*\(Number\(pendingPrice\) - 0\.1\)\.toFixed\(1\)/u)
   })
 })

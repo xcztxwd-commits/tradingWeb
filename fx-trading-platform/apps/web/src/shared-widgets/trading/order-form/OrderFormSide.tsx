@@ -18,6 +18,7 @@ import {
   type TradeMarket
 } from '@fx-platform/frontend-core'
 import { translateCoreMessage } from '../../../routes/shared/translateCoreMessage'
+import styles from './TradePanel.module.css'
 
 type Props = {
   form: TradeFormState
@@ -97,7 +98,7 @@ export function OrderFormSide({
 
   return (
     <section
-      className={`trade-panel__side trade-panel__side--${form.side} trade-panel__side--${form.orderType} trade-panel__side--strategy-${form.strategyType}`}
+      className={`${styles['trade-panel__side']} ${styles[`trade-panel__side--${form.side}`]}`}
       aria-label={t('trading.sideForm', { side: sideLabel })}
       data-price-precision={pricePrecision}
       data-quantity-precision={quantityPrecision}
@@ -126,7 +127,7 @@ export function OrderFormSide({
       ) : (
         <>
           <StaticOrderField label={t('common.price')} value={t('trading.marketPrice')} disabled />
-          {marketStaleError ? <span className="trade-panel__error">{marketStaleError}</span> : null}
+          {marketStaleError ? <span className={styles['trade-panel__error']}>{marketStaleError}</span> : null}
         </>
       )}
 
@@ -201,9 +202,9 @@ function TriggerPriceField({
   const { t } = useTranslation()
 
   return (
-    <label className={`trade-panel__field trade-panel__strategy-trigger ${error ? 'trade-panel__field--invalid' : ''}`}>
-      <span className="trade-panel__control trade-panel__control--with-stepper">
-        <span className="trade-panel__field-label">{t('trading.triggerPrice')}</span>
+    <label className={`${styles['trade-panel__field']} ${error ? styles['trade-panel__field--invalid'] : ''}`}>
+      <span className={styles['trade-panel__control']}>
+        <span className={styles['trade-panel__field-label']}>{t('trading.triggerPrice')}</span>
         <input
           aria-label={t('trading.triggerPrice')}
           inputMode="decimal"
@@ -211,19 +212,19 @@ function TriggerPriceField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
         />
-        <span className="trade-panel__unit">{unit}</span>
-        <span className="trade-panel__stepper" aria-hidden="true"><span /><span /></span>
+        <span className={styles['trade-panel__unit']}>{unit}</span>
+        <span className={styles['trade-panel__stepper']} aria-hidden="true"><span /><span /></span>
       </span>
-      {error ? <span className="trade-panel__error">{error}</span> : null}
+      {error ? <span className={styles['trade-panel__error']}>{error}</span> : null}
     </label>
   )
 }
 
 function StaticOrderField({ label, value, disabled = false }: { label: string; value: string; disabled?: boolean }) {
   return (
-    <label className="trade-panel__field">
-      <span className={`trade-panel__control trade-panel__control--static ${disabled ? 'trade-panel__control--disabled' : ''}`}>
-        <span className="trade-panel__field-label">{label}</span>
+    <label className={styles['trade-panel__field']}>
+      <span className={`${styles['trade-panel__control']} ${disabled ? styles['trade-panel__control--disabled'] : ''}`}>
+        <span className={styles['trade-panel__field-label']}>{label}</span>
         <input aria-label={label} value={value} disabled readOnly />
       </span>
     </label>
@@ -235,7 +236,7 @@ function SlippageTolerance({ expanded }: { expanded: boolean }) {
 
   if (!expanded) {
     return (
-      <label className="trade-panel__check trade-panel__slippage-check">
+      <label className={`${styles['trade-panel__check']} ${styles['trade-panel__slippage-check']}`}>
         <input type="checkbox" readOnly />
         <span>{t('trading.slippageTolerance')}</span>
       </label>
@@ -243,13 +244,13 @@ function SlippageTolerance({ expanded }: { expanded: boolean }) {
   }
 
   return (
-    <section className="trade-panel__slippage">
-      <span className="trade-panel__mini-title">{t('trading.slippageTolerance')}</span>
-      <label className="trade-panel__field">
-        <span className="trade-panel__control trade-panel__control--compact">
-          <span className="trade-panel__field-label">{t('trading.slippage')}</span>
+    <section className={styles['trade-panel__slippage']}>
+      <span className={styles['trade-panel__mini-title']}>{t('trading.slippageTolerance')}</span>
+      <label className={styles['trade-panel__field']}>
+        <span className={`${styles['trade-panel__control']} ${styles['trade-panel__control--compact']}`}>
+          <span className={styles['trade-panel__field-label']}>{t('trading.slippage')}</span>
           <input aria-label={t('trading.slippage')} inputMode="decimal" placeholder="" />
-          <span className="trade-panel__unit trade-panel__unit--dropdown">{t('trading.minimumPercent', { value: '0.1' })}</span>
+          <span className={`${styles['trade-panel__unit']} ${styles['trade-panel__unit--dropdown']}`}>{t('trading.minimumPercent', { value: '0.1' })}</span>
         </span>
       </label>
     </section>
@@ -296,7 +297,7 @@ function BalanceSummary({
   const maxValue = side === 'buy' ? maxBuyAmount : marginQuantityMarket ? maxSellAmount : maxSellValue
 
   return (
-    <div className="trade-panel__balance" aria-label={t('trading.sidePreview', { side })}>
+    <div className={styles['trade-panel__balance']} aria-label={t('trading.sidePreview', { side })}>
       <span>
         <span>{t('trading.available')}</span>
         <strong>{canTrade ? formatBalance(availableValue) : '-'} {availableAsset}</strong>
@@ -306,7 +307,7 @@ function BalanceSummary({
         <strong>{canTrade ? formatDecimal(maxValue) || '--' : '--'} {maxAsset}</strong>
       </span>
       {quoteBalanceError ? (
-        <span className="trade-panel__balance-alert">
+        <span className={styles['trade-panel__balance-alert']}>
           <span>{marginQuantityMarket ? t('trading.marginRequirement') : t('trading.balanceShortfall')}</span>
           <strong>
             {marginQuantityMarket
@@ -320,7 +321,7 @@ function BalanceSummary({
         </span>
       ) : null}
       {baseBalanceError ? (
-        <span className="trade-panel__balance-alert">
+        <span className={styles['trade-panel__balance-alert']}>
           <span>{t('trading.balanceShortfall')}</span>
           <strong>{t('trading.balanceShortfallValue', { amount: formatBalance(baseShortfall), asset: baseAsset })}</strong>
         </span>

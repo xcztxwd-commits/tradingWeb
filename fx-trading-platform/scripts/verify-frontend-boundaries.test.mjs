@@ -21,6 +21,7 @@ describe('frontend dependency boundaries', () => {
 
     writeFixture(root, 'packages/ui/src/static.ts', "import '@fx-platform/frontend-core'\n")
     writeFixture(root, 'packages/ui/src/export.ts', "export { Link } from 'react-router-dom'\n")
+    writeFixture(root, 'packages/ui/src/i18n.ts', "import { useTranslation } from 'react-i18next'\n")
     writeFixture(root, 'packages/ui/src/app.ts', "import '../../../apps/web/src/app/App'\n")
     writeFixture(root, 'packages/frontend-core/src/dynamic.ts', "const ui = import('@fx-platform/ui')\n")
     writeFixture(root, 'packages/frontend-core/src/styles.ts', "import './styles.css'\n")
@@ -33,10 +34,11 @@ describe('frontend dependency boundaries', () => {
 
     const violations = findFrontendBoundaryViolations(root)
 
-    assert.equal(violations.length, 11)
+    assert.equal(violations.length, 12)
     assert.deepEqual(violations, [...violations].sort())
     assertViolation(violations, 'packages/ui/src/static.ts', '@fx-platform/frontend-core')
     assertViolation(violations, 'packages/ui/src/export.ts', 'react-router-dom')
+    assertViolation(violations, 'packages/ui/src/i18n.ts', 'react-i18next')
     assertViolation(violations, 'packages/ui/src/app.ts', 'apps/web/src/app/App')
     assertViolation(violations, 'packages/frontend-core/src/dynamic.ts', '@fx-platform/ui')
     assertViolation(violations, 'packages/frontend-core/src/styles.ts', 'styles.css')
@@ -141,7 +143,7 @@ describe('frontend dependency boundaries', () => {
     assert.equal(packageJson.scripts['frontend-core:typecheck'], 'npm --workspace packages/frontend-core run typecheck')
     assert.equal(
       packageJson.scripts['frontend:check'],
-      'npm run ui:test && npm run ui:typecheck && npm run frontend-core:test && npm run frontend-core:typecheck && npm run web:test && npm run web:build && npm run verify:frontend-boundaries && npm run verify:architecture && npm run web:bundle-budget && npm run audit:large-files'
+      'npm run ui:test && npm run ui:typecheck && npm run frontend-core:test && npm run frontend-core:typecheck && npm run web:test && npm run web:build && npm run test:visual-qa-contract && npm run verify:frontend-boundaries && npm run verify:frontend-styles && npm run verify:architecture && npm run web:bundle-budget && npm run audit:large-files'
     )
     assert.match(architectureVerifier, /findFrontendBoundaryViolations/u)
     assert.match(architectureVerifier, /Frontend dependency boundary/u)

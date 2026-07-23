@@ -50,7 +50,6 @@ const enUS = {
     loadingData: 'Loading data.',
     loadFailed: 'Load failed',
     empty: 'No data',
-    placeholderPageMessage: 'This page entry is reserved. Data and tables will be added later.',
     loginRequired: 'Login required',
     goLogin: 'Go to login',
     previousPage: 'Previous',

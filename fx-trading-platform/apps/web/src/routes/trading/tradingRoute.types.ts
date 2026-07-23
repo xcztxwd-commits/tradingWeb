@@ -47,7 +47,6 @@ export type TradingRouteModel = {
   chartCallbacks: TradingChartCallbacks
   chartSettings: ChartSettings
   chartThemeMode: ChartThemeMode
-  chartTitle: string
   controllerSentinel: string
   indicators: string[]
   loginRequired: boolean

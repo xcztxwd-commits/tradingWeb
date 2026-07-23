@@ -14,7 +14,7 @@ export function MobileShellChrome({ model }: { model: ShellChromeModel }) {
   if (model.isAuthRoute) return null
 
   return (
-    <nav className={`${styles.root} mobile-tabs`} aria-label="Mobile navigation" data-platform-view="mobile">
+    <nav className={styles.root} aria-label="Mobile navigation" data-platform-view="mobile">
       {mobileNavItems.map((item) => (
         <MobileNavLink key={item.to} item={item} pathname={model.pathname} />
       ))}
@@ -24,14 +24,18 @@ export function MobileShellChrome({ model }: { model: ShellChromeModel }) {
 
 function MobileNavLink({ item, pathname }: { item: AppNavItem; pathname: string }) {
   const { t } = useTranslation()
-  const tradeClassName = item.to.startsWith('/trade/') ? ' mobile-tab--trade' : ''
+  const isTrade = item.to.startsWith('/trade/')
   const target = item.to.startsWith('/trade/') ? resolveMobileTradingPath(pathname) : item.to
 
   return (
     <NavLink
       end={target === '/'}
       to={target}
-      className={({ isActive }) => `mobile-tab${tradeClassName}${isActive || isConfiguredNavPathActive(item, pathname) ? ' active' : ''}`}
+      className={({ isActive }) => [
+        styles.tab,
+        isTrade && styles.trade,
+        (isActive || isConfiguredNavPathActive(item, pathname)) && styles.active
+      ].filter(Boolean).join(' ')}
     >
       <item.icon size={19} aria-hidden="true" />
       <span>{t(item.labelKey)}</span>

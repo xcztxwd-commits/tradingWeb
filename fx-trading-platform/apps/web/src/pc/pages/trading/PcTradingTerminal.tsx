@@ -118,11 +118,9 @@ export function PcTradingTerminal({ model }: { model: TradingRouteModel }) {
               onSelectPrice={model.onSelectPrice}
             />
           }
-          chartTitle={model.chartTitle}
           market={
             <RightTradingPanel
               symbol={model.symbol}
-              token={model.token}
               loading={model.terminalLoading}
               onSelectPrice={model.onSelectPrice}
             />

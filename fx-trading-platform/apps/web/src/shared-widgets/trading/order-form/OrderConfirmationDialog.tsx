@@ -3,6 +3,7 @@ import { Bitcoin, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { CanonicalSubmitPayload, OcoOrderPayload } from '@fx-platform/frontend-core'
+import styles from './TradePanel.module.css'
 
 type Props = {
   payload: CanonicalSubmitPayload
@@ -32,35 +33,35 @@ export function OrderConfirmationDialog({
       ariaLabel={t('trading.orderConfirmAria', { side: sideLabel, symbol: payload.symbol })}
       closeLabel={t('trading.closeOrderConfirm')}
       pending={submitting}
-      className="trade-panel__confirm-layer"
-      backdropClassName="trade-panel__confirm-backdrop"
-      panelClassName="trade-panel__confirm"
+      className={styles['trade-panel__confirm-layer']}
+      backdropClassName={styles['trade-panel__confirm-backdrop']}
+      panelClassName={styles['trade-panel__confirm']}
     >
-      <header className="trade-panel__confirm-head">
+      <header className={styles['trade-panel__confirm-head']}>
         <strong>{t('trading.orderConfirmTitle')}</strong>
         <button type="button" aria-label={t('trading.closeOrderConfirm')} disabled={submitting} onClick={onCancel}>
           <X size={22} aria-hidden="true" />
         </button>
       </header>
 
-      <div className="trade-panel__confirm-symbol">
-        <span className="trade-panel__confirm-coin" aria-hidden="true"><Bitcoin size={14} /></span>
+      <div className={styles['trade-panel__confirm-symbol']}>
+        <span className={styles['trade-panel__confirm-coin']} aria-hidden="true"><Bitcoin size={14} /></span>
         <strong>{payload.symbol}</strong>
-        <span className={`trade-panel__confirm-side trade-panel__confirm-side--${payload.side.toLowerCase()}`}>{sideLabel}</span>
+        <span className={`${styles['trade-panel__confirm-side']} ${styles[`trade-panel__confirm-side--${payload.side.toLowerCase()}`]}`}>{sideLabel}</span>
       </div>
 
-      <dl className="trade-panel__confirm-grid trade-panel__confirm-grid--primary">
+      <dl className={`${styles['trade-panel__confirm-grid']} ${styles['trade-panel__confirm-grid--primary']}`}>
         {rows.map((row) => <ConfirmItem key={row.label} label={row.label} value={row.value} />)}
       </dl>
 
-      <p className="trade-panel__confirm-risk">{t('trading.orderConfirmRisk')}</p>
-      <label className="trade-panel__confirm-skip">
+      <p className={styles['trade-panel__confirm-risk']}>{t('trading.orderConfirmRisk')}</p>
+      <label className={styles['trade-panel__confirm-skip']}>
         <input type="checkbox" checked={skipConfirm} onChange={(event) => onSkipConfirmChange(event.target.checked)} />
         <span>{t('trading.skipConfirm')}</span>
       </label>
-      <footer className="trade-panel__confirm-actions">
-        <button type="button" className="trade-panel__confirm-cancel" disabled={submitting} onClick={onCancel}>{t('common.cancel')}</button>
-        <button type="button" className="trade-panel__confirm-submit" disabled={submitting} onClick={onConfirm}>
+      <footer className={styles['trade-panel__confirm-actions']}>
+        <button type="button" className={styles['trade-panel__confirm-cancel']} disabled={submitting} onClick={onCancel}>{t('common.cancel')}</button>
+        <button type="button" className={styles['trade-panel__confirm-submit']} disabled={submitting} onClick={onConfirm}>
           {submitting ? t('trading.submitting') : t('common.confirm')}
         </button>
       </footer>
