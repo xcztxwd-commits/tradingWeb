@@ -46,6 +46,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class MarketBundleResolverTest {
@@ -76,6 +78,25 @@ class MarketBundleResolverTest {
     tracker = new MarketSourceSelectionTracker(event -> selectionEvents.incrementAndGet(), CLOCK);
     resolver = new MarketBundleResolver(
         providerResolver, new MarketBundleValidator(CLOCK), tracker, healthRecorder, CLOCK);
+  }
+
+  @Test
+  void springWiresTestControlIntoProductionConstructor() {
+    MarketTestControlService testControlService = mock(MarketTestControlService.class);
+
+    new ApplicationContextRunner()
+        .withBean(ProviderResolver.class, () -> mock(ProviderResolver.class))
+        .withBean(MarketBundleValidator.class, () -> mock(MarketBundleValidator.class))
+        .withBean(MarketSourceSelectionTracker.class, () -> mock(MarketSourceSelectionTracker.class))
+        .withBean(ProviderHealthRecorder.class, () -> mock(ProviderHealthRecorder.class))
+        .withBean(MarketTestControlService.class, () -> testControlService)
+        .withBean(MarketBundleResolver.class)
+        .run(context -> {
+          assertThat(context).hasSingleBean(MarketBundleResolver.class);
+          assertThat(ReflectionTestUtils.getField(
+              context.getBean(MarketBundleResolver.class),
+              "testControlService")).isSameAs(testControlService);
+        });
   }
 
   @ParameterizedTest
@@ -215,7 +236,7 @@ class MarketBundleResolverTest {
     when(providerResolver.resolveCandidates("BTCUSDT", BUNDLE_CAPABILITIES))
         .thenReturn(List.of(candidate));
     when(authorityValidator.valid(providerBundle)).thenReturn(true);
-    when(testControlService.applyOverride(providerBundle)).thenReturn(authorityBundle);
+    when(testControlService.applySpotOverride(providerBundle)).thenReturn(authorityBundle);
     when(authorityValidator.valid(authorityBundle)).thenReturn(true);
     MarketBundleResolver authorityResolver = new MarketBundleResolver(
         providerResolver,
@@ -230,7 +251,7 @@ class MarketBundleResolverTest {
     assertThat(result).isSameAs(authorityBundle);
     InOrder validationOrder = inOrder(authorityValidator, testControlService);
     validationOrder.verify(authorityValidator).valid(same(providerBundle));
-    validationOrder.verify(testControlService).applyOverride(same(providerBundle));
+    validationOrder.verify(testControlService).applySpotOverride(same(providerBundle));
     validationOrder.verify(authorityValidator).valid(same(authorityBundle));
     verify(healthRecorder).recordQuoteSuccess(
         same(candidate.provider()),
@@ -254,7 +275,7 @@ class MarketBundleResolverTest {
     when(providerResolver.resolveCandidates("BTCUSDT-PERP", BUNDLE_CAPABILITIES))
         .thenReturn(List.of(candidate));
     when(authorityValidator.valid(providerBundle)).thenReturn(true);
-    when(testControlService.applyOverride(providerBundle)).thenReturn(authorityBundle);
+    when(testControlService.applyPerpetualOverride(providerBundle)).thenReturn(authorityBundle);
     when(authorityValidator.valid(authorityBundle)).thenReturn(true);
     MarketBundleResolver authorityResolver = new MarketBundleResolver(
         providerResolver,
@@ -269,7 +290,7 @@ class MarketBundleResolverTest {
     assertThat(result).isSameAs(authorityBundle);
     InOrder validationOrder = inOrder(authorityValidator, testControlService);
     validationOrder.verify(authorityValidator).valid(same(providerBundle));
-    validationOrder.verify(testControlService).applyOverride(same(providerBundle));
+    validationOrder.verify(testControlService).applyPerpetualOverride(same(providerBundle));
     validationOrder.verify(authorityValidator).valid(same(authorityBundle));
     verify(healthRecorder).recordQuoteSuccess(
         same(candidate.provider()),
