@@ -3928,6 +3928,13 @@ export async function executeP0PlanPhases({
         context.authorityState.evidence = evidence
         context.authorityBundleFixture = evidence.authorityBundleFixture
         context.authorityEvidence = evidence
+        const caseAuthority = context.p0Context?.authority
+        if (caseAuthority && typeof caseAuthority === 'object'
+          && !Object.isFrozen(caseAuthority)) {
+          caseAuthority.status = 'COMPLETE'
+          caseAuthority.authorityBundleFixture = evidence.authorityBundleFixture
+          caseAuthority.evidence = evidence
+        }
       }
       recordControlResult(phase, evidence)
       continue
@@ -7593,7 +7600,7 @@ async function submitAuthorityMarketProbe(
   return { before, mutation, ...completed }
 }
 
-function authorityFillCheck(probe, quote, rules, productType) {
+export function authorityFillCheck(probe, quote, rules, productType) {
   const expected = marketFillOracle({
     productType,
     side: probe.trade.side,
@@ -7617,7 +7624,7 @@ function authorityFillCheck(probe, quote, rules, productType) {
   }
 }
 
-function authorityPerpRiskCheck(probe, reference, rules) {
+export function authorityPerpRiskCheck(probe, reference, rules) {
   const position = authorityPositionEvidence(probe.position)
   const summary = authoritySummaryEvidence(probe.snapshot.summary)
   const side = position.positionSide === 'SHORT' || position.side === 'SHORT'
@@ -7952,7 +7959,8 @@ export async function runAuthorityBundleGate(context, options = {}) {
     )
     recordCheck(
       'baseline-spot-fill',
-      baselineSpotProbe.order.orderType === 'MARKET'
+      baselineSpotFill.pass
+        && baselineSpotProbe.order.orderType === 'MARKET'
         && baselineSpotProbe.order.status === 'FILLED'
         && authoritySourcesMatch(baselineSpotFill.trade, baselineSpotQuote),
       { symbol: SPOT_SYMBOL }
@@ -8012,18 +8020,13 @@ export async function runAuthorityBundleGate(context, options = {}) {
     )
     const baselinePerpRisk = authorityPerpRiskCheck(
       baselinePerpProbe,
-      {
-        ...baselineReference,
-        mark: authorityPositiveDecimal(
-          baselinePerpProbe.position.markPrice,
-          `${PERP_SYMBOL}.baseline.position.markPrice`
-        )
-      },
+      baselineReference,
       perpRules
     )
     recordCheck(
       'baseline-perp-fill',
-      baselinePerpProbe.order.orderType === 'MARKET'
+      baselinePerpFill.pass
+        && baselinePerpProbe.order.orderType === 'MARKET'
         && baselinePerpProbe.order.status === 'FILLED'
         && authoritySourcesMatch(baselinePerpFill.trade, baselinePerpQuote),
       { symbol: PERP_SYMBOL }
@@ -12833,7 +12836,8 @@ export async function runP0Suite(options, dependencies) {
                       details
                     )
                   : result
-                if (blockedSubruns.length > 0) {
+                if (blockedSubruns.length > 0
+                  && typeof caseContext?.evidence?.writeCaseResultAtomic === 'function') {
                   caseContext.evidence.writeCaseResultAtomic(
                     join(
                       p0Context?.run?.artifactRoot ?? prepared.runRoot,

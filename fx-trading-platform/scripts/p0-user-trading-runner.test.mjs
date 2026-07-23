@@ -4310,6 +4310,118 @@ test('authority bundle evidence is complete, fail-closed, and separates fixture 
   )
 })
 
+test('authority baseline fill and Perp risk checks use independent market evidence', () => {
+  const quote = {
+    symbol: 'BTCUSDT',
+    bid: '99',
+    ask: '100',
+    providerCode: 'binance',
+    sourceMode: 'PUBLIC_EXTERNAL'
+  }
+  const expectedFill = financialOracles.marketFillOracle({
+    productType: 'CRYPTO_SPOT',
+    side: 'BUY',
+    bid: quote.bid,
+    ask: quote.ask
+  })
+  const fillProbe = {
+    trade: {
+      id: '11111111-1111-4111-8111-111111111111',
+      orderId: '22222222-2222-4222-8222-222222222222',
+      symbol: quote.symbol,
+      productType: 'CRYPTO_SPOT',
+      side: 'BUY',
+      lots: '1',
+      price: expectedFill.filledPrice,
+      realizedPnl: '0',
+      fee: '0.050005',
+      feeAsset: 'BTC',
+      liquidityRole: 'TAKER',
+      providerCode: quote.providerCode,
+      sourceMode: quote.sourceMode
+    }
+  }
+  assert.equal(
+    smokeContracts.authorityFillCheck(fillProbe, quote, BTC_RULES, 'CRYPTO_SPOT').pass,
+    true
+  )
+  assert.equal(
+    smokeContracts.authorityFillCheck({
+      trade: { ...fillProbe.trade, price: '101' }
+    }, quote, BTC_RULES, 'CRYPTO_SPOT').pass,
+    false,
+    'a filled order at the wrong authority price must block the fixture'
+  )
+
+  const position = {
+    id: '33333333-3333-4333-8333-333333333333',
+    symbol: 'BTCUSDT-PERP',
+    side: 'LONG',
+    productType: 'LINEAR_PERP',
+    positionMode: 'ONE_WAY',
+    positionSide: 'LONG',
+    marginMode: 'CROSS',
+    leverage: '10',
+    lots: '0.001',
+    openPrice: '100',
+    markPrice: '110',
+    floatingPnl: '0.01000000',
+    marginHeld: '0.01000000',
+    maintenanceMargin: '0.00055000',
+    maintenanceMarginRate: '0.005',
+    status: 'OPEN'
+  }
+  const riskProbe = {
+    position,
+    snapshot: {
+      summary: {
+        balance: '50000',
+        equity: '50000.01',
+        usedMargin: '0.01000000',
+        freeMargin: '50000',
+        openFloatingPnl: '0.01000000',
+        maintenanceMargin: '0.00055000'
+      }
+    }
+  }
+  const reference = { symbol: position.symbol, mark: '110' }
+  const risk = smokeContracts.authorityPerpRiskCheck(
+    riskProbe,
+    reference,
+    { ...BTC_RULES, stepSize: '0.001', minQty: '0.001' }
+  )
+  assert.equal(risk.markPass, true)
+  assert.equal(risk.riskPass, true)
+  assert.equal(
+    smokeContracts.authorityPerpRiskCheck(
+      { ...riskProbe, position: { ...position, markPrice: '111' } },
+      reference,
+      { ...BTC_RULES, stepSize: '0.001', minQty: '0.001' }
+    ).markPass,
+    false,
+    'position mark must be compared with the independent reference mark'
+  )
+  assert.equal(
+    smokeContracts.authorityPerpRiskCheck({
+      ...riskProbe,
+      snapshot: {
+        summary: { ...riskProbe.snapshot.summary, openFloatingPnl: '0.02000000' }
+      }
+    }, reference, { ...BTC_RULES, stepSize: '0.001', minQty: '0.001' }).riskPass,
+    false,
+    'account summary UPL must agree with the independent position oracle'
+  )
+
+  const gateSource = smokeContracts.runAuthorityBundleGate.toString()
+  assert.match(gateSource, /baselineSpotFill\.pass/)
+  assert.match(gateSource, /baselinePerpFill\.pass/)
+  assert.match(
+    gateSource,
+    /authorityPerpRiskCheck\(\s*baselinePerpProbe,\s*baselineReference,/,
+    'the baseline gate must not replace the independent reference mark with position evidence'
+  )
+})
+
 test('authority checkpoints retain independent oracle evidence without a browser page', async (t) => {
   const artifactRoot = mkdtempSync(join(tmpdir(), 'p0-authority-oracle-checkpoint-'))
   t.after(() => rmSync(artifactRoot, { recursive: true, force: true }))
@@ -4391,6 +4503,11 @@ test('authority fixture BLOCKED blocks only declared dependent subruns and execu
     '--run-id=p0-authority-subrun-block-a1'
   ])
   const dispatched = []
+  const caseAuthority = {
+    status: 'PENDING',
+    authorityBundleFixture: 'BLOCKED'
+  }
+  let persisted
   let execution
   await smokeContracts.runP0Suite(options, {
     installSignalHandlers() { return () => {} },
@@ -4403,6 +4520,17 @@ test('authority fixture BLOCKED blocks only declared dependent subruns and execu
         databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_authority_subrun_block_a1',
         inheritedEnv: {},
         caseResults: []
+      }
+    },
+    createP0Context(prepared) {
+      return {
+        run: { artifactRoot: prepared.runRoot },
+        authority: caseAuthority,
+        evidence: {
+          writeCaseResultAtomic(_path, result) {
+            persisted = result
+          }
+        }
       }
     },
     phaseOperations: {
@@ -4436,6 +4564,7 @@ test('authority fixture BLOCKED blocks only declared dependent subruns and execu
 
   assert.deepEqual(dispatched, [['desktop-core']])
   const result = execution.caseResults[0]
+  assert.equal(persisted, result)
   assert.equal(result.id, 'PERP-01')
   assert.equal(result.status, 'BLOCKED')
   assert.deepEqual(
@@ -4449,6 +4578,8 @@ test('authority fixture BLOCKED blocks only declared dependent subruns and execu
     result.subruns[1].failureOrBlocker.reasonCode,
     'AUTHORITY_BUNDLE_FIXTURE_MISSING'
   )
+  assert.equal(caseAuthority.status, 'COMPLETE')
+  assert.equal(caseAuthority.authorityBundleFixture, 'BLOCKED')
 })
 
 test('P0 planner intersects phase case profile and viewport into one effective subrun selection', () => {
