@@ -2805,12 +2805,11 @@ test('default phase engine restarts the owned backend for each planned profile b
     async dispatchCase(definition) {
       assert.equal(activeProfile, definition.requiredSubruns[0].profile)
       events.push(`dispatch:${activeProfile}:${definition.id}`)
-      return {
-        id: definition.id,
-        status: 'PASS',
-        scopeComplete: true,
-        subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
-      }
+      return formalP0CaseFragment(
+        definition,
+        definition.requiredSubruns,
+        { scopeComplete: true }
+      )
     },
     handlers: Object.create(null),
     async writeReport() { return { status: 'TEST' } },
@@ -3274,12 +3273,11 @@ test('managed backend receives verified compose credentials and exact database i
     },
     dispatchCase: async (definition) => {
       events.push(`dispatch:${definition.id}`)
-      return {
-        id: definition.id,
-        status: 'PASS',
-        scopeComplete: true,
-        subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
-      }
+      return formalP0CaseFragment(
+        definition,
+        definition.requiredSubruns,
+        { scopeComplete: true }
+      )
     },
     handlers: Object.create(null),
     async writeReport() { return { status: 'TEST' } },
@@ -4546,12 +4544,11 @@ test('same P0 phase increments backend attempt database for every profile activa
       }
     },
     async dispatchCase(definition) {
-      return {
-        id: definition.id,
-        status: 'PASS',
-        scopeComplete: true,
-        subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
-      }
+      return formalP0CaseFragment(
+        definition,
+        definition.requiredSubruns,
+        { scopeComplete: true }
+      )
     },
     async writeReport(execution) { return { verdict: execution.plan.verdict } },
     async cleanup() { return { status: 'CLEANED' } }
@@ -5799,6 +5796,34 @@ test('recovery never terminates a reused PID without the same native process han
   )
 })
 
+function formalP0CaseFragment(definition, subruns, {
+  status = 'PASS',
+  subrunStatus = status,
+  schemaVersion = 1,
+  attempt = 1,
+  durationMs = 1,
+  scopeComplete = false,
+  artifactHashes
+} = {}) {
+  const resolvedHashes = artifactHashes ?? Object.fromEntries(subruns.map((subrun) => [
+    `subruns/${subrun.id}/result.json`,
+    `sha256:${createHash('sha256').update(`${definition.id}:${subrun.id}:${attempt}`).digest('hex')}`
+  ]))
+  return {
+    schemaVersion,
+    id: definition.id,
+    status,
+    attempt,
+    durationMs,
+    scopeComplete,
+    subruns: subruns.map((subrun) => ({
+      ...subrun,
+      status: typeof subrunStatus === 'function' ? subrunStatus(subrun) : subrunStatus
+    })),
+    artifactHashes: resolvedHashes
+  }
+}
+
 test('multi-profile cases dispatch profile slices and merge exact subrun evidence once', async () => {
   const options = p0CaseContracts.parseP0Cli([
     '--suite=p0',
@@ -5845,12 +5870,11 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
       assert.equal(definition.requiredSubruns.length > 0, true)
       assert.equal(definition.requiredSubruns.every(({ profile }) => profile === activeProfile), true)
       dispatches.push(activeProfile)
-      const fragment = {
-        id: definition.id,
-        status: 'PASS',
-        scopeComplete: false,
-        subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
-      }
+      const fragment = formalP0CaseFragment(
+        definition,
+        definition.requiredSubruns,
+        { durationMs: definition.requiredSubruns.length }
+      )
       fragments.push(fragment)
       return fragment
     },
@@ -5864,8 +5888,15 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
   assert.equal(completed.execution.caseResults.length, 1)
   const merged = completed.execution.caseResults[0]
   assert.equal(merged.id, entry.id)
+  assert.equal(merged.schemaVersion, 1)
   assert.equal(merged.status, 'PASS')
+  assert.equal(merged.attempt, 1)
+  assert.equal(merged.durationMs, entry.selectedSubruns.length)
   assert.equal(merged.scopeComplete, !entry.cropped)
+  assert.equal(
+    Object.keys(merged.artifactHashes).length,
+    entry.selectedSubruns.length
+  )
   assert.deepEqual(
     merged.subruns.map(({ id }) => id),
     entry.selectedSubruns.map(({ id }) => id)
@@ -5880,11 +5911,223 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
     /P0_CASE_FRAGMENT_DUPLICATE/
   )
   assert.throws(
-    () => smokeContracts.mergeP0CaseFragments(entry, [{
-      id: entry.id,
-      status: 'PASS',
-      subruns: [{ id: 'unexpected-subrun', profile: 'UI_CORE', viewport: 'desktop', status: 'PASS' }]
-    }]),
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      formalP0CaseFragment(entry.definition, [{
+        id: 'unexpected-subrun',
+        profile: 'UI_CORE',
+        viewport: 'desktop'
+      }])
+    ]),
+    /P0_CASE_FRAGMENT_UNEXPECTED/
+  )
+})
+
+test('formal case fragment merge preserves evidence and terminal status priority', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const entry = {
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }
+  const [core, target] = definition.requiredSubruns
+  const mergeStatuses = (leftStatus, rightStatus) => smokeContracts.mergeP0CaseFragments(
+    entry,
+    [
+      formalP0CaseFragment(definition, [{ ...core, checkpoint: 'core-evidence' }], {
+        status: leftStatus,
+        durationMs: 7
+      }),
+      formalP0CaseFragment(definition, [target], {
+        status: rightStatus,
+        durationMs: 11
+      })
+    ]
+  )
+
+  const blocked = mergeStatuses('PASS', 'BLOCKED')
+  assert.equal(blocked.status, 'BLOCKED')
+  assert.equal(blocked.schemaVersion, 1)
+  assert.equal(blocked.attempt, 1)
+  assert.equal(blocked.durationMs, 18)
+  assert.equal(blocked.scopeComplete, true)
+  assert.equal(blocked.subruns[0].checkpoint, 'core-evidence')
+  assert.deepEqual(
+    Object.keys(blocked.artifactHashes).toSorted(),
+    definition.requiredSubruns
+      .map(({ id }) => `subruns/${id}/result.json`)
+      .toSorted()
+  )
+
+  assert.equal(mergeStatuses('BLOCKED', 'INVALID_TEST').status, 'INVALID_TEST')
+  assert.equal(mergeStatuses('INVALID_TEST', 'FAIL').status, 'FAIL')
+
+  const cropped = smokeContracts.mergeP0CaseFragments(
+    { ...entry, selectedSubruns: [core], cropped: true },
+    [formalP0CaseFragment(definition, [core], { scopeComplete: true })]
+  )
+  assert.equal(cropped.scopeComplete, false)
+})
+
+test('formal case fragment merge rejects metadata and artifact hash collisions', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const [core, target] = definition.requiredSubruns
+  const entry = {
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }
+  const sharedPath = 'subruns/shared/result.json'
+  const sharedHash = `sha256:${'a'.repeat(64)}`
+  const first = formalP0CaseFragment(definition, [core], {
+    artifactHashes: { [sharedPath]: sharedHash }
+  })
+
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      first,
+      formalP0CaseFragment(definition, [target], {
+        artifactHashes: { [sharedPath]: sharedHash }
+      })
+    ]),
+    /P0_CASE_FRAGMENT_HASH_DUPLICATE/
+  )
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      first,
+      formalP0CaseFragment(definition, [target], {
+        artifactHashes: { [sharedPath]: `sha256:${'b'.repeat(64)}` }
+      })
+    ]),
+    /P0_CASE_FRAGMENT_HASH_CONFLICT/
+  )
+
+  for (const [label, patch] of [
+    ['schema', { schemaVersion: 2 }],
+    ['attempt', { attempt: 2 }]
+  ]) {
+    assert.throws(
+      () => smokeContracts.mergeP0CaseFragments(entry, [
+        first,
+        formalP0CaseFragment(definition, [target], patch)
+      ]),
+      /P0_CASE_FRAGMENT_METADATA_CONFLICT/,
+      label
+    )
+  }
+
+  for (const [label, patch] of [
+    ['duration', { durationMs: -1 }],
+    ['scope', { scopeComplete: 'false' }],
+    ['hash', { artifactHashes: { bad: 'not-a-sha256' } }]
+  ]) {
+    assert.throws(
+      () => smokeContracts.mergeP0CaseFragments(entry, [
+        formalP0CaseFragment(definition, [core], patch),
+        formalP0CaseFragment(definition, [target])
+      ]),
+      /P0_CASE_FRAGMENT_UNEXPECTED/,
+      label
+    )
+  }
+})
+
+test('formal case fragment merge rejects incomplete definitions and accessor or prototype forgery', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const [core, target] = definition.requiredSubruns
+  const entry = {
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }
+  const fragments = [
+    formalP0CaseFragment(definition, [core]),
+    formalP0CaseFragment(definition, [target])
+  ]
+
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      ...entry,
+      definition: {
+        ...definition,
+        requiredSubruns: [core, core]
+      }
+    }, fragments),
+    /P0_CASE_FRAGMENT_INCOMPLETE/
+  )
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      ...entry,
+      selectedSubruns: [core]
+    }, [fragments[0]]),
+    /P0_CASE_FRAGMENT_INCOMPLETE/
+  )
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      ...entry,
+      selectedSubruns: [{ ...core, profile: 'ORDER_TRIGGER' }, target]
+    }, fragments),
+    /P0_CASE_FRAGMENT_INCOMPLETE/
+  )
+
+  let definitionGetterCalls = 0
+  const getterDefinition = { ...definition }
+  Object.defineProperty(getterDefinition, 'requiredSubruns', {
+    enumerable: true,
+    get() {
+      definitionGetterCalls += 1
+      return definition.requiredSubruns
+    }
+  })
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      ...entry,
+      definition: getterDefinition
+    }, fragments),
+    /P0_CASE_FRAGMENT_INCOMPLETE/
+  )
+  assert.equal(definitionGetterCalls, 0)
+
+  let statusGetterCalls = 0
+  const getterFragment = formalP0CaseFragment(definition, [core])
+  Object.defineProperty(getterFragment, 'status', {
+    enumerable: true,
+    get() {
+      statusGetterCalls += 1
+      return 'PASS'
+    }
+  })
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      getterFragment,
+      fragments[1]
+    ]),
+    /P0_CASE_FRAGMENT_UNEXPECTED/
+  )
+  assert.equal(statusGetterCalls, 0)
+
+  const inheritedStatus = Object.create({ status: 'PASS' })
+  Object.assign(inheritedStatus, formalP0CaseFragment(definition, [core]))
+  delete inheritedStatus.status
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      inheritedStatus,
+      fragments[1]
+    ]),
+    /P0_CASE_FRAGMENT_UNEXPECTED/
+  )
+
+  const inheritedSubrun = Object.create(core)
+  inheritedSubrun.status = 'PASS'
+  const forgedSubrunFragment = formalP0CaseFragment(definition, [core])
+  forgedSubrunFragment.subruns = [inheritedSubrun]
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      forgedSubrunFragment,
+      fragments[1]
+    ]),
     /P0_CASE_FRAGMENT_UNEXPECTED/
   )
 })

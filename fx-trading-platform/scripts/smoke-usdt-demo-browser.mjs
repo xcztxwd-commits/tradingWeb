@@ -18,6 +18,7 @@ import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { types as utilTypes } from 'node:util'
 
 import {
   aggregateReport,
@@ -8564,51 +8565,226 @@ async function recoverP0CleanupContext(artifactBase, runId) {
   }
 }
 
-export function mergeP0CaseFragments(entry, fragments) {
-  if (!entry || typeof entry !== 'object'
-    || !Array.isArray(entry.selectedSubruns)
-    || !Array.isArray(fragments)
+const P0_CASE_STATUS_PRIORITY = {
+  PASS: 0,
+  BLOCKED: 1,
+  INVALID_TEST: 2,
+  FAIL: 3
+}
+const P0_ARTIFACT_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
+
+function isPlainP0CaseEvidence(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || utilTypes.isProxy(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+function ownP0CaseEvidenceValue(source, field) {
+  if (!isPlainP0CaseEvidence(source)) return undefined
+  const descriptor = Object.getOwnPropertyDescriptor(source, field)
+  return descriptor?.enumerable === true && Object.hasOwn(descriptor, 'value')
+    ? descriptor.value
+    : undefined
+}
+
+function denseP0CaseEvidenceArray(value) {
+  if (!Array.isArray(value) || utilTypes.isProxy(value)) return null
+  const items = []
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index))
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return null
+    items.push(descriptor.value)
+  }
+  return items
+}
+
+function p0SubrunIdentity(value) {
+  if (!isPlainP0CaseEvidence(value)) return null
+  const identity = {
+    id: ownP0CaseEvidenceValue(value, 'id'),
+    profile: ownP0CaseEvidenceValue(value, 'profile'),
+    viewport: ownP0CaseEvidenceValue(value, 'viewport')
+  }
+  return Object.values(identity).every((item) => (
+    typeof item === 'string' && item.length > 0
+  )) ? identity : null
+}
+
+function validatedP0SubrunDescriptors(value) {
+  const subruns = denseP0CaseEvidenceArray(value)
+  if (!subruns || subruns.length === 0) return null
+  const identities = subruns.map(p0SubrunIdentity)
+  if (identities.some((identity) => identity === null)
+    || new Set(identities.map(({ id }) => id)).size !== identities.length) return null
+  return identities
+}
+
+function cloneP0CaseSubrun(value) {
+  const identity = p0SubrunIdentity(value)
+  const status = ownP0CaseEvidenceValue(value, 'status')
+  if (!identity || !Object.hasOwn(P0_CASE_STATUS_PRIORITY, status)) return null
+  const clone = {}
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string') return null
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return null
+    if (descriptor.enumerable) {
+      Object.defineProperty(clone, key, {
+        value: descriptor.value,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      })
+    }
+  }
+  return { identity, status, clone }
+}
+
+function p0ArtifactHashEntries(value) {
+  if (!isPlainP0CaseEvidence(value)) return null
+  const entries = []
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string' || key.length === 0) return null
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (!descriptor || descriptor.enumerable !== true
+      || !Object.hasOwn(descriptor, 'value')
+      || typeof descriptor.value !== 'string'
+      || !P0_ARTIFACT_HASH_PATTERN.test(descriptor.value)) return null
+    entries.push([key, descriptor.value])
+  }
+  return entries
+}
+
+function exactP0SubrunIdentity(left, right) {
+  return left.id === right.id
+    && left.profile === right.profile
+    && left.viewport === right.viewport
+}
+
+export function mergeP0CaseFragments(entry, fragmentsValue) {
+  const entryId = ownP0CaseEvidenceValue(entry, 'id')
+  const definition = ownP0CaseEvidenceValue(entry, 'definition')
+  const definitionId = ownP0CaseEvidenceValue(definition, 'id')
+  const selected = validatedP0SubrunDescriptors(
+    ownP0CaseEvidenceValue(entry, 'selectedSubruns')
+  )
+  const canonical = validatedP0SubrunDescriptors(
+    ownP0CaseEvidenceValue(definition, 'requiredSubruns')
+  )
+  const cropped = ownP0CaseEvidenceValue(entry, 'cropped')
+  const fragments = denseP0CaseEvidenceArray(fragmentsValue)
+  if (typeof entryId !== 'string' || entryId.length === 0
+    || definitionId !== entryId
+    || !selected
+    || !canonical
+    || typeof cropped !== 'boolean'
+    || !fragments
     || fragments.length === 0) {
     throw new Error('P0_CASE_FRAGMENT_INCOMPLETE')
   }
-  const expected = new Map(entry.selectedSubruns.map((subrun) => [subrun?.id, subrun]))
-  if (expected.size !== entry.selectedSubruns.length || expected.has(undefined)) {
+
+  const canonicalById = new Map(canonical.map((subrun) => [subrun.id, subrun]))
+  if (selected.some((subrun) => {
+    const required = canonicalById.get(subrun.id)
+    return !required || !exactP0SubrunIdentity(subrun, required)
+  }) || (!cropped && (
+    selected.length !== canonical.length
+    || selected.some((subrun, index) => !exactP0SubrunIdentity(subrun, canonical[index]))
+  ))) {
     throw new Error('P0_CASE_FRAGMENT_INCOMPLETE')
   }
+
+  const expected = new Map(selected.map((subrun) => [subrun.id, subrun]))
   const observed = new Map()
-  let passed = true
-  for (const fragment of fragments) {
-    if (fragment?.id !== entry.id || !Array.isArray(fragment.subruns)) {
+  const hashes = new Map()
+  let schemaVersion
+  let attempt
+  let durationMs = 0
+  let status = 'PASS'
+  const includeStatus = (candidate) => {
+    if (!Object.hasOwn(P0_CASE_STATUS_PRIORITY, candidate)) {
       throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
     }
-    if (fragment.status !== 'PASS') passed = false
-    for (const subrun of fragment.subruns) {
-      const required = expected.get(subrun?.id)
-      if (!required
-        || subrun.profile !== required.profile
-        || subrun.viewport !== required.viewport) {
-        throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
-      }
-      if (observed.has(subrun.id)) throw new Error('P0_CASE_FRAGMENT_DUPLICATE')
-      observed.set(subrun.id, subrun)
-      if (subrun.status !== 'PASS') passed = false
+    if (P0_CASE_STATUS_PRIORITY[candidate] > P0_CASE_STATUS_PRIORITY[status]) {
+      status = candidate
     }
   }
+
+  for (const fragment of fragments) {
+    const fragmentId = ownP0CaseEvidenceValue(fragment, 'id')
+    const fragmentStatus = ownP0CaseEvidenceValue(fragment, 'status')
+    const fragmentSchemaVersion = ownP0CaseEvidenceValue(fragment, 'schemaVersion')
+    const fragmentAttempt = ownP0CaseEvidenceValue(fragment, 'attempt')
+    const fragmentDurationMs = ownP0CaseEvidenceValue(fragment, 'durationMs')
+    const fragmentScopeComplete = ownP0CaseEvidenceValue(fragment, 'scopeComplete')
+    const fragmentSubruns = denseP0CaseEvidenceArray(
+      ownP0CaseEvidenceValue(fragment, 'subruns')
+    )
+    const fragmentHashes = p0ArtifactHashEntries(
+      ownP0CaseEvidenceValue(fragment, 'artifactHashes')
+    )
+    if (fragmentId !== entryId
+      || !Object.hasOwn(P0_CASE_STATUS_PRIORITY, fragmentStatus)
+      || !Number.isSafeInteger(fragmentSchemaVersion) || fragmentSchemaVersion < 1
+      || !Number.isSafeInteger(fragmentAttempt) || fragmentAttempt < 1
+      || !Number.isSafeInteger(fragmentDurationMs) || fragmentDurationMs < 0
+      || typeof fragmentScopeComplete !== 'boolean'
+      || !fragmentSubruns || fragmentSubruns.length === 0
+      || !fragmentHashes) {
+      throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
+    }
+    if ((schemaVersion !== undefined && schemaVersion !== fragmentSchemaVersion)
+      || (attempt !== undefined && attempt !== fragmentAttempt)) {
+      throw new Error('P0_CASE_FRAGMENT_METADATA_CONFLICT')
+    }
+    schemaVersion ??= fragmentSchemaVersion
+    attempt ??= fragmentAttempt
+    durationMs += fragmentDurationMs
+    if (!Number.isSafeInteger(durationMs)) throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
+    includeStatus(fragmentStatus)
+
+    for (const subrun of fragmentSubruns) {
+      const evidence = cloneP0CaseSubrun(subrun)
+      const required = evidence ? expected.get(evidence.identity.id) : undefined
+      if (!evidence || !required
+        || !exactP0SubrunIdentity(evidence.identity, required)) {
+        throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
+      }
+      if (observed.has(evidence.identity.id)) throw new Error('P0_CASE_FRAGMENT_DUPLICATE')
+      observed.set(evidence.identity.id, evidence.clone)
+      includeStatus(evidence.status)
+    }
+
+    for (const [path, hash] of fragmentHashes) {
+      if (hashes.has(path)) {
+        throw new Error(hashes.get(path) === hash
+          ? 'P0_CASE_FRAGMENT_HASH_DUPLICATE'
+          : 'P0_CASE_FRAGMENT_HASH_CONFLICT')
+      }
+      hashes.set(path, hash)
+    }
+  }
+
   if (observed.size !== expected.size) throw new Error('P0_CASE_FRAGMENT_INCOMPLETE')
-  const canonical = entry.definition?.requiredSubruns ?? []
-  const exactCanonicalScope = !entry.cropped
-    && canonical.length === entry.selectedSubruns.length
-    && canonical.every((subrun, index) => {
-      const selected = entry.selectedSubruns[index]
-      return selected?.id === subrun.id
-        && selected.profile === subrun.profile
-        && selected.viewport === subrun.viewport
+  const artifactHashes = {}
+  for (const [path, hash] of hashes) {
+    Object.defineProperty(artifactHashes, path, {
+      value: hash,
+      enumerable: true,
+      configurable: true,
+      writable: true
     })
+  }
   return {
-    id: entry.id,
-    status: passed ? 'PASS' : 'FAIL',
-    scopeComplete: exactCanonicalScope,
-    subruns: entry.selectedSubruns.map(({ id }) => observed.get(id))
+    schemaVersion,
+    id: entryId,
+    status,
+    attempt,
+    durationMs,
+    scopeComplete: !cropped,
+    subruns: selected.map(({ id }) => observed.get(id)),
+    artifactHashes
   }
 }
 
