@@ -648,6 +648,10 @@ describe('real USDT demo browser smoke contract', () => {
       bindingSource,
       /const selected = await waitFor\(\(\) => page\.evaluate\([\s\S]*`Admin \$\{PERP_SYMBOL\} symbol option`, 15000\)/
     )
+    assert.match(
+      bindingSource,
+      /if \(select\.value !== option\.value\) \{[\s\S]*select\.dispatchEvent\(new Event\('change'[\s\S]*return false\s*\}\s*return true/
+    )
   })
 
   it('canonical smoke module import is quiet and side-effect free', (t) => {
