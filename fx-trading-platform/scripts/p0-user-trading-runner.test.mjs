@@ -1360,6 +1360,10 @@ test('default P0 DB oracle follows the active profile database', async (t) => {
     mode: 'discovery'
   })
 
+  assert.deepEqual(context.authority, {
+    status: 'PENDING',
+    authorityBundleFixture: 'BLOCKED'
+  })
   await context.db.query('SELECT 1;')
   prepared.activeDatabaseSegment = phaseDatabase
   await context.db.query('SELECT 2;')
@@ -3681,31 +3685,215 @@ test('default phase engine restarts the owned backend for each planned profile b
   }
 
   await smokeContracts.runP0Suite(options, dependencies)
-  assert.deepEqual(events, Object.keys(expectedWorkers).flatMap((profile) => [
-    `stop:${profile}`,
-    `free:${profile}:18086`,
-    `start:${profile}:${expectedWorkers[profile]}`,
-    `health:${profile}`,
-    `business:${profile}`,
-    `database:${profile}`,
-    `dispatch:${profile}:${expectedCase[profile]}`
-  ]))
+  assert.deepEqual(events, [
+    'stop:UI_CORE',
+    'free:UI_CORE:18086',
+    `start:UI_CORE:${expectedWorkers.UI_CORE}`,
+    'health:UI_CORE',
+    'business:UI_CORE',
+    'database:UI_CORE',
+    ...Object.keys(expectedWorkers).flatMap((profile) => [
+      `stop:${profile}`,
+      `free:${profile}:18086`,
+      `start:${profile}:${expectedWorkers[profile]}`,
+      `health:${profile}`,
+      `business:${profile}`,
+      `database:${profile}`,
+      `dispatch:${profile}:${expectedCase[profile]}`
+    ])
+  ])
 })
 
-test('default authority phase fails closed when no concrete authority operation exists', async () => {
-  const runFullyFakeAuthorityPhase = async (operation, context, plan) => {
-    if (typeof operation !== 'function') {
-      throw new Error('P0_AUTHORITY_OPERATION_REQUIRED')
+test('authority bundle evidence is complete, fail-closed, and separates fixture verdict', () => {
+  assert.equal(typeof smokeContracts.evaluateAuthorityBundleEvidence, 'function')
+  assert.equal(typeof smokeContracts.runAuthorityBundleGate, 'function')
+  const passingChecks = smokeContracts.AUTHORITY_BUNDLE_REQUIRED_CHECKS.map((id) => ({
+    id,
+    status: 'PASS'
+  }))
+
+  assert.deepEqual(
+    smokeContracts.evaluateAuthorityBundleEvidence({
+      checks: passingChecks,
+      cleanup: { status: 'PASS' }
+    }),
+    {
+      status: 'PASS',
+      authorityBundleFixture: 'PASS',
+      checks: passingChecks,
+      cleanup: { status: 'PASS' }
     }
-    return operation(context, plan)
-  }
-  await assert.rejects(
-    runFullyFakeAuthorityPhase(undefined, {}, {}),
-    /P0_AUTHORITY_OPERATION_REQUIRED/
   )
 
-  const evidence = { status: 'PASS', source: 'injected-authority-operation' }
-  assert.equal(await runFullyFakeAuthorityPhase(async () => evidence, {}, {}), evidence)
+  const comparisonFailure = passingChecks.map((check) => (
+    check.id === 'controlled-perp-risk'
+      ? { ...check, status: 'FAIL', reason: 'maintenance mismatch' }
+      : check
+  ))
+  assert.deepEqual(
+    smokeContracts.evaluateAuthorityBundleEvidence({
+      checks: comparisonFailure,
+      cleanup: { status: 'PASS' }
+    }).authorityBundleFixture,
+    'BLOCKED',
+    'a fully executed comparison failure is evidence, not a matrix-wide exception'
+  )
+
+  assert.throws(
+    () => smokeContracts.evaluateAuthorityBundleEvidence({
+      checks: passingChecks.slice(1),
+      cleanup: { status: 'PASS' }
+    }),
+    /P0_AUTHORITY_EVIDENCE_INCOMPLETE/
+  )
+  assert.throws(
+    () => smokeContracts.evaluateAuthorityBundleEvidence({
+      checks: passingChecks,
+      cleanup: { status: 'FAIL' }
+    }),
+    /P0_AUTHORITY_CLEANUP_FAILED/
+  )
+})
+
+test('authority checkpoints retain independent oracle evidence without a browser page', async (t) => {
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'p0-authority-oracle-checkpoint-'))
+  t.after(() => rmSync(artifactRoot, { recursive: true, force: true }))
+  const oracleEvidence = [{
+    symbol: 'BTCUSDT-PERP',
+    markPrice: '60005.00000000',
+    floatingPnl: '1.23450000',
+    maintenanceMargin: '0.30002500'
+  }]
+  const checkpoint = await smokeContracts.captureCheckpoint(
+    { run: { artifactRoot } },
+    'controlled-risk',
+    {
+      caseId: 'authority',
+      oracleEvidence: async () => oracleEvidence
+    }
+  )
+
+  assert.deepEqual(checkpoint.oracleEvidence, oracleEvidence)
+  assert.deepEqual(checkpoint.uiEvidence, [])
+  assert.deepEqual(checkpoint.artifactHashes, {})
+})
+
+test('a complete authority fixture BLOCKED remains control PASS and does not abort matrix phases', async () => {
+  const controlResults = []
+  const phases = []
+  await smokeContracts.executeP0PlanPhases({
+    plan: { phases: ['authority', 'ui-core'] },
+    context: {},
+    controlResults,
+    operations: {
+      async runAuthority() {
+        phases.push('authority')
+        return {
+          status: 'PASS',
+          authorityBundleFixture: 'BLOCKED',
+          checks: [{ id: 'controlled-perp-risk', status: 'FAIL' }]
+        }
+      },
+      async runMatrixPhase(phase) {
+        phases.push(phase)
+      }
+    }
+  })
+
+  assert.deepEqual(phases, ['authority', 'ui-core'])
+  assert.equal(controlResults[0].status, 'PASS')
+  assert.equal(controlResults[0].evidence.authorityBundleFixture, 'BLOCKED')
+})
+
+test('authority fixture BLOCKED blocks only declared dependent subruns and executes the rest', async () => {
+  const blockedAuthority = {
+    status: 'COMPLETE',
+    authorityBundleFixture: 'BLOCKED'
+  }
+  const wholeCase = P0_CASES.find(({ id }) => id === 'SPOT-05')
+  const independent = P0_CASES.find(({ id }) => id === 'SPOT-01')
+  assert.deepEqual(
+    smokeContracts.authorityBlockedSubruns(
+      wholeCase,
+      wholeCase.requiredSubruns,
+      blockedAuthority
+    ),
+    wholeCase.requiredSubruns
+  )
+  assert.deepEqual(
+    smokeContracts.authorityBlockedSubruns(
+      independent,
+      independent.requiredSubruns,
+      blockedAuthority
+    ),
+    []
+  )
+
+  const options = p0CaseContracts.parseP0Cli([
+    '--suite=p0',
+    '--phase=selected',
+    '--case=PERP-01',
+    '--run-id=p0-authority-subrun-block-a1'
+  ])
+  const dispatched = []
+  let execution
+  await smokeContracts.runP0Suite(options, {
+    installSignalHandlers() { return () => {} },
+    async initializeOwnership() {
+      return {
+        runRoot: resolve(tmpdir(), options.runId),
+        options,
+        ownerId: 'b'.repeat(64),
+        matrixDatabase: 'fx_p0_user_e2e_authority_subrun_block_a1',
+        databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_authority_subrun_block_a1',
+        inheritedEnv: {},
+        caseResults: []
+      }
+    },
+    phaseOperations: {
+      async runPreflight() {
+        return { id: 'AUTH-01', status: 'PASS' }
+      },
+      async runAuthority() {
+        return {
+          status: 'PASS',
+          authorityBundleFixture: 'BLOCKED',
+          checks: [{ id: 'controlled-perp-risk', status: 'FAIL' }]
+        }
+      },
+      async writeReport(context, plan) {
+        return exactP0ReportPhaseEvidence(context, plan)
+      }
+    },
+    async dispatchCase(definition) {
+      dispatched.push(definition.requiredSubruns.map(({ id }) => id))
+      return formalP0CaseFragment(definition, definition.requiredSubruns)
+    },
+    handlers: Object.create(null),
+    async writeReport(value) {
+      execution = value
+      return { status: 'TEST' }
+    },
+    async cleanup() {
+      return { status: 'CLEANED' }
+    }
+  })
+
+  assert.deepEqual(dispatched, [['desktop-core']])
+  const result = execution.caseResults[0]
+  assert.equal(result.id, 'PERP-01')
+  assert.equal(result.status, 'BLOCKED')
+  assert.deepEqual(
+    result.subruns.map(({ id, status }) => ({ id, status })),
+    [
+      { id: 'desktop-core', status: 'PASS' },
+      { id: 'desktop-target-mark', status: 'BLOCKED' }
+    ]
+  )
+  assert.equal(
+    result.subruns[1].failureOrBlocker.reasonCode,
+    'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+  )
 })
 
 test('P0 planner intersects phase case profile and viewport into one effective subrun selection', () => {
@@ -5419,6 +5607,7 @@ test('same P0 phase increments backend attempt database for every profile activa
   })
   assert.equal(preparedAttempt, null)
   assert.deepEqual(attempts, [
+    { phase: 'authority', attempt: 1, profile: 'UI_CORE' },
     { phase: 'source', attempt: 1, profile: 'UI_CORE' },
     { phase: 'source', attempt: 2, profile: 'ORDER_TRIGGER' },
     { phase: 'source', attempt: 3, profile: 'FUNDING_ONLY' },
@@ -7420,6 +7609,92 @@ test('canonical child is singular argless and cleaned before authority and matri
     'matrix:resilience',
     'matrix:ui',
     'report'
+  ])
+})
+
+test('authority phase owns an isolated UI_CORE database and backend before its gate', async () => {
+  const events = []
+  const context = {
+    runId: 'p0-authority-owned-profile-a1',
+    ownerId: 'a'.repeat(64),
+    matrixDatabase: 'fx_p0_user_e2e_authority_fallback_a1',
+    databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_authority_fallback_a1',
+    inheritedEnv: {
+      ADMIN_BOOTSTRAP_ENABLED: 'false',
+      ADMIN_BOOTSTRAP_EMAIL: 'poison@example.com',
+      ADMIN_BOOTSTRAP_PASSWORD: 'poison'
+    }
+  }
+  const authorityDatabase = 'fx_p0_user_e2e_authority_owned_a1'
+  await smokeContracts.executeP0PlanPhases({
+    plan: { phases: ['authority'] },
+    context,
+    operations: {
+      async stopProfileBackend(_context, profile) {
+        events.push(`stop:${profile}`)
+      },
+      async assertProfilePortFree(port, _context, profile) {
+        events.push(`free:${profile}:${port}`)
+      },
+      async prepareProfileDatabase({ phase, attempt }) {
+        assert.equal(phase, 'authority')
+        assert.equal(attempt, 1)
+        events.push('database:prepare')
+        return {
+          segmentName: authorityDatabase,
+          databaseUrl: `jdbc:postgresql://127.0.0.1:5432/${authorityDatabase}`
+        }
+      },
+      async startProfileBackend({ phase, profile, attempt, databaseUrl, environment }) {
+        assert.equal(phase, 'authority')
+        assert.equal(profile, 'UI_CORE')
+        assert.equal(attempt, 1)
+        assert.equal(databaseUrl.endsWith(`/${authorityDatabase}`), true)
+        assert.equal(environment.TRADING_PENDING_ORDER_EXECUTION_ENABLED, 'false')
+        assert.equal(environment.TRADING_PROTECTIVE_ORDER_EXECUTION_ENABLED, 'false')
+        assert.equal(environment.TRADING_FUNDING_ENABLED, 'false')
+        assert.equal(environment.TRADING_LIQUIDATION_ENABLED, 'false')
+        assert.equal(environment.ADMIN_BOOTSTRAP_ENABLED, 'true')
+        assert.match(environment.ADMIN_BOOTSTRAP_EMAIL, /^p0-authority-/)
+        assert.notEqual(environment.ADMIN_BOOTSTRAP_EMAIL, 'poison@example.com')
+        assert.notEqual(environment.ADMIN_BOOTSTRAP_PASSWORD, 'poison')
+        events.push('backend:start')
+        return { profile, databaseUrl }
+      },
+      async waitForProfileHealth() {
+        events.push('backend:health')
+      },
+      async waitForProfileBusinessEndpoint() {
+        events.push('backend:business')
+      },
+      async verifyProfileDatabaseIdentity() {
+        events.push('database:verify')
+      },
+      async ensureParentFrontends() {
+        assert.equal(context.activeDatabaseSegment, authorityDatabase)
+        events.push('frontends')
+      },
+      async runAuthority(received) {
+        assert.equal(received.activeDatabaseSegment, authorityDatabase)
+        events.push('gate')
+        return {
+          status: 'PASS',
+          authorityBundleFixture: 'PASS'
+        }
+      }
+    }
+  })
+
+  assert.deepEqual(events, [
+    'stop:UI_CORE',
+    'free:UI_CORE:18086',
+    'database:prepare',
+    'backend:start',
+    'backend:health',
+    'backend:business',
+    'database:verify',
+    'frontends',
+    'gate'
   ])
 })
 
@@ -9629,7 +9904,7 @@ test('typed domain fields reject null while structural null remains safe', (t) =
       enabled: false
     },
     checks: [
-      { authorityBundleFixture: 'FAIL' },
+      { authorityBundleFixture: 'BLOCKED' },
       { authorityBundleFixture: 'OUTSIDE_CONTRACT' }
     ]
   }
@@ -9667,7 +9942,7 @@ test('typed domain fields reject null while structural null remains safe', (t) =
       amount: '1.2500',
       enabled: false
     })
-    assert.deepEqual(safe.checks, [{ authorityBundleFixture: 'FAIL' }, {}])
+    assert.deepEqual(safe.checks, [{ authorityBundleFixture: 'BLOCKED' }, {}])
   }
 })
 
@@ -9691,7 +9966,7 @@ test('positive evidence schema preserves unified case records', (t) => {
     preconditions: [{ status: 'PASS' }],
     userActions: [{ status: 'PASS', note: 'clicked-order-submit' }],
     fixtureActions: [{ status: 'PASS' }],
-    authorityBundleFixture: 'FAIL',
+    authorityBundleFixture: 'BLOCKED',
     contractProbes: [{ status: 'PASS' }],
     replayProbes: [{ id: 'AUTH-01', status: 'PASS' }],
     checkpoints: [{ status: 'PASS' }],
@@ -9727,7 +10002,7 @@ test('positive evidence schema preserves unified case records', (t) => {
     for (const field of expectedFields) assert.equal(Object.hasOwn(safe, field), true, field)
     assert.equal(safe.startedAt, record.startedAt)
     assert.equal(safe.finishedAt, record.finishedAt)
-    assert.equal(safe.authorityBundleFixture, 'FAIL')
+    assert.equal(safe.authorityBundleFixture, 'BLOCKED')
     assert.deepEqual(safe.financialCalculation, { amount: '1.2500' })
     assert.equal(Object.hasOwn(safe, unknownContainer), false)
     assert.deepEqual(safe[persistenceDigest(unknownContainer)], { status: 'PASS' })

@@ -38,6 +38,15 @@ import {
   runCase
 } from './p0-user-trading-cases.mjs'
 import { CASE_HANDLERS } from './p0-user-trading-core-cases.mjs'
+import {
+  alignPriceToTick,
+  effectiveQuantityStep,
+  floorToStep,
+  marketFillOracle,
+  perpPositionOracle,
+  tolerancesFromRules,
+  withinTolerance
+} from './p0-user-trading-oracles.mjs'
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
 const P0_COMPOSE_PROJECT = 'infra'
@@ -3544,6 +3553,77 @@ const P0_CONTROL_PHASES = new Set([
   'report'
 ])
 
+export const AUTHORITY_BUNDLE_REQUIRED_CHECKS = Object.freeze([
+  'baseline-spot-ui-quote',
+  'baseline-spot-fill',
+  'baseline-perp-ui-quote',
+  'baseline-perp-fill',
+  'baseline-perp-mark',
+  'baseline-perp-risk',
+  'controlled-spot-target-distance',
+  'controlled-perp-target-distance',
+  'controlled-spot-override',
+  'controlled-perp-override',
+  'controlled-spot-ui-quote',
+  'controlled-perp-ui-quote',
+  'controlled-spot-fill',
+  'controlled-perp-fill',
+  'controlled-perp-mark',
+  'controlled-perp-risk',
+  'restored-spot-provider',
+  'restored-perp-provider'
+])
+
+export function evaluateAuthorityBundleEvidence({ checks, cleanup } = {}) {
+  if (!isPlainP0ControlOutcome(cleanup) || cleanup.status !== 'PASS') {
+    throw new Error('P0_AUTHORITY_CLEANUP_FAILED')
+  }
+  if (!Array.isArray(checks)
+    || checks.length !== AUTHORITY_BUNDLE_REQUIRED_CHECKS.length) {
+    throw new Error('P0_AUTHORITY_EVIDENCE_INCOMPLETE')
+  }
+  const byId = new Map()
+  for (const check of checks) {
+    if (!isPlainP0ControlOutcome(check)
+      || typeof check.id !== 'string'
+      || !['PASS', 'FAIL'].includes(check.status)
+      || byId.has(check.id)) {
+      throw new Error('P0_AUTHORITY_EVIDENCE_INCOMPLETE')
+    }
+    byId.set(check.id, check)
+  }
+  if (AUTHORITY_BUNDLE_REQUIRED_CHECKS.some((id) => !byId.has(id))
+    || [...byId.keys()].some((id) => !AUTHORITY_BUNDLE_REQUIRED_CHECKS.includes(id))) {
+    throw new Error('P0_AUTHORITY_EVIDENCE_INCOMPLETE')
+  }
+  return {
+    status: 'PASS',
+    authorityBundleFixture: checks.every(({ status }) => status === 'PASS')
+      ? 'PASS'
+      : 'BLOCKED',
+    checks,
+    cleanup
+  }
+}
+
+export function authorityBlockedSubruns(definition, selectedSubruns, authorityState) {
+  if (authorityState?.status !== 'COMPLETE') return []
+  if (authorityState.authorityBundleFixture === 'PASS') return []
+  if (authorityState.authorityBundleFixture !== 'BLOCKED') {
+    throw new Error('P0_AUTHORITY_STATE_INVALID')
+  }
+  if (!Array.isArray(selectedSubruns)
+    || !definition?.authority
+    || !['none', 'whole-case', 'subruns'].includes(definition.authority.mode)
+    || !Array.isArray(definition.authority.subruns)) {
+    throw new Error('P0_AUTHORITY_CASE_CONTRACT_INVALID')
+  }
+  if (definition.authority.mode === 'none') return []
+  if (definition.authority.mode === 'whole-case') return [...selectedSubruns]
+  const authorityIds = new Set(definition.authority.subruns)
+  return selectedSubruns.filter(({ id }) => authorityIds.has(id))
+}
+
 const P0_PROFILE_LIFECYCLE_OPERATIONS = [
   'stopProfileBackend',
   'assertProfilePortFree',
@@ -3552,6 +3632,7 @@ const P0_PROFILE_LIFECYCLE_OPERATIONS = [
   'waitForProfileBusinessEndpoint',
   'verifyProfileDatabaseIdentity'
 ]
+const p0AuthorityCredentials = new WeakMap()
 
 function supportsP0ProfileLifecycle(operations) {
   const available = P0_PROFILE_LIFECYCLE_OPERATIONS.filter(
@@ -3562,6 +3643,21 @@ function supportsP0ProfileLifecycle(operations) {
     throw new Error('P0_PROFILE_LIFECYCLE_INCOMPLETE')
   }
   return true
+}
+
+function p0AuthorityAdminCredentials(context) {
+  if (typeof context?.ownerId !== 'string' || !/^[a-f0-9]{64}$/.test(context.ownerId)) {
+    throw new Error('P0_AUTHORITY_OWNER_ID_REQUIRED')
+  }
+  let credentials = p0AuthorityCredentials.get(context)
+  if (credentials) return credentials
+  const identity = randomUUID().replaceAll('-', '')
+  credentials = Object.freeze({
+    email: `p0-authority-${identity.slice(0, 16)}@example.invalid`,
+    password: `P0!${randomUUID().replaceAll('-', '')}Aa9`
+  })
+  p0AuthorityCredentials.set(context, credentials)
+  return credentials
 }
 
 async function activateP0Profile({ phase, profile, attempt, context, operations, signal }) {
@@ -3581,10 +3677,21 @@ async function activateP0Profile({ phase, profile, attempt, context, operations,
   if (typeof databaseUrl !== 'string') throw new Error('P0_PROFILE_DATABASE_URL_REQUIRED')
   context.activeDatabaseSegment = phaseDatabase.segmentName
   context.activeDatabaseUrl = databaseUrl
+  const authorityCredentials = phase === 'authority'
+    ? p0AuthorityAdminCredentials(context)
+    : null
+  const authorityEnvironment = authorityCredentials
+    ? {
+        ADMIN_BOOTSTRAP_ENABLED: 'true',
+        ADMIN_BOOTSTRAP_EMAIL: authorityCredentials.email,
+        ADMIN_BOOTSTRAP_PASSWORD: authorityCredentials.password
+      }
+    : {}
   const environment = buildBackendEnvironment(profile, {
     DATABASE_URL: databaseUrl,
     SPRING_DATASOURCE_URL: databaseUrl,
-    SERVER_PORT: '18086'
+    SERVER_PORT: '18086',
+    ...authorityEnvironment
   }, context.inheritedEnv ?? {})
   const backend = await operations.startProfileBackend({
     phase,
@@ -3796,10 +3903,32 @@ export async function executeP0PlanPhases({
       continue
     }
     if (phase === 'authority') {
+      if (supportsP0ProfileLifecycle(operations)) {
+        await activateP0Profile({
+          phase,
+          profile: 'UI_CORE',
+          attempt: 1,
+          context,
+          operations,
+          signal
+        })
+      }
+      throwIfP0Aborted(signal)
       await operations.ensureParentFrontends?.(context, { signal })
       throwIfP0Aborted(signal)
       const evidence = await operations.runAuthority(context, plan, { signal })
       throwIfP0Aborted(signal)
+      if (['PASS', 'BLOCKED'].includes(evidence?.authorityBundleFixture)) {
+        context.authorityState ??= {
+          status: 'PENDING',
+          authorityBundleFixture: 'BLOCKED'
+        }
+        context.authorityState.status = 'COMPLETE'
+        context.authorityState.authorityBundleFixture = evidence.authorityBundleFixture
+        context.authorityState.evidence = evidence
+        context.authorityBundleFixture = evidence.authorityBundleFixture
+        context.authorityEvidence = evidence
+      }
       recordControlResult(phase, evidence)
       continue
     }
@@ -7074,8 +7203,1198 @@ export async function captureCheckpoint(context, name, scope = {}) {
     networkEvidence,
     eventEvidence,
     apiEvidence: await resolveEvidence(scope.apiEvidence) ?? [],
-    dbEvidence: await resolveEvidence(scope.dbEvidence) ?? []
+    dbEvidence: await resolveEvidence(scope.dbEvidence) ?? [],
+    oracleEvidence: await resolveEvidence(scope.oracleEvidence) ?? []
   }
+}
+
+const AUTHORITY_MOBILE_VIEWPORT = Object.freeze({
+  name: 'p0-authority-mobile',
+  width: 390,
+  height: 844,
+  mobile: true
+})
+const AUTHORITY_ADMIN_VIEWPORT = Object.freeze({
+  name: 'p0-authority-admin',
+  width: 1440,
+  height: 900,
+  mobile: false
+})
+const AUTHORITY_TARGET_TTL = 'PT5M'
+
+function authorityDecimal(value, label) {
+  const result = String(value)
+  if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(result)) {
+    throw new Error(`P0_AUTHORITY_DECIMAL_REQUIRED: ${label}`)
+  }
+  return result
+}
+
+function authorityPositiveDecimal(value, label) {
+  const result = authorityDecimal(value, label)
+  if (Number(result) <= 0) throw new Error(`P0_AUTHORITY_POSITIVE_DECIMAL_REQUIRED: ${label}`)
+  return result
+}
+
+function authorityRules(rawRules) {
+  if (!rawRules || typeof rawRules !== 'object') {
+    throw new Error('P0_AUTHORITY_RULES_REQUIRED')
+  }
+  const rules = { ...rawRules }
+  for (const field of [
+    'tickSize',
+    'stepSize',
+    'minQty',
+    'minNotional',
+    'contractSize',
+    'contractMultiplier',
+    'persistenceStep'
+  ]) {
+    if (rules[field] !== undefined && rules[field] !== null) {
+      rules[field] = authorityDecimal(rules[field], `rules.${field}`)
+    }
+  }
+  authorityPositiveDecimal(rules.tickSize, 'rules.tickSize')
+  authorityPositiveDecimal(rules.stepSize, 'rules.stepSize')
+  return rules
+}
+
+function authorityQuoteEvidence(quote) {
+  if (!quote || typeof quote !== 'object') throw new Error('P0_AUTHORITY_QUOTE_REQUIRED')
+  return {
+    symbol: quote.symbol,
+    bid: authorityPositiveDecimal(quote.bid, `${quote.symbol}.bid`),
+    ask: authorityPositiveDecimal(quote.ask, `${quote.symbol}.ask`),
+    ...(quote.markPrice === undefined || quote.markPrice === null
+      ? {}
+      : { markPrice: authorityPositiveDecimal(quote.markPrice, `${quote.symbol}.markPrice`) }),
+    providerCode: quote.providerCode,
+    providerSymbol: quote.providerSymbol,
+    sourceMode: quote.sourceMode,
+    asOf: quote.asOf,
+    expiresAt: quote.expiresAt,
+    stale: quote.stale
+  }
+}
+
+function authorityReferenceEvidence(reference) {
+  if (!reference || typeof reference !== 'object') {
+    throw new Error('P0_AUTHORITY_PERP_REFERENCE_REQUIRED')
+  }
+  return {
+    symbol: reference.symbol,
+    bid: authorityPositiveDecimal(reference.bid, `${reference.symbol}.bid`),
+    ask: authorityPositiveDecimal(reference.ask, `${reference.symbol}.ask`),
+    mark: authorityPositiveDecimal(reference.mark, `${reference.symbol}.mark`),
+    index: authorityPositiveDecimal(reference.index, `${reference.symbol}.index`),
+    providerCode: reference.providerCode,
+    providerSymbol: reference.providerSymbol,
+    sourceMode: reference.sourceMode,
+    asOf: reference.asOf,
+    expiresAt: reference.expiresAt,
+    stale: reference.stale
+  }
+}
+
+function authorityTradeEvidence(trade) {
+  if (!trade || typeof trade !== 'object') throw new Error('P0_AUTHORITY_TRADE_REQUIRED')
+  return {
+    id: trade.id,
+    orderId: trade.orderId,
+    symbol: trade.symbol,
+    productType: trade.productType,
+    positionSide: trade.positionSide,
+    marginMode: trade.marginMode,
+    side: trade.side,
+    lots: authorityPositiveDecimal(trade.lots, `${trade.symbol}.trade.lots`),
+    price: authorityPositiveDecimal(trade.price, `${trade.symbol}.trade.price`),
+    realizedPnl: authorityDecimal(trade.realizedPnl ?? '0', `${trade.symbol}.trade.realizedPnl`),
+    fee: authorityDecimal(trade.fee ?? '0', `${trade.symbol}.trade.fee`),
+    feeAsset: trade.feeAsset,
+    liquidityRole: trade.liquidityRole,
+    sourceMode: trade.sourceMode,
+    providerCode: trade.providerCode,
+    executedAt: trade.executedAt
+  }
+}
+
+function authorityPositionEvidence(position) {
+  if (!position || typeof position !== 'object') {
+    throw new Error('P0_AUTHORITY_POSITION_REQUIRED')
+  }
+  return {
+    id: position.id,
+    symbol: position.symbol,
+    side: position.side,
+    productType: position.productType,
+    positionMode: position.positionMode,
+    positionSide: position.positionSide,
+    marginMode: position.marginMode,
+    leverage: position.leverage,
+    lots: authorityPositiveDecimal(position.lots, `${position.symbol}.position.lots`),
+    openPrice: authorityPositiveDecimal(
+      position.openPrice,
+      `${position.symbol}.position.openPrice`
+    ),
+    markPrice: authorityPositiveDecimal(
+      position.markPrice,
+      `${position.symbol}.position.markPrice`
+    ),
+    floatingPnl: authorityDecimal(
+      position.floatingPnl,
+      `${position.symbol}.position.floatingPnl`
+    ),
+    marginHeld: authorityPositiveDecimal(
+      position.marginHeld,
+      `${position.symbol}.position.marginHeld`
+    ),
+    maintenanceMargin: authorityDecimal(
+      position.maintenanceMargin,
+      `${position.symbol}.position.maintenanceMargin`
+    ),
+    maintenanceMarginRate: authorityDecimal(
+      position.maintenanceMarginRate,
+      `${position.symbol}.position.maintenanceMarginRate`
+    ),
+    status: position.status
+  }
+}
+
+function authoritySummaryEvidence(summary) {
+  if (!summary || typeof summary !== 'object') {
+    throw new Error('P0_AUTHORITY_ACCOUNT_SUMMARY_REQUIRED')
+  }
+  return {
+    balance: authorityDecimal(summary.balance, 'summary.balance'),
+    equity: authorityDecimal(summary.equity, 'summary.equity'),
+    usedMargin: authorityDecimal(summary.usedMargin, 'summary.usedMargin'),
+    freeMargin: authorityDecimal(summary.freeMargin, 'summary.freeMargin'),
+    openFloatingPnl: authorityDecimal(
+      summary.openFloatingPnl ?? '0',
+      'summary.openFloatingPnl'
+    ),
+    maintenanceMargin: authorityDecimal(
+      summary.maintenanceMargin ?? '0',
+      'summary.maintenanceMargin'
+    )
+  }
+}
+
+function authoritySourcesMatch(left, right) {
+  return typeof left?.providerCode === 'string'
+    && left.providerCode === right?.providerCode
+    && typeof left?.sourceMode === 'string'
+    && left.sourceMode === right?.sourceMode
+    && (left.providerSymbol === undefined
+      || right?.providerSymbol === undefined
+      || left.providerSymbol === right.providerSymbol)
+}
+
+function authorityQuotesMatch(left, right, rules) {
+  if (!left || !right) return false
+  const tolerance = tolerancesFromRules(rules).price
+  try {
+    return withinTolerance(
+      authorityPositiveDecimal(left.bid, 'visible.bid'),
+      authorityPositiveDecimal(right.bid, 'authority.bid'),
+      tolerance
+    ) && withinTolerance(
+      authorityPositiveDecimal(left.ask, 'visible.ask'),
+      authorityPositiveDecimal(right.ask, 'authority.ask'),
+      tolerance
+    )
+  } catch {
+    return false
+  }
+}
+
+function authorityUiQuoteComplete(quote) {
+  try {
+    authorityPositiveDecimal(quote?.bid, 'visible.bid')
+    authorityPositiveDecimal(quote?.ask, 'visible.ask')
+    return Number(quote.bid) <= Number(quote.ask)
+  } catch {
+    return false
+  }
+}
+
+function authorityTargetQuote(baseline, rules) {
+  const bid = alignPriceToTick(String(Number(baseline.bid) * 1.3), rules)
+  const ask = alignPriceToTick(String(Number(baseline.ask) * 1.3), rules)
+  if (Number(ask) <= Number(bid)) throw new Error('P0_AUTHORITY_TARGET_SPREAD_INVALID')
+  return { symbol: baseline.symbol, bid, ask }
+}
+
+function authorityTargetIsFarEnough(baseline, target) {
+  return Number(target.bid) >= Number(baseline.bid) * 1.2
+    && Number(target.ask) >= Number(baseline.ask) * 1.2
+}
+
+async function authorityVisibleQuote(page) {
+  return page.evaluate(() => {
+    const tradeButton = document.querySelector(
+      '[data-platform-view="mobile"] [data-testid="mobile-trade-action"]'
+    )
+    const shell = tradeButton?.closest('section')
+    const ask = shell?.querySelector('span[class*="ask"]')?.nextElementSibling
+    const bid = shell?.querySelector('span[class*="bid"]')?.nextElementSibling
+    const visible = (element) => {
+      const rect = element?.getBoundingClientRect()
+      const style = element ? getComputedStyle(element) : null
+      return Boolean(rect && style && rect.width > 0 && rect.height > 0
+        && rect.bottom > 0 && rect.right > 0
+        && rect.top < window.innerHeight && rect.left < window.innerWidth
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number(style.opacity) > 0)
+    }
+    if (ask?.tagName !== 'STRONG' || bid?.tagName !== 'STRONG'
+      || !visible(shell) || !visible(ask) || !visible(bid)) return null
+    return {
+      ask: ask.textContent?.trim().replaceAll(',', '') ?? '',
+      bid: bid.textContent?.trim().replaceAll(',', '') ?? ''
+    }
+  })
+}
+
+async function readAuthorityUiQuote(page, target, signal) {
+  const route = resolveP0TradeRoute(target)
+  const baseUrl = p0PageBaseUrl(
+    page,
+    'webBaseUrl',
+    'WEB_BASE_URL',
+    'http://127.0.0.1:5199'
+  )
+  page.p0TradePanel = undefined
+  await page.navigate(`${baseUrl}${route}`)
+  await page.waitForFunction(
+    (expectedRoute, expectedSymbol) => {
+      const mobile = document.querySelector('[data-platform-view="mobile"]')
+      const button = mobile?.querySelector('[data-testid="mobile-trade-action"]')
+      const shell = button?.closest('section')
+      const symbol = shell?.querySelector('header button strong')?.textContent?.trim()
+      return window.location.pathname === expectedRoute
+        && symbol === expectedSymbol
+        && Boolean(button)
+    },
+    `authority mobile route ${route}`,
+    route,
+    target.symbol
+  )
+  return waitFor(
+    () => authorityVisibleQuote(page),
+    `visible authority quote ${target.symbol}`,
+    15000,
+    signal
+  )
+}
+
+async function waitForAuthorityUiTarget(page, target, expected, rules, signal) {
+  let visible = await readAuthorityUiQuote(page, target, signal)
+  try {
+    visible = await waitFor(async () => {
+      const candidate = await authorityVisibleQuote(page)
+      if (candidate) visible = candidate
+      return authorityQuotesMatch(candidate, expected, rules) ? candidate : null
+    }, `authority UI target ${target.symbol}`, 15000, signal)
+    return { status: 'PASS', visible }
+  } catch (error) {
+    if (!String(error?.message).startsWith('Timed out waiting for authority UI target')) {
+      throw error
+    }
+    return { status: 'FAIL', visible }
+  }
+}
+
+async function waitForAuthorityUiBootstrap(context, page, target, rules, signal) {
+  let latest
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const visible = await readAuthorityUiQuote(page, target, signal)
+    const quote = authorityQuoteEvidence(
+      (await context.api.snapshotMarket(target.symbol)).quote
+    )
+    latest = { status: 'FAIL', visible, quote }
+    if (authorityQuotesMatch(visible, quote, rules)) {
+      return { status: 'PASS', visible, quote }
+    }
+  }
+  return latest
+}
+
+function newAuthorityTrade(before, after, symbol, side) {
+  const known = new Set(before.trades.map(({ id }) => id))
+  return after.trades.find((trade) => (
+    !known.has(trade.id) && trade.symbol === symbol && trade.side === side
+  ))
+}
+
+function matchingAuthorityOrder(snapshot, trade) {
+  return snapshot.orders.find(({ id }) => id === trade.orderId)
+}
+
+function openAuthorityPosition(snapshot, symbol) {
+  return snapshot.positions.find((position) => (
+    position.symbol === symbol && position.status === 'OPEN'
+  ))
+}
+
+async function submitAuthorityMarketProbe(
+  context,
+  page,
+  { product, symbol, side, amount },
+  signal
+) {
+  const before = await context.api.snapshotAccount(page)
+  await context.ui.openTradePanel(page, { product, symbol, mobile: true })
+  const mutation = await context.ui.submitOrderViaUi(page, {
+    side,
+    orderType: 'MARKET',
+    amount
+  })
+  const completed = await waitFor(async () => {
+    const snapshot = await context.api.snapshotAccount(page)
+    const trade = newAuthorityTrade(before, snapshot, symbol, side)
+    if (!trade) return null
+    const order = matchingAuthorityOrder(snapshot, trade)
+    if (!order || order.status !== 'FILLED') return null
+    const position = product === 'perpetual'
+      ? openAuthorityPosition(snapshot, symbol)
+      : undefined
+    if (product === 'perpetual' && !position) return null
+    return { snapshot, trade, order, position }
+  }, `authority ${symbol} ${side} MARKET fill`, 30000, signal)
+  return { before, mutation, ...completed }
+}
+
+function authorityFillCheck(probe, quote, rules, productType) {
+  const expected = marketFillOracle({
+    productType,
+    side: probe.trade.side,
+    bid: authorityPositiveDecimal(quote.bid, `${quote.symbol}.bid`),
+    ask: authorityPositiveDecimal(quote.ask, `${quote.symbol}.ask`)
+  })
+  const trade = authorityTradeEvidence(probe.trade)
+  const tolerance = tolerancesFromRules(rules).price
+  return {
+    pass: withinTolerance(trade.price, expected.filledPrice, tolerance)
+      && trade.liquidityRole === expected.liquidityRole
+      && authoritySourcesMatch(trade, quote),
+    oracle: {
+      symbol: quote.symbol,
+      side: probe.trade.side,
+      price: expected.filledPrice,
+      slippage: expected.slippage,
+      liquidityRole: expected.liquidityRole
+    },
+    trade
+  }
+}
+
+function authorityPerpRiskCheck(probe, reference, rules) {
+  const position = authorityPositionEvidence(probe.position)
+  const summary = authoritySummaryEvidence(probe.snapshot.summary)
+  const side = position.positionSide === 'SHORT' || position.side === 'SHORT'
+    ? 'SHORT'
+    : 'LONG'
+  const oracle = perpPositionOracle({
+    side,
+    quantity: position.lots.replace(/^-/, ''),
+    entryPrice: position.openPrice,
+    markPrice: authorityPositiveDecimal(reference.mark, `${reference.symbol}.mark`),
+    leverage: authorityPositiveDecimal(position.leverage, `${position.symbol}.leverage`),
+    positionMargin: position.marginHeld,
+    maintenanceMarginRate: position.maintenanceMarginRate,
+    rules
+  })
+  const amountTolerance = oracle.tolerances.amount
+  const priceTolerance = oracle.tolerances.price
+  return {
+    markPass: withinTolerance(position.markPrice, reference.mark, priceTolerance),
+    riskPass: withinTolerance(
+      position.floatingPnl,
+      oracle.unrealizedPnl,
+      amountTolerance
+    ) && withinTolerance(
+      position.marginHeld,
+      oracle.initialMargin,
+      amountTolerance
+    ) && withinTolerance(
+      position.maintenanceMargin,
+      oracle.maintenanceMargin,
+      amountTolerance
+    ) && withinTolerance(
+      summary.usedMargin,
+      position.marginHeld,
+      amountTolerance
+    ) && withinTolerance(
+      summary.openFloatingPnl,
+      oracle.unrealizedPnl,
+      amountTolerance
+    ) && withinTolerance(
+      summary.maintenanceMargin,
+      position.maintenanceMargin,
+      amountTolerance
+    ),
+    oracle: {
+      symbol: reference.symbol,
+      markPrice: authorityPositiveDecimal(reference.mark, `${reference.symbol}.mark`),
+      floatingPnl: oracle.unrealizedPnl,
+      marginHeld: oracle.initialMargin,
+      maintenanceMargin: oracle.maintenanceMargin
+    },
+    position,
+    summary
+  }
+}
+
+async function closeAuthorityPerpProbe(context, page, signal) {
+  const before = await context.api.snapshotAccount(page)
+  const position = openAuthorityPosition(before, PERP_SYMBOL)
+  if (!position) return null
+  const side = position.positionSide === 'SHORT' || position.side === 'SHORT'
+    ? 'BUY'
+    : 'SELL'
+  await context.ui.openTradePanel(page, {
+    product: 'perpetual',
+    symbol: PERP_SYMBOL,
+    mobile: true
+  })
+  const mutation = await context.ui.submitOrderViaUi(page, {
+    side,
+    orderType: 'MARKET',
+    amount: authorityPositiveDecimal(position.lots, 'perp.close.lots')
+  })
+  const completed = await waitFor(async () => {
+    const snapshot = await context.api.snapshotAccount(page)
+    const trade = newAuthorityTrade(before, snapshot, PERP_SYMBOL, side)
+    return trade && !openAuthorityPosition(snapshot, PERP_SYMBOL)
+      ? { snapshot, trade }
+      : null
+  }, 'authority Perp probe close', 30000, signal)
+  return { mutation, ...completed }
+}
+
+async function closeAuthoritySpotProbe(context, page, rules, signal) {
+  const before = await context.api.snapshotAccount(page)
+  const wallet = before.wallets.find(({ walletType, asset }) => (
+    walletType === 'SPOT' && asset === 'BTC'
+  ))
+  if (!wallet || Number(wallet.available) <= 0) return null
+  const amount = floorToStep(
+    authorityPositiveDecimal(wallet.available, 'spot.wallet.available'),
+    effectiveQuantityStep(rules)
+  )
+  if (Number(amount) < Number(rules.minQty ?? effectiveQuantityStep(rules))) return null
+  await context.ui.openTradePanel(page, {
+    product: 'spot',
+    symbol: SPOT_SYMBOL,
+    mobile: true
+  })
+  const mutation = await context.ui.submitOrderViaUi(page, {
+    side: 'SELL',
+    orderType: 'MARKET',
+    amount
+  })
+  const completed = await waitFor(async () => {
+    const snapshot = await context.api.snapshotAccount(page)
+    const trade = newAuthorityTrade(before, snapshot, SPOT_SYMBOL, 'SELL')
+    return trade ? { snapshot, trade } : null
+  }, 'authority Spot probe close', 30000, signal)
+  return { mutation, ...completed }
+}
+
+async function cleanupAuthorityProbes({
+  context,
+  userPage,
+  adminPage,
+  adminAuthenticated,
+  spotRules,
+  signal
+}) {
+  const failures = []
+  if (!adminAuthenticated) {
+    failures.push(new Error('P0_AUTHORITY_ADMIN_SESSION_REQUIRED'))
+  } else {
+    for (const symbol of [SPOT_SYMBOL, PERP_SYMBOL]) {
+      try {
+        await context.api.admin(
+          adminPage,
+          `/api/admin/market/test-control/overrides/${encodeURIComponent(symbol)}`,
+          { method: 'DELETE', signal }
+        )
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+  }
+  try {
+    await closeAuthorityPerpProbe(context, userPage, signal)
+  } catch (error) {
+    failures.push(error)
+  }
+  if (spotRules) {
+    try {
+      await closeAuthoritySpotProbe(context, userPage, spotRules, signal)
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  let snapshot
+  let activeOrders = []
+  let openPositions = []
+  try {
+    snapshot = await context.api.snapshotAccount(userPage)
+    activeOrders = snapshot.orders.filter(
+      ({ status }) => !TERMINAL_ORDER_STATUSES.has(status)
+    )
+    if (activeOrders.length > 0) {
+      await context.ui.openTradePanel(userPage, {
+        product: 'spot',
+        symbol: SPOT_SYMBOL,
+        mobile: true
+      })
+      await context.ui.cancelAllOrdersViaUi(userPage)
+      snapshot = await waitFor(async () => {
+        const candidate = await context.api.snapshotAccount(userPage)
+        return candidate.orders.every(({ status }) => TERMINAL_ORDER_STATUSES.has(status))
+          ? candidate
+          : null
+      }, 'authority active order cleanup', 30000, signal)
+      activeOrders = snapshot.orders.filter(
+        ({ status }) => !TERMINAL_ORDER_STATUSES.has(status)
+      )
+    }
+    openPositions = snapshot.positions.filter(({ status }) => status === 'OPEN')
+    if (activeOrders.length > 0 || openPositions.length > 0) {
+      failures.push(new Error('P0_AUTHORITY_PROBE_CLEANUP_INCOMPLETE'))
+    }
+  } catch (error) {
+    failures.push(error)
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'P0_AUTHORITY_PROBE_CLEANUP_FAILED')
+  }
+  return {
+    status: 'PASS',
+    count: {
+      order: activeOrders.length,
+      position: openPositions.length
+    },
+    snapshot
+  }
+}
+
+async function closeAuthorityBrowserPages(userPage, adminPage, browser) {
+  const failures = []
+  for (const [page, label] of [
+    [adminPage, 'authority Admin'],
+    [userPage, 'authority user']
+  ]) {
+    if (!page) continue
+    try {
+      page.assertEvidenceClean(label)
+      await page.close()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (browser) {
+    try {
+      await browser.close()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'P0_AUTHORITY_BROWSER_CLEANUP_FAILED')
+  }
+}
+
+export async function runAuthorityBundleGate(context, options = {}) {
+  if (!context?.run || typeof context.userFactory !== 'function') {
+    throw new Error('P0_AUTHORITY_CONTEXT_REQUIRED')
+  }
+  const signal = options.signal
+  const checks = new Map()
+  const recordCheck = (id, pass, evidence = {}) => {
+    if (!AUTHORITY_BUNDLE_REQUIRED_CHECKS.includes(id) || checks.has(id)) {
+      throw new Error('P0_AUTHORITY_EVIDENCE_INCOMPLETE')
+    }
+    checks.set(id, {
+      id,
+      reasonCode: id.replaceAll('-', '_').toUpperCase(),
+      status: pass ? 'PASS' : 'FAIL',
+      ...evidence
+    })
+  }
+  const checkpoints = []
+  const snapshots = []
+  const oracleEvidence = []
+  const fixtureActions = []
+  const credentials = context.userFactory('AUTHORITY-BUNDLE')
+  const adminCredentials = options.adminCredentials
+  let browser
+  let userPage
+  let adminPage
+  let adminAuthenticated = false
+  let spotRules
+  let cleanup
+  let cleanupFailure
+  let mainFailure
+  let database
+
+  try {
+    throwIfP0Aborted(signal)
+    database = await context.db.assertDedicatedDatabase()
+    browser = await context.ui.launchBrowser()
+    userPage = await context.ui.createEvidencePage(browser, {
+      caseId: 'authority',
+      viewport: AUTHORITY_MOBILE_VIEWPORT
+    })
+    adminPage = await context.ui.createEvidencePage(browser, {
+      caseId: 'authority-admin',
+      viewport: AUTHORITY_ADMIN_VIEWPORT
+    })
+    await userPage.navigate(`${userPage.p0Options.webBaseUrl}/register`)
+    const registration = await context.ui.registerViaUi(userPage, credentials)
+    fixtureActions.push({
+      action: 'register-authority-user-via-ui',
+      reasonCode: 'REGISTER_AUTHORITY_USER_VIA_UI',
+      requestRef: registration.requestRef
+    })
+    const adminLogin = await context.ui.loginAdminViaUi(adminPage, adminCredentials)
+    adminAuthenticated = true
+    fixtureActions.push({
+      action: 'login-admin-via-ui',
+      reasonCode: 'LOGIN_ADMIN_VIA_UI',
+      requestRef: adminLogin.requestRef
+    })
+    for (const symbol of [SPOT_SYMBOL, PERP_SYMBOL]) {
+      await context.api.admin(
+        adminPage,
+        `/api/admin/market/test-control/overrides/${encodeURIComponent(symbol)}`,
+        { method: 'DELETE' }
+      )
+      fixtureActions.push({
+        action: 'clear-authority-override',
+        reasonCode: 'CLEAR_AUTHORITY_OVERRIDE',
+        symbol
+      })
+    }
+
+    const spotTarget = { product: 'spot', symbol: SPOT_SYMBOL, mobile: true }
+    const rawSpotRules = await context.api.user(
+      userPage,
+      `/api/market/symbols/${encodeURIComponent(SPOT_SYMBOL)}/rules`
+    )
+    spotRules = authorityRules(rawSpotRules)
+    const baselineSpotBootstrap = await waitForAuthorityUiBootstrap(
+      context,
+      userPage,
+      spotTarget,
+      spotRules,
+      signal
+    )
+    const baselineSpotVisible = baselineSpotBootstrap.visible
+    const baselineSpotQuote = baselineSpotBootstrap.quote
+    recordCheck(
+      'baseline-spot-ui-quote',
+      baselineSpotBootstrap.status === 'PASS'
+        && authorityUiQuoteComplete(baselineSpotVisible)
+        && typeof baselineSpotQuote.providerCode === 'string'
+        && typeof baselineSpotQuote.sourceMode === 'string'
+        && baselineSpotQuote.stale !== true,
+      { symbol: SPOT_SYMBOL }
+    )
+    const baselineSpotProbe = await submitAuthorityMarketProbe(
+      context,
+      userPage,
+      {
+        product: 'spot',
+        symbol: SPOT_SYMBOL,
+        side: 'BUY',
+        amount: '100'
+      },
+      signal
+    )
+    const baselineSpotFill = authorityFillCheck(
+      baselineSpotProbe,
+      baselineSpotQuote,
+      spotRules,
+      'CRYPTO_SPOT'
+    )
+    recordCheck(
+      'baseline-spot-fill',
+      baselineSpotProbe.order.orderType === 'MARKET'
+        && baselineSpotProbe.order.status === 'FILLED'
+        && authoritySourcesMatch(baselineSpotFill.trade, baselineSpotQuote),
+      { symbol: SPOT_SYMBOL }
+    )
+    oracleEvidence.push(baselineSpotFill.oracle)
+    await closeAuthoritySpotProbe(context, userPage, spotRules, signal)
+
+    const perpTarget = {
+      product: 'perpetual',
+      symbol: PERP_SYMBOL,
+      mobile: true
+    }
+    const rawPerpRules = await context.api.user(
+      userPage,
+      `/api/market/symbols/${encodeURIComponent(PERP_SYMBOL)}/rules`
+    )
+    const perpRules = authorityRules(rawPerpRules)
+    const baselinePerpBootstrap = await waitForAuthorityUiBootstrap(
+      context,
+      userPage,
+      perpTarget,
+      perpRules,
+      signal
+    )
+    const baselinePerpVisible = baselinePerpBootstrap.visible
+    const baselinePerpQuote = baselinePerpBootstrap.quote
+    const rawBaselineReference = await context.api.user(
+      userPage,
+      `/api/market/perpetuals/${encodeURIComponent(PERP_SYMBOL)}/reference`
+    )
+    const baselineReference = authorityReferenceEvidence(rawBaselineReference)
+    recordCheck(
+      'baseline-perp-ui-quote',
+      baselinePerpBootstrap.status === 'PASS'
+        && authorityUiQuoteComplete(baselinePerpVisible)
+        && typeof baselinePerpQuote.providerCode === 'string'
+        && typeof baselinePerpQuote.sourceMode === 'string'
+        && baselinePerpQuote.stale !== true,
+      { symbol: PERP_SYMBOL }
+    )
+    const baselinePerpProbe = await submitAuthorityMarketProbe(
+      context,
+      userPage,
+      {
+        product: 'perpetual',
+        symbol: PERP_SYMBOL,
+        side: 'BUY',
+        amount: '0.001'
+      },
+      signal
+    )
+    const baselinePerpFill = authorityFillCheck(
+      baselinePerpProbe,
+      baselinePerpQuote,
+      perpRules,
+      'LINEAR_PERP'
+    )
+    const baselinePerpRisk = authorityPerpRiskCheck(
+      baselinePerpProbe,
+      {
+        ...baselineReference,
+        mark: authorityPositiveDecimal(
+          baselinePerpProbe.position.markPrice,
+          `${PERP_SYMBOL}.baseline.position.markPrice`
+        )
+      },
+      perpRules
+    )
+    recordCheck(
+      'baseline-perp-fill',
+      baselinePerpProbe.order.orderType === 'MARKET'
+        && baselinePerpProbe.order.status === 'FILLED'
+        && authoritySourcesMatch(baselinePerpFill.trade, baselinePerpQuote),
+      { symbol: PERP_SYMBOL }
+    )
+    recordCheck(
+      'baseline-perp-mark',
+      baselinePerpRisk.markPass
+        && authoritySourcesMatch(baselineReference, baselinePerpQuote),
+      { symbol: PERP_SYMBOL }
+    )
+    recordCheck('baseline-perp-risk', baselinePerpRisk.riskPass, { symbol: PERP_SYMBOL })
+    oracleEvidence.push(baselinePerpFill.oracle, baselinePerpRisk.oracle)
+    await closeAuthorityPerpProbe(context, userPage, signal)
+    snapshots.push({
+      checkpoint: 'baseline',
+      market: [baselineSpotQuote, baselinePerpQuote, baselineReference],
+      trade: [baselineSpotFill.trade, baselinePerpFill.trade],
+      position: [baselinePerpRisk.position],
+      data: { summary: baselinePerpRisk.summary }
+    })
+    checkpoints.push(await context.evidence.captureCheckpoint(
+      context,
+      'baseline',
+      {
+        caseId: 'authority',
+        pages: [userPage, adminPage],
+        apiEvidence: [snapshots.at(-1)],
+        dbEvidence: async () => [
+          await context.db.snapshotTradingRows(baselinePerpProbe.snapshot.account.id)
+        ],
+        oracleEvidence: [...oracleEvidence]
+      }
+    ))
+
+    const spotOverride = authorityTargetQuote(baselineSpotQuote, spotRules)
+    const perpOverride = authorityTargetQuote(baselinePerpQuote, perpRules)
+    recordCheck(
+      'controlled-spot-target-distance',
+      authorityTargetIsFarEnough(baselineSpotQuote, spotOverride),
+      { symbol: SPOT_SYMBOL }
+    )
+    recordCheck(
+      'controlled-perp-target-distance',
+      authorityTargetIsFarEnough(baselinePerpQuote, perpOverride),
+      { symbol: PERP_SYMBOL }
+    )
+    const [spotOverrideResponse, perpOverrideResponse] = await Promise.all([
+      context.api.admin(
+        adminPage,
+        '/api/admin/market/test-control/overrides',
+        {
+          method: 'POST',
+          body: { ...spotOverride, ttl: AUTHORITY_TARGET_TTL }
+        }
+      ),
+      context.api.admin(
+        adminPage,
+        '/api/admin/market/test-control/overrides',
+        {
+          method: 'POST',
+          body: { ...perpOverride, ttl: AUTHORITY_TARGET_TTL }
+        }
+      )
+    ])
+    fixtureActions.push(
+      {
+        action: 'set-authority-override',
+        reasonCode: 'SET_AUTHORITY_OVERRIDE',
+        symbol: SPOT_SYMBOL
+      },
+      {
+        action: 'set-authority-override',
+        reasonCode: 'SET_AUTHORITY_OVERRIDE',
+        symbol: PERP_SYMBOL
+      }
+    )
+    const controlledSpotQuote = authorityQuoteEvidence(spotOverrideResponse)
+    const controlledPerpQuote = authorityQuoteEvidence(perpOverrideResponse)
+    recordCheck(
+      'controlled-spot-override',
+      authorityQuotesMatch(controlledSpotQuote, spotOverride, spotRules),
+      { symbol: SPOT_SYMBOL }
+    )
+    recordCheck(
+      'controlled-perp-override',
+      authorityQuotesMatch(controlledPerpQuote, perpOverride, perpRules),
+      { symbol: PERP_SYMBOL }
+    )
+
+    const spotUiTarget = await waitForAuthorityUiTarget(
+      userPage,
+      spotTarget,
+      spotOverride,
+      spotRules,
+      signal
+    )
+    recordCheck(
+      'controlled-spot-ui-quote',
+      spotUiTarget.status === 'PASS',
+      { symbol: SPOT_SYMBOL }
+    )
+    const perpUiTarget = await waitForAuthorityUiTarget(
+      userPage,
+      perpTarget,
+      perpOverride,
+      perpRules,
+      signal
+    )
+    recordCheck(
+      'controlled-perp-ui-quote',
+      perpUiTarget.status === 'PASS',
+      { symbol: PERP_SYMBOL }
+    )
+    const [controlledSpotMarket, controlledPerpMarket] = await Promise.all([
+      context.api.snapshotMarket(SPOT_SYMBOL),
+      context.api.snapshotMarket(PERP_SYMBOL)
+    ])
+    const controlledSpotAuthority = authorityQuoteEvidence(controlledSpotMarket.quote)
+    const controlledPerpAuthority = authorityQuoteEvidence(controlledPerpMarket.quote)
+    snapshots.push({
+      checkpoint: 'controlled-quote',
+      market: [
+        controlledSpotQuote,
+        controlledPerpQuote,
+        { ...controlledSpotAuthority, bid: spotUiTarget.visible.bid, ask: spotUiTarget.visible.ask },
+        { ...controlledPerpAuthority, bid: perpUiTarget.visible.bid, ask: perpUiTarget.visible.ask }
+      ]
+    })
+    checkpoints.push(await context.evidence.captureCheckpoint(
+      context,
+      'controlled-quote',
+      {
+        caseId: 'authority',
+        pages: [userPage, adminPage],
+        apiEvidence: [snapshots.at(-1)],
+        dbEvidence: async () => [
+          await context.db.snapshotTradingRows(baselinePerpProbe.snapshot.account.id)
+        ]
+      }
+    ))
+
+    let controlledSpotFill
+    if (spotUiTarget.status === 'PASS') {
+      const probe = await submitAuthorityMarketProbe(
+        context,
+        userPage,
+        {
+          product: 'spot',
+          symbol: SPOT_SYMBOL,
+          side: 'BUY',
+          amount: '100'
+        },
+        signal
+      )
+      controlledSpotFill = authorityFillCheck(
+        probe,
+        controlledSpotAuthority,
+        spotRules,
+        'CRYPTO_SPOT'
+      )
+      recordCheck(
+        'controlled-spot-fill',
+        controlledSpotFill.pass
+          && authorityQuotesMatch(controlledSpotAuthority, spotOverride, spotRules),
+        { symbol: SPOT_SYMBOL }
+      )
+      oracleEvidence.push(controlledSpotFill.oracle)
+    } else {
+      recordCheck('controlled-spot-fill', false, { symbol: SPOT_SYMBOL })
+    }
+
+    let controlledPerpFill
+    let controlledPerpRisk
+    if (perpUiTarget.status === 'PASS') {
+      const probe = await submitAuthorityMarketProbe(
+        context,
+        userPage,
+        {
+          product: 'perpetual',
+          symbol: PERP_SYMBOL,
+          side: 'BUY',
+          amount: '0.001'
+        },
+        signal
+      )
+      const rawControlledReference = await context.api.user(
+        userPage,
+        `/api/market/perpetuals/${encodeURIComponent(PERP_SYMBOL)}/reference`
+      )
+      const controlledReference = authorityReferenceEvidence(rawControlledReference)
+      controlledPerpFill = authorityFillCheck(
+        probe,
+        controlledPerpAuthority,
+        perpRules,
+        'LINEAR_PERP'
+      )
+      controlledPerpRisk = authorityPerpRiskCheck(
+        probe,
+        controlledReference,
+        perpRules
+      )
+      const controlledPerpAuthorityMatches = authorityQuotesMatch(
+        controlledPerpAuthority,
+        perpOverride,
+        perpRules
+      ) && authorityQuotesMatch(controlledReference, perpOverride, perpRules)
+        && withinTolerance(
+          controlledReference.mark,
+          controlledPerpAuthority.markPrice,
+          tolerancesFromRules(perpRules).price
+        )
+      recordCheck(
+        'controlled-perp-fill',
+        controlledPerpFill.pass && controlledPerpAuthorityMatches,
+        { symbol: PERP_SYMBOL }
+      )
+      recordCheck(
+        'controlled-perp-mark',
+        controlledPerpRisk.markPass
+          && controlledPerpAuthorityMatches
+          && authoritySourcesMatch(controlledReference, controlledPerpAuthority),
+        { symbol: PERP_SYMBOL }
+      )
+      recordCheck(
+        'controlled-perp-risk',
+        controlledPerpRisk.riskPass && controlledPerpAuthorityMatches,
+        { symbol: PERP_SYMBOL }
+      )
+      oracleEvidence.push(controlledPerpFill.oracle, controlledPerpRisk.oracle)
+      snapshots.push({
+        checkpoint: 'controlled-probes',
+        market: [controlledSpotAuthority, controlledPerpAuthority, controlledReference],
+        trade: [
+          ...(controlledSpotFill ? [controlledSpotFill.trade] : []),
+          controlledPerpFill.trade
+        ],
+        position: [controlledPerpRisk.position],
+        data: { summary: controlledPerpRisk.summary }
+      })
+    } else {
+      recordCheck('controlled-perp-fill', false, { symbol: PERP_SYMBOL })
+      recordCheck('controlled-perp-mark', false, { symbol: PERP_SYMBOL })
+      recordCheck('controlled-perp-risk', false, { symbol: PERP_SYMBOL })
+      snapshots.push({
+        checkpoint: 'controlled-probes',
+        market: [controlledSpotAuthority, controlledPerpAuthority],
+        trade: controlledSpotFill ? [controlledSpotFill.trade] : []
+      })
+    }
+    checkpoints.push(await context.evidence.captureCheckpoint(
+      context,
+      'controlled-probes',
+      {
+        caseId: 'authority',
+        pages: [userPage, adminPage],
+        apiEvidence: [snapshots.at(-1)],
+        dbEvidence: async () => [
+          await context.db.snapshotTradingRows(baselinePerpProbe.snapshot.account.id)
+        ],
+        oracleEvidence: [...oracleEvidence]
+      }
+    ))
+
+    for (const symbol of [SPOT_SYMBOL, PERP_SYMBOL]) {
+      await context.api.admin(
+        adminPage,
+        `/api/admin/market/test-control/overrides/${encodeURIComponent(symbol)}`,
+        { method: 'DELETE' }
+      )
+      fixtureActions.push({
+        action: 'delete-authority-override',
+        reasonCode: 'DELETE_AUTHORITY_OVERRIDE',
+        symbol
+      })
+    }
+    const restoredSpotBootstrap = await waitForAuthorityUiBootstrap(
+      context,
+      userPage,
+      spotTarget,
+      spotRules,
+      signal
+    )
+    const restoredSpotVisible = restoredSpotBootstrap.visible
+    const restoredSpotQuote = restoredSpotBootstrap.quote
+    const restoredPerpBootstrap = await waitForAuthorityUiBootstrap(
+      context,
+      userPage,
+      perpTarget,
+      perpRules,
+      signal
+    )
+    const restoredPerpVisible = restoredPerpBootstrap.visible
+    const restoredPerpQuote = restoredPerpBootstrap.quote
+    const restoredReference = authorityReferenceEvidence(await context.api.user(
+      userPage,
+      `/api/market/perpetuals/${encodeURIComponent(PERP_SYMBOL)}/reference`
+    ))
+    recordCheck(
+      'restored-spot-provider',
+      restoredSpotBootstrap.status === 'PASS'
+        && authoritySourcesMatch(restoredSpotQuote, baselineSpotQuote)
+        && authorityUiQuoteComplete(restoredSpotVisible)
+        && !authorityQuotesMatch(restoredSpotVisible, spotOverride, spotRules)
+        && !authorityQuotesMatch(restoredSpotQuote, spotOverride, spotRules),
+      { symbol: SPOT_SYMBOL }
+    )
+    recordCheck(
+      'restored-perp-provider',
+      restoredPerpBootstrap.status === 'PASS'
+        && authoritySourcesMatch(restoredPerpQuote, baselinePerpQuote)
+        && authoritySourcesMatch(restoredReference, baselineReference)
+        && authorityUiQuoteComplete(restoredPerpVisible)
+        && !authorityQuotesMatch(restoredPerpVisible, perpOverride, perpRules)
+        && !authorityQuotesMatch(restoredPerpQuote, perpOverride, perpRules),
+      { symbol: PERP_SYMBOL }
+    )
+    snapshots.push({
+      checkpoint: 'restored',
+      market: [restoredSpotQuote, restoredPerpQuote, restoredReference]
+    })
+    checkpoints.push(await context.evidence.captureCheckpoint(
+      context,
+      'restored',
+      {
+        caseId: 'authority',
+        pages: [userPage, adminPage],
+        apiEvidence: [snapshots.at(-1)],
+        dbEvidence: async () => [
+          await context.db.snapshotTradingRows(baselinePerpProbe.snapshot.account.id)
+        ]
+      }
+    ))
+  } catch (error) {
+    mainFailure = error
+  } finally {
+    const cleanupSignal = AbortSignal.timeout(120000)
+    try {
+      cleanup = await cleanupAuthorityProbes({
+        context,
+        userPage,
+        adminPage,
+        adminAuthenticated,
+        spotRules,
+        signal: cleanupSignal
+      })
+    } catch (error) {
+      cleanupFailure = error
+      cleanup = { status: 'FAIL' }
+    }
+    try {
+      await closeAuthorityBrowserPages(userPage, adminPage, browser)
+    } catch (error) {
+      cleanupFailure = cleanupFailure
+        ? new AggregateError([cleanupFailure, error], 'P0_AUTHORITY_CLEANUP_FAILED')
+        : error
+      cleanup = { status: 'FAIL' }
+    }
+  }
+
+  if (mainFailure || cleanupFailure) {
+    const failures = [mainFailure, cleanupFailure].filter(Boolean)
+    throw failures.length === 1
+      ? failures[0]
+      : new AggregateError(failures, 'P0_AUTHORITY_GATE_FAILED')
+  }
+  const orderedChecks = AUTHORITY_BUNDLE_REQUIRED_CHECKS.map((id) => checks.get(id))
+  const verdict = evaluateAuthorityBundleEvidence({
+    checks: orderedChecks,
+    cleanup: {
+      status: cleanup.status,
+      count: cleanup.count
+    }
+  })
+  const dbEvidence = await context.db.snapshotTradingRows(cleanup.snapshot.account.id)
+  const finalCheckpoint = checkpoints.at(-1)
+  const result = {
+    ...verdict,
+    kind: 'P0_AUTHORITY_BUNDLE_GATE',
+    profile: 'UI_CORE',
+    database,
+    fixtureActions,
+    checkpoints: checkpoints.map(({ name, uiEvidence }) => ({ name, uiEvidence })),
+    uiEvidence: checkpoints.flatMap(({ uiEvidence }) => uiEvidence),
+    networkEvidence: finalCheckpoint?.networkEvidence ?? [],
+    apiEvidence: snapshots,
+    eventEvidence: finalCheckpoint?.eventEvidence ?? [],
+    oracleEvidence,
+    snapshots,
+    dbEvidence: [dbEvidence]
+  }
+  context.authority.authorityBundleFixture = result.authorityBundleFixture
+  context.authority.status = 'COMPLETE'
+  context.authority.evidence = result
+  context.evidence.writeCaseResultAtomic(
+    join(context.run.artifactRoot, 'authority', 'result.json'),
+    result
+  )
+  return result
 }
 
 function extractP0IdempotencyKey(request) {
@@ -9979,6 +11298,10 @@ function createDefaultP0CaseContext({
       commit: prepared.identity?.commit,
       artifactRoot: prepared.runRoot
     }),
+    authority: prepared.authorityState ?? {
+      status: 'PENDING',
+      authorityBundleFixture: 'BLOCKED'
+    },
     ui,
     api: {
       user: userApi,
@@ -10036,7 +11359,7 @@ async function requestP0Json(baseUrl, path, request = {}) {
       ...(request.token ? { Authorization: `Bearer ${request.token}` } : {})
     },
     body: request.body === undefined ? undefined : JSON.stringify(request.body),
-    signal: operationSignal(request.timeoutMs ?? 30000)
+    signal: request.signal ?? operationSignal(request.timeoutMs ?? 30000)
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok || payload?.success === false) {
@@ -10811,11 +12134,25 @@ export function createDefaultP0Dependencies(runtime = {}) {
       async runAuthority(context, plan, { signal } = {}) {
         assertP0ProcessTreeCapability()
         throwIfP0Aborted(signal)
-        if (typeof runtime.runAuthority !== 'function') {
-          throw new Error('P0_AUTHORITY_OPERATION_REQUIRED')
-        }
-        const result = await runtime.runAuthority(context, plan, { signal })
+        const result = typeof runtime.runAuthority === 'function'
+          ? await runtime.runAuthority(context, plan, { signal })
+          : await runAuthorityBundleGate(context.p0Context, {
+              signal,
+              plan,
+              adminCredentials: p0AuthorityAdminCredentials(context)
+            })
         throwIfP0Aborted(signal)
+        if (['PASS', 'BLOCKED'].includes(result?.authorityBundleFixture)) {
+          context.authorityState ??= {
+            status: 'PENDING',
+            authorityBundleFixture: 'BLOCKED'
+          }
+          context.authorityState.authorityBundleFixture = result.authorityBundleFixture
+          context.authorityState.status = 'COMPLETE'
+          context.authorityState.evidence = result
+          context.authorityBundleFixture = result.authorityBundleFixture
+          context.authorityEvidence = result
+        }
         return result
       },
       async writeReport(context, plan, { signal } = {}) {
@@ -11150,6 +12487,77 @@ export function createDefaultP0Dependencies(runtime = {}) {
   return dependencies
 }
 
+function p0AuthorityBlocker() {
+  return {
+    status: 'BLOCKED',
+    reason: 'AUTHORITY_BUNDLE_FIXTURE_MISSING',
+    reasonCode: 'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+  }
+}
+
+function blockedP0AuthorityFragment(definition, subruns, details = {}) {
+  const attempt = Number.isSafeInteger(details.attempt) && details.attempt > 0
+    ? details.attempt
+    : 1
+  const profileAttempt = Number.isSafeInteger(details.profileAttempt)
+    && details.profileAttempt > 0
+    ? details.profileAttempt
+    : 1
+  return {
+    schemaVersion: 1,
+    id: definition.id,
+    status: 'BLOCKED',
+    attempt,
+    durationMs: 0,
+    scopeComplete: true,
+    subruns: subruns.map((subrun) => ({
+      ...subrun,
+      status: 'BLOCKED',
+      attempt,
+      profileAttempt,
+      durationMs: 0,
+      artifactHashes: {},
+      failureOrBlocker: p0AuthorityBlocker()
+    })),
+    artifactHashes: {},
+    failureOrBlocker: p0AuthorityBlocker()
+  }
+}
+
+function combineP0AuthorityFragments(
+  definition,
+  selectedSubruns,
+  executed,
+  blocked,
+  details
+) {
+  if (!executed) return blockedP0AuthorityFragment(definition, blocked, details)
+  const executedById = new Map(
+    Array.isArray(executed.subruns)
+      ? executed.subruns.map((subrun) => [subrun?.id, subrun])
+      : []
+  )
+  const blockedById = new Map(
+    blockedP0AuthorityFragment(definition, blocked, {
+      attempt: executed.attempt ?? details.attempt,
+      profileAttempt: executed.subruns?.[0]?.profileAttempt ?? details.profileAttempt
+    }).subruns.map((subrun) => [subrun.id, subrun])
+  )
+  const subruns = selectedSubruns.map(({ id }) => (
+    executedById.get(id) ?? blockedById.get(id)
+  ))
+  if (subruns.some((subrun) => !subrun)) {
+    throw new Error('P0_AUTHORITY_EXECUTION_FRAGMENT_INVALID')
+  }
+  return {
+    ...executed,
+    status: 'BLOCKED',
+    scopeComplete: true,
+    subruns,
+    failureOrBlocker: p0AuthorityBlocker()
+  }
+}
+
 export async function runP0Suite(options, dependencies) {
   const usesDefaultDependencies = dependencies === undefined
     || defaultP0DependencyInstances.has(dependencies)
@@ -11172,7 +12580,11 @@ export async function runP0Suite(options, dependencies) {
           ...prepared,
           options: receivedOptions,
           plan,
-          caseResults: Array.isArray(prepared.caseResults) ? prepared.caseResults : []
+          caseResults: Array.isArray(prepared.caseResults) ? prepared.caseResults : [],
+          authorityState: prepared.authorityState ?? {
+            status: 'PENDING',
+            authorityBundleFixture: 'BLOCKED'
+          }
         }
         const p0Context = dependencies.createP0Context
           ? await dependencies.createP0Context(preparedContext, receivedOptions, details)
@@ -11205,18 +12617,34 @@ export async function runP0Suite(options, dependencies) {
                 selectedSubruns = entry.selectedSubruns,
                 profileAttempt = 1
               ) => {
+                const blockedSubruns = authorityBlockedSubruns(
+                  entry.definition,
+                  selectedSubruns,
+                  prepared.authorityState
+                )
+                const blockedIds = new Set(blockedSubruns.map(({ id }) => id))
+                const executableSubruns = selectedSubruns.filter(
+                  ({ id }) => !blockedIds.has(id)
+                )
                 const definition = {
                   ...entry.definition,
-                  requiredSubruns: selectedSubruns
+                  requiredSubruns: executableSubruns
                 }
                 throwIfP0Aborted(signal)
-                const result = await dispatchCase(definition, p0Context, handlers, {
-                  signal,
-                  attempt: 1,
-                  profileAttempt
-                })
+                const details = { signal, attempt: 1, profileAttempt }
+                const result = executableSubruns.length > 0
+                  ? await dispatchCase(definition, p0Context, handlers, details)
+                  : null
                 throwIfP0Aborted(signal)
-                return result
+                return blockedSubruns.length > 0
+                  ? combineP0AuthorityFragments(
+                      entry.definition,
+                      selectedSubruns,
+                      result,
+                      blockedSubruns,
+                      details
+                    )
+                  : result
               }
               if (supportsP0ProfileLifecycle(baseOperations)) {
                 const fragmentsByEntry = new Map(entries.map(({ id }) => [id, []]))
