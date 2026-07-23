@@ -9514,7 +9514,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
       throwIfP0Aborted(signal)
       return persisted
     },
-    async cleanup(prepared, { signal } = {}, options) {
+    async cleanup(prepared, { signal, error: runError } = {}, options) {
       throwIfP0Aborted(signal)
       let context = prepared
       let active
@@ -9535,6 +9535,14 @@ export function createDefaultP0Dependencies(runtime = {}) {
         )
         throwIfP0Aborted(signal)
       } else {
+        if (runError) {
+          try {
+            await lstat(resolveP0RunRoot(artifactBase, options.runId))
+          } catch (error) {
+            if (error?.code !== 'ENOENT') throw error
+            return { status: 'NOT_STARTED' }
+          }
+        }
         const recovered = await recoverP0ActiveControlContext(artifactBase, options.runId)
         throwIfP0Aborted(signal)
         if (recovered.alreadyCleaned) {

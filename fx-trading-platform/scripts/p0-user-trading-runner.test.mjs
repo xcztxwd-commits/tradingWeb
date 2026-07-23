@@ -5526,6 +5526,59 @@ test('CLEANED atomically replaces ACTIVE without a raw ownership deletion window
   assert.equal(existsSync(join(control.runRoot, 'control', 'cleaned.json')), false)
 })
 
+test('cleanup is a no-op only after prepare fails before the run root exists', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-pre-control-cleanup-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const artifactBase = join(root, 'artifacts')
+  const runId = 'p0-pre-control-cleanup-a1'
+  const dependencies = smokeContracts.createDefaultP0Dependencies({
+    artifactBase,
+    inheritedEnv: {},
+    redis: {},
+    processManager: {},
+    infrastructure: {},
+    postgres: {}
+  })
+  const options = { suite: 'p0', mode: 'discovery', phase: 'all', runId }
+  const preparationFailure = new Error('P0_PREPARE_SENTINEL')
+
+  await assert.rejects(
+    smokeContracts.executeP0SuiteLifecycle({
+      options,
+      operations: {
+        installSignalHandlers() { return async () => {} },
+        async prepare() { throw preparationFailure },
+        async execute() { assert.fail('execute must not run') },
+        async writeReport() { assert.fail('report must not run') },
+        cleanup(prepared, details) {
+          return dependencies.cleanup(prepared, details, options)
+        }
+      }
+    }),
+    (error) => error === preparationFailure && !(error instanceof AggregateError)
+  )
+
+  assert.deepEqual(await dependencies.cleanup(undefined, {
+    error: preparationFailure
+  }, options), {
+    status: 'NOT_STARTED'
+  })
+  assert.equal(existsSync(join(artifactBase, runId)), false)
+  await assert.rejects(
+    dependencies.cleanup(undefined, {}, options),
+    /P0_CONTROL_MISSING/
+  )
+
+  const partialRunId = 'p0-pre-control-partial-a1'
+  mkdirSync(join(artifactBase, partialRunId), { recursive: true })
+  await assert.rejects(
+    dependencies.cleanup(undefined, {
+      error: preparationFailure
+    }, { ...options, runId: partialRunId }),
+    /P0_CONTROL_MISSING/
+  )
+})
+
 test('cleanup rejects missing forged or unsafe authoritative control state', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-s2-authoritative-control-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
