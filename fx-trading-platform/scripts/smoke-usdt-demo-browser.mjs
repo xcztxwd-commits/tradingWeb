@@ -5984,7 +5984,7 @@ async function captureAdminCriticalPaths(page, mode, viewport, runtimeErrors) {
 
 async function assertAdminBindingMode(page, mode) {
   const providerCodes = ['binance-usdm', 'okx-swap', 'local-perp']
-  const selected = await page.evaluate((symbol) => {
+  const selected = await waitFor(() => page.evaluate((symbol) => {
     const select = [...document.querySelectorAll('select')].find((candidate) =>
       [...candidate.options].some((option) => option.textContent?.includes(symbol))
     )
@@ -5995,7 +5995,7 @@ async function assertAdminBindingMode(page, mode) {
     select.dispatchEvent(new Event('input', { bubbles: true }))
     select.dispatchEvent(new Event('change', { bubbles: true }))
     return true
-  }, PERP_SYMBOL)
+  }, PERP_SYMBOL), `Admin ${PERP_SYMBOL} symbol option`, 15000)
   assert(selected, `Admin binding page must expose ${PERP_SYMBOL}`)
   const rows = await waitFor(() => page.evaluate((codes) => {
     const tableRows = [...document.querySelectorAll('tbody tr')].map((row) =>
