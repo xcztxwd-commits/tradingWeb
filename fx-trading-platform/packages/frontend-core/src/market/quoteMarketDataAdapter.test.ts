@@ -41,6 +41,13 @@ describe('quote market data adapter', () => {
     assert.doesNotMatch(adapterSource, /expectedSource = undefined/)
   })
 
+  it('retries an incomplete bundle while the provider source is changing', () => {
+    assert.match(
+      adapterSource,
+      /if \(expectedSource\) \{[\s\S]*store\.reset\(unavailableSnapshot\('source-changing'\)\)\s*scheduleBundleRefresh\(\)\s*return/
+    )
+  })
+
   it('refreshes an expired bundle when realtime events are unavailable', () => {
     assert.match(
       adapterSource,

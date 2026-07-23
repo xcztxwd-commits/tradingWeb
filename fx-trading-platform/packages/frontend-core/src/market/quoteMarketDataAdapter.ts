@@ -63,6 +63,7 @@ function startQuoteSession(symbol: string, token: string | null, store: AdapterS
     if (expectedSource) {
       if (snapshot.status !== 'ready' || !snapshot.source || !matchesExpectedMarketSource(snapshot.source, expectedSource)) {
         store.reset(unavailableSnapshot('source-changing'))
+        scheduleBundleRefresh()
         return
       }
     }
