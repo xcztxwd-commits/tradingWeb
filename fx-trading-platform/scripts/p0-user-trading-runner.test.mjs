@@ -4825,6 +4825,7 @@ function authorityGateContractContext({
   }
   const overrides = new Map()
   const lastOverrides = new Map()
+  const adminCleanupCalls = []
   let restoredAfterOverride = false
   let sequence = 0
   let spotBuyCount = 0
@@ -4878,11 +4879,28 @@ function authorityGateContractContext({
       index: quote.markPrice
     }
   }
-  const snapshotAccount = () => ({
-    accounts: [structuredClone(account)],
-    activeDemoAccounts: [structuredClone(account)],
-    ...structuredClone(state)
-  })
+  const snapshotAccount = () => {
+    const snapshot = structuredClone(state)
+    const btcWallet = snapshot.wallets.find(({ walletType, asset }) => (
+      walletType === 'SPOT' && asset === 'BTC'
+    ))
+    const spotPositions = Number(btcWallet?.available) > 0
+      ? [{
+          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          symbol: 'BTCUSDT',
+          productType: 'CRYPTO_SPOT',
+          lots: btcWallet.available,
+          quantity: btcWallet.available,
+          status: 'OPEN'
+        }]
+      : []
+    return {
+      accounts: [structuredClone(account)],
+      activeDemoAccounts: [structuredClone(account)],
+      ...snapshot,
+      positions: [...snapshot.positions, ...spotPositions]
+    }
+  }
   const resetPerpSummary = () => {
     state.summary = {
       balance: '50000',
@@ -4984,7 +5002,9 @@ function authorityGateContractContext({
           positionSide: target.product === 'spot' ? 'BOTH' : 'LONG',
           marginMode: target.product === 'spot' ? 'CASH' : 'CROSS',
           side: order.side,
-          lots: target.product === 'spot' ? '0.001' : '0.001',
+          lots: target.product === 'spot' && order.side === 'SELL'
+            ? String(order.amount)
+            : '0.001',
           price,
           realizedPnl: '0',
           fee: '0.0001',
@@ -4997,7 +5017,10 @@ function authorityGateContractContext({
         })
         if (target.product === 'spot') {
           const wallet = state.wallets.find(({ asset }) => asset === 'BTC')
-          wallet.available = order.side === 'BUY' ? '0.001' : '0'
+          const nextAvailable = order.side === 'BUY'
+            ? Number(wallet.available) + 0.0009995
+            : Number(wallet.available) - Number(order.amount)
+          wallet.available = Math.max(0, nextAvailable).toFixed(8)
           wallet.total = wallet.available
         } else if (order.side === 'BUY') {
           const currentReference = reference()
@@ -5079,6 +5102,26 @@ function authorityGateContractContext({
         throw new Error(`UNEXPECTED_AUTHORITY_USER_PATH: ${path}`)
       },
       async admin(_page, path, request) {
+        if (request.method === 'POST'
+          && path === `/api/admin/accounts/${account.id}/force-cleanup`) {
+          adminCleanupCalls.push({ path, body: structuredClone(request.body) })
+          state.positions = []
+          resetPerpSummary()
+          return { items: [] }
+        }
+        if (request.method === 'POST'
+          && path === `/api/admin/accounts/${account.id}/demo-reset`) {
+          adminCleanupCalls.push({ path, body: structuredClone(request.body) })
+          const btcWallet = state.wallets.find(({ walletType, asset }) => (
+            walletType === 'SPOT' && asset === 'BTC'
+          ))
+          btcWallet.available = '0'
+          btcWallet.total = '0'
+          btcWallet.locked = '0'
+          state.positions = []
+          resetPerpSummary()
+          return { demoGeneration: 2 }
+        }
         if (request.method === 'DELETE') {
           const symbol = decodeURIComponent(path.split('/').at(-1))
           if (overrides.has(symbol)) restoredAfterOverride = true
@@ -5146,7 +5189,9 @@ function authorityGateContractContext({
   }
   return {
     context,
-    persisted: () => persisted
+    persisted: () => persisted,
+    adminCleanupCalls: () => structuredClone(adminCleanupCalls),
+    snapshotAccount
   }
 }
 
@@ -5161,6 +5206,17 @@ test('runAuthorityBundleGate directly proves PASS, BLOCKED, and cleanup failure'
   })
   assert.equal(pass.authorityBundleFixture, 'PASS')
   assert.equal(passing.persisted(), pass)
+  assert.deepEqual(
+    passing.adminCleanupCalls().map(({ path }) => path),
+    [
+      '/api/admin/accounts/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/force-cleanup',
+      '/api/admin/accounts/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/demo-reset'
+    ]
+  )
+  assert.equal(
+    passing.snapshotAccount().positions.filter(({ status }) => status === 'OPEN').length,
+    0
+  )
 
   const wrongFill = authorityGateContractContext({ wrongControlledSpotFill: true })
   const blockedFill = await smokeContracts.runAuthorityBundleGate(wrongFill.context, {
@@ -5334,6 +5390,11 @@ test('authority fixture BLOCKED blocks only declared dependent subruns and execu
   assert.equal(persisted, result)
   assert.equal(result.id, 'PERP-01')
   assert.equal(result.status, 'BLOCKED')
+  assert.equal(result.authorityBundleFixture, 'BLOCKED')
+  assert.equal(
+    result.failureOrBlocker.reasonCode,
+    'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+  )
   assert.deepEqual(
     result.subruns.map(({ id, status }) => ({ id, status })),
     [
@@ -8484,6 +8545,144 @@ test('multi-profile cases persist one canonical merged result after exact subrun
   )
 })
 
+test('multi-profile authority BLOCKED persists one canonical result with blocker provenance', async (t) => {
+  const options = p0CaseContracts.parseP0Cli([
+    '--suite=p0',
+    '--run-id=p0-authority-blocked-multi-profile-a1',
+    '--phase=selected',
+    '--case=SOURCE-03'
+  ])
+  const runRoot = mkdtempSync(join(tmpdir(), 'p0-authority-blocked-multi-profile-'))
+  t.after(() => rmSync(runRoot, { recursive: true, force: true }))
+  const definition = P0_CASES.find(({ id }) => id === 'SOURCE-03')
+  const dispatchedProfiles = []
+  const caseAuthority = {
+    status: 'PENDING',
+    authorityBundleFixture: 'BLOCKED'
+  }
+  let activeProfile
+  const result = await smokeContracts.runP0Suite(options, {
+    installSignalHandlers() { return () => {} },
+    async initializeOwnership() {
+      return {
+        runRoot,
+        options,
+        ownerId: 'e'.repeat(64),
+        identity: { commit: RUN_STATE_COMMIT_A },
+        matrixDatabase: 'fx_p0_user_e2e_authority_blocked_multi_profile_a1',
+        databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_authority_blocked_multi_profile_a1',
+        inheritedEnv: {},
+        authorityState: caseAuthority,
+        caseResults: []
+      }
+    },
+    createP0Context() {
+      return {
+        run: {
+          artifactRoot: runRoot,
+          commit: RUN_STATE_COMMIT_A
+        },
+        authority: caseAuthority,
+        evidence: {
+          captureCheckpoint: smokeContracts.captureCheckpoint,
+          writeCaseResultAtomic
+        }
+      }
+    },
+    phaseOperations: {
+      async runPreflight() { return { id: 'AUTH-01', status: 'PASS' } },
+      async runAuthority() {
+        return {
+          status: 'PASS',
+          authorityBundleFixture: 'BLOCKED',
+          checks: [{ id: 'controlled-perp-risk', status: 'FAIL' }]
+        }
+      },
+      async stopProfileBackend() { activeProfile = undefined },
+      async assertProfilePortFree() {},
+      async startProfileBackend({ profile }) {
+        activeProfile = profile
+        return { profile }
+      },
+      async waitForProfileHealth() {},
+      async waitForProfileBusinessEndpoint() {},
+      async verifyProfileDatabaseIdentity() {},
+      async writeReport(context, plan) {
+        return exactP0ReportPhaseEvidence(context, plan)
+      }
+    },
+    async dispatchCase(receivedDefinition, _context, _handlers, details) {
+      dispatchedProfiles.push(activeProfile)
+      const startedAt = `2026-07-23T00:00:0${details.profileAttempt}.000Z`
+      return {
+        ...formalP0CaseFragment(
+          receivedDefinition,
+          receivedDefinition.requiredSubruns,
+          { durationMs: receivedDefinition.requiredSubruns.length }
+        ),
+        commit: RUN_STATE_COMMIT_A,
+        profile: activeProfile,
+        viewport: 'desktop',
+        startedAt,
+        finishedAt: startedAt,
+        preconditions: [{ status: 'PASS' }],
+        userActions: [],
+        fixtureActions: [],
+        authorityBundleFixture: 'BLOCKED',
+        contractProbes: [],
+        replayProbes: [],
+        checkpoints: [],
+        financialCalculation: { status: 'PASS' },
+        uiEvidence: [],
+        networkEvidence: [],
+        apiEvidence: [],
+        dbEvidence: [],
+        eventEvidence: [],
+        oracleEvidence: [],
+        consoleErrors: [],
+        cleanup: { status: 'PASS' }
+      }
+    },
+    handlers: Object.create(null),
+    async writeReport(execution) {
+      return { caseResults: execution.caseResults }
+    },
+    async cleanup() { return { status: 'CLEANED' } }
+  })
+
+  assert.deepEqual(dispatchedProfiles, ['UI_CORE', 'FUNDING_ONLY'])
+  const canonical = result.execution.caseResults[0]
+  assert.equal(canonical.id, definition.id)
+  assert.equal(canonical.status, 'BLOCKED')
+  assert.equal(canonical.authorityBundleFixture, 'BLOCKED')
+  assert.equal(
+    canonical.failureOrBlocker.reasonCode,
+    'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+  )
+  assert.deepEqual(
+    canonical.subruns.map(({ id, status }) => ({ id, status })),
+    definition.requiredSubruns.map((subrun) => ({
+      id: subrun.id,
+      status: ['desktop-trigger-order-trigger', 'desktop-liquidation'].includes(subrun.id)
+        ? 'BLOCKED'
+        : 'PASS'
+    }))
+  )
+  const persisted = JSON.parse(
+    readFileSync(join(runRoot, definition.id, 'result.json'), 'utf8')
+  )
+  assert.equal(persisted.status, 'BLOCKED')
+  assert.equal(persisted.authorityBundleFixture, 'BLOCKED')
+  assert.equal(
+    persisted.failureOrBlocker.reasonCode,
+    'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+  )
+  assert.deepEqual(
+    persisted.subruns.map(({ id, status }) => ({ id, status })),
+    canonical.subruns.map(({ id, status }) => ({ id, status }))
+  )
+})
+
 test('formal case fragment merge preserves evidence and terminal status priority', () => {
   const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
   const entry = {
@@ -8523,6 +8722,21 @@ test('formal case fragment merge preserves evidence and terminal status priority
 
   assert.equal(mergeStatuses('BLOCKED', 'INVALID_TEST').status, 'INVALID_TEST')
   assert.equal(mergeStatuses('INVALID_TEST', 'FAIL').status, 'FAIL')
+
+  const failed = smokeContracts.mergeP0CaseFragments(entry, [
+    formalP0CaseFragment(definition, [core]),
+    {
+      ...formalP0CaseFragment(definition, [target], { status: 'FAIL' }),
+      failureOrBlocker: {
+        status: 'FAIL',
+        reason: 'existing formal case failure'
+      }
+    }
+  ])
+  assert.deepEqual(failed.failureOrBlocker, {
+    status: 'FAIL',
+    reason: 'existing formal case failure'
+  })
 
   const cropped = smokeContracts.mergeP0CaseFragments(
     { ...entry, selectedSubruns: [core], cropped: true },

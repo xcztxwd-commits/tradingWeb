@@ -7809,6 +7809,61 @@ async function cleanupAuthorityProbes({
         ({ status }) => !TERMINAL_ORDER_STATUSES.has(status)
       )
     }
+  } catch (error) {
+    failures.push(error)
+  }
+  if (adminAuthenticated && typeof snapshot?.account?.id === 'string') {
+    const accountPath = `/api/admin/accounts/${encodeURIComponent(snapshot.account.id)}`
+    try {
+      await context.api.admin(adminPage, `${accountPath}/force-cleanup`, {
+        method: 'POST',
+        body: {
+          reason: 'P0 Authority gate probe cleanup',
+          requestId: randomUUID(),
+          confirmationText: 'CONFIRM_FORCE_CLEANUP'
+        },
+        signal
+      })
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      await context.api.admin(adminPage, `${accountPath}/demo-reset`, {
+        method: 'POST',
+        body: {
+          reason: 'P0 Authority gate demo reset',
+          requestId: randomUUID(),
+          confirmationText: 'CONFIRM_DEMO_RESET'
+        },
+        signal
+      })
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      snapshot = await waitFor(async () => {
+        const candidate = await context.api.snapshotAccount(userPage)
+        const candidateOrders = candidate.orders.filter(
+          ({ status }) => !TERMINAL_ORDER_STATUSES.has(status)
+        )
+        const candidatePositions = candidate.positions.filter(
+          ({ status }) => status === 'OPEN'
+        )
+        return candidateOrders.length === 0 && candidatePositions.length === 0
+          ? candidate
+          : null
+      }, 'authority Admin probe cleanup', 30000, signal)
+      activeOrders = snapshot.orders.filter(
+        ({ status }) => !TERMINAL_ORDER_STATUSES.has(status)
+      )
+      openPositions = snapshot.positions.filter(({ status }) => status === 'OPEN')
+    } catch (error) {
+      failures.push(error)
+    }
+  } else if (adminAuthenticated) {
+    failures.push(new Error('P0_AUTHORITY_ACCOUNT_ID_REQUIRED'))
+  }
+  try {
     openPositions = snapshot.positions.filter(({ status }) => status === 'OPEN')
     if (activeOrders.length > 0 || openPositions.length > 0) {
       failures.push(new Error('P0_AUTHORITY_PROBE_CLEANUP_INCOMPLETE'))
@@ -10866,6 +10921,25 @@ function cloneP0CaseSubrun(value) {
   return { identity, status, clone }
 }
 
+function cloneP0CasePlainRecord(value) {
+  if (!isPlainP0CaseEvidence(value)) return null
+  const clone = {}
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string') return null
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return null
+    if (descriptor.enumerable) {
+      Object.defineProperty(clone, key, {
+        value: descriptor.value,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      })
+    }
+  }
+  return clone
+}
+
 function isCanonicalP0ArtifactPath(value) {
   if (typeof value !== 'string' || value.length === 0
     || value.startsWith('/')
@@ -10898,7 +10972,7 @@ function exactP0SubrunIdentity(left, right) {
     && left.viewport === right.viewport
 }
 
-function mergedP0CaseEvidence(fragments) {
+function mergedP0CaseEvidence(fragments, terminalStatus) {
   const merged = {}
   for (const field of P0_CASE_ARRAY_EVIDENCE_FIELDS) {
     const values = fragments.map((fragment) => ownP0CaseEvidenceValue(fragment, field))
@@ -10971,6 +11045,40 @@ function mergedP0CaseEvidence(fragments) {
     merged.cleanup = statuses.every((value) => value === 'PASS')
       ? { status: 'PASS' }
       : { status: statuses.find((value) => value !== 'PASS') }
+  }
+  const blockers = []
+  for (const fragment of fragments) {
+    if (ownP0CaseEvidenceValue(fragment, 'status') !== terminalStatus) continue
+    const raw = ownP0CaseEvidenceValue(fragment, 'failureOrBlocker')
+    if (raw === undefined) continue
+    const blocker = cloneP0CasePlainRecord(raw)
+    const status = ownP0CaseEvidenceValue(blocker, 'status')
+    const reason = ownP0CaseEvidenceValue(blocker, 'reason')
+    const reasonCode = ownP0CaseEvidenceValue(blocker, 'reasonCode')
+    if (!blocker
+      || status !== terminalStatus
+      || typeof reason !== 'string' || reason.length === 0
+      || (reasonCode !== undefined
+        && (typeof reasonCode !== 'string' || reasonCode.length === 0))
+      || (terminalStatus === 'BLOCKED'
+        && merged.authorityBundleFixture === 'BLOCKED'
+        && (reason !== 'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+          || reasonCode !== 'AUTHORITY_BUNDLE_FIXTURE_MISSING'))) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    blockers.push({ blocker, reason, reasonCode })
+  }
+  if (blockers.length > 0) {
+    const reasonCodes = new Set(
+      blockers.map(({ reasonCode }) => reasonCode).filter(Boolean)
+    )
+    if (blockers.some(({ reason }) => reason !== blockers[0].reason)
+      || reasonCodes.size > 1) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    merged.failureOrBlocker = (
+      blockers.find(({ reasonCode }) => reasonCode)?.blocker ?? blockers[0].blocker
+    )
   }
   return merged
 }
@@ -11087,7 +11195,7 @@ export function mergeP0CaseFragments(entry, fragmentsValue) {
     })
   }
   return {
-    ...mergedP0CaseEvidence(fragments),
+    ...mergedP0CaseEvidence(fragments, status),
     schemaVersion: 1,
     id: entryId,
     status,
@@ -13528,13 +13636,45 @@ function blockedP0AuthorityFragment(definition, subruns, details = {}) {
     && details.profileAttempt > 0
     ? details.profileAttempt
     : 1
+  const timestamp = new Date().toISOString()
+  const profiles = new Set(subruns.map(({ profile }) => profile))
+  const viewports = new Set(subruns.map(({ viewport }) => viewport))
+  const blocker = p0AuthorityBlocker()
   return {
     schemaVersion: 1,
     id: definition.id,
     status: 'BLOCKED',
+    ...(typeof details.commit === 'string' && details.commit.length > 0
+      ? { commit: details.commit }
+      : {}),
+    ...(typeof details.database === 'string' && details.database.length > 0
+      ? { database: details.database }
+      : {}),
+    ...(profiles.size === 1 ? { profile: [...profiles][0] } : {}),
+    ...(viewports.size === 1 ? { viewport: [...viewports][0] } : {}),
+    startedAt: timestamp,
+    finishedAt: timestamp,
     attempt,
     durationMs: 0,
     scopeComplete: true,
+    preconditions: [],
+    userActions: [],
+    fixtureActions: [],
+    authorityBundleFixture: 'BLOCKED',
+    contractProbes: [],
+    replayProbes: [],
+    checkpoints: [],
+    financialCalculation: {
+      status: 'BLOCKED',
+      reasonCode: blocker.reasonCode
+    },
+    uiEvidence: [],
+    networkEvidence: [],
+    apiEvidence: [],
+    dbEvidence: [],
+    eventEvidence: [],
+    oracleEvidence: [],
+    consoleErrors: [],
     subruns: subruns.map((subrun) => ({
       ...subrun,
       status: 'BLOCKED',
@@ -13542,10 +13682,11 @@ function blockedP0AuthorityFragment(definition, subruns, details = {}) {
       profileAttempt,
       durationMs: 0,
       artifactHashes: {},
-      failureOrBlocker: p0AuthorityBlocker()
+      failureOrBlocker: blocker
     })),
     artifactHashes: {},
-    failureOrBlocker: p0AuthorityBlocker()
+    cleanup: { status: 'PASS' },
+    failureOrBlocker: blocker
   }
 }
 
@@ -13577,6 +13718,7 @@ function combineP0AuthorityFragments(
   return {
     ...executed,
     status: 'BLOCKED',
+    authorityBundleFixture: 'BLOCKED',
     scopeComplete: true,
     subruns,
     failureOrBlocker: p0AuthorityBlocker()
@@ -13693,7 +13835,13 @@ export async function runP0Suite(options, dependencies) {
                     }
                   }
                 }
-                const details = { signal, attempt: 1, profileAttempt }
+                const details = {
+                  signal,
+                  attempt: 1,
+                  profileAttempt,
+                  commit: p0Context?.run?.commit,
+                  database: prepared.activeDatabaseSegment
+                }
                 let result
                 let failure
                 try {
