@@ -5502,7 +5502,7 @@ async function runBrowserMinimalTradingLoop(mode) {
   const runtimeErrors = []
   page.on('Runtime.exceptionThrown', (event) => runtimeErrors.push(event.exceptionDetails?.text ?? 'runtime exception'))
   page.on('Log.entryAdded', (event) => {
-    if (event.entry?.level === 'error') runtimeErrors.push(event.entry.text)
+    if (event.entry?.level === 'error') runtimeErrors.push(event.entry)
   })
   await page.send('Page.enable')
   await page.send('Runtime.enable')
@@ -5811,7 +5811,7 @@ async function startAccountEventObserver() {
   const network = { webSockets: [], sentFrames: [], receivedFrames: [] }
   page.on('Runtime.exceptionThrown', (event) => runtimeErrors.push(event.exceptionDetails?.text ?? 'runtime exception'))
   page.on('Log.entryAdded', (event) => {
-    if (event.entry?.level === 'error') runtimeErrors.push(event.entry.text)
+    if (event.entry?.level === 'error') runtimeErrors.push(event.entry)
   })
   page.on('Network.webSocketCreated', (event) => network.webSockets.push(event.url ?? ''))
   page.on('Network.webSocketFrameSent', (event) => network.sentFrames.push(event.response?.payloadData ?? ''))
@@ -5860,7 +5860,7 @@ async function captureBrowserEvidence(mode, viewport) {
   const network = { webSockets: [], sentFrames: [], receivedFrames: [] }
   page.on('Runtime.exceptionThrown', (event) => runtimeErrors.push(event.exceptionDetails?.text ?? 'runtime exception'))
   page.on('Log.entryAdded', (event) => {
-    if (event.entry?.level === 'error') runtimeErrors.push(event.entry.text)
+    if (event.entry?.level === 'error') runtimeErrors.push(event.entry)
   })
   page.on('Network.webSocketCreated', (event) => network.webSockets.push(event.url ?? ''))
   page.on('Network.webSocketFrameSent', (event) => network.sentFrames.push(event.response?.payloadData ?? ''))
@@ -6183,9 +6183,16 @@ async function captureScreenshot(page, mode, viewport, route) {
   return path
 }
 
-function assertNoRuntimeErrors(errors, label) {
-  const relevant = errors.filter((message) => !/ResizeObserver loop|favicon\.ico/i.test(message))
-  assert(relevant.length === 0, `${label} browser runtime errors: ${relevant.join(' | ')}`)
+function browserRuntimeErrorMessage(error) {
+  return typeof error === 'string' ? error : error?.text ?? 'browser log error'
+}
+
+export function assertNoRuntimeErrors(errors, label) {
+  const relevant = errors.filter((error) => !/ResizeObserver loop|favicon\.ico/i.test(browserRuntimeErrorMessage(error)))
+  const details = relevant.map((error) => typeof error === 'string'
+    ? error
+    : `${browserRuntimeErrorMessage(error)} [source=${error.source ?? 'unknown'}, url=${error.url ?? 'unknown'}]`)
+  assert(relevant.length === 0, `${label} browser runtime errors: ${details.join(' | ')}`)
 }
 
 async function launchBrowser() {
