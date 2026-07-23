@@ -1546,6 +1546,370 @@ test('default P0 DB oracle follows the active profile database', async (t) => {
   )
 })
 
+test('default P0 runtime restarts the same active profile and database around downtime work', async () => {
+  assert.equal(
+    typeof smokeContracts.createP0CaseRuntimeCapabilities,
+    'function',
+    'P0_DEFAULT_CASE_RUNTIME_REQUIRED'
+  )
+  const events = []
+  let nextPid = 7101
+  const prepared = {
+    artifactBase: 'C:\\p0-runtime-capabilities',
+    ownerToken: 'p0-runtime-capabilities-owner-token-a1',
+    options: { runId: 'p0-runtime-capabilities-a1' },
+    activeBackend: { pid: 7100 },
+    activeDatabaseSegment: 'fx_p0_user_e2e_funding_2',
+    activeDatabaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2',
+    activeProfileRuntime: {
+      phase: 'funding',
+      profile: 'FUNDING_ONLY',
+      attempt: 2,
+      segmentName: 'fx_p0_user_e2e_funding_2',
+      databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2',
+      environment: {
+        SPRING_PROFILES_ACTIVE: 'dev',
+        DATABASE_URL: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2',
+        DATABASE_PASSWORD: 'fixture-password',
+        TRADING_FUNDING_ENABLED: 'true'
+      },
+      restartCount: 0
+    },
+    parentFrontends: new Map([
+      ['web', { pid: 7201 }],
+      ['admin', { pid: 7202 }]
+    ])
+  }
+  const capabilities = smokeContracts.createP0CaseRuntimeCapabilities({
+    prepared,
+    guard() {},
+    signal: undefined,
+    processManager: {
+      async stopOwnedBackend(backend) {
+        events.push(`stop:${backend.pid}`)
+      },
+      async startOwnedBackend({ profile, environment }) {
+        events.push(`start:${profile}:${environment.DATABASE_URL}`)
+        return { pid: nextPid++ }
+      },
+      async waitForBackendHealth(backend) {
+        events.push(`health:${backend.pid}`)
+      },
+      async waitForBusinessEndpoint(backend) {
+        events.push(`business:${backend.pid}`)
+      },
+      async waitForFrontend(frontend, url) {
+        events.push(`frontend:${frontend.pid}:${url}`)
+      }
+    },
+    infrastructure: {
+      async assertPortsFree(ports) {
+        events.push(`free:${ports.join(',')}`)
+      }
+    },
+    async verifyActiveDatabase({ segmentName, databaseUrl }) {
+      events.push(`database:${segmentName}:${databaseUrl}`)
+    },
+    async journalMutation({ resource, start }) {
+      events.push(`journal:${resource.id}`)
+      return start()
+    },
+    async adminApi() {
+      throw new Error('P0_TEST_ADMIN_NOT_EXPECTED')
+    },
+    async query() {
+      throw new Error('P0_TEST_DB_NOT_EXPECTED')
+    }
+  })
+
+  assert.deepEqual(await capabilities.services.ensureProfile('FUNDING_ONLY'), {
+    phase: 'funding',
+    profile: 'FUNDING_ONLY',
+    attempt: 2,
+    segmentName: 'fx_p0_user_e2e_funding_2',
+    databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2',
+    restartCount: 0
+  })
+  assert.equal(
+    JSON.stringify(await capabilities.services.ensureProfile('FUNDING_ONLY')).includes(
+      'fixture-password'
+    ),
+    false
+  )
+  await assert.rejects(
+    capabilities.services.ensureProfile('ORDER_TRIGGER'),
+    /P0_ACTIVE_PROFILE_MISMATCH/
+  )
+  events.length = 0
+
+  const restarted = await capabilities.services.restartBackend(async () => {
+    events.push('downtime')
+    assert.equal(prepared.activeBackend, undefined)
+  })
+  assert.equal(restarted.pid, 7101)
+  assert.equal(prepared.activeBackend, restarted)
+  assert.equal(prepared.activeProfileRuntime.restartCount, 1)
+  assert.deepEqual(events, [
+    'stop:7100',
+    'free:18086',
+    'downtime',
+    'journal:backend:funding:2:FUNDING_ONLY:restart:1',
+    'start:FUNDING_ONLY:jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2',
+    'health:7101',
+    'business:7101',
+    'database:fx_p0_user_e2e_funding_2:jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2'
+  ])
+
+  await assert.rejects(
+    capabilities.services.restartBackend({
+      async duringDowntime() {
+        events.push('downtime-failed')
+        throw new Error('INJECTED_DOWNTIME_FAILURE')
+      }
+    }),
+    /INJECTED_DOWNTIME_FAILURE/
+  )
+  assert.equal(prepared.activeBackend.pid, 7102)
+  assert.equal(prepared.activeProfileRuntime.restartCount, 2)
+
+  await capabilities.services.assertOwnedPorts()
+  assert.deepEqual(events.slice(-4), [
+    'health:7102',
+    'business:7102',
+    'frontend:7201:http://127.0.0.1:5199',
+    'frontend:7202:http://127.0.0.1:5200'
+  ])
+})
+
+test('default P0 runtime fixtures snapshot and restore Admin and scoped position mutations', async () => {
+  assert.equal(typeof smokeContracts.createP0CaseRuntimeCapabilities, 'function')
+  const page = { id: 'admin-page' }
+  const providers = [
+    { id: 'provider-binance', code: 'binance' },
+    { id: 'provider-okx', code: 'okx' }
+  ]
+  const symbols = [{ id: 'symbol-btc', symbol: 'BTCUSDT' }]
+  const bindings = [
+    {
+      id: 'binding-binance',
+      symbolId: 'symbol-btc',
+      providerId: 'provider-binance',
+      providerInstrumentId: 'instrument-binance',
+      providerSymbol: 'BTCUSDT',
+      priority: 10,
+      enabled: true,
+      configJson: '{}'
+    },
+    {
+      id: 'binding-okx',
+      symbolId: 'symbol-btc',
+      providerId: 'provider-okx',
+      providerInstrumentId: 'instrument-okx',
+      providerSymbol: 'BTC-USDT',
+      priority: 20,
+      enabled: false,
+      configJson: '{}'
+    }
+  ]
+  const originalBindings = structuredClone(bindings)
+  let funding = {
+    symbolId: 'symbol-btc',
+    symbol: 'BTCUSDT',
+    fundingSourcePriority: ['BINANCE', 'OKX', 'FIXED'],
+    fixedFundingRate: '0.0001',
+    fixedFundingIntervalMinutes: 480,
+    fundingStaleSeconds: 90
+  }
+  const originalFunding = structuredClone(funding)
+  const overrides = new Map()
+  const calls = []
+  const prepared = {
+    authorityState: { authorityBundleFixture: 'PASS' },
+    activeProfileRuntime: {
+      phase: 'funding',
+      profile: 'FUNDING_ONLY',
+      attempt: 1,
+      segmentName: 'fx_p0_user_e2e_funding_fixture_1',
+      databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_fixture_1',
+      environment: {},
+      restartCount: 0
+    }
+  }
+  let openedAt = '2026-07-23T00:00:00.000000Z'
+  const positionId = '11111111-1111-4111-8111-111111111111'
+  const accountId = '22222222-2222-4222-8222-222222222222'
+  const capabilities = smokeContracts.createP0CaseRuntimeCapabilities({
+    prepared,
+    guard() {},
+    processManager: {},
+    infrastructure: {},
+    async journalMutation() {
+      throw new Error('P0_TEST_JOURNAL_NOT_EXPECTED')
+    },
+    async verifyActiveDatabase() {},
+    async adminApi(receivedPage, path, request = {}) {
+      assert.equal(receivedPage, page)
+      const method = request.method ?? 'GET'
+      calls.push({ method, path, body: structuredClone(request.body) })
+      if (path === '/api/admin/market/data-providers') return structuredClone(providers)
+      if (path === '/api/admin/market/symbols?page=0&size=2000') {
+        return { content: structuredClone(symbols) }
+      }
+      if (path === '/api/admin/market/symbols/symbol-btc/provider-bindings'
+        && method === 'GET') {
+        return structuredClone(bindings)
+      }
+      if (path.startsWith('/api/admin/market/symbols/symbol-btc/provider-bindings/')
+        && method === 'PUT') {
+        const id = path.split('/').at(-1)
+        const target = bindings.find((binding) => binding.id === id)
+        Object.assign(target, request.body)
+        return structuredClone(target)
+      }
+      if (path === '/api/admin/market/symbols/symbol-btc/funding-config'
+        && method === 'GET') {
+        return structuredClone(funding)
+      }
+      if (path === '/api/admin/market/symbols/symbol-btc/funding-config'
+        && method === 'PUT') {
+        funding = { ...funding, ...request.body }
+        delete funding.reason
+        return structuredClone(funding)
+      }
+      if (path === '/api/admin/market/test-control/overrides' && method === 'POST') {
+        overrides.set(request.body.symbol, structuredClone(request.body))
+        return structuredClone(request.body)
+      }
+      if (path.startsWith('/api/admin/market/test-control/overrides/')
+        && method === 'DELETE') {
+        overrides.delete(decodeURIComponent(path.split('/').at(-1)))
+        return null
+      }
+      throw new Error(`P0_TEST_ADMIN_ROUTE_UNEXPECTED: ${method} ${path}`)
+    },
+    async query(sql) {
+      calls.push({ method: 'SQL', path: sql })
+      if (/SET opened_at =/.test(sql)) {
+        const target = sql.match(/SET opened_at = '([^']+)'::timestamptz/)?.[1]
+        assert(target)
+        openedAt = target
+        return JSON.stringify({ count: 1, openedAt })
+      }
+      if (/SELECT json_build_object\(\s*'count'/.test(sql)) {
+        return JSON.stringify({ count: 1, openedAt })
+      }
+      throw new Error('P0_TEST_SQL_UNEXPECTED')
+    }
+  })
+
+  const override = await capabilities.fixtures.marketOverride(page, {
+    symbol: 'BTCUSDT',
+    bid: '40000.00',
+    ask: '40000.01',
+    ttl: 'PT2M'
+  })
+  const secondOverride = await capabilities.fixtures.marketOverride(page, {
+    symbol: 'ETHUSDT',
+    bid: '2000.00',
+    ask: '2000.01',
+    ttl: 'PT2M'
+  })
+  assert.equal(overrides.get('BTCUSDT').bid, '40000.00')
+  assert.equal(prepared.p0FixtureCleanupRegistry.length, 2)
+  assert.deepEqual(
+    await smokeContracts.restoreP0CaseFixtures(prepared),
+    { status: 'PASS', restored: 2 }
+  )
+  assert.equal(prepared.p0FixtureCleanupRegistry.length, 0)
+  await override.restore()
+  await secondOverride.restore()
+  assert.equal(overrides.has('BTCUSDT'), false)
+  assert.deepEqual(
+    calls
+      .filter(({ method, path }) => (
+        method === 'DELETE'
+        && path.startsWith('/api/admin/market/test-control/overrides/')
+      ))
+      .map(({ path }) => path.split('/').at(-1)),
+    ['ETHUSDT', 'BTCUSDT']
+  )
+
+  prepared.authorityState.authorityBundleFixture = 'BLOCKED'
+  await assert.rejects(
+    capabilities.fixtures.marketOverride(page, {
+      symbol: 'BTCUSDT',
+      bid: '41000.00',
+      ask: '41000.01'
+    }),
+    /P0_AUTHORITY_BUNDLE_FIXTURE_REQUIRED/
+  )
+  overrides.set('BTCUSDT', { symbol: 'BTCUSDT' })
+  await capabilities.fixtures.marketOverride(page, {
+    symbol: 'BTCUSDT',
+    action: 'CLEAR'
+  })
+  assert.equal(overrides.has('BTCUSDT'), false)
+  prepared.authorityState.authorityBundleFixture = 'PASS'
+
+  const providerFixture = await capabilities.fixtures.providerBindings(page, {
+    symbols: ['BTCUSDT'],
+    enabledProviders: ['okx']
+  })
+  assert.deepEqual(
+    bindings.map(({ id, enabled }) => ({ id, enabled })),
+    [
+      { id: 'binding-binance', enabled: false },
+      { id: 'binding-okx', enabled: true }
+    ]
+  )
+  await providerFixture.restore()
+  await providerFixture.restore()
+  assert.deepEqual(bindings, originalBindings)
+  assert.equal(prepared.p0FixtureCleanupRegistry.length, 0)
+  const unavailableProviders = await capabilities.fixtures.providerBindings(page, {
+    symbols: ['BTCUSDT'],
+    enabledProviders: []
+  })
+  assert.equal(bindings.every(({ enabled }) => enabled === false), true)
+  await unavailableProviders.restore()
+  assert.deepEqual(bindings, originalBindings)
+
+  const fundingFixture = await capabilities.fixtures.fundingConfig(page, {
+    symbol: 'BTCUSDT',
+    fundingSourcePriority: ['FIXED'],
+    fixedFundingRate: '-0.0002',
+    fixedFundingIntervalMinutes: 1,
+    fundingStaleSeconds: 5,
+    reason: 'P0 funding fixture'
+  })
+  assert.equal(funding.fixedFundingRate, '-0.0002')
+  await fundingFixture.restore()
+  await fundingFixture.restore()
+  assert.deepEqual(funding, originalFunding)
+  assert.equal(prepared.p0FixtureCleanupRegistry.length, 0)
+
+  const positionFixture = await capabilities.fixtures.positionTime({
+    accountId,
+    positionId,
+    openedAt: '2026-07-22T23:00:00.000Z'
+  })
+  assert.equal(openedAt, '2026-07-22T23:00:00.000Z')
+  await positionFixture.restore()
+  await positionFixture.restore()
+  assert.equal(openedAt, '2026-07-23T00:00:00.000000Z')
+  assert.equal(prepared.p0FixtureCleanupRegistry.length, 0)
+  assert(
+    calls
+      .filter(({ method }) => method === 'SQL')
+      .every(({ path }) => path.includes(accountId) && path.includes(positionId)),
+    'position fixture SQL must stay scoped to the exact account and position'
+  )
+  await assert.rejects(
+    capabilities.fixtures.kline(),
+    /P0_RUNTIME_OPERATION_REQUIRED: kline/
+  )
+})
+
 test('default P0 browser launch journals native identity before readiness', async (t) => {
   const artifactBase = mkdtempSync(join(tmpdir(), 'p0-owned-browser-journal-'))
   t.after(() => rmSync(artifactBase, { recursive: true, force: true }))
@@ -4225,9 +4589,19 @@ test('default phase engine restarts the owned backend for each planned profile b
         return exactP0ReportPhaseEvidence(context, plan)
       }
     },
-    async dispatchCase(definition) {
+    async dispatchCase(definition, context) {
       assert.equal(activeProfile, definition.requiredSubruns[0].profile)
       events.push(`dispatch:${activeProfile}:${definition.id}`)
+      const entry = {
+        async restore() {
+          events.push(`restore:${activeProfile}:${definition.id}`)
+          context.p0FixtureCleanupRegistry.splice(
+            context.p0FixtureCleanupRegistry.indexOf(entry),
+            1
+          )
+        }
+      }
+      context.p0FixtureCleanupRegistry = [entry]
       return formalP0CaseFragment(
         definition,
         definition.requiredSubruns,
@@ -4254,7 +4628,8 @@ test('default phase engine restarts the owned backend for each planned profile b
       `health:${profile}`,
       `business:${profile}`,
       `database:${profile}`,
-      `dispatch:${profile}:${expectedCase[profile]}`
+      `dispatch:${profile}:${expectedCase[profile]}`,
+      `restore:${profile}:${expectedCase[profile]}`
     ])
   ])
 })
