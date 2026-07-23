@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.exception.ErrorCode;
+import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.market.entity.ProviderInstrumentEntity;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.model.ProductType;
@@ -287,7 +288,7 @@ public class InstrumentRulesEngine {
   }
 
   private String normalizeSymbol(String symbol) {
-    return normalize(symbol).replace("-", "").replace("/", "");
+    return SymbolNormalizer.normalize(normalize(symbol));
   }
 
   private String normalize(String value) {
