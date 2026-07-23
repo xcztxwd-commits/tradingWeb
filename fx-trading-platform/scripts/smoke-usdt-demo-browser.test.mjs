@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
-import { assertNewestFirstProtectionResize } from './smoke-usdt-demo-browser.mjs'
+import { assertNewestFirstProtectionResize, assertNoRuntimeErrors } from './smoke-usdt-demo-browser.mjs'
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(scriptsDir, '..')
@@ -96,6 +96,33 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /new WebSocket/)
     assert.match(text, new RegExp(escapeRegExp('/api/trading')))
     assert.match(text, new RegExp(escapeRegExp('/api/accounts')))
+  })
+
+  it('reports structured CDP log origins without weakening ignored-message rules', () => {
+    const text = source()
+    assert.equal(text.match(/runtimeErrors\.push\(event\.entry\)/g)?.length, 3)
+
+    assert.throws(
+      () => assertNoRuntimeErrors([{
+        level: 'error',
+        text: 'Failed to load resource: net::ERR_NETWORK_CHANGED',
+        source: 'network',
+        url: 'https://cdn.example.test/asset.svg'
+      }], 'diagnostic'),
+      /diagnostic browser runtime errors: Failed to load resource: net::ERR_NETWORK_CHANGED \[source=network, url=https:\/\/cdn\.example\.test\/asset\.svg\]/
+    )
+    assert.doesNotThrow(() => assertNoRuntimeErrors([{
+      level: 'error',
+      text: 'favicon.ico failed',
+      source: 'network',
+      url: 'https://cdn.example.test/asset.svg'
+    }], 'ignored'))
+    assert.throws(() => assertNoRuntimeErrors([{
+      level: 'error',
+      text: 'Failed to load resource',
+      source: 'network',
+      url: 'https://cdn.example.test/favicon.ico'
+    }], 'still-relevant'), /still-relevant browser runtime errors/)
   })
 
   it('disables the Chromium sandbox only when the smoke runs as root', () => {
