@@ -4422,6 +4422,398 @@ test('authority baseline fill and Perp risk checks use independent market eviden
   )
 })
 
+function authorityGateContractContext({
+  wrongControlledSpotFill = false,
+  staleRestoredUi = false,
+  browserCloseFailure = false
+} = {}) {
+  const baseline = {
+    BTCUSDT: {
+      symbol: 'BTCUSDT',
+      bid: '50000',
+      ask: '50010',
+      providerCode: 'binance',
+      providerSymbol: 'BTCUSDT',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      stale: false
+    },
+    'BTCUSDT-PERP': {
+      symbol: 'BTCUSDT-PERP',
+      bid: '60000',
+      ask: '60010',
+      markPrice: '60005',
+      providerCode: 'binance-usdm',
+      providerSymbol: 'BTCUSDT',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      stale: false
+    }
+  }
+  const overrides = new Map()
+  const lastOverrides = new Map()
+  let restoredAfterOverride = false
+  let sequence = 0
+  let spotBuyCount = 0
+  let persisted
+  const nextId = () => (
+    `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`
+  )
+  const account = {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    accountType: 'DEMO',
+    status: 'ACTIVE'
+  }
+  const state = {
+    account,
+    wallets: [
+      {
+        walletType: 'SPOT',
+        asset: 'USDT',
+        total: '50000',
+        available: '50000',
+        locked: '0'
+      },
+      {
+        walletType: 'SPOT',
+        asset: 'BTC',
+        total: '0',
+        available: '0',
+        locked: '0'
+      }
+    ],
+    summary: {
+      balance: '50000',
+      equity: '50000',
+      usedMargin: '0',
+      freeMargin: '50000',
+      openFloatingPnl: '0',
+      maintenanceMargin: '0'
+    },
+    settings: {},
+    orders: [],
+    trades: [],
+    positions: [],
+    fundingSettlements: []
+  }
+  const market = (symbol) => structuredClone(overrides.get(symbol) ?? baseline[symbol])
+  const reference = () => {
+    const quote = market('BTCUSDT-PERP')
+    return {
+      ...quote,
+      mark: quote.markPrice,
+      index: quote.markPrice
+    }
+  }
+  const snapshotAccount = () => ({
+    accounts: [structuredClone(account)],
+    activeDemoAccounts: [structuredClone(account)],
+    ...structuredClone(state)
+  })
+  const resetPerpSummary = () => {
+    state.summary = {
+      balance: '50000',
+      equity: '50000',
+      usedMargin: '0',
+      freeMargin: '50000',
+      openFloatingPnl: '0',
+      maintenanceMargin: '0'
+    }
+  }
+  const page = (role) => ({
+    role,
+    target: null,
+    p0Options: {
+      webBaseUrl: 'http://127.0.0.1:5199',
+      adminBaseUrl: 'http://127.0.0.1:5200'
+    },
+    async navigate(url) {
+      if (url.includes('/trade/spot/')) this.target = { product: 'spot', symbol: 'BTCUSDT' }
+      if (url.includes('/trade/perpetual/')) {
+        this.target = { product: 'perpetual', symbol: 'BTCUSDT-PERP' }
+      }
+    },
+    async waitForFunction() {},
+    async evaluate() {
+      if (!this.target) return null
+      const symbol = this.target.symbol
+      const visible = staleRestoredUi
+        && restoredAfterOverride
+        && !overrides.has(symbol)
+        ? lastOverrides.get(symbol)
+        : market(symbol)
+      return { bid: visible.bid, ask: visible.ask }
+    },
+    assertEvidenceClean() {},
+    async close() {}
+  })
+  const userPage = page('user')
+  const adminPage = page('admin')
+  const context = {
+    run: {
+      runId: 'p0-authority-direct-contract-a1',
+      commit: 'a'.repeat(40),
+      artifactRoot: resolve(tmpdir(), 'p0-authority-direct-contract-a1')
+    },
+    authority: {
+      status: 'PENDING',
+      authorityBundleFixture: 'BLOCKED'
+    },
+    userFactory() {
+      return { email: 'authority@example.test', password: 'Password123!' }
+    },
+    ui: {
+      async launchBrowser() {
+        return {
+          async close() {
+            if (browserCloseFailure) throw new Error('AUTHORITY_BROWSER_CLOSE_FAILED')
+          }
+        }
+      },
+      async createEvidencePage(_browser, { caseId }) {
+        return caseId === 'authority-admin' ? adminPage : userPage
+      },
+      async registerViaUi() { return { requestRef: '101.1' } },
+      async loginAdminViaUi() { return { requestRef: '102.1' } },
+      async openTradePanel(targetPage, target) {
+        targetPage.target = target
+      },
+      async submitOrderViaUi(targetPage, order) {
+        const target = targetPage.target
+        const quote = market(target.symbol)
+        const productType = target.product === 'spot' ? 'CRYPTO_SPOT' : 'LINEAR_PERP'
+        const expected = financialOracles.marketFillOracle({
+          productType,
+          side: order.side,
+          bid: quote.bid,
+          ask: quote.ask
+        })
+        if (target.product === 'spot' && order.side === 'BUY') spotBuyCount += 1
+        const price = wrongControlledSpotFill
+          && target.product === 'spot'
+          && order.side === 'BUY'
+          && spotBuyCount === 2
+          ? String(Number(expected.filledPrice) + 100)
+          : expected.filledPrice
+        const orderId = nextId()
+        const tradeId = nextId()
+        state.orders.push({
+          id: orderId,
+          symbol: target.symbol,
+          orderType: 'MARKET',
+          status: 'FILLED'
+        })
+        state.trades.push({
+          id: tradeId,
+          orderId,
+          symbol: target.symbol,
+          productType,
+          positionSide: target.product === 'spot' ? 'BOTH' : 'LONG',
+          marginMode: target.product === 'spot' ? 'CASH' : 'CROSS',
+          side: order.side,
+          lots: target.product === 'spot' ? '0.001' : '0.001',
+          price,
+          realizedPnl: '0',
+          fee: '0.0001',
+          feeAsset: target.product === 'spot' ? 'BTC' : 'USDT',
+          liquidityRole: 'TAKER',
+          providerCode: quote.providerCode,
+          providerSymbol: quote.providerSymbol,
+          sourceMode: quote.sourceMode,
+          executedAt: '2026-07-23T00:00:00.000Z'
+        })
+        if (target.product === 'spot') {
+          const wallet = state.wallets.find(({ asset }) => asset === 'BTC')
+          wallet.available = order.side === 'BUY' ? '0.001' : '0'
+          wallet.total = wallet.available
+        } else if (order.side === 'BUY') {
+          const currentReference = reference()
+          const first = financialOracles.perpPositionOracle({
+            side: 'LONG',
+            quantity: '0.001',
+            entryPrice: price,
+            markPrice: currentReference.mark,
+            leverage: '10',
+            positionMargin: '1',
+            maintenanceMarginRate: '0.005',
+            rules: { ...BTC_RULES, stepSize: '0.001', minQty: '0.001' }
+          })
+          const oracle = financialOracles.perpPositionOracle({
+            side: 'LONG',
+            quantity: '0.001',
+            entryPrice: price,
+            markPrice: currentReference.mark,
+            leverage: '10',
+            positionMargin: first.initialMargin,
+            maintenanceMarginRate: '0.005',
+            rules: { ...BTC_RULES, stepSize: '0.001', minQty: '0.001' }
+          })
+          state.positions = [{
+            id: nextId(),
+            symbol: target.symbol,
+            side: 'LONG',
+            productType,
+            positionMode: 'ONE_WAY',
+            positionSide: 'LONG',
+            marginMode: 'CROSS',
+            leverage: '10',
+            lots: '0.001',
+            openPrice: price,
+            markPrice: currentReference.mark,
+            floatingPnl: oracle.unrealizedPnl,
+            marginHeld: oracle.initialMargin,
+            maintenanceMargin: oracle.maintenanceMargin,
+            maintenanceMarginRate: '0.005',
+            status: 'OPEN'
+          }]
+          state.summary = {
+            balance: '50000',
+            equity: String(50000 + Number(oracle.unrealizedPnl)),
+            usedMargin: oracle.initialMargin,
+            freeMargin: String(
+              50000 - Number(oracle.initialMargin) + Number(oracle.unrealizedPnl)
+            ),
+            openFloatingPnl: oracle.unrealizedPnl,
+            maintenanceMargin: oracle.maintenanceMargin
+          }
+        } else {
+          state.positions = []
+          resetPerpSummary()
+        }
+        return { requestRef: `${sequence}.1` }
+      },
+      async cancelAllOrdersViaUi() {
+        return { requestRef: '199.1' }
+      }
+    },
+    api: {
+      async snapshotAccount() {
+        return snapshotAccount()
+      },
+      async snapshotMarket(symbol) {
+        return { quote: market(symbol) }
+      },
+      async user(_page, path) {
+        if (path.endsWith('/rules')) {
+          return {
+            ...BTC_RULES,
+            stepSize: path.includes('PERP') ? '0.001' : BTC_RULES.stepSize,
+            minQty: path.includes('PERP') ? '0.001' : BTC_RULES.minQty,
+            minNotional: '1'
+          }
+        }
+        if (path.includes('/perpetuals/')) return reference()
+        throw new Error(`UNEXPECTED_AUTHORITY_USER_PATH: ${path}`)
+      },
+      async admin(_page, path, request) {
+        if (request.method === 'DELETE') {
+          const symbol = decodeURIComponent(path.split('/').at(-1))
+          if (overrides.has(symbol)) restoredAfterOverride = true
+          overrides.delete(symbol)
+          return { status: 'PASS' }
+        }
+        if (request.method === 'POST') {
+          const body = request.body
+          const baselineQuote = baseline[body.symbol]
+          const quote = {
+            ...baselineQuote,
+            bid: body.bid,
+            ask: body.ask,
+            ...(body.symbol.endsWith('-PERP')
+              ? {
+                  markPrice: String(
+                    (Number(body.bid) + Number(body.ask)) / 2
+                  )
+                }
+              : {})
+          }
+          overrides.set(body.symbol, quote)
+          lastOverrides.set(body.symbol, structuredClone(quote))
+          return structuredClone(quote)
+        }
+        throw new Error(`UNEXPECTED_AUTHORITY_ADMIN_PATH: ${path}`)
+      }
+    },
+    db: {
+      async assertDedicatedDatabase() {
+        return 'fx_p0_user_e2e_authority_direct_a1'
+      },
+      async snapshotTradingRows() {
+        return {
+          database: 'fx_p0_user_e2e_authority_direct_a1',
+          orders: state.orders.length,
+          trades: state.trades.length,
+          openPositions: state.positions.length
+        }
+      }
+    },
+    evidence: {
+      async captureCheckpoint(_checkpointContext, name, scope) {
+        return {
+          name,
+          artifactHashes: {},
+          uiEvidence: [],
+          networkEvidence: [],
+          eventEvidence: [],
+          apiEvidence: typeof scope.apiEvidence === 'function'
+            ? await scope.apiEvidence()
+            : scope.apiEvidence ?? [],
+          dbEvidence: typeof scope.dbEvidence === 'function'
+            ? await scope.dbEvidence()
+            : scope.dbEvidence ?? [],
+          oracleEvidence: typeof scope.oracleEvidence === 'function'
+            ? await scope.oracleEvidence()
+            : scope.oracleEvidence ?? []
+        }
+      },
+      writeCaseResultAtomic(_path, result) {
+        persisted = result
+      }
+    }
+  }
+  return {
+    context,
+    persisted: () => persisted
+  }
+}
+
+test('runAuthorityBundleGate directly proves PASS, BLOCKED, and cleanup failure', async () => {
+  const adminCredentials = {
+    email: 'admin@example.test',
+    password: 'AdminPassword123!'
+  }
+  const passing = authorityGateContractContext()
+  const pass = await smokeContracts.runAuthorityBundleGate(passing.context, {
+    adminCredentials
+  })
+  assert.equal(pass.authorityBundleFixture, 'PASS')
+  assert.equal(passing.persisted(), pass)
+
+  const wrongFill = authorityGateContractContext({ wrongControlledSpotFill: true })
+  const blockedFill = await smokeContracts.runAuthorityBundleGate(wrongFill.context, {
+    adminCredentials
+  })
+  assert.equal(blockedFill.authorityBundleFixture, 'BLOCKED')
+  assert.equal(
+    blockedFill.checks.find(({ id }) => id === 'controlled-spot-fill').status,
+    'FAIL'
+  )
+
+  const staleRestore = authorityGateContractContext({ staleRestoredUi: true })
+  const blockedRestore = await smokeContracts.runAuthorityBundleGate(staleRestore.context, {
+    adminCredentials
+  })
+  assert.equal(blockedRestore.authorityBundleFixture, 'BLOCKED')
+  assert.equal(
+    blockedRestore.checks.find(({ id }) => id === 'restored-spot-provider').status,
+    'FAIL'
+  )
+
+  const cleanupFailure = authorityGateContractContext({ browserCloseFailure: true })
+  await assert.rejects(
+    smokeContracts.runAuthorityBundleGate(cleanupFailure.context, { adminCredentials }),
+    /P0_AUTHORITY_BROWSER_CLEANUP_FAILED|P0_AUTHORITY_CLEANUP_FAILED/
+  )
+})
+
 test('authority checkpoints retain independent oracle evidence without a browser page', async (t) => {
   const artifactRoot = mkdtempSync(join(tmpdir(), 'p0-authority-oracle-checkpoint-'))
   t.after(() => rmSync(artifactRoot, { recursive: true, force: true }))
