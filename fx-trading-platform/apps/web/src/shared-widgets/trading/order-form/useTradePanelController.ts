@@ -188,6 +188,7 @@ export function useTradePanelController({
     notice,
     onRetrySession,
     positionMode: adapterSettings.positionMode,
+    readiness: { backendReady, marketDataReady, rulesTradable, settingsReady },
     requestSubmit,
     sellForm,
     sessionState,

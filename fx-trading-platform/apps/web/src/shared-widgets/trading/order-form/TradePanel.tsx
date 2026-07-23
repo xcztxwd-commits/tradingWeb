@@ -46,6 +46,10 @@ export function TradePanel({
     <section
       className={`${styles['trade-panel']} ${compact ? styles['trade-panel--compact'] : ''} ${styles[`trade-panel--mobile-${mobileSide}`]}`}
       aria-label={t('trading.panelForSymbol', { symbol: market.symbol })}
+      data-backend-ready={model.readiness.backendReady}
+      data-market-data-ready={model.readiness.marketDataReady}
+      data-rules-tradable={model.readiness.rulesTradable}
+      data-settings-ready={model.readiness.settingsReady}
     >
       <header className={styles['trade-panel__header']}>
         <TradeTabs productType={market.productType} />
