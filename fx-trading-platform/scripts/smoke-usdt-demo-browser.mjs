@@ -5589,6 +5589,7 @@ async function openBrowserTradeRoute(page, route, symbol) {
   } catch (error) {
     const diagnostic = await page.evaluate((panelSelector) => {
       const panel = document.querySelector(panelSelector)
+      const readinessPanel = panel?.querySelector('[data-backend-ready]')
       const settings = document.querySelector('[aria-label="Perpetual trading settings"]')
       const sources = [...document.querySelectorAll('[data-source]')].map((source) => ({
         source: source.getAttribute('data-source'),
@@ -5615,11 +5616,11 @@ async function openBrowserTradeRoute(page, route, symbol) {
       return {
         pathname: window.location.pathname,
         panelPresent: Boolean(panel),
-        readiness: panel ? {
-          backendReady: panel.getAttribute('data-backend-ready'),
-          marketDataReady: panel.getAttribute('data-market-data-ready'),
-          rulesTradable: panel.getAttribute('data-rules-tradable'),
-          settingsReady: panel.getAttribute('data-settings-ready')
+        readiness: readinessPanel ? {
+          backendReady: readinessPanel.getAttribute('data-backend-ready'),
+          marketDataReady: readinessPanel.getAttribute('data-market-data-ready'),
+          rulesTradable: readinessPanel.getAttribute('data-rules-tradable'),
+          settingsReady: readinessPanel.getAttribute('data-settings-ready')
         } : null,
         panelText: panel?.textContent?.trim().slice(0, 600) ?? null,
         sources,

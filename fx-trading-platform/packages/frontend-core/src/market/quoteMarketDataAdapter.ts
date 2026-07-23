@@ -102,7 +102,7 @@ export function startQuoteSession(
     }
     store.reset(snapshot)
     if (snapshot.status !== 'ready' || !snapshot.source) {
-      if (snapshot.status === 'stale') scheduleBundleRefresh()
+      scheduleBundleRefresh()
       return
     }
 
@@ -137,7 +137,10 @@ export function startQuoteSession(
       latestTrades = trades
       publish()
     } catch {
-      if (!disposed) store.reset(unavailableSnapshot(expectedSource ? 'source-changing' : 'unavailable'))
+      if (!disposed) {
+        store.reset(unavailableSnapshot(expectedSource ? 'source-changing' : 'unavailable'))
+        scheduleBundleRefresh()
+      }
     } finally {
       if (refreshController === controller) refreshController = undefined
       refreshRunning = false
