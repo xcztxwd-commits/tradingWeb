@@ -6613,7 +6613,11 @@ async function assertDatabaseState() {
       'assetLedger', (SELECT count(*) FROM ledger.asset_ledger_entries WHERE account_id = '${sqlLiteral(accountId)}'),
       'orders', (SELECT count(*) FROM trading.orders WHERE account_id = '${sqlLiteral(accountId)}'),
       'trades', (SELECT count(*) FROM trading.trades WHERE account_id = '${sqlLiteral(accountId)}'),
-      'positions', (SELECT count(*) FROM trading.positions WHERE account_id = '${sqlLiteral(accountId)}' AND status = 'OPEN'),
+      'positions', (
+        (SELECT count(*) FROM trading.positions WHERE account_id = '${sqlLiteral(accountId)}' AND status = 'OPEN')
+        + (SELECT count(*) FROM trading.spot_positions
+           WHERE account_id = '${sqlLiteral(accountId)}' AND wallet_type = 'SPOT' AND quantity > 0)
+      ),
       'funding', (SELECT count(*) FROM trading.funding_settlements WHERE account_id = '${sqlLiteral(accountId)}')
     )::text
   `)
