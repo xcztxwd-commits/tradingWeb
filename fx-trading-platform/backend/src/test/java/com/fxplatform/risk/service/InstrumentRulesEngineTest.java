@@ -185,6 +185,22 @@ class InstrumentRulesEngineTest {
   }
 
   @Test
+  void readRulesPreserveCanonicalPerpetualSuffix() {
+    SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setSymbol("BTCUSDT-PERP");
+    symbol.setProductType(ProductType.LINEAR_PERP);
+    symbol.setAssetClass("LINEAR_PERP");
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
+
+    InstrumentRules rules = engine().rules("btcusdt-perp");
+
+    assertThat(rules.symbol()).isEqualTo("BTCUSDT-PERP");
+    assertThat(rules.exists()).isTrue();
+    assertThat(rules.orderEnabled()).isTrue();
+    assertThat(rules.productType()).isEqualTo(ProductType.LINEAR_PERP);
+  }
+
+  @Test
   void usesSeededSpotMinLotAsStepFallbackWhenBindingHasNoProviderInstrument() {
     SymbolEntity symbol = cryptoSpotSymbol();
     symbol.setLotSize(BigDecimal.ONE);

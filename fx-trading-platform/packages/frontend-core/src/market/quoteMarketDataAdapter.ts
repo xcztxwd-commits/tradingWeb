@@ -1,9 +1,9 @@
 import { subscribeMarketSourceChanges, subscribeOrderBook, subscribeQuote, subscribeRecentTrades } from './marketStream.ts'
 import type { MarketSourceChangedEvent } from './marketStream.ts'
-import { createAuthoritativeMarketSnapshot, matchesExpectedMarketSource, unavailableSnapshot } from './authoritativeMarketSnapshot.ts'
+import { createAuthoritativeMarketSnapshot, unavailableSnapshot } from './authoritativeMarketSnapshot.ts'
 import { fetchMarketOrderBook, fetchMarketQuote, fetchMarketRecentTradeBatch } from './tradingMarketApi.ts'
 import type { MarketOrderBook, MarketTradeBatch } from './marketDataTypes.ts'
-import type { MarketSourceMode, TradingQuote } from './tradingModels.ts'
+import type { TradingQuote } from './tradingModels.ts'
 import { marketDataStore } from './marketDataStore.ts'
 
 type AdapterStore = typeof marketDataStore
@@ -77,7 +77,7 @@ export function startQuoteSession(
   let latestQuote: TradingQuote | undefined
   let latestOrderBook: MarketOrderBook | undefined
   let latestTrades: MarketTradeBatch | undefined
-  let expectedSource: { providerCode: string; sourceMode: MarketSourceMode } | undefined
+  let sourceChanging = false
   let disposed = false
   let expiryTimer: ReturnType<typeof globalThis.setTimeout> | undefined
   let refreshTimer: ReturnType<typeof globalThis.setTimeout> | undefined
@@ -93,18 +93,17 @@ export function startQuoteSession(
     expiryTimer = undefined
 
     const snapshot = createAuthoritativeMarketSnapshot(latestQuote, latestOrderBook, latestTrades)
-    if (expectedSource) {
-      if (snapshot.status !== 'ready' || !snapshot.source || !matchesExpectedMarketSource(snapshot.source, expectedSource)) {
-        store.reset(unavailableSnapshot('source-changing'))
-        scheduleBundleRefresh()
-        return
-      }
+    if (sourceChanging && (snapshot.status !== 'ready' || !snapshot.source)) {
+      store.reset(unavailableSnapshot('source-changing'))
+      scheduleBundleRefresh()
+      return
     }
     store.reset(snapshot)
     if (snapshot.status !== 'ready' || !snapshot.source) {
-      if (snapshot.status === 'stale') scheduleBundleRefresh()
+      scheduleBundleRefresh()
       return
     }
+    sourceChanging = false
 
     const expiresIn = Date.parse(snapshot.source.expiresAt) - Date.now()
     expiryTimer = globalThis.setTimeout(() => {
@@ -131,13 +130,16 @@ export function startQuoteSession(
         dependencies.fetchOrderBook(symbol, controller.signal),
         dependencies.fetchTrades(symbol, controller.signal)
       ])
-      if (disposed) return
+      if (disposed || controller.signal.aborted) return
       latestQuote = quote
       latestOrderBook = orderBook
       latestTrades = trades
       publish()
     } catch {
-      if (!disposed) store.reset(unavailableSnapshot(expectedSource ? 'source-changing' : 'unavailable'))
+      if (!disposed) {
+        store.reset(unavailableSnapshot(sourceChanging ? 'source-changing' : 'unavailable'))
+        scheduleBundleRefresh()
+      }
     } finally {
       if (refreshController === controller) refreshController = undefined
       refreshRunning = false
@@ -162,7 +164,7 @@ export function startQuoteSession(
   const unsubscribeOrderBook = dependencies.subscribeOrderBook(symbol, token, scheduleBundleRefresh)
   const unsubscribeRecentTrades = dependencies.subscribeRecentTrades(symbol, token, scheduleBundleRefresh)
   const unsubscribeSourceChanges = dependencies.subscribeSourceChanges(symbol, token, (event: MarketSourceChangedEvent) => {
-    expectedSource = { providerCode: event.providerCode, sourceMode: event.sourceMode }
+    sourceChanging = true
     latestQuote = undefined
     latestOrderBook = undefined
     latestTrades = undefined
