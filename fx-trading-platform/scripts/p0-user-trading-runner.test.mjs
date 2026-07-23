@@ -41,7 +41,7 @@ import {
 import * as p0CaseContracts from './p0-user-trading-cases.mjs'
 import * as smokeContracts from './smoke-usdt-demo-browser.mjs'
 import './p0-user-trading-advanced-cases.mjs'
-import './p0-user-trading-core-cases.mjs'
+import * as p0CoreContracts from './p0-user-trading-core-cases.mjs'
 import './p0-user-trading-oracles.mjs'
 import './p0-user-trading-order-cases.mjs'
 
@@ -680,6 +680,358 @@ test('dispatch invokes the declared handler and fails fast when it is absent', a
     runCase(definition, context, {}),
     new RegExp(`^Error: INCOMPLETE_MATRIX: ${definition.id}$`)
   )
+})
+
+test('P0Context locks the real runtime interfaces used by detailed case modules', () => {
+  const noop = () => {}
+  const input = {
+    run: {
+      runId: 'p0-context-contract-a1',
+      mode: 'DISCOVERY',
+      commit: 'a'.repeat(40),
+      artifactRoot: 'C:\\p0-context-contract'
+    },
+    ui: {
+      launchBrowser: noop,
+      createEvidencePage: noop,
+      registerViaUi: noop,
+      loginViaUi: noop,
+      loginAdminViaUi: noop,
+      logoutViaUi: noop,
+      openTradePanel: noop,
+      withCapturedMutation: noop,
+      submitOrderViaUi: noop,
+      acceptNextNativeDialog: noop,
+      followLoginPromptViaUi: noop,
+      cancelAllOrdersViaUi: noop
+    },
+    api: {
+      user: noop,
+      admin: noop,
+      snapshotAccount: noop,
+      snapshotMarket: noop
+    },
+    db: {
+      query: noop,
+      snapshotTradingRows: noop,
+      assertDedicatedDatabase: noop
+    },
+    events: {
+      waitForStompEvent: noop,
+      snapshotFrames: noop,
+      probeForbiddenSubscription: noop
+    },
+    services: {
+      ensureProfile: noop,
+      restartBackend: noop,
+      assertOwnedPorts: noop
+    },
+    fixtures: {
+      marketOverride: noop,
+      providerBindings: noop,
+      fundingConfig: noop,
+      positionTime: noop,
+      kline: noop
+    },
+    evidence: {
+      captureCheckpoint: noop,
+      writeCaseResultAtomic: noop
+    },
+    userFactory: noop
+  }
+
+  const context = p0CaseContracts.createP0Context(input)
+  assert.notEqual(context, input)
+  assert.equal(context.run.runId, input.run.runId)
+  assert.equal(context.ui.withCapturedMutation, noop)
+  assert.equal(context.evidence.captureCheckpoint, noop)
+  assert.equal(context.userFactory, noop)
+  assert.equal(Object.isFrozen(context), true)
+  assert.throws(
+    () => p0CaseContracts.createP0Context({
+      ...input,
+      ui: { ...input.ui, withCapturedMutation: undefined }
+    }),
+    /P0_CONTEXT_INTERFACE_REQUIRED: ui\.withCapturedMutation/
+  )
+  for (const method of [
+    'launchBrowser',
+    'logoutViaUi',
+    'followLoginPromptViaUi',
+    'cancelAllOrdersViaUi'
+  ]) {
+    assert.throws(
+      () => p0CaseContracts.createP0Context({
+        ...input,
+        ui: { ...input.ui, [method]: undefined }
+      }),
+      new RegExp(`P0_CONTEXT_INTERFACE_REQUIRED: ui\\.${method}`)
+    )
+  }
+  assert.throws(
+    () => p0CaseContracts.createP0Context({
+      ...input,
+      events: { ...input.events, probeForbiddenSubscription: undefined }
+    }),
+    /P0_CONTEXT_INTERFACE_REQUIRED: events\.probeForbiddenSubscription/
+  )
+})
+
+test('AUTH handlers are real owned dispatch targets and AUTH-03 launches two browser processes', () => {
+  assert.deepEqual(Object.keys(p0CoreContracts.CASE_HANDLERS).toSorted(), [
+    'runAuth01',
+    'runAuth02',
+    'runAuth03'
+  ])
+  for (const id of ['AUTH-01', 'AUTH-02', 'AUTH-03']) {
+    const definition = P0_CASES.find((candidate) => candidate.id === id)
+    assert.equal(typeof p0CoreContracts.CASE_HANDLERS[definition.handlerId], 'function')
+  }
+
+  const corePath = fileURLToPath(new URL('./p0-user-trading-core-cases.mjs', import.meta.url))
+  const coreSource = readFileSync(corePath, 'utf8')
+  const auth03Source = coreSource.slice(
+    coreSource.indexOf('export async function runAuth03'),
+    coreSource.indexOf('export const CASE_HANDLERS')
+  )
+  assert.doesNotMatch(coreSource, /smoke-usdt-demo-browser/)
+  assert.doesNotMatch(coreSource, /installBrowserSession/)
+  assert.doesNotMatch(coreSource, /fx-trade-confirm-skip/)
+  assert.doesNotMatch(coreSource, /Fetch\.(?:enable|requestPaused|fulfillRequest)/)
+  assert.doesNotMatch(coreSource, /(?:^|[^\\w-])\.trade-panel/)
+  assert.equal(
+    [...auth03Source.matchAll(/context\.ui\.launchBrowser\(\)/g)].length,
+    2,
+    'AUTH-03 must start two independent browser processes'
+  )
+  assert.match(
+    auth03Source,
+    /context\.events\.probeForbiddenSubscription\([\s\S]*\/topic\/trading\/accounts\//
+  )
+})
+
+test('default P0 dispatch builds one context and injects the owned AUTH handlers', () => {
+  const smokePath = fileURLToPath(new URL('./smoke-usdt-demo-browser.mjs', import.meta.url))
+  const smokeSource = readFileSync(smokePath, 'utf8')
+
+  assert.match(smokeSource, /createP0Context/)
+  assert.match(smokeSource, /CASE_HANDLERS/)
+  assert.match(smokeSource, /const p0Context = dependencies\.createP0Context/)
+  assert.match(smokeSource, /dispatchCase\(definition, p0Context, handlers/)
+})
+
+test('default P0 DB oracle follows the active profile database', async (t) => {
+  const artifactBase = mkdtempSync(join(tmpdir(), 'p0-active-profile-database-'))
+  t.after(() => rmSync(artifactBase, { recursive: true, force: true }))
+  const matrixDatabase = 'fx_p0_user_e2e_matrix_oracle_a1'
+  const phaseDatabase = 'fx_p0_user_e2e_ui_core_oracle_a1'
+  const queriedDatabases = []
+  const dependencies = smokeContracts.createDefaultP0Dependencies({
+    artifactBase,
+    inheritedEnv: {},
+    infrastructure: {},
+    redis: {},
+    postgres: {
+      async queryDatabase(database, sql) {
+        queriedDatabases.push({ database, sql })
+        return sql === 'SELECT current_database();' ? database : 'ok'
+      }
+    }
+  })
+  const prepared = {
+    matrixDatabase,
+    identity: { commit: 'c'.repeat(40) },
+    runRoot: artifactBase
+  }
+  const context = dependencies.createP0Context(prepared, {
+    runId: 'p0-active-profile-database-a1',
+    mode: 'discovery'
+  })
+
+  await context.db.query('SELECT 1;')
+  prepared.activeDatabaseSegment = phaseDatabase
+  await context.db.query('SELECT 2;')
+  assert.equal(await context.db.assertDedicatedDatabase(), phaseDatabase)
+  assert.deepEqual(
+    queriedDatabases.map(({ database }) => database),
+    [matrixDatabase, phaseDatabase, phaseDatabase]
+  )
+})
+
+test('AUTH fragments satisfy the merge contract and hash every checkpoint screenshot', async (t) => {
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'p0-auth-fragment-contract-'))
+  t.after(() => rmSync(artifactRoot, { recursive: true, force: true }))
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-01')
+  let persisted
+  let screenshotSequence = 0
+  const page = {
+    p0Options: { webBaseUrl: 'http://127.0.0.1:5199' },
+    async navigate() {},
+    async waitForFunction() {},
+    async evaluate() { return 1 },
+    async send(method) {
+      if (method === 'Page.captureScreenshot') {
+        screenshotSequence += 1
+        return {
+          data: Buffer.from(`auth-checkpoint-${screenshotSequence}`).toString('base64')
+        }
+      }
+      return {}
+    },
+    assertEvidenceClean() {},
+    snapshotEvidence() {
+      return {
+        networkEvidence: [],
+        eventEvidence: [],
+        consoleErrors: []
+      }
+    },
+    async close() {}
+  }
+  const accountSnapshot = {
+    account: {
+      id: '11111111-1111-4111-8111-111111111111',
+      accountType: 'DEMO',
+      status: 'ACTIVE'
+    },
+    wallets: [{
+      walletType: 'SPOT',
+      asset: 'USDT',
+      total: 50000,
+      available: 50000,
+      locked: 0
+    }],
+    summary: {
+      balance: 50000,
+      equity: 50000,
+      freeMargin: 50000,
+      usedMargin: 0
+    },
+    settings: {
+      positionMode: 'ONE_WAY',
+      symbols: [{
+        symbol: 'BTCUSDT-PERP',
+        marginMode: 'CROSS',
+        leverage: 10,
+        quantityUnit: 'BASE'
+      }]
+    },
+    orders: [],
+    trades: [],
+    positions: [],
+    fundingSettlements: []
+  }
+  const dbSnapshot = {
+    activeDemoAccounts: 1,
+    orders: 0,
+    trades: 0,
+    openPositions: 0,
+    fundingSettlements: 0
+  }
+  const context = {
+    run: {
+      runId: 'p0-auth-fragment-contract-a1',
+      commit: 'a'.repeat(40),
+      artifactRoot
+    },
+    userFactory() {
+      return { email: 'member@example.test', password: 'Password123!' }
+    },
+    ui: {
+      async launchBrowser() { return { async close() {} } },
+      async createEvidencePage() { return page },
+      async registerViaUi() { return { requestRef: '101.1' } },
+      async openTradePanel() {}
+    },
+    api: {
+      async snapshotAccount() { return accountSnapshot },
+      async snapshotMarket() { return { quote: { last: 60000 } } }
+    },
+    db: {
+      async assertDedicatedDatabase() { return 'fx_p0_user_e2e_auth_fragment_a1' },
+      async snapshotTradingRows() { return dbSnapshot }
+    },
+    evidence: {
+      captureCheckpoint: smokeContracts.captureCheckpoint,
+      writeCaseResultAtomic(_path, result) { persisted = result }
+    }
+  }
+
+  const result = await p0CoreContracts.runAuth01(context, definition, {
+    attempt: 2,
+    profileAttempt: 3
+  })
+  assert.equal(result.schemaVersion, 1)
+  assert.equal(result.attempt, 2)
+  assert.equal(result.scopeComplete, true)
+  assert.equal(Number.isFinite(result.durationMs) && result.durationMs >= 0, true)
+  assert.deepEqual(Object.keys(result.artifactHashes).toSorted(), [
+    'AUTH-01/before.png',
+    'AUTH-01/final.png',
+    'AUTH-01/submitted.png'
+  ])
+  for (const [path, hash] of Object.entries(result.artifactHashes)) {
+    const bytes = readFileSync(join(artifactRoot, ...path.split('/')))
+    const expected = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+    assert.equal(hash, expected)
+  }
+  assert.deepEqual(result.subruns, [{
+    ...definition.requiredSubruns[0],
+    status: 'PASS',
+    attempt: 2,
+    profileAttempt: 3,
+    durationMs: result.durationMs,
+    artifactHashes: result.artifactHashes
+  }])
+  assert.equal(persisted, result)
+  assert.doesNotThrow(() => smokeContracts.mergeP0CaseFragments({
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }, [result]))
+})
+
+test('AUTH failure fragments retain the formal terminal fields', async () => {
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-01')
+  let persisted
+  const context = {
+    run: {
+      runId: 'p0-auth-failure-fragment-a1',
+      commit: 'b'.repeat(40),
+      artifactRoot: resolve(tmpdir(), 'p0-auth-failure-fragment-a1')
+    },
+    userFactory() {
+      return { email: 'member@example.test', password: 'Password123!' }
+    },
+    ui: {
+      async launchBrowser() { throw new Error('AUTH_BROWSER_START_FAILED') }
+    },
+    evidence: {
+      writeCaseResultAtomic(_path, result) { persisted = result }
+    }
+  }
+
+  await assert.rejects(
+    p0CoreContracts.runAuth01(context, definition, {
+      attempt: 4,
+      profileAttempt: 5
+    }),
+    /AUTH_BROWSER_START_FAILED/
+  )
+  assert.equal(persisted.schemaVersion, 1)
+  assert.equal(persisted.attempt, 4)
+  assert.equal(persisted.scopeComplete, true)
+  assert.equal(Number.isFinite(persisted.durationMs) && persisted.durationMs >= 0, true)
+  assert.deepEqual(persisted.artifactHashes, {})
+  assert.deepEqual(persisted.subruns, [{
+    ...definition.requiredSubruns[0],
+    status: 'FAIL',
+    attempt: 4,
+    profileAttempt: 5,
+    durationMs: persisted.durationMs,
+    artifactHashes: {}
+  }])
 })
 
 test('dispatch and phase counting ignore inherited values', async () => {

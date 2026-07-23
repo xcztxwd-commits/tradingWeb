@@ -557,6 +557,51 @@ export function countByPhase(definitions) {
   }, {})
 }
 
+const P0_CONTEXT_INTERFACES = {
+  ui: [
+    'launchBrowser',
+    'createEvidencePage',
+    'registerViaUi',
+    'loginViaUi',
+    'loginAdminViaUi',
+    'logoutViaUi',
+    'openTradePanel',
+    'withCapturedMutation',
+    'submitOrderViaUi',
+    'acceptNextNativeDialog',
+    'followLoginPromptViaUi',
+    'cancelAllOrdersViaUi'
+  ],
+  api: ['user', 'admin', 'snapshotAccount', 'snapshotMarket'],
+  db: ['query', 'snapshotTradingRows', 'assertDedicatedDatabase'],
+  events: ['waitForStompEvent', 'snapshotFrames', 'probeForbiddenSubscription'],
+  services: ['ensureProfile', 'restartBackend', 'assertOwnedPorts'],
+  fixtures: ['marketOverride', 'providerBindings', 'fundingConfig', 'positionTime', 'kline'],
+  evidence: ['captureCheckpoint', 'writeCaseResultAtomic']
+}
+
+export function createP0Context(input) {
+  if (!input || typeof input !== 'object') throw new Error('P0_CONTEXT_REQUIRED')
+  if (!input.run || typeof input.run !== 'object') {
+    throw new Error('P0_CONTEXT_INTERFACE_REQUIRED: run')
+  }
+  for (const [group, methods] of Object.entries(P0_CONTEXT_INTERFACES)) {
+    const implementation = input[group]
+    if (!implementation || typeof implementation !== 'object') {
+      throw new Error(`P0_CONTEXT_INTERFACE_REQUIRED: ${group}`)
+    }
+    for (const method of methods) {
+      if (typeof implementation[method] !== 'function') {
+        throw new Error(`P0_CONTEXT_INTERFACE_REQUIRED: ${group}.${method}`)
+      }
+    }
+  }
+  if (typeof input.userFactory !== 'function') {
+    throw new Error('P0_CONTEXT_INTERFACE_REQUIRED: userFactory')
+  }
+  return Object.freeze({ ...input })
+}
+
 export async function runCase(definition, context, handlers, details = {}) {
   const descriptor = handlers && typeof handlers === 'object'
     ? Object.getOwnPropertyDescriptor(handlers, definition.handlerId)

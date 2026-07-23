@@ -33,8 +33,10 @@ import {
   planP0Execution,
   registryFingerprint as calculateRegistryFingerprint,
   resolveP0RunRoot,
+  createP0Context as buildP0Context,
   runCase
 } from './p0-user-trading-cases.mjs'
+import { CASE_HANDLERS } from './p0-user-trading-core-cases.mjs'
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
 const P0_COMPOSE_PROJECT = 'infra'
@@ -3779,12 +3781,16 @@ export async function executeP0PlanPhases({
       continue
     }
     if (phase === 'authority') {
+      await operations.ensureParentFrontends?.(context, { signal })
+      throwIfP0Aborted(signal)
       const evidence = await operations.runAuthority(context, plan, { signal })
       throwIfP0Aborted(signal)
       recordControlResult(phase, evidence)
       continue
     }
     if (P0_MATRIX_PHASES.has(phase)) {
+      await operations.ensureParentFrontends?.(context, { signal })
+      throwIfP0Aborted(signal)
       await operations.runMatrixPhase(phase, context, plan, { signal })
       throwIfP0Aborted(signal)
       matrixPhases += 1
@@ -6195,7 +6201,7 @@ export function assertNoRuntimeErrors(errors, label) {
   assert(relevant.length === 0, `${label} browser runtime errors: ${details.join(' | ')}`)
 }
 
-async function launchBrowser() {
+export async function launchBrowser() {
   const executable = browserCandidates().find(existsSync)
   assert(executable, 'Chrome or Edge is required; set SMOKE_BROWSER_PATH or CHROME_PATH')
   const port = await freePort()
@@ -6314,6 +6320,10 @@ async function createCdpPage(port) {
     on(method, listener) {
       if (!listeners.has(method)) listeners.set(method, new Set())
       listeners.get(method).add(listener)
+      return () => {
+        listeners.get(method)?.delete(listener)
+        if (listeners.get(method)?.size === 0) listeners.delete(method)
+      }
     },
     async navigate(url) {
       await send('Page.navigate', { url })
@@ -6368,6 +6378,775 @@ async function setViewport(page, viewport) {
     screenWidth: viewport.width,
     screenHeight: viewport.height
   })
+}
+
+export async function createEvidencePage(browserInstance, options = {}) {
+  const createPage = options.createPage ?? createCdpPage
+  const page = await createPage(browserInstance.port)
+  const evidence = {
+    caseId: options.caseId ?? null,
+    cursor: 0,
+    requests: [],
+    byRequestId: new Map(),
+    consoleErrors: [],
+    httpErrors: [],
+    stompFrames: [],
+    allowedHttpErrors: new Map(),
+    dispose: []
+  }
+  const listen = (method, listener) => {
+    const dispose = page.on(method, listener)
+    if (typeof dispose === 'function') evidence.dispose.push(dispose)
+  }
+  const advance = () => {
+    evidence.cursor += 1
+    return evidence.cursor
+  }
+
+  listen('Runtime.exceptionThrown', ({ exceptionDetails = {} }) => {
+    evidence.consoleErrors.push({
+      text: exceptionDetails.exception?.description
+        ?? exceptionDetails.text
+        ?? 'browser runtime exception',
+      source: 'Runtime.exceptionThrown',
+      url: exceptionDetails.url
+    })
+  })
+  listen('Runtime.consoleAPICalled', ({ type, args = [], stackTrace }) => {
+    if (type !== 'error' && type !== 'assert') return
+    evidence.consoleErrors.push({
+      text: args.map((argument) => (
+        argument.value ?? argument.description ?? argument.type ?? ''
+      )).join(' ') || `console.${type}`,
+      source: 'Runtime.consoleAPICalled',
+      url: stackTrace?.callFrames?.[0]?.url
+    })
+  })
+  listen('Log.entryAdded', ({ entry = {} }) => {
+    if (entry.level === 'error') evidence.consoleErrors.push(entry)
+  })
+  listen('Network.requestWillBeSent', ({ requestId, request = {}, type }) => {
+    const record = {
+      cursor: advance(),
+      requestId,
+      type,
+      method: String(request.method ?? '').toUpperCase(),
+      url: request.url ?? '',
+      postData: request.postData,
+      requestHeaders: request.headers ?? {},
+      idempotencyKey: extractP0IdempotencyKey(request),
+      response: null,
+      responseBody: undefined,
+      loadingFinished: false,
+      loadingFailure: null
+    }
+    evidence.requests.push(record)
+    evidence.byRequestId.set(requestId, record)
+  })
+  listen('Network.responseReceived', ({ requestId, response = {} }) => {
+    const record = evidence.byRequestId.get(requestId)
+    if (!record) return
+    advance()
+    record.response = {
+      status: response.status,
+      mimeType: response.mimeType,
+      headers: response.headers ?? {}
+    }
+    if (Number(response.status) >= 400) {
+      evidence.httpErrors.push({
+        requestId,
+        method: record.method,
+        url: record.url,
+        status: Number(response.status)
+      })
+    }
+  })
+  listen('Network.loadingFinished', ({ requestId }) => {
+    const record = evidence.byRequestId.get(requestId)
+    if (!record) return
+    advance()
+    record.loadingFinished = true
+  })
+  listen('Network.loadingFailed', ({ requestId, errorText, canceled }) => {
+    const record = evidence.byRequestId.get(requestId)
+    if (!record) return
+    advance()
+    record.loadingFailure = { errorText, canceled: Boolean(canceled) }
+  })
+  listen('Network.webSocketFrameSent', ({ response = {} }) => {
+    evidence.stompFrames.push(parseP0StompFrame('sent', response.payloadData))
+  })
+  listen('Network.webSocketFrameReceived', ({ response = {} }) => {
+    evidence.stompFrames.push(parseP0StompFrame('received', response.payloadData))
+  })
+
+  await page.send('Page.enable')
+  await page.send('Runtime.enable')
+  await page.send('Log.enable')
+  await page.send('Network.enable')
+  if (options.viewport) await setViewport(page, options.viewport)
+
+  Object.defineProperty(page, 'p0Evidence', { value: evidence })
+  Object.defineProperty(page, 'p0Options', {
+    value: Object.freeze({
+      webBaseUrl: options.webBaseUrl,
+      adminBaseUrl: options.adminBaseUrl,
+      apiBaseUrl: options.apiBaseUrl,
+      caseId: options.caseId
+    })
+  })
+  page.allowHttpError = (requestRef, reason) => {
+    if (typeof requestRef !== 'string' || requestRef.length === 0
+      || typeof reason !== 'string' || reason.length === 0) {
+      throw new Error('P0_EXPECTED_HTTP_ERROR_SCOPE_REQUIRED')
+    }
+    evidence.allowedHttpErrors.set(requestRef, reason)
+  }
+  page.assertEvidenceClean = (label = options.caseId ?? 'P0 browser page') => {
+    assertNoRuntimeErrors(evidence.consoleErrors, label)
+    const unexplained = evidence.httpErrors.filter(({ requestId }) => (
+      !evidence.allowedHttpErrors.has(requestId)
+    ))
+    if (unexplained.length > 0) {
+      const first = unexplained[0]
+      throw new Error(
+        `${label} unexplained HTTP ${first.status} ${first.method} ${first.url}`
+      )
+    }
+  }
+  page.snapshotEvidence = () => ({
+    networkEvidence: evidence.requests.map(redactP0NetworkRecord),
+    eventEvidence: evidence.stompFrames.filter(Boolean),
+    consoleErrors: evidence.consoleErrors.map((error) => browserRuntimeErrorMessage(error))
+  })
+  const closePage = page.close.bind(page)
+  page.close = async () => {
+    for (const dispose of evidence.dispose.splice(0)) dispose()
+    await closePage()
+  }
+  return page
+}
+
+export async function withCapturedMutation(page, matcher, action) {
+  if (!page?.p0Evidence || typeof action !== 'function') {
+    throw new Error('P0_CAPTURED_MUTATION_PAGE_REQUIRED')
+  }
+  const cursor = page.p0Evidence.cursor
+  const actionResult = await action()
+  const record = await waitFor(
+    () => page.p0Evidence.requests.find((candidate) => (
+      candidate.cursor > cursor && matchesP0NetworkRequest(candidate, matcher)
+    )),
+    'browser mutation request',
+    15000
+  )
+  await waitFor(() => {
+    if (record.loadingFailure) {
+      throw new Error(
+        `P0_MUTATION_NETWORK_FAILED: ${record.method} ${record.url} `
+          + `${record.loadingFailure.errorText ?? 'unknown'}`
+      )
+    }
+    return record.response && record.loadingFinished
+  }, `browser mutation response ${record.requestId}`, 30000)
+  const responseBody = await page.send('Network.getResponseBody', {
+    requestId: record.requestId
+  })
+  record.responseBody = responseBody?.base64Encoded
+    ? Buffer.from(responseBody.body ?? '', 'base64').toString('utf8')
+    : String(responseBody?.body ?? '')
+  return {
+    actionResult,
+    requestRef: record.requestId,
+    method: record.method,
+    url: record.url,
+    idempotencyKey: record.idempotencyKey,
+    status: Number(record.response.status),
+    networkEvidence: redactP0NetworkRecord(record)
+  }
+}
+
+export async function registerViaUi(page, credentials) {
+  requireP0Credentials(credentials)
+  const baseUrl = p0PageBaseUrl(page, 'webBaseUrl', 'WEB_BASE_URL', 'http://127.0.0.1:5199')
+  await page.navigate(`${baseUrl}/register`)
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[aria-labelledby="register-title"] form')),
+    'real registration form'
+  )
+  const capture = await withCapturedMutation(
+    page,
+    { method: 'POST', url: /\/api\/auth\/register$/ },
+    () => page.evaluate((email, password) => {
+      const form = document.querySelector('[aria-labelledby="register-title"] form')
+      const channel = form?.querySelector('[aria-label="注册方式"] button')
+      const emailInput = form?.querySelector('input[autocomplete="email"]')
+      const passwordInput = form?.querySelector('input[autocomplete="new-password"]')
+      const submit = form?.querySelector('button[type="submit"]')
+      if (!form || !channel || !emailInput || !passwordInput || !submit) {
+        throw new Error('P0_REGISTER_FORM_INCOMPLETE')
+      }
+      channel.click()
+      const setValue = (input, value) => {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value'
+        )?.set
+        setter?.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      setValue(emailInput, email)
+      setValue(passwordInput, password)
+      submit.click()
+      return true
+    }, credentials.email, credentials.password)
+  )
+  assertP0MutationSucceeded(capture, 'registration')
+  await page.waitForFunction(
+    () => window.location.pathname === '/account/overview',
+    'registration authenticated redirect'
+  )
+  return { ...capture, authenticated: true }
+}
+
+export async function loginViaUi(page, credentials, options = {}) {
+  requireP0Credentials(credentials)
+  const baseUrl = p0PageBaseUrl(page, 'webBaseUrl', 'WEB_BASE_URL', 'http://127.0.0.1:5199')
+  const redirect = options.redirect ?? credentials.redirect
+  const loginPath = redirect
+    ? `/login?redirect=${encodeURIComponent(redirect)}`
+    : '/login'
+  await page.navigate(`${baseUrl}${loginPath}`)
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[aria-labelledby="login-title"] form')),
+    'real login form'
+  )
+  const capture = await withCapturedMutation(
+    page,
+    { method: 'POST', url: /\/api\/auth\/login$/ },
+    () => page.evaluate((email, password) => {
+      const form = document.querySelector('[aria-labelledby="login-title"] form')
+      const emailInput = form?.querySelector('input[autocomplete="email"]')
+      const passwordInput = form?.querySelector('input[autocomplete="current-password"]')
+      const submit = form?.querySelector('button[type="submit"]')
+      if (!form || !emailInput || !passwordInput || !submit) {
+        throw new Error('P0_LOGIN_FORM_INCOMPLETE')
+      }
+      const setValue = (input, value) => {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value'
+        )?.set
+        setter?.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      setValue(emailInput, email)
+      setValue(passwordInput, password)
+      submit.click()
+      return true
+    }, credentials.email, credentials.password)
+  )
+  if (options.expectFailure) {
+    assert(
+      capture.status >= 400 && capture.status < 500,
+      `wrong-password login must return 4xx, got ${capture.status}`
+    )
+    page.allowHttpError(capture.requestRef, options.reason ?? 'expected login rejection')
+    await page.waitForFunction(
+      () => Boolean(document.querySelector('[aria-labelledby="login-title"] [role="alert"]')),
+      'visible login rejection'
+    )
+    return { ...capture, authenticated: false }
+  }
+  assertP0MutationSucceeded(capture, 'login')
+  await page.waitForFunction(
+    (expectedPath) => window.location.pathname === expectedPath,
+    'login authenticated redirect',
+    redirect ?? '/account/overview'
+  )
+  return { ...capture, authenticated: true }
+}
+
+export async function loginAdminViaUi(page, credentials, options = {}) {
+  requireP0Credentials(credentials)
+  const baseUrl = p0PageBaseUrl(page, 'adminBaseUrl', 'ADMIN_BASE_URL', 'http://127.0.0.1:5200')
+  await page.navigate(`${baseUrl}/login`)
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('form.login-panel')),
+    'real Admin login form'
+  )
+  const capture = await withCapturedMutation(
+    page,
+    { method: 'POST', url: /\/api\/auth\/login$/ },
+    () => page.evaluate((email, password) => {
+      const form = document.querySelector('form.login-panel')
+      const emailInput = form?.querySelector('input[autocomplete="username"]')
+      const passwordInput = form?.querySelector('input[autocomplete="current-password"]')
+      const submit = form?.querySelector('button')
+      if (!form || !emailInput || !passwordInput || !submit) {
+        throw new Error('P0_ADMIN_LOGIN_FORM_INCOMPLETE')
+      }
+      const setValue = (input, value) => {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value'
+        )?.set
+        setter?.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      setValue(emailInput, email)
+      setValue(passwordInput, password)
+      submit.click()
+      return true
+    }, credentials.email, credentials.password)
+  )
+  assertP0MutationSucceeded(capture, 'Admin login')
+  await page.waitForFunction(
+    () => window.location.pathname !== '/login',
+    'Admin authenticated redirect'
+  )
+  return { ...capture, authenticated: true, expectedRoute: options.redirect ?? '/dashboard' }
+}
+
+export async function logoutViaUi(page) {
+  const opened = await page.evaluate(() => {
+    const trigger = document.querySelector('button[aria-label="个人中心"][aria-haspopup="menu"]')
+    if (!trigger) return false
+    trigger.click()
+    return true
+  })
+  assert(opened, 'authenticated user menu must be available for UI logout')
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[role="menu"][aria-label="个人中心"]')),
+    'authenticated user menu'
+  )
+  const capture = await withCapturedMutation(
+    page,
+    { method: 'POST', url: /\/api\/auth\/logout$/ },
+    () => page.evaluate(() => {
+      const menu = document.querySelector('[role="menu"][aria-label="个人中心"]')
+      const logout = [...(menu?.querySelectorAll('button[role="menuitem"]') ?? [])]
+        .find((button) => button.textContent?.includes('退出登录'))
+      if (!logout) throw new Error('P0_LOGOUT_ACTION_MISSING')
+      logout.click()
+      return true
+    })
+  )
+  assertP0MutationSucceeded(capture, 'logout')
+  await page.waitForFunction(
+    () => window.location.pathname === '/',
+    'logout public redirect'
+  )
+  return { ...capture, authenticated: false }
+}
+
+export async function openTradePanel(page, target) {
+  const route = resolveP0TradeRoute(target)
+  const baseUrl = p0PageBaseUrl(page, 'webBaseUrl', 'WEB_BASE_URL', 'http://127.0.0.1:5199')
+  await page.navigate(`${baseUrl}${route}`)
+  await page.waitForFunction(
+    (expectedPath) => window.location.pathname === expectedPath
+      && (document.body?.innerText?.trim().length ?? 0) > 40,
+    `real trade route ${route}`,
+    route
+  )
+  const mobile = target?.mobile ?? await page.evaluate(() => {
+    const root = document.querySelector('[data-platform-view="mobile"]')
+    if (!root) return false
+    const rect = root.getBoundingClientRect()
+    const style = getComputedStyle(root)
+    return rect.width > 0 && rect.height > 0
+      && style.display !== 'none' && style.visibility !== 'hidden'
+  })
+  const selector = mobile
+    ? '[data-platform-view="mobile"] [aria-hidden="false"] section[aria-label][class*="trade-panel"]'
+    : '[data-platform-view="pc"] [data-panel-id="trade"] section[aria-label][class*="trade-panel"]'
+  if (mobile) {
+    const clicked = await page.evaluate(() => {
+      const button = document.querySelector('[data-testid="mobile-trade-action"]')
+      if (!button) return false
+      const rect = button.getBoundingClientRect()
+      const style = getComputedStyle(button)
+      if (rect.width <= 0 || rect.height <= 0
+        || style.display === 'none' || style.visibility === 'hidden') return false
+      button.click()
+      return true
+    })
+    assert(clicked, 'visible mobile Trade action must open the real order sheet')
+  }
+  await page.waitForFunction((panelSelector) => {
+    const panels = [...document.querySelectorAll(panelSelector)]
+    const visible = panels.filter((panel) => {
+      const rect = panel.getBoundingClientRect()
+      const style = getComputedStyle(panel)
+      return rect.width > 0 && rect.height > 0
+        && rect.bottom > 0 && rect.right > 0
+        && rect.top < window.innerHeight && rect.left < window.innerWidth
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number(style.opacity) > 0
+    })
+    return visible.length === 1
+  }, `one visible scoped trade panel ${route}`, selector)
+  page.p0TradePanel = { selector, mobile, route }
+  return page.p0TradePanel
+}
+
+export async function submitOrderViaUi(page, order) {
+  if (!page.p0TradePanel) await openTradePanel(page, order.target ?? order)
+  const panelSelector = page.p0TradePanel.selector
+  const side = String(order.side ?? 'BUY').toLowerCase()
+  const orderType = String(order.orderType ?? 'MARKET').toUpperCase()
+  await page.evaluate((selector, selectedSide, selectedType, values) => {
+    const panel = document.querySelector(selector)
+    if (!panel) throw new Error('P0_SCOPED_TRADE_PANEL_MISSING')
+    const visible = (element) => {
+      const rect = element?.getBoundingClientRect()
+      const style = element ? getComputedStyle(element) : null
+      return Boolean(rect && style && rect.width > 0 && rect.height > 0
+        && style.display !== 'none' && style.visibility !== 'hidden')
+    }
+    const tabIndex = selectedType === 'LIMIT' ? 0 : selectedType === 'MARKET' ? 1 : 2
+    const tabs = [...panel.querySelectorAll('[role="tablist"]')]
+      .map((tablist) => [...tablist.querySelectorAll(':scope > [role="tab"]')].filter(visible))
+      .find((candidates) => candidates.length >= 3) ?? []
+    const orderTab = tabs[tabIndex]
+    if (!orderTab) throw new Error(`P0_ORDER_TAB_MISSING: ${selectedType}`)
+    orderTab.click()
+    if (values.mobile) {
+      const sideTabs = [...panel.querySelectorAll('[role="tablist"] button')]
+        .filter((button) => !button.hasAttribute('role') && visible(button))
+      const sideTab = sideTabs[selectedSide === 'buy' ? 0 : 1]
+      sideTab?.click()
+    }
+  }, panelSelector, side, orderType, { mobile: page.p0TradePanel.mobile })
+  await waitFor(() => page.evaluate((selector, selectedSide, selectedType, values) => {
+    const panel = document.querySelector(selector)
+    const form = panel?.querySelector(
+      `section[data-price-precision][class*="side--${selectedSide}"]`
+    )
+    if (!form) return false
+    const inputs = [...form.querySelectorAll('input[inputmode="decimal"]:not([disabled])')]
+    const setValue = (input, value) => {
+      if (value === undefined || value === null) return true
+      if (input.value === String(value)) return true
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value'
+      )?.set
+      setter?.call(input, String(value))
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+      return false
+    }
+    if (selectedType === 'LIMIT') {
+      if (inputs.length < 2) return false
+      const priceReady = setValue(inputs[0], values.price)
+      const amountReady = setValue(inputs.at(-1), values.amount)
+      return priceReady && amountReady
+    } else if (selectedType === 'STOP_MARKET' || selectedType === 'STOP') {
+      if (inputs.length < 2) return false
+      const triggerReady = setValue(inputs[0], values.triggerPrice)
+      const amountReady = setValue(inputs.at(-1), values.amount)
+      return triggerReady && amountReady
+    } else {
+      if (inputs.length < 1) return false
+      return setValue(inputs.at(-1), values.amount)
+    }
+  }, panelSelector, side, orderType, {
+    price: order.price,
+    triggerPrice: order.triggerPrice,
+    amount: order.amount ?? order.quantity
+  }), 'scoped order form inputs', 15000)
+
+  if (order.expectLogin) {
+    const cursor = page.p0Evidence.cursor
+    const clicked = await waitFor(() => page.evaluate((selector, selectedSide) => {
+      const panel = document.querySelector(selector)
+      const form = panel?.querySelector(
+        `section[data-price-precision][class*="side--${selectedSide}"]`
+      )
+      const button = form?.querySelector('[data-trading-action="login-required"]')
+      if (!button || button.disabled) return false
+      button.click()
+      return true
+    }, panelSelector, side), 'guest scoped login-required action', 15000)
+    assert(clicked, 'guest order attempt must use the visible login-required action')
+    await page.waitForFunction(
+      () => Boolean(document.querySelector(
+        'section[role="dialog"] [data-trading-action="go-to-login"]'
+      )),
+      'guest login prompt'
+    )
+    await sleep(400)
+    const leaked = page.p0Evidence.requests.some((request) => (
+      request.cursor > cursor
+        && request.method === 'POST'
+        && /\/api\/trading\/orders$/.test(request.url)
+    ))
+    assert(!leaked, 'guest order attempt must not issue create-order request')
+    return { loginRequired: true, requestRef: null }
+  }
+
+  const opened = await waitFor(() => page.evaluate((selector, selectedSide) => {
+    const panel = document.querySelector(selector)
+    const form = panel?.querySelector(
+      `section[data-price-precision][class*="side--${selectedSide}"]`
+    )
+    const button = form?.querySelector('[data-trading-action="submit-order"]')
+    if (!button || button.disabled) return false
+    button.click()
+    return true
+  }, panelSelector, side), 'scoped order submit action', 15000)
+  assert(opened, 'real order confirmation must open from the scoped panel')
+  await page.waitForFunction((selector) => {
+    const panel = document.querySelector(selector)
+    const dialog = panel?.querySelector('section[role="dialog"]')
+    if (!dialog) return false
+    const rect = dialog.getBoundingClientRect()
+    const style = getComputedStyle(dialog)
+    return rect.width > 0 && rect.height > 0
+      && style.display !== 'none' && style.visibility !== 'hidden'
+  }, 'scoped order confirmation', panelSelector)
+  const capture = await withCapturedMutation(
+    page,
+    order.matcher ?? { method: 'POST', url: /\/api\/trading\/orders$/ },
+    () => page.evaluate((selector) => {
+      const panel = document.querySelector(selector)
+      const dialog = panel?.querySelector('section[role="dialog"]')
+      const submit = dialog?.querySelector('footer button:last-child')
+      if (!dialog || !submit || submit.disabled) {
+        throw new Error('P0_SCOPED_ORDER_CONFIRM_MISSING')
+      }
+      submit.click()
+      return true
+    }, panelSelector)
+  )
+  assertP0MutationSucceeded(capture, 'order submission')
+  return capture
+}
+
+export async function followLoginPromptViaUi(page) {
+  const followed = await page.evaluate(() => {
+    const button = document.querySelector(
+      'section[role="dialog"] [data-trading-action="go-to-login"]'
+    )
+    if (!button) return false
+    button.click()
+    return true
+  })
+  assert(followed, 'guest login prompt must expose its real login action')
+  await page.waitForFunction(
+    () => window.location.pathname === '/login'
+      && new URLSearchParams(window.location.search).has('redirect'),
+    'guest trade login redirect'
+  )
+  return page.evaluate(() => ({
+    path: window.location.pathname,
+    redirect: new URLSearchParams(window.location.search).get('redirect')
+  }))
+}
+
+export async function cancelAllOrdersViaUi(page) {
+  const capture = await withCapturedMutation(
+    page,
+    { method: 'POST', url: /\/api\/trading\/orders\/cancel-all$/ },
+    () => acceptNextNativeDialog(page, () => waitFor(() => page.evaluate(() => {
+        const panels = [...document.querySelectorAll('section[aria-label]')]
+          .filter((section) => section.querySelector('[role="tabpanel"]'))
+          .filter((section) => {
+            const rect = section.getBoundingClientRect()
+            const style = getComputedStyle(section)
+            return rect.width > 0 && rect.height > 0
+              && style.display !== 'none' && style.visibility !== 'hidden'
+          })
+        const panel = panels.find((candidate) => (
+          candidate.querySelector(':scope > [role="tablist"] > [role="tab"]')
+        ))
+        const tablist = panel?.querySelector(':scope > [role="tablist"]')
+        const firstTab = tablist?.querySelector(':scope > [role="tab"]')
+        if (!firstTab) return false
+        if (firstTab.getAttribute('aria-selected') !== 'true') {
+          firstTab.click()
+          return false
+        }
+        const toolbar = tablist.nextElementSibling
+        const cancelAll = [...(toolbar?.querySelectorAll('button') ?? [])]
+          .find((button) => !button.disabled)
+        if (!cancelAll) return false
+        cancelAll.click()
+        return true
+      }), 'visible cancel-all orders action', 15000))
+  )
+  assertP0MutationSucceeded(capture, 'cancel-all orders')
+  return capture
+}
+
+export async function acceptNextNativeDialog(page, action) {
+  let opening
+  const dispose = page.on('Page.javascriptDialogOpening', (event) => {
+    opening ??= event
+  })
+  try {
+    const actionResult = Promise.resolve()
+      .then(action)
+      .then(
+        (value) => ({ value }),
+        (error) => ({ error })
+      )
+    const dialog = await waitFor(() => opening, 'native browser confirmation', 5000)
+    await page.send('Page.handleJavaScriptDialog', { accept: true })
+    const settled = await actionResult
+    if (settled.error) throw settled.error
+    return {
+      actionResult: settled.value,
+      dialog: { type: dialog.type, hasBrowserHandler: dialog.hasBrowserHandler }
+    }
+  } finally {
+    if (typeof dispose === 'function') dispose()
+  }
+}
+
+export async function captureCheckpoint(context, name, scope = {}) {
+  const caseId = scope.caseId ?? scope.definition?.id
+  assert(caseId, 'P0 checkpoint requires caseId')
+  const directory = join(context.run.artifactRoot, safeName(caseId))
+  await mkdir(directory, { recursive: true })
+  const pages = scope.pages ?? (scope.page ? [scope.page] : [])
+  const uiEvidence = []
+  const networkEvidence = []
+  const eventEvidence = []
+  const artifactHashes = {}
+  for (let index = 0; index < pages.length; index += 1) {
+    const page = pages[index]
+    page.assertEvidenceClean(`${caseId}/${name}`)
+    const suffix = index === 0 ? '' : `-${index + 1}`
+    const filename = `${safeName(name)}${suffix}.png`
+    const screenshot = await page.send('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: false
+    })
+    const screenshotBytes = Buffer.from(screenshot.data, 'base64')
+    await writeFile(join(directory, filename), screenshotBytes)
+    artifactHashes[`${safeName(caseId)}/${filename}`] = (
+      `sha256:${createHash('sha256').update(screenshotBytes).digest('hex')}`
+    )
+    const snapshot = page.snapshotEvidence()
+    uiEvidence.push({ checkpoint: name, screenshot: filename })
+    networkEvidence.push(...snapshot.networkEvidence)
+    eventEvidence.push(...snapshot.eventEvidence)
+  }
+  const resolveEvidence = async (value) => (
+    typeof value === 'function' ? value() : value
+  )
+  return {
+    name,
+    artifactHashes,
+    uiEvidence,
+    networkEvidence,
+    eventEvidence,
+    apiEvidence: await resolveEvidence(scope.apiEvidence) ?? [],
+    dbEvidence: await resolveEvidence(scope.dbEvidence) ?? []
+  }
+}
+
+function extractP0IdempotencyKey(request) {
+  const headers = request.headers ?? {}
+  const header = Object.entries(headers).find(([name]) => (
+    name.toLowerCase() === 'x-idempotency-key'
+  ))?.[1]
+  if (typeof header === 'string' && header) return header
+  try {
+    const body = JSON.parse(request.postData ?? '')
+    return body.idempotencyKey ?? body.clientOrderId ?? null
+  } catch {
+    return null
+  }
+}
+
+function parseP0StompFrame(direction, payload) {
+  if (typeof payload !== 'string' || payload.length === 0) {
+    return { direction, command: 'UNKNOWN' }
+  }
+  const command = payload.match(/(?:^|["\[])((?:CONNECTED|SUBSCRIBE|MESSAGE|ERROR|SEND))\\?n/)?.[1]
+    ?? payload.match(/^(CONNECTED|SUBSCRIBE|MESSAGE|ERROR|SEND)/)?.[1]
+    ?? 'UNKNOWN'
+  const destination = payload.match(/destination:([^\\\n\r"]+)/)?.[1]
+  const eventType = payload.match(/"type"\s*:\s*"([A-Z_]+)"/)?.[1]
+  return {
+    direction,
+    command,
+    ...(destination ? { destination } : {}),
+    ...(eventType ? { eventType } : {})
+  }
+}
+
+function matchesP0NetworkRequest(record, matcher) {
+  if (typeof matcher === 'function') return Boolean(matcher({
+    method: record.method,
+    url: record.url,
+    postData: record.postData,
+    requestId: record.requestId,
+    idempotencyKey: record.idempotencyKey
+  }))
+  if (!matcher || typeof matcher !== 'object') return false
+  if (matcher.method && record.method !== String(matcher.method).toUpperCase()) return false
+  if (matcher.url instanceof RegExp) {
+    matcher.url.lastIndex = 0
+    if (!matcher.url.test(record.url)) return false
+  } else if (typeof matcher.url === 'string' && !record.url.includes(matcher.url)) {
+    return false
+  }
+  return true
+}
+
+function redactP0NetworkRecord(record) {
+  return redactNetworkEntry({
+    requestId: record.requestId,
+    requestRef: record.requestId,
+    method: record.method,
+    url: record.url,
+    postData: record.postData,
+    requestHeaders: record.requestHeaders,
+    status: record.response?.status,
+    responseHeaders: record.response?.headers,
+    mimeType: record.response?.mimeType,
+    responseBody: record.responseBody
+  })
+}
+
+function requireP0Credentials(credentials) {
+  if (typeof credentials?.email !== 'string' || credentials.email.length === 0
+    || typeof credentials?.password !== 'string' || credentials.password.length < 8) {
+    throw new Error('P0_UI_CREDENTIALS_REQUIRED')
+  }
+}
+
+function p0PageBaseUrl(page, option, environmentKey, fallback) {
+  return page.p0Options?.[option] ?? process.env[environmentKey] ?? fallback
+}
+
+function assertP0MutationSucceeded(capture, label) {
+  assert(
+    capture.status >= 200 && capture.status < 300,
+    `${label} browser mutation failed with HTTP ${capture.status}`
+  )
+}
+
+function resolveP0TradeRoute(target = {}) {
+  if (typeof target === 'string' && target.startsWith('/trade/')) return target
+  if (typeof target.route === 'string' && target.route.startsWith('/trade/')) {
+    return target.route
+  }
+  const product = target.product ?? target.productType
+  const segment = product === 'spot' || product === 'CRYPTO_SPOT'
+    ? 'spot'
+    : 'perpetual'
+  const symbol = target.symbol ?? (segment === 'spot' ? SPOT_SYMBOL : PERP_SYMBOL)
+  return `/trade/${segment}/${encodeURIComponent(symbol)}`
 }
 
 function browserCandidates() {
@@ -7900,6 +8679,13 @@ export function createDockerPostgresAdapter(
     executeAdminSql(sql, { sensitive = false, signal } = {}) {
       return execute('postgres-admin', 'postgres', `${sql};\n`, sensitive, signal)
     },
+    queryDatabase(segmentName, sql, { sensitive = true, signal } = {}) {
+      assertP0DatabaseName(segmentName)
+      if (typeof sql !== 'string' || sql.trim().length === 0) {
+        throw new Error('P0_DATABASE_QUERY_REQUIRED')
+      }
+      return execute('postgres-case-query', segmentName, `${sql}\n`, sensitive, signal)
+    },
     async readDatabaseOwnership(segmentName, { signal } = {}) {
       assertP0DatabaseName(segmentName)
       const row = await execute('postgres-owner-read', 'postgres', `
@@ -8302,6 +9088,46 @@ export function createLocalProcessManager(
   } = {}
 ) {
   return {
+    async startOwnedFrontend(surface, { environment, signal } = {}) {
+      const port = surface === 'web'
+        ? 5199
+        : surface === 'admin'
+          ? 5200
+          : null
+      if (port === null) throw new Error('P0_FRONTEND_SURFACE_INVALID')
+      const child = startP0ManagedProcess(
+        `p0-frontend-${surface}`,
+        process.platform === 'win32' ? 'npm.cmd' : 'npm',
+        [
+          '--workspace', `apps/${surface}`,
+          'run', 'dev', '--',
+          '--host', '127.0.0.1',
+          '--port', String(port),
+          '--strictPort'
+        ],
+        projectRoot,
+        environment,
+        signal
+      )
+      await child.p0SpawnReady
+      if (!child.processIdentity) {
+        await terminateProcessTree(child, `unidentified P0 ${surface} frontend`)
+        throw new Error('P0_PROCESS_IDENTITY_UNKNOWN')
+      }
+      return child
+    },
+    async waitForFrontend(frontend, url, signal) {
+      await waitFor(async () => {
+        assertProcessRunning(frontend)
+        return canFetch(url, signal)
+      }, 'owned P0 frontend', 60000, signal)
+    },
+    async stopOwnedFrontend(frontend, { signal } = {}) {
+      if (!frontend) return
+      if (frontend.p0AbortTermination) await frontend.p0AbortTermination
+      throwIfP0Aborted(signal)
+      await terminateProcessTree(frontend, 'owned P0 frontend', signal)
+    },
     async startOwnedBackend({ environment, signal }) {
       const mavenArguments = [
         'spring-boot:run',
@@ -8780,6 +9606,321 @@ export function validateP0ResumeJournal(manifest, matrixDatabase) {
   return databases
 }
 
+function createDefaultP0CaseContext({
+  prepared,
+  options,
+  postgres,
+  runtime,
+  inheritedEnv,
+  signal
+}) {
+  const users = new Map()
+  const runtimeUrl = (key, fallback) => inheritedEnv[key] ?? fallback
+  const apiUrl = runtimeUrl('API_BASE_URL', 'http://127.0.0.1:18086')
+  const webUrl = runtimeUrl('WEB_BASE_URL', 'http://127.0.0.1:5199')
+  const adminUrl = runtimeUrl('ADMIN_BASE_URL', 'http://127.0.0.1:5200')
+  const userFactory = (role = 'USER') => {
+    if (!users.has(role)) {
+      const digest = createHash('sha256')
+        .update(`${options.runId}\0${role}`)
+        .digest('hex')
+        .slice(0, 20)
+      users.set(role, Object.freeze({
+        email: `p0-${digest}@example.com`,
+        password: `P0!${digest}Aa9`
+      }))
+    }
+    return users.get(role)
+  }
+  const requiredRuntimeOperation = (name) => (...args) => {
+    if (typeof runtime[name] !== 'function') {
+      throw new Error(`P0_RUNTIME_OPERATION_REQUIRED: ${name}`)
+    }
+    return runtime[name](...args)
+  }
+  const userApi = (page, path, request = {}) => (
+    requestP0BrowserApi(page, apiUrl, 'fx-platform-auth-token', path, request)
+  )
+  const adminApiForPage = (page, path, request = {}) => (
+    requestP0BrowserApi(page, apiUrl, 'fx-platform-admin-token', path, request)
+  )
+  const snapshotAccount = async (page) => {
+    const accounts = await userApi(page, '/api/accounts')
+    const activeDemoAccounts = accounts.filter((candidate) => (
+      candidate.accountType === 'DEMO' && candidate.status === 'ACTIVE'
+    ))
+    assert(
+      activeDemoAccounts.length === 1,
+      'authenticated user must own one ACTIVE DEMO account'
+    )
+    const account = activeDemoAccounts[0]
+    const accountId = encodeURIComponent(account.id)
+    const [summary, wallets, settings, ordersPage, tradesPage, positionsPage, fundingPage] = await Promise.all([
+      userApi(page, `/api/accounts/${accountId}/summary`),
+      userApi(page, `/api/accounts/${accountId}/wallet-balances`),
+      userApi(page, `/api/accounts/${accountId}/trading-settings`),
+      userApi(page, `/api/trading/orders?accountId=${accountId}&page=0&size=200`),
+      userApi(page, `/api/trading/trades?accountId=${accountId}&page=0&size=200`),
+      userApi(page, `/api/trading/positions?accountId=${accountId}&page=0&size=200`),
+      userApi(page, `/api/trading/funding/settlements?accountId=${accountId}&page=0&size=200`)
+    ])
+    return {
+      accounts,
+      activeDemoAccounts,
+      account,
+      summary,
+      wallets,
+      settings,
+      orders: pageContent(ordersPage),
+      trades: pageContent(tradesPage),
+      positions: pageContent(positionsPage),
+      fundingSettlements: pageContent(fundingPage)
+    }
+  }
+  const snapshotMarket = async (symbol = SPOT_SYMBOL) => {
+    const [symbols, quote] = await Promise.all([
+      requestP0Json(apiUrl, '/api/market/symbols'),
+      requestP0Json(apiUrl, `/api/market/quotes/${encodeURIComponent(symbol)}`)
+    ])
+    return { symbols, quote }
+  }
+  const activeDatabaseSegment = () => (
+    prepared.activeDatabaseSegment ?? prepared.matrixDatabase
+  )
+  const query = (sql, details = {}) => postgres.queryDatabase(
+    activeDatabaseSegment(),
+    sql,
+    { ...details, signal: details.signal ?? signal }
+  )
+  const snapshotTradingRows = async (targetAccountId) => {
+    if (typeof targetAccountId !== 'string' || targetAccountId.length === 0) {
+      throw new Error('P0_ACCOUNT_ID_REQUIRED')
+    }
+    const raw = await query(`
+      SELECT json_build_object(
+        'database', current_database(),
+        'activeDemoAccounts', (
+          SELECT count(*)
+          FROM core.trading_accounts candidate
+          WHERE candidate.user_id = (
+            SELECT owner.user_id
+            FROM core.trading_accounts owner
+            WHERE owner.id = '${sqlLiteral(targetAccountId)}'
+          )
+            AND candidate.account_type = 'DEMO'
+            AND candidate.status = 'ACTIVE'
+        ),
+        'orders', (
+          SELECT count(*) FROM trading.orders
+          WHERE account_id = '${sqlLiteral(targetAccountId)}'
+        ),
+        'trades', (
+          SELECT count(*) FROM trading.trades
+          WHERE account_id = '${sqlLiteral(targetAccountId)}'
+        ),
+        'openPositions', (
+          SELECT count(*) FROM trading.positions
+          WHERE account_id = '${sqlLiteral(targetAccountId)}' AND status = 'OPEN'
+        ),
+        'fundingSettlements', (
+          SELECT count(*) FROM trading.funding_settlements
+          WHERE account_id = '${sqlLiteral(targetAccountId)}'
+        )
+      )::text;
+    `)
+    const json = String(raw).split(/\r?\n/).filter(Boolean).at(-1)
+    return JSON.parse(json)
+  }
+  const assertDedicatedDatabase = async () => {
+    const expectedDatabase = activeDatabaseSegment()
+    assertP0DatabaseName(expectedDatabase)
+    const actual = await query('SELECT current_database();')
+    assert(
+      actual === expectedDatabase,
+      'P0 case DB oracle must use the active profile database'
+    )
+    return actual
+  }
+  const ui = {
+    launchBrowser,
+    createEvidencePage: (browserInstance, pageOptions = {}) => createEvidencePage(
+      browserInstance,
+      {
+        webBaseUrl: webUrl,
+        adminBaseUrl: adminUrl,
+        apiBaseUrl: apiUrl,
+        ...pageOptions
+      }
+    ),
+    registerViaUi,
+    loginViaUi,
+    loginAdminViaUi,
+    logoutViaUi,
+    openTradePanel,
+    withCapturedMutation,
+    submitOrderViaUi,
+    acceptNextNativeDialog,
+    followLoginPromptViaUi,
+    cancelAllOrdersViaUi,
+    ...(runtime.p0Ui ?? {})
+  }
+  return buildP0Context({
+    run: Object.freeze({
+      runId: options.runId,
+      mode: String(options.mode).toUpperCase(),
+      commit: prepared.identity?.commit,
+      artifactRoot: prepared.runRoot
+    }),
+    ui,
+    api: {
+      user: userApi,
+      admin: adminApiForPage,
+      snapshotAccount,
+      snapshotMarket,
+      ...(runtime.p0Api ?? {})
+    },
+    db: {
+      query,
+      snapshotTradingRows,
+      assertDedicatedDatabase,
+      ...(runtime.p0Db ?? {})
+    },
+    events: {
+      waitForStompEvent: waitForP0StompEvent,
+      snapshotFrames: snapshotP0StompFrames,
+      probeForbiddenSubscription: probeForbiddenStompSubscription,
+      ...(runtime.p0Events ?? {})
+    },
+    services: {
+      ensureProfile: requiredRuntimeOperation('ensureProfile'),
+      restartBackend: requiredRuntimeOperation('restartBackend'),
+      assertOwnedPorts: requiredRuntimeOperation('assertOwnedPorts'),
+      ...(runtime.p0Services ?? {})
+    },
+    fixtures: {
+      marketOverride: requiredRuntimeOperation('marketOverride'),
+      providerBindings: requiredRuntimeOperation('providerBindings'),
+      fundingConfig: requiredRuntimeOperation('fundingConfig'),
+      positionTime: requiredRuntimeOperation('positionTime'),
+      kline: requiredRuntimeOperation('kline'),
+      ...(runtime.p0Fixtures ?? {})
+    },
+    evidence: {
+      captureCheckpoint,
+      writeCaseResultAtomic,
+      ...(runtime.p0Evidence ?? {})
+    },
+    userFactory
+  })
+}
+
+async function requestP0BrowserApi(page, baseUrl, tokenKey, path, request = {}) {
+  const token = await page.evaluate((storageKey) => localStorage.getItem(storageKey), tokenKey)
+  if (typeof token !== 'string' || token.length === 0) throw new Error('P0_BROWSER_SESSION_REQUIRED')
+  return requestP0Json(baseUrl, path, { ...request, token })
+}
+
+async function requestP0Json(baseUrl, path, request = {}) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: request.method ?? 'GET',
+    headers: {
+      ...(request.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(request.token ? { Authorization: `Bearer ${request.token}` } : {})
+    },
+    body: request.body === undefined ? undefined : JSON.stringify(request.body),
+    signal: operationSignal(request.timeoutMs ?? 30000)
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok || payload?.success === false) {
+    const error = new Error(
+      payload?.error?.code
+        ?? payload?.code
+        ?? `HTTP_${response.status}`
+    )
+    error.status = response.status
+    error.code = payload?.error?.code ?? payload?.code ?? `HTTP_${response.status}`
+    throw error
+  }
+  return payload?.data ?? payload
+}
+
+async function waitForP0StompEvent(page, expected, options = {}) {
+  return waitFor(() => page.p0Evidence.stompFrames.find((frame) => {
+    if (typeof expected === 'function') return expected(frame)
+    if (String(expected).startsWith('/')) return frame.destination === expected
+    return frame.direction === 'received' && frame.eventType === expected
+  }), `STOMP event ${typeof expected === 'string' ? expected : 'predicate'}`, options.timeoutMs ?? 15000)
+}
+
+export async function probeForbiddenStompSubscription(page, destination) {
+  if (typeof destination !== 'string'
+    || !destination.startsWith('/topic/trading/accounts/')) {
+    throw new Error('P0_FORBIDDEN_STOMP_DESTINATION_REQUIRED')
+  }
+  const apiUrl = page.p0Options?.apiBaseUrl
+    ?? process.env.API_BASE_URL
+    ?? 'http://127.0.0.1:18086'
+  const result = await page.evaluate(async (baseUrl, targetDestination) => {
+    const token = localStorage.getItem('fx-platform-auth-token')
+    if (!token) throw new Error('P0_BROWSER_SESSION_REQUIRED')
+    const url = new URL(baseUrl)
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.pathname = '/ws'
+    url.search = ''
+    url.hash = ''
+    return new Promise((resolvePromise, rejectPromise) => {
+      const socket = new WebSocket(url.toString(), ['v12.stomp', 'v11.stomp'])
+      let subscribed = false
+      const timeout = window.setTimeout(() => {
+        socket.close()
+        rejectPromise(new Error('P0_FORBIDDEN_STOMP_SUBSCRIPTION_NOT_REJECTED'))
+      }, 10000)
+      const finish = (value, error) => {
+        window.clearTimeout(timeout)
+        socket.onopen = null
+        socket.onmessage = null
+        socket.onerror = null
+        socket.onclose = null
+        if (socket.readyState < WebSocket.CLOSING) socket.close()
+        if (error) rejectPromise(error)
+        else resolvePromise(value)
+      }
+      socket.onopen = () => socket.send(
+        `CONNECT\naccept-version:1.2,1.1\nheart-beat:0,0\nAuthorization:Bearer ${token}\n\n\u0000`
+      )
+      socket.onmessage = ({ data }) => {
+        const frame = String(data)
+        if (frame.startsWith('CONNECTED')) {
+          subscribed = true
+          socket.send(
+            `SUBSCRIBE\nid:p0-forbidden-account-topic\nack:auto\ndestination:${targetDestination}\n\n\u0000`
+          )
+          return
+        }
+        if (frame.startsWith('ERROR')) {
+          finish({ status: 'REJECTED', command: 'ERROR' })
+        }
+      }
+      socket.onerror = () => {
+        if (!subscribed) finish(null, new Error('P0_FORBIDDEN_STOMP_PROBE_CONNECT_FAILED'))
+      }
+      socket.onclose = () => {
+        if (subscribed) finish({ status: 'REJECTED', command: 'CLOSE' })
+        else finish(null, new Error('P0_FORBIDDEN_STOMP_PROBE_CONNECT_FAILED'))
+      }
+    })
+  }, apiUrl, destination)
+  assert(
+    result?.status === 'REJECTED',
+    'legacy mutable account topic must be rejected'
+  )
+  return result
+}
+
+function snapshotP0StompFrames(page) {
+  return page.p0Evidence.stompFrames.map((frame) => ({ ...frame }))
+}
+
 export function createDefaultP0Dependencies(runtime = {}) {
   const platform = P0_HOST_PLATFORM
   const processTreeProvider = runtime.processTreeProvider
@@ -8837,6 +9978,51 @@ export function createDefaultP0Dependencies(runtime = {}) {
       ? (segmentName, details) => infrastructure.databaseExists(segmentName, details)
       : async () => false)
   const dispatchCaseOperation = runtime.dispatchCase ?? runCase
+  const ensureParentFrontends = async (context, { signal } = {}) => {
+    assertP0ProcessTreeCapability()
+    throwIfP0Aborted(signal)
+    context.parentFrontends ??= new Map()
+    if (!(context.parentFrontends instanceof Map)) {
+      throw new Error('P0_PARENT_FRONTEND_STATE_INVALID')
+    }
+    const specifications = [
+      { surface: 'web', port: 5199, url: 'http://127.0.0.1:5199' },
+      { surface: 'admin', port: 5200, url: 'http://127.0.0.1:5200' }
+    ]
+    for (const { surface, port, url } of specifications) {
+      let frontend = context.parentFrontends.get(surface)
+      if (!frontend) {
+        await infrastructure.assertPortsFree([port], { signal })
+        throwIfP0Aborted(signal)
+        frontend = await runP0JournaledMutation({
+          artifactBase,
+          runId: context.options.runId,
+          runToken: context.ownerToken,
+          resource: {
+            type: 'process',
+            id: `frontend:${surface}`,
+            live: true,
+            commandFingerprint: sha256Text(`owned-p0-frontend:${surface}`)
+          },
+          start: () => processManager.startOwnedFrontend(surface, {
+            environment: {
+              ...commandEnvironment,
+              VITE_API_BASE_URL: 'http://127.0.0.1:18086'
+            },
+            signal
+          }),
+          stopLiveProcess: (handle, details) => (
+            processManager.stopOwnedFrontend(handle, details)
+          ),
+          signal,
+          now
+        })
+        context.parentFrontends.set(surface, frontend)
+      }
+      await processManager.waitForFrontend(frontend, url, signal)
+      throwIfP0Aborted(signal)
+    }
+  }
 
   const finalizePendingCleanupReceipt = async (cleanedContext, runId, { signal } = {}) => {
     throwIfP0Aborted(signal)
@@ -9150,6 +10336,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
       return buildPreparedContext(redisSnapshot, touchedRedisKeys)
     },
     phaseOperations: {
+      ensureParentFrontends,
       async runPreflight(context, _plan, { signal } = {}) {
         assertP0ProcessTreeCapability()
         return runP0Preflight({
@@ -9226,10 +10413,13 @@ export function createDefaultP0Dependencies(runtime = {}) {
           }
         })
       },
-      stopProfileBackend(_context, _profile, { signal } = {}) {
+      async stopProfileBackend(context, _profile, { signal } = {}) {
         assertP0ProcessTreeCapability()
         throwIfP0Aborted(signal)
-        return processManager.stopParentBackend({ signal })
+        if (!context.activeBackend) return
+        const backend = context.activeBackend
+        await processManager.stopOwnedBackend(context.activeBackend, { signal })
+        if (context.activeBackend === backend) context.activeBackend = undefined
       },
       assertProfilePortFree(port, _context, _profile, { signal } = {}) {
         assertP0ProcessTreeCapability()
@@ -9296,10 +10486,10 @@ export function createDefaultP0Dependencies(runtime = {}) {
         }
         return descriptor
       },
-      startProfileBackend({ phase, profile, attempt, environment, signal }, context) {
+      async startProfileBackend({ phase, profile, attempt, environment, signal }, context) {
         assertP0ProcessTreeCapability()
         const ownedEnvironment = withVerifiedComposeDatabaseCredentials(environment, composeIdentity)
-        return runP0JournaledMutation({
+        const backend = await runP0JournaledMutation({
           artifactBase,
           runId: context.options.runId,
           runToken: context.ownerToken,
@@ -9318,6 +10508,8 @@ export function createDefaultP0Dependencies(runtime = {}) {
           signal,
           now
         })
+        context.activeBackend = backend
+        return backend
       },
       waitForProfileHealth(backend, _context, _profile, { signal } = {}) {
         assertP0ProcessTreeCapability()
@@ -9358,9 +10550,11 @@ export function createDefaultP0Dependencies(runtime = {}) {
         }
         throwIfP0Aborted(signal)
       },
-      stopParentBackend(_context, { signal } = {}) {
+      async stopParentBackend(context, { signal } = {}) {
         assertP0ProcessTreeCapability()
-        return processManager.stopParentBackend({ signal })
+        await processManager.stopParentBackend({ signal })
+        context.activeBackend = undefined
+        context.parentFrontends?.clear()
       },
       assertBusinessPortsFree(ports, _context, { signal } = {}) {
         assertP0ProcessTreeCapability()
@@ -9430,7 +10624,20 @@ export function createDefaultP0Dependencies(runtime = {}) {
       assertP0ProcessTreeCapability()
       return dispatchCaseOperation(...args)
     },
-    handlers: runtime.handlers ?? Object.create(null),
+    createP0Context(prepared, options, { signal } = {}) {
+      if (typeof runtime.createP0Context === 'function') {
+        return runtime.createP0Context(prepared, options, { signal })
+      }
+      return createDefaultP0CaseContext({
+        prepared,
+        options,
+        postgres,
+        runtime,
+        inheritedEnv,
+        signal
+      })
+    },
+    handlers: runtime.handlers ?? CASE_HANDLERS,
     async writeReport(execution, prepared, { signal } = {}) {
       assertP0ProcessTreeCapability()
       throwIfP0Aborted(signal)
@@ -9582,6 +10789,10 @@ export function createDefaultP0Dependencies(runtime = {}) {
         throwIfP0Aborted(signal)
       }
       await processManager.stopParentBackend({ signal })
+      if (prepared) {
+        prepared.activeBackend = undefined
+        prepared.parentFrontends?.clear()
+      }
       throwIfP0Aborted(signal)
       if (platform !== 'win32' && hasJournaledProcesses) {
         await terminateOwnedProcesses()
@@ -9749,14 +10960,20 @@ export async function runP0Suite(options, dependencies) {
       async prepare(receivedOptions, details) {
         const prepared = await dependencies.initializeOwnership(receivedOptions, plan, details)
         if (!prepared || typeof prepared !== 'object') throw new Error('P0_OWNERSHIP_INVALID')
-        return {
+        const preparedContext = {
           ...prepared,
           options: receivedOptions,
           plan,
           caseResults: Array.isArray(prepared.caseResults) ? prepared.caseResults : []
         }
+        const p0Context = dependencies.createP0Context
+          ? await dependencies.createP0Context(preparedContext, receivedOptions, details)
+          : null
+        preparedContext.p0Context = p0Context
+        return preparedContext
       },
       async execute(prepared, details) {
+        const p0Context = prepared.p0Context ?? prepared
         const baseOperations = typeof dependencies.phaseOperations === 'function'
           ? await dependencies.phaseOperations(prepared, plan, details)
           : dependencies.phaseOperations
@@ -9775,13 +10992,21 @@ export async function runP0Suite(options, dependencies) {
               const entries = phase === 'selected'
                 ? plan.executionEntries
                 : plan.executionEntries.filter((entry) => entry.phase === phase)
-              const executeEntry = async (entry, selectedSubruns = entry.selectedSubruns) => {
+              const executeEntry = async (
+                entry,
+                selectedSubruns = entry.selectedSubruns,
+                profileAttempt = 1
+              ) => {
                 const definition = {
                   ...entry.definition,
                   requiredSubruns: selectedSubruns
                 }
                 throwIfP0Aborted(signal)
-                const result = await dispatchCase(definition, prepared, handlers, { signal })
+                const result = await dispatchCase(definition, p0Context, handlers, {
+                  signal,
+                  attempt: 1,
+                  profileAttempt
+                })
                 throwIfP0Aborted(signal)
                 return result
               }
@@ -9806,7 +11031,7 @@ export async function runP0Suite(options, dependencies) {
                     const selectedSubruns = entry.selectedSubruns
                       .filter((subrun) => subrun.profile === profile)
                     fragmentsByEntry.get(entry.id).push(
-                      await executeEntry(entry, selectedSubruns)
+                      await executeEntry(entry, selectedSubruns, attempt)
                     )
                   }
                 }

@@ -6,7 +6,13 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
-import { assertNewestFirstProtectionResize, assertNoRuntimeErrors } from './smoke-usdt-demo-browser.mjs'
+import {
+  acceptNextNativeDialog,
+  assertNewestFirstProtectionResize,
+  assertNoRuntimeErrors,
+  createEvidencePage,
+  withCapturedMutation
+} from './smoke-usdt-demo-browser.mjs'
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(scriptsDir, '..')
@@ -715,6 +721,237 @@ describe('real USDT demo browser smoke contract', () => {
     assert.equal(execution.stdout, '')
     assert.equal(execution.stderr, '')
     assert.deepEqual(readdirSync(root), [])
+  })
+
+  it('captures a browser mutation before returning control to REST/DB/STOMP oracles', async () => {
+    const listeners = new Map()
+    const sent = []
+    const rawPage = {
+      async send(method, params = {}) {
+        sent.push({ method, params })
+        if (method === 'Network.getResponseBody') {
+          return {
+            body: JSON.stringify({
+              id: 'order-contract-1',
+              status: 'FILLED',
+              accessToken: 'must-not-leave-process'
+            }),
+            base64Encoded: false
+          }
+        }
+        return {}
+      },
+      on(method, listener) {
+        if (!listeners.has(method)) listeners.set(method, new Set())
+        listeners.get(method).add(listener)
+        return () => listeners.get(method)?.delete(listener)
+      },
+      close: async () => {}
+    }
+    const emit = (method, payload) => {
+      for (const listener of listeners.get(method) ?? []) listener(payload)
+    }
+    const page = await createEvidencePage(
+      { port: 9222 },
+      { createPage: async () => rawPage, caseId: 'AUTH-03' }
+    )
+    let oracleStarted = false
+    const capture = await withCapturedMutation(
+      page,
+      { method: 'POST', url: /\/api\/trading\/orders$/ },
+      async () => {
+        emit('Network.requestWillBeSent', {
+          requestId: 'request-contract-1',
+          request: {
+            method: 'POST',
+            url: 'http://127.0.0.1:18086/api/trading/orders',
+            postData: JSON.stringify({
+              symbol: 'BTCUSDT',
+              password: 'must-not-leave-process',
+              idempotencyKey: 'idem-contract-1'
+            }),
+            headers: { 'X-Idempotency-Key': 'idem-contract-1' }
+          }
+        })
+        emit('Network.responseReceived', {
+          requestId: 'request-contract-1',
+          response: { status: 200, mimeType: 'application/json', headers: {} }
+        })
+        emit('Network.loadingFinished', { requestId: 'request-contract-1' })
+        return 'clicked'
+      }
+    )
+    oracleStarted = true
+
+    assert.equal(oracleStarted, true)
+    assert.equal(capture.actionResult, 'clicked')
+    assert.equal(capture.requestRef, 'request-contract-1')
+    assert.equal(capture.method, 'POST')
+    assert.equal(capture.status, 200)
+    assert.equal(capture.idempotencyKey, 'idem-contract-1')
+    assert.equal(
+      sent.some(({ method, params }) => (
+        method === 'Network.getResponseBody'
+          && params.requestId === 'request-contract-1'
+      )),
+      true
+    )
+    const persistedShape = JSON.stringify(capture.networkEvidence)
+    assert.equal(persistedShape.includes('must-not-leave-process'), false)
+    assert.equal(Object.hasOwn(capture.networkEvidence, 'postData'), false)
+    assert.equal(capture.networkEvidence.responseBody.includes('[REDACTED]'), true)
+    assert.doesNotThrow(() => page.assertEvidenceClean('AUTH-03 mutation'))
+  })
+
+  it('fails closed on unexplained browser errors and only allows a request-scoped expected 4xx', async () => {
+    const listeners = new Map()
+    const rawPage = {
+      async send(method) {
+        if (method === 'Network.getResponseBody') return { body: '{}', base64Encoded: false }
+        return {}
+      },
+      on(method, listener) {
+        if (!listeners.has(method)) listeners.set(method, new Set())
+        listeners.get(method).add(listener)
+        return () => listeners.get(method)?.delete(listener)
+      },
+      close: async () => {}
+    }
+    const emit = (method, payload) => {
+      for (const listener of listeners.get(method) ?? []) listener(payload)
+    }
+    const page = await createEvidencePage(
+      { port: 9223 },
+      { createPage: async () => rawPage, caseId: 'AUTH-02' }
+    )
+    const capture = await withCapturedMutation(
+      page,
+      { method: 'POST', url: /\/api\/auth\/login$/ },
+      async () => {
+        emit('Network.requestWillBeSent', {
+          requestId: 'wrong-password-request',
+          request: {
+            method: 'POST',
+            url: 'http://127.0.0.1:18086/api/auth/login',
+            postData: '{"email":"member@example.com","password":"wrong"}',
+            headers: {}
+          }
+        })
+        emit('Network.responseReceived', {
+          requestId: 'wrong-password-request',
+          response: { status: 401, mimeType: 'application/json', headers: {} }
+        })
+        emit('Network.loadingFinished', { requestId: 'wrong-password-request' })
+      }
+    )
+
+    assert.throws(
+      () => page.assertEvidenceClean('AUTH-02 unexpected 401'),
+      /unexplained HTTP 401/
+    )
+    page.allowHttpError(capture.requestRef, 'AUTH-02 wrong password')
+    assert.doesNotThrow(() => page.assertEvidenceClean('AUTH-02 expected 401'))
+
+    emit('Runtime.consoleAPICalled', {
+      type: 'error',
+      args: [{ value: 'console contract error' }]
+    })
+    assert.throws(
+      () => page.assertEvidenceClean('AUTH-02 console'),
+      /console contract error/
+    )
+
+    emit('Runtime.exceptionThrown', {
+      exceptionDetails: { text: 'unhandled contract exception' }
+    })
+    assert.throws(
+      () => page.assertEvidenceClean('AUTH-02 runtime'),
+      /unhandled contract exception/
+    )
+  })
+
+  it('accepts a native confirmation before waiting for its blocked UI action', async () => {
+    let dialogListener
+    let actionFinished = false
+    const page = {
+      on(method, listener) {
+        assert.equal(method, 'Page.javascriptDialogOpening')
+        dialogListener = listener
+        return () => {
+          dialogListener = undefined
+        }
+      },
+      async send(method, params) {
+        assert.equal(method, 'Page.handleJavaScriptDialog')
+        assert.deepEqual(params, { accept: true })
+        actionFinished = true
+      }
+    }
+    const result = await acceptNextNativeDialog(page, async () => {
+      dialogListener({ type: 'confirm', hasBrowserHandler: true })
+      while (!actionFinished) await new Promise((resolvePromise) => setImmediate(resolvePromise))
+      return 'cancel-all-clicked'
+    })
+
+    assert.equal(result.actionResult, 'cancel-all-clicked')
+    assert.deepEqual(result.dialog, { type: 'confirm', hasBrowserHandler: true })
+    assert.equal(dialogListener, undefined)
+  })
+
+  it('owns Web and Admin once while profile switches stop only the active backend', () => {
+    const text = source()
+    const processManagerSource = text.slice(
+      text.indexOf('export function createLocalProcessManager'),
+      text.indexOf('async function writeRedisRecoveryState')
+    )
+    const defaultDependenciesSource = text.slice(
+      text.indexOf('export function createDefaultP0Dependencies'),
+      text.indexOf('export async function runP0Suite')
+    )
+
+    assert.match(processManagerSource, /startOwnedFrontend/)
+    assert.match(processManagerSource, /--workspace', `apps\/\$\{surface\}`/)
+    assert.match(processManagerSource, /'--strictPort'/)
+    assert.match(defaultDependenciesSource, /ensureParentFrontends/)
+    assert.match(defaultDependenciesSource, /id: `frontend:\$\{surface\}`/)
+    assert.match(defaultDependenciesSource, /processManager\.waitForFrontend/)
+    assert.match(
+      defaultDependenciesSource,
+      /stopProfileBackend[\s\S]*processManager\.stopOwnedBackend\(context\.activeBackend/
+    )
+    const profileStop = defaultDependenciesSource.slice(
+      defaultDependenciesSource.indexOf('stopProfileBackend'),
+      defaultDependenciesSource.indexOf('assertProfilePortFree')
+    )
+    assert.doesNotMatch(profileStop, /stopParentBackend/)
+    assert.match(
+      text,
+      /phase === 'authority'[\s\S]*ensureParentFrontends[\s\S]*runAuthority/
+    )
+    assert.match(
+      text,
+      /P0_MATRIX_PHASES\.has\(phase\)[\s\S]*ensureParentFrontends[\s\S]*runMatrixPhase/
+    )
+  })
+
+  it('keeps detailed P0 UI helpers scoped and free of session injection or API interception', () => {
+    const text = source()
+    const start = text.indexOf('export async function createEvidencePage')
+    const end = text.indexOf('export function createDefaultP0Dependencies')
+    const detailedRuntime = text.slice(start, end)
+
+    assert.notEqual(start, -1)
+    assert.ok(end > start)
+    assert.doesNotMatch(detailedRuntime, /installBrowserSession/)
+    assert.doesNotMatch(detailedRuntime, /fx-trade-confirm-skip/)
+    assert.doesNotMatch(detailedRuntime, /Fetch\.(?:enable|requestPaused|fulfillRequest)/)
+    assert.doesNotMatch(detailedRuntime, /:visible/)
+    assert.match(detailedRuntime, /getBoundingClientRect/)
+    assert.match(detailedRuntime, /getComputedStyle/)
+    assert.match(detailedRuntime, /\[data-testid="mobile-trade-action"\]/)
+    assert.match(detailedRuntime, /\[aria-hidden="false"\]/)
+    assert.match(detailedRuntime, /Page\.javascriptDialogOpening/)
+    assert.match(detailedRuntime, /Page\.handleJavaScriptDialog/)
   })
 })
 
