@@ -130,7 +130,7 @@ export async function runAuth02(context, definition, details = {}) {
       const dbSnapshot = await context.db.snapshotTradingRows(
         afterSnapshot.account.id
       )
-      assert.equal(afterSnapshot.account.id, beforeSnapshot.account.id)
+      assertAuth02SessionContinuity(beforeSnapshot, afterSnapshot)
       assert.equal(Number(dbSnapshot.activeDemoAccounts), 1)
       const final = await checkpoint(context, definition, 'final', [page], {
         apiEvidence: [safeAccountEvidence(afterSnapshot)],
@@ -231,16 +231,22 @@ export async function runAuth03(context, definition, details = {}) {
       await context.events.waitForStompEvent(pageA, 'ORDER_CANCELED')
       const submitted = await checkpoint(context, definition, 'submitted', [pageA, pageB])
 
-      await visitUserIsolationRoutes(pageB, accountA.account.id)
       const afterA = await context.api.snapshotAccount(pageA)
       const afterB = await context.api.snapshotAccount(pageB)
       assert.equal(afterA.trades.length > 0, true)
       assert.equal(afterB.trades.length, 0)
       assert.equal(afterB.orders.length, 0)
+      assert.equal(afterB.positions.length, 0)
+      assert.equal(afterB.fundingSettlements.length, 0)
       assert.equal(
         JSON.stringify(afterB).includes(accountA.account.id),
         false,
         'USER_B snapshot must not contain USER_A account id'
+      )
+      const uiIsolationProbe = await visitUserIsolationRoutes(
+        pageB,
+        accountA.account.id,
+        afterB.summary
       )
       const crossAccountProbe = await assertCrossAccountReadDenied(
         context,
@@ -263,6 +269,7 @@ export async function runAuth03(context, definition, details = {}) {
       const database = await context.db.assertDedicatedDatabase()
       const dbA = await context.db.snapshotTradingRows(accountA.account.id)
       const dbB = await context.db.snapshotTradingRows(accountB.account.id)
+      assertAuth03DatabaseIsolation(database, dbA, dbB)
       const final = await checkpoint(context, definition, 'final', [pageA, pageB], {
         apiEvidence: [safeAccountEvidence(afterA), safeAccountEvidence(afterB)],
         dbEvidence: [dbA, dbB]
@@ -288,7 +295,7 @@ export async function runAuth03(context, definition, details = {}) {
           { action: 'cancel-all-user-a-via-ui', requestRef: cancelAll.requestRef }
         ],
         checkpoints: [before, submitted, final],
-        contractProbes: [crossAccountProbe, legacyTopicProbe],
+        contractProbes: [uiIsolationProbe, crossAccountProbe, legacyTopicProbe],
         apiEvidence: [safeAccountEvidence(afterA), safeAccountEvidence(afterB)],
         dbEvidence: [dbA, dbB]
       }, details)
@@ -461,6 +468,38 @@ function assertAuth01State(snapshot, dbSnapshot) {
   assert.equal(Number(dbSnapshot.fundingSettlements), 0)
 }
 
+function assertAuth02SessionContinuity(beforeSnapshot, afterSnapshot) {
+  assert.deepEqual(
+    safeAccountEvidence(afterSnapshot),
+    safeAccountEvidence(beforeSnapshot),
+    'AUTH-02 session continuity must preserve account, wallet, settings, and trading history'
+  )
+}
+
+function assertAuth03DatabaseIsolation(database, dbA, dbB) {
+  assert.equal(
+    dbA.database,
+    database,
+    'AUTH-03 USER_A database isolation must use the active database'
+  )
+  assert.equal(
+    dbB.database,
+    database,
+    'AUTH-03 USER_B database isolation must use the active database'
+  )
+  assert(
+    Number(dbA.orders) >= 2 && Number(dbA.trades) >= 1,
+    'AUTH-03 USER_A database isolation requires the submitted orders and trade'
+  )
+  for (const field of ['orders', 'trades', 'openPositions', 'fundingSettlements']) {
+    assert.equal(
+      Number(dbB[field]),
+      0,
+      `AUTH-03 USER_B database isolation requires zero ${field}`
+    )
+  }
+}
+
 function safeAccountEvidence(snapshot) {
   return {
     account: {
@@ -508,21 +547,142 @@ async function openRegistrationPage(page, label) {
   )
 }
 
-async function visitUserIsolationRoutes(page, foreignAccountId) {
-  for (const route of ['/orders', '/wallet', '/positions']) {
-    await page.navigate(`${page.p0Options.webBaseUrl}${route}`)
-    await page.waitForFunction(
-      (expectedPath) => window.location.pathname === expectedPath
-        && (document.body?.innerText?.trim().length ?? 0) > 40,
-      `AUTH-03 USER_B route ${route}`,
-      route
-    )
-    const leaked = await page.evaluate(
-      (accountId) => document.body?.innerText?.includes(accountId) ?? false,
-      foreignAccountId
-    )
-    assert.equal(leaked, false, `${route} must not render USER_A account id`)
+async function visitUserIsolationRoutes(page, foreignAccountId, expectedSummary) {
+  const routes = []
+  routes.push(await inspectIsolationTables(
+    page,
+    '/orders',
+    ['CURRENT', 'HISTORY', 'TRADES'],
+    foreignAccountId
+  ))
+  await openIsolationRoute(page, '/wallet', foreignAccountId)
+  const wallet = await page.evaluate(readIsolationWallet, foreignAccountId)
+  assert.equal(wallet.leaked, false, '/wallet must not render USER_A account id')
+  assert.equal(
+    wallet.balance,
+    String(expectedSummary.balance),
+    'AUTH-03 USER_B UI isolation wallet balance must match USER_B API'
+  )
+  assert.equal(
+    wallet.freeMargin,
+    String(expectedSummary.freeMargin),
+    'AUTH-03 USER_B UI isolation wallet free margin must match USER_B API'
+  )
+  routes.push(wallet)
+  routes.push(await inspectIsolationTables(
+    page,
+    '/positions',
+    ['CURRENT', 'HISTORY'],
+    foreignAccountId
+  ))
+  return {
+    status: 'PASS',
+    kind: 'USER_UI_ISOLATION',
+    accountRole: 'USER_B',
+    routes
   }
+}
+
+async function inspectIsolationTables(page, route, views, foreignAccountId) {
+  await openIsolationRoute(page, route, foreignAccountId)
+  const tables = []
+  for (let index = 0; index < views.length; index += 1) {
+    const view = views[index]
+    assert.equal(
+      await page.evaluate(clickIsolationTab, index),
+      true,
+      `AUTH-03 USER_B UI isolation requires ${view} tab`
+    )
+    await page.waitForFunction(
+      isIsolationTableReady,
+      `AUTH-03 USER_B ${route} ${view} table`,
+      route,
+      index
+    )
+    const table = await page.evaluate(readIsolationTable, route, view, index)
+    assert.equal(
+      table.dataRows,
+      0,
+      `AUTH-03 USER_B UI isolation requires zero ${view} rows`
+    )
+    assert.equal(
+      table.emptyRows,
+      1,
+      `AUTH-03 USER_B UI isolation requires the ${view} empty state`
+    )
+    tables.push(table)
+  }
+  return { route, views: tables }
+}
+
+async function openIsolationRoute(page, route, foreignAccountId) {
+  await page.navigate(`${page.p0Options.webBaseUrl}${route}`)
+  await page.waitForFunction(
+    isIsolationRouteReady,
+    `AUTH-03 USER_B route ${route}`,
+    route
+  )
+  const leaked = await page.evaluate(readIsolationLeak, foreignAccountId)
+  assert.equal(leaked, false, `${route} must not render USER_A account id`)
+}
+
+function isIsolationRouteReady(expectedPath) {
+  if (window.location.pathname !== expectedPath) return false
+  if (document.querySelector(
+    '[data-state-variant="loading"], [data-state-variant="error"], [data-state-variant="login"]'
+  )) return false
+  if (expectedPath === '/wallet') {
+    return Boolean(document.querySelector('#wallet-overview > article strong'))
+  }
+  return Boolean(document.querySelector('[role="tablist"]') && document.querySelector('table'))
+}
+
+function clickIsolationTab(index) {
+  const buttons = document.querySelectorAll('[role="tablist"] button')
+  const button = buttons[index]
+  if (!(button instanceof HTMLButtonElement)) return false
+  button.click()
+  return true
+}
+
+function isIsolationTableReady(expectedPath, index) {
+  if (window.location.pathname !== expectedPath) return false
+  if (document.querySelector(
+    '[data-state-variant="loading"], [data-state-variant="error"], [data-state-variant="login"]'
+  )) return false
+  if (!document.querySelector('table')) return false
+  const buttons = document.querySelectorAll('[role="tablist"] button')
+  const active = buttons[index]
+  return active instanceof HTMLButtonElement
+    && active.className.trim().length > 0
+}
+
+function readIsolationTable(route, view, index) {
+  const rows = Array.from(document.querySelectorAll('table tbody tr'))
+  const emptyRows = rows.filter((row) => (
+    row.cells.length === 1 && row.cells[0].colSpan > 1
+  )).length
+  return {
+    route,
+    view,
+    tab: document.querySelectorAll('[role="tablist"] button')[index]?.textContent?.trim(),
+    dataRows: rows.length - emptyRows,
+    emptyRows
+  }
+}
+
+function readIsolationWallet(foreignAccountId) {
+  const overview = document.querySelector('#wallet-overview')
+  return {
+    route: '/wallet',
+    balance: overview?.children[0]?.querySelector('strong')?.textContent?.trim(),
+    freeMargin: overview?.children[1]?.querySelector('strong')?.textContent?.trim(),
+    leaked: document.body?.innerText?.includes(foreignAccountId) ?? false
+  }
+}
+
+function readIsolationLeak(foreignAccountId) {
+  return document.body?.innerText?.includes(foreignAccountId) ?? false
 }
 
 function limitPriceBelow(quote) {

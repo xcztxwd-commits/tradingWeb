@@ -6226,12 +6226,13 @@ export function assertNoRuntimeErrors(errors, label) {
   assert(relevant.length === 0, `${label} browser runtime errors: ${details.join(' | ')}`)
 }
 
-export async function launchBrowser() {
+export async function launchBrowser({ onSpawn, signal } = {}) {
+  throwIfP0Aborted(signal)
   const executable = browserCandidates().find(existsSync)
   assert(executable, 'Chrome or Edge is required; set SMOKE_BROWSER_PATH or CHROME_PATH')
   const port = await freePort()
   const userDataDir = await mkdtemp(join(tmpdir(), 'fx-usdt-demo-smoke-'))
-  const child = spawn(executable, [
+  const args = [
     '--headless=new',
     ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
     `--remote-debugging-port=${port}`,
@@ -6244,22 +6245,45 @@ export async function launchBrowser() {
     '--no-default-browser-check',
     '--window-size=1440,900',
     'about:blank'
-  ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-  observeLocalChildSpawn(child, { label: 'browser' })
+  ]
+  const child = spawn(executable, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  })
+  observeLocalChildSpawn(child, {
+    descriptor: { command: executable, args, cwd: projectRoot },
+    label: 'browser',
+    registerIdentity: true
+  })
+  bindP0AbortToManagedProcess(child, signal, 'browser')
   const log = { label: 'browser', command: executable, output: '' }
   processLogs.push(log)
   child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
   child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
-  await child.p0SpawnReady
-  await waitFor(async () => {
-    assertProcessRunning(child)
-    return canFetch(`http://127.0.0.1:${port}/json/version`)
-  }, 'Chrome DevTools endpoint', 30000)
+  try {
+    await child.p0SpawnReady
+    await onSpawn?.(child)
+    throwIfP0Aborted(signal)
+    await waitFor(async () => {
+      assertProcessRunning(child)
+      return canFetch(`http://127.0.0.1:${port}/json/version`, signal)
+    }, 'Chrome DevTools endpoint', 30000, signal)
+  } catch (error) {
+    await terminateProcessTree(child, 'browser launch cleanup').catch(() => {})
+    await rm(userDataDir, { recursive: true, force: true })
+    throw error
+  }
   return {
+    pid: child.pid,
+    processIdentity: child.processIdentity,
     port,
     close: async () => {
-      await terminateProcessTree(child, 'browser')
-      await rm(userDataDir, { recursive: true, force: true })
+      try {
+        if (child.p0AbortTermination) await child.p0AbortTermination
+        else await terminateProcessTree(child, 'browser')
+      } finally {
+        await rm(userDataDir, { recursive: true, force: true })
+      }
     }
   }
 }
@@ -9823,6 +9847,7 @@ function createDefaultP0CaseContext({
   signal
 }) {
   const users = new Map()
+  let browserAttempt = 0
   const runtimeUrl = (key, fallback) => inheritedEnv[key] ?? fallback
   const apiUrl = runtimeUrl('API_BASE_URL', 'http://127.0.0.1:18086')
   const webUrl = runtimeUrl('WEB_BASE_URL', 'http://127.0.0.1:5199')
@@ -9949,8 +9974,28 @@ function createDefaultP0CaseContext({
     )
     return actual
   }
+  const uiOverrides = { ...(runtime.p0Ui ?? {}) }
+  const startBrowser = uiOverrides.launchBrowser ?? launchBrowser
+  delete uiOverrides.launchBrowser
+  const launchOwnedBrowser = () => {
+    browserAttempt += 1
+    return runP0JournaledMutation({
+      artifactBase: prepared.artifactBase,
+      runId: options.runId,
+      runToken: prepared.ownerToken,
+      resource: {
+        type: 'process',
+        id: `browser:${browserAttempt}`,
+        live: true,
+        commandFingerprint: sha256Text(`owned-p0-browser:${browserAttempt}`)
+      },
+      start: (markStarted) => startBrowser({ onSpawn: markStarted, signal }),
+      stopLiveProcess: (browser) => browser?.close(),
+      signal
+    })
+  }
   const ui = {
-    launchBrowser,
+    launchBrowser: launchOwnedBrowser,
     createEvidencePage: (browserInstance, pageOptions = {}) => createEvidencePage(
       browserInstance,
       {
@@ -9970,7 +10015,7 @@ function createDefaultP0CaseContext({
     acceptNextNativeDialog,
     followLoginPromptViaUi,
     cancelAllOrdersViaUi,
-    ...(runtime.p0Ui ?? {})
+    ...uiOverrides
   }
   return buildP0Context({
     run: Object.freeze({

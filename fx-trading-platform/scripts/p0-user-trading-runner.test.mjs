@@ -1370,6 +1370,191 @@ test('default P0 DB oracle follows the active profile database', async (t) => {
   )
 })
 
+test('default P0 browser launch journals native identity before readiness', async (t) => {
+  const artifactBase = mkdtempSync(join(tmpdir(), 'p0-owned-browser-journal-'))
+  t.after(() => rmSync(artifactBase, { recursive: true, force: true }))
+  const runId = 'p0-owned-browser-journal-a1'
+  const runToken = 'p0-owned-browser-journal-owner-token-a1'
+  const matrixDatabase = 'fx_p0_user_e2e_browser_matrix_1'
+  const control = await smokeContracts.createControlManifest({
+    artifactBase,
+    runId,
+    runToken,
+    mode: 'discovery',
+    selection: {
+      caseIds: ['AUTH-01'],
+      phases: [],
+      profiles: [],
+      viewports: []
+    },
+    database: {
+      canonical: 'fx_p0_user_e2e_browser_canonical_1',
+      matrix: matrixDatabase
+    }
+  })
+  const states = []
+  const browser = {
+    pid: 43121,
+    processIdentity: {
+      pid: 43121,
+      startedAt: '2026-07-23T14:00:00.000Z',
+      processFingerprint: `sha256:${'b'.repeat(64)}`
+    },
+    async close() {}
+  }
+  const ownership = () => JSON.parse(readFileSync(control.ownershipPath, 'utf8'))
+  const dependencies = smokeContracts.createDefaultP0Dependencies({
+    artifactBase,
+    inheritedEnv: {},
+    postgres: { queryDatabase() { throw new Error('P0_TEST_DB_NOT_EXPECTED') } },
+    p0Ui: {
+      async launchBrowser({ onSpawn }) {
+        states.push(ownership().journal.resources.at(-1)?.state)
+        await onSpawn(browser)
+        states.push(ownership().journal.resources.at(-1)?.state)
+        return browser
+      }
+    }
+  })
+  const context = dependencies.createP0Context({
+    artifactBase,
+    ownerToken: runToken,
+    ownerId: control.ownerId,
+    matrixDatabase,
+    identity: { commit: 'c'.repeat(40) },
+    runRoot: control.runRoot
+  }, {
+    runId,
+    mode: 'discovery'
+  })
+
+  assert.equal(await context.ui.launchBrowser(), browser)
+  assert.deepEqual(states, ['PLANNED', 'STARTED'])
+  const resource = ownership().journal.resources.at(-1)
+  assert.equal(resource.type, 'process')
+  assert.equal(resource.id, 'browser:1')
+  assert.equal(resource.live, true)
+  assert.equal(resource.state, 'STARTED')
+  assert.equal(resource.pid, browser.pid)
+  assert.equal(resource.processFingerprint, browser.processIdentity.processFingerprint)
+})
+
+test('AUTH-02 fails closed when a login cycle changes account continuity', async () => {
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-02')
+  const beforeSnapshot = authAccountSnapshot({
+    accountId: '11111111-1111-4111-8111-111111111111'
+  })
+  const afterSnapshot = structuredClone(beforeSnapshot)
+  afterSnapshot.wallets[0].available = 49999
+  afterSnapshot.trades.push({ id: 'unexpected-trade' })
+  const snapshots = [beforeSnapshot, afterSnapshot]
+  const page = authEvidencePage('AUTH-02')
+  const context = {
+    run: authRun('p0-auth-02-continuity-a1'),
+    userFactory() {
+      return { email: 'member@example.test', password: 'Password123!' }
+    },
+    ui: {
+      async launchBrowser() { return { async close() {} } },
+      async createEvidencePage() { return page },
+      async loginViaUi(_page, _credentials, options = {}) {
+        return options.expectFailure
+          ? { authenticated: false, requestRef: 'wrong-password' }
+          : { authenticated: true, requestRef: 'login' }
+      },
+      async logoutViaUi() { return { requestRef: 'logout' } },
+      async openTradePanel() {},
+      async submitOrderViaUi() {
+        return { loginRequired: true, requestRef: null }
+      },
+      async followLoginPromptViaUi() {
+        return {
+          path: '/login',
+          redirect: '/trade/perpetual/BTCUSDT-PERP'
+        }
+      }
+    },
+    api: {
+      async snapshotAccount() { return snapshots.shift() }
+    },
+    db: {
+      async assertDedicatedDatabase() {
+        return 'fx_p0_user_e2e_auth_02_continuity_a1'
+      },
+      async snapshotTradingRows() {
+        return {
+          database: 'fx_p0_user_e2e_auth_02_continuity_a1',
+          activeDemoAccounts: 1,
+          orders: 0,
+          trades: 0,
+          openPositions: 0,
+          fundingSettlements: 0
+        }
+      }
+    },
+    evidence: authEvidenceSink()
+  }
+
+  await assert.rejects(
+    p0CoreContracts.runAuth02(context, definition),
+    /AUTH-02 session continuity/
+  )
+})
+
+test('AUTH-03 fails closed when USER_B owns trading rows in the active database', async () => {
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-03')
+  const accountA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const accountB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  const database = 'fx_p0_user_e2e_auth_03_isolation_a1'
+  const context = auth03Context({
+    accountA,
+    accountB,
+    database,
+    dbB: {
+      database,
+      activeDemoAccounts: 1,
+      orders: 0,
+      trades: 1,
+      openPositions: 0,
+      fundingSettlements: 0
+    }
+  })
+
+  await assert.rejects(
+    p0CoreContracts.runAuth03(context, definition),
+    /AUTH-03 USER_B database isolation/
+  )
+})
+
+test('AUTH-03 fails closed when USER_B Trades UI renders another user row', async () => {
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-03')
+  const accountA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const accountB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  const database = 'fx_p0_user_e2e_auth_03_ui_isolation_a1'
+  const context = auth03Context({
+    accountA,
+    accountB,
+    database,
+    uiBRows: {
+      '/orders': [0, 0, 1],
+      '/positions': [0, 0]
+    },
+    dbB: {
+      database,
+      activeDemoAccounts: 1,
+      orders: 0,
+      trades: 0,
+      openPositions: 0,
+      fundingSettlements: 0
+    }
+  })
+
+  await assert.rejects(
+    p0CoreContracts.runAuth03(context, definition),
+    /AUTH-03 USER_B UI isolation requires zero TRADES rows/
+  )
+})
+
 test('AUTH fragments satisfy the merge contract and hash every checkpoint screenshot', async (t) => {
   const artifactRoot = mkdtempSync(join(tmpdir(), 'p0-auth-fragment-contract-'))
   t.after(() => rmSync(artifactRoot, { recursive: true, force: true }))
@@ -1545,6 +1730,196 @@ test('AUTH failure fragments retain the formal terminal fields', async () => {
     artifactHashes: {}
   }])
 })
+
+function authRun(runId) {
+  return {
+    runId,
+    commit: 'a'.repeat(40),
+    artifactRoot: resolve(tmpdir(), runId)
+  }
+}
+
+function authEvidencePage(role) {
+  return {
+    role,
+    p0Options: { webBaseUrl: 'http://127.0.0.1:5199' },
+    async navigate() {},
+    async waitForFunction() {},
+    async evaluate() { return false },
+    assertEvidenceClean() {},
+    async close() {}
+  }
+}
+
+function authEvidenceSink() {
+  return {
+    async captureCheckpoint(_context, name) {
+      return {
+        name,
+        artifactHashes: {},
+        uiEvidence: [],
+        networkEvidence: [],
+        eventEvidence: []
+      }
+    },
+    writeCaseResultAtomic() {}
+  }
+}
+
+function authAccountSnapshot({
+  accountId,
+  orders = [],
+  trades = [],
+  positions = [],
+  fundingSettlements = []
+}) {
+  return {
+    accounts: [],
+    activeDemoAccounts: [],
+    account: {
+      id: accountId,
+      accountType: 'DEMO',
+      status: 'ACTIVE'
+    },
+    wallets: [{
+      walletType: 'SPOT',
+      asset: 'USDT',
+      total: 50000,
+      available: 50000,
+      locked: 0
+    }],
+    summary: {
+      balance: 50000,
+      equity: 50000,
+      freeMargin: 50000,
+      usedMargin: 0
+    },
+    settings: {
+      positionMode: 'ONE_WAY',
+      symbols: [{
+        symbol: 'BTCUSDT-PERP',
+        marginMode: 'CROSS',
+        leverage: 10,
+        quantityUnit: 'BASE'
+      }]
+    },
+    orders,
+    trades,
+    positions,
+    fundingSettlements
+  }
+}
+
+function auth03Context({
+  accountA,
+  accountB,
+  database,
+  dbB,
+  uiBRows = {
+    '/orders': [0, 0, 0],
+    '/positions': [0, 0]
+  }
+}) {
+  const pageA = authEvidencePage('AUTH-03-A')
+  const pageB = authEvidencePage('AUTH-03-B')
+  pageB.evaluate = async (fn, ...args) => {
+    if (fn.name === 'clickIsolationTab') return true
+    if (fn.name === 'readIsolationTable') {
+      const [route, view, index] = args
+      const dataRows = uiBRows[route][index]
+      return {
+        route,
+        view,
+        dataRows,
+        emptyRows: dataRows === 0 ? 1 : 0
+      }
+    }
+    if (fn.name === 'readIsolationWallet') {
+      return {
+        route: '/wallet',
+        balance: '50000',
+        freeMargin: '50000',
+        leaked: false
+      }
+    }
+    return false
+  }
+  const browserA = { role: 'AUTH-03-A', async close() {} }
+  const browserB = { role: 'AUTH-03-B', async close() {} }
+  const browsers = [browserA, browserB]
+  const initialA = authAccountSnapshot({ accountId: accountA })
+  const afterA = authAccountSnapshot({
+    accountId: accountA,
+    orders: [{ id: 'market-a' }, { id: 'limit-a' }],
+    trades: [{ id: 'trade-a' }]
+  })
+  const snapshotByPage = new Map([
+    [pageA, [initialA, afterA]],
+    [pageB, [
+      authAccountSnapshot({ accountId: accountB }),
+      authAccountSnapshot({ accountId: accountB })
+    ]]
+  ])
+  return {
+    run: authRun('p0-auth-03-isolation-a1'),
+    userFactory(role) {
+      return {
+        email: `${role.toLowerCase()}@example.test`,
+        password: 'Password123!'
+      }
+    },
+    ui: {
+      async launchBrowser() { return browsers.shift() },
+      async createEvidencePage(browser) {
+        return browser.role === 'AUTH-03-A' ? pageA : pageB
+      },
+      async registerViaUi(page) { return { requestRef: `register-${page.role}` } },
+      async logoutViaUi(page) { return { requestRef: `logout-${page.role}` } },
+      async loginViaUi(page) { return { requestRef: `login-${page.role}` } },
+      async openTradePanel() {},
+      async submitOrderViaUi(_page, order) {
+        return { requestRef: `submit-${order.orderType.toLowerCase()}` }
+      },
+      async cancelAllOrdersViaUi() { return { requestRef: 'cancel-all' } }
+    },
+    api: {
+      async snapshotAccount(page) {
+        return snapshotByPage.get(page).shift()
+      },
+      async snapshotMarket() {
+        return { quote: { bid: 60000 } }
+      },
+      async user() {
+        const error = new Error('forbidden')
+        error.status = 403
+        error.code = 'ACCOUNT_ACCESS_DENIED'
+        throw error
+      }
+    },
+    db: {
+      async assertDedicatedDatabase() { return database },
+      async snapshotTradingRows(accountId) {
+        if (accountId === accountB) return dbB
+        return {
+          database,
+          activeDemoAccounts: 1,
+          orders: 2,
+          trades: 1,
+          openPositions: 0,
+          fundingSettlements: 0
+        }
+      }
+    },
+    events: {
+      async waitForStompEvent() {},
+      snapshotFrames() { return [] },
+      async probeForbiddenSubscription() {
+        return { status: 'REJECTED' }
+      }
+    },
+    evidence: authEvidenceSink()
+  }
+}
 
 test('dispatch and phase counting ignore inherited values', async () => {
   const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
