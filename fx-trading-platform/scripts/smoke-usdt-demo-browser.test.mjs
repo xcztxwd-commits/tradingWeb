@@ -462,6 +462,17 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(submitSource, /browser state: \$\{JSON\.stringify\(diagnostic\)\}/)
   })
 
+  it('waits for controlled browser order inputs to reach React state before submitting', () => {
+    const text = source()
+    const submitSource = text.slice(
+      text.indexOf('async function submitBrowserOrder'),
+      text.indexOf('async function cancelBrowserOrder')
+    )
+
+    assert.match(submitSource, /input\?\.value === String\(expected\)\s*&&\s*input\.defaultValue === String\(expected\)/)
+    assert.doesNotMatch(submitSource, /await sleep\(50\)/)
+  })
+
   it('retains browser route readiness diagnostics', () => {
     const text = source()
     const openRouteSource = text.slice(

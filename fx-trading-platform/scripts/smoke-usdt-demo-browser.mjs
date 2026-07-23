@@ -5666,7 +5666,14 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
       return true
     }, TRADE_PANEL_SELECTOR, side, index, values[index])
     assert(changed, `${label} input ${index} must be editable`)
-    await sleep(50)
+    await page.waitForFunction((panelSelector, targetSide, inputIndex, expected) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
+      const inputs = [...(section?.querySelectorAll('input[inputmode="decimal"]:not([disabled])') ?? [])]
+      const input = inputs[inputIndex]
+      return input?.value === String(expected) && input.defaultValue === String(expected)
+    }, `${label} input ${index} controlled state`, TRADE_PANEL_SELECTOR, side, index, values[index])
   }
   if (reduceOnly) {
     const checked = await page.evaluate((panelSelector, targetSide) => {
