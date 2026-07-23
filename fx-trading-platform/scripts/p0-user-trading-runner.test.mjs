@@ -5802,7 +5802,7 @@ function formalP0CaseFragment(definition, subruns, {
   schemaVersion = 1,
   attempt = 1,
   durationMs = 1,
-  scopeComplete = false,
+  scopeComplete = true,
   artifactHashes
 } = {}) {
   const resolvedHashes = artifactHashes ?? Object.fromEntries(subruns.map((subrun) => [
@@ -6003,19 +6003,13 @@ test('formal case fragment merge rejects metadata and artifact hash collisions',
     /P0_CASE_FRAGMENT_HASH_CONFLICT/
   )
 
-  for (const [label, patch] of [
-    ['schema', { schemaVersion: 2 }],
-    ['attempt', { attempt: 2 }]
-  ]) {
-    assert.throws(
-      () => smokeContracts.mergeP0CaseFragments(entry, [
-        first,
-        formalP0CaseFragment(definition, [target], patch)
-      ]),
-      /P0_CASE_FRAGMENT_METADATA_CONFLICT/,
-      label
-    )
-  }
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      first,
+      formalP0CaseFragment(definition, [target], { attempt: 2 })
+    ]),
+    /P0_CASE_FRAGMENT_METADATA_CONFLICT/
+  )
 
   for (const [label, patch] of [
     ['duration', { durationMs: -1 }],
@@ -6025,6 +6019,70 @@ test('formal case fragment merge rejects metadata and artifact hash collisions',
     assert.throws(
       () => smokeContracts.mergeP0CaseFragments(entry, [
         formalP0CaseFragment(definition, [core], patch),
+        formalP0CaseFragment(definition, [target])
+      ]),
+      /P0_CASE_FRAGMENT_UNEXPECTED/,
+      label
+    )
+  }
+})
+
+test('formal case fragment merge rejects unsupported schema versions', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      id: definition.id,
+      definition,
+      selectedSubruns: definition.requiredSubruns,
+      cropped: false
+    }, definition.requiredSubruns.map((subrun) => (
+      formalP0CaseFragment(definition, [subrun], { schemaVersion: 999 })
+    ))),
+    /P0_CASE_FRAGMENT_UNEXPECTED/
+  )
+})
+
+test('formal case fragment merge rejects incomplete fragment scope', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const [core, target] = definition.requiredSubruns
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      id: definition.id,
+      definition,
+      selectedSubruns: definition.requiredSubruns,
+      cropped: false
+    }, [
+      formalP0CaseFragment(definition, [core], { scopeComplete: false }),
+      formalP0CaseFragment(definition, [target])
+    ]),
+    /P0_CASE_FRAGMENT_UNEXPECTED/
+  )
+})
+
+test('formal case fragment merge rejects unsafe artifact paths', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const [core, target] = definition.requiredSubruns
+  const entry = {
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }
+  const hash = `sha256:${'a'.repeat(64)}`
+  for (const [label, path] of [
+    ['absolute', '/tmp/result.json'],
+    ['drive-absolute', 'C:/tmp/result.json'],
+    ['dot-segment', 'subruns/./result.json'],
+    ['parent-segment', 'subruns/../result.json'],
+    ['backslash', 'subruns\\core\\result.json'],
+    ['empty-segment', 'subruns//result.json'],
+    ['control-character', 'subruns/\u0000/result.json']
+  ]) {
+    assert.throws(
+      () => smokeContracts.mergeP0CaseFragments(entry, [
+        formalP0CaseFragment(definition, [core], {
+          artifactHashes: { [path]: hash }
+        }),
         formalP0CaseFragment(definition, [target])
       ]),
       /P0_CASE_FRAGMENT_UNEXPECTED/,

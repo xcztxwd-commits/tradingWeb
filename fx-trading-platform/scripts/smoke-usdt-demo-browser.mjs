@@ -8641,11 +8641,22 @@ function cloneP0CaseSubrun(value) {
   return { identity, status, clone }
 }
 
+function isCanonicalP0ArtifactPath(value) {
+  if (typeof value !== 'string' || value.length === 0
+    || value.startsWith('/')
+    || /^[a-z]:/i.test(value)
+    || value.includes('\\')
+    || /[\u0000-\u001f\u007f-\u009f]/.test(value)) return false
+  return value.split('/').every((segment) => (
+    segment.length > 0 && segment !== '.' && segment !== '..'
+  ))
+}
+
 function p0ArtifactHashEntries(value) {
   if (!isPlainP0CaseEvidence(value)) return null
   const entries = []
   for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== 'string' || key.length === 0) return null
+    if (!isCanonicalP0ArtifactPath(key)) return null
     const descriptor = Object.getOwnPropertyDescriptor(value, key)
     if (!descriptor || descriptor.enumerable !== true
       || !Object.hasOwn(descriptor, 'value')
@@ -8698,7 +8709,6 @@ export function mergeP0CaseFragments(entry, fragmentsValue) {
   const expected = new Map(selected.map((subrun) => [subrun.id, subrun]))
   const observed = new Map()
   const hashes = new Map()
-  let schemaVersion
   let attempt
   let durationMs = 0
   let status = 'PASS'
@@ -8726,19 +8736,17 @@ export function mergeP0CaseFragments(entry, fragmentsValue) {
     )
     if (fragmentId !== entryId
       || !Object.hasOwn(P0_CASE_STATUS_PRIORITY, fragmentStatus)
-      || !Number.isSafeInteger(fragmentSchemaVersion) || fragmentSchemaVersion < 1
+      || fragmentSchemaVersion !== 1
       || !Number.isSafeInteger(fragmentAttempt) || fragmentAttempt < 1
       || !Number.isSafeInteger(fragmentDurationMs) || fragmentDurationMs < 0
-      || typeof fragmentScopeComplete !== 'boolean'
+      || fragmentScopeComplete !== true
       || !fragmentSubruns || fragmentSubruns.length === 0
       || !fragmentHashes) {
       throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
     }
-    if ((schemaVersion !== undefined && schemaVersion !== fragmentSchemaVersion)
-      || (attempt !== undefined && attempt !== fragmentAttempt)) {
+    if (attempt !== undefined && attempt !== fragmentAttempt) {
       throw new Error('P0_CASE_FRAGMENT_METADATA_CONFLICT')
     }
-    schemaVersion ??= fragmentSchemaVersion
     attempt ??= fragmentAttempt
     durationMs += fragmentDurationMs
     if (!Number.isSafeInteger(durationMs)) throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
@@ -8777,7 +8785,7 @@ export function mergeP0CaseFragments(entry, fragmentsValue) {
     })
   }
   return {
-    schemaVersion,
+    schemaVersion: 1,
     id: entryId,
     status,
     attempt,
