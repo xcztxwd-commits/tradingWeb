@@ -6634,6 +6634,10 @@ test('default P0 dependency factory wires local adapters and main injects it', a
   )
   assert.doesNotMatch(smokeSource, /P0_LOCAL_ADAPTER_REQUIRED|P0_SUITE_NOT_IMPLEMENTED/)
   assert.doesNotMatch(smokeSource, /\b(?:FLUSHDB|FLUSHALL)\b|request\(\['KEYS'/)
+  assert.match(
+    smokeSource,
+    /gateOutput: join\(context\.runRoot, 'preflight', 'surefire-details\.json'\)/
+  )
 
   const root = mkdtempSync(join(tmpdir(), 'p0-default-factory-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))

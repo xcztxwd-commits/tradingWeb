@@ -9163,7 +9163,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
         assertP0ProcessTreeCapability()
         return runP0Preflight({
           projectRoot,
-          gateOutput: join(context.runRoot, 'preflight', 'surefire-gate.json'),
+          gateOutput: join(context.runRoot, 'preflight', 'surefire-details.json'),
           databaseUrl: context.databaseUrl,
           now,
           signal,
