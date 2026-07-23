@@ -637,6 +637,19 @@ describe('real USDT demo browser smoke contract', () => {
     )
   })
 
+  it('waits for the Admin symbol binding options loaded from the API', () => {
+    const text = source()
+    const bindingSource = text.slice(
+      text.indexOf('async function assertAdminBindingMode'),
+      text.indexOf('async function installBrowserSession')
+    )
+
+    assert.match(
+      bindingSource,
+      /const selected = await waitFor\(\(\) => page\.evaluate\([\s\S]*`Admin \$\{PERP_SYMBOL\} symbol option`, 15000\)/
+    )
+  })
+
   it('canonical smoke module import is quiet and side-effect free', (t) => {
     const root = mkdtempSync(join(tmpdir(), 'p0-smoke-import-safe-'))
     t.after(() => rmSync(root, { recursive: true, force: true }))
