@@ -658,6 +658,36 @@ export function transferConservationOracle({
   }
 }
 
+export function perpOpeningHoldOracle({
+  baseQuantity,
+  worstPrice,
+  leverage,
+  worstFeeRate = DEMO_RATES.takerFeeRate,
+  rules
+}) {
+  const quantity = requireQuantity(baseQuantity, rules, 'baseQuantity')
+  const price = positive(worstPrice, 'worstPrice')
+  const leverageValue = positive(leverage, 'leverage')
+  const feeRate = nonNegative(worstFeeRate, 'worstFeeRate')
+  const notional = money(multiply(quantity, price))
+  const openingInitialMargin = divideFixed(
+    notional,
+    leverageValue,
+    MONEY_SCALE,
+    'HALF_UP'
+  )
+  const feeBuffer = money(multiply(notional, feeRate))
+  const holdAmount = money(add(openingInitialMargin, feeBuffer))
+  return {
+    notional: formatFixed(notional),
+    openingInitialMargin: formatFixed(openingInitialMargin),
+    feeBuffer: formatFixed(feeBuffer),
+    holdAmount: formatFixed(holdAmount),
+    holdCurrency: 'USDT',
+    tolerances: tolerancesFromRules(rules)
+  }
+}
+
 export function perpPositionOracle({
   side,
   quantity,

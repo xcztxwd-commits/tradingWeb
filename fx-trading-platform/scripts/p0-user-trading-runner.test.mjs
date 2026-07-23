@@ -372,6 +372,27 @@ test('financial oracle: funding applies directional cashflow to the correct marg
   })
 })
 
+test('financial oracle: Perp opening hold includes initial margin and worst fee once', () => {
+  assert.deepEqual(financialOracles.perpOpeningHoldOracle({
+    baseQuantity: '0.01',
+    worstPrice: '50005',
+    leverage: '50',
+    worstFeeRate: '0.0005',
+    rules: BTC_RULES
+  }), {
+    notional: '500.05000000',
+    openingInitialMargin: '10.00100000',
+    feeBuffer: '0.25002500',
+    holdAmount: '10.25102500',
+    holdCurrency: 'USDT',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }
+  })
+})
+
 test('financial oracle: Spot and Perp transfer deltas conserve combined USDT', () => {
   const spotToPerp = financialOracles.transferConservationOracle({
     direction: 'SPOT_TO_PERP',
