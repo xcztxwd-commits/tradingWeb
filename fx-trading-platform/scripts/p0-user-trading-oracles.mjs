@@ -9,6 +9,7 @@ export const PERSISTED_QUANTITY_STEP = '0.0001'
 const MONEY_SCALE = 8
 const ROUNDING = new Set(['DOWN', 'FLOOR', 'CEILING', 'HALF_UP'])
 const ZERO = Object.freeze({ units: 0n, scale: 0 })
+const MONEY_INCREMENT = Object.freeze({ units: 1n, scale: MONEY_SCALE })
 
 function decimal(value, name = 'value') {
   if (typeof value !== 'string') {
@@ -241,6 +242,28 @@ function directionalDifference(side, exitPrice, entryPrice) {
   throw new TypeError('side must be LONG or SHORT')
 }
 
+function marketProjection(productType, side, bid, ask) {
+  if (productType !== 'CRYPTO_SPOT' && productType !== 'LINEAR_PERP') {
+    throw new TypeError('productType must be CRYPTO_SPOT or LINEAR_PERP')
+  }
+  if (side !== 'BUY' && side !== 'SELL') {
+    throw new TypeError('side must be BUY or SELL')
+  }
+  if (compare(bid, ask) > 0) throw new RangeError('bid must not exceed ask')
+  const referencePrice = side === 'BUY' ? ask : bid
+  let slippage = multiply(referencePrice, decimal(DEMO_RATES.slippageRate))
+  let filledPrice = side === 'BUY'
+    ? add(referencePrice, slippage)
+    : subtract(referencePrice, slippage)
+  if (productType === 'LINEAR_PERP') {
+    filledPrice = money(filledPrice)
+    slippage = money(side === 'BUY'
+      ? subtract(filledPrice, referencePrice)
+      : subtract(referencePrice, filledPrice))
+  }
+  return { referencePrice, filledPrice, slippage }
+}
+
 function fieldTolerance(value) {
   return divideFixed(value, decimal('2'), value.scale + 1, 'HALF_UP')
 }
@@ -283,7 +306,7 @@ export function tolerancesFromRules(rules) {
   return {
     price: normalized(fieldTolerance(tick)),
     quantity: normalized(fieldTolerance(step)),
-    amount: normalized(fieldTolerance(multiply(tick, step)))
+    amount: normalized(fieldTolerance(MONEY_INCREMENT))
   }
 }
 
@@ -302,13 +325,32 @@ export function alignPriceToTick(price, rules) {
   ))
 }
 
+export function marketFillOracle({ productType, side, bid, ask }) {
+  const projection = marketProjection(
+    productType,
+    side,
+    positive(bid, 'bid'),
+    positive(ask, 'ask')
+  )
+  const format = productType === 'LINEAR_PERP' ? formatFixed : normalized
+  return {
+    referencePrice: normalized(projection.referencePrice),
+    filledPrice: format(projection.filledPrice),
+    slippage: format(projection.slippage),
+    slippageRate: DEMO_RATES.slippageRate,
+    feeRate: DEMO_RATES.takerFeeRate,
+    liquidityRole: 'TAKER'
+  }
+}
+
 export function quantityFromUnit({ unit, quantity, authorityMark, rules }) {
   const original = positive(quantity, 'quantity')
   const mark = positive(authorityMark, 'authorityMark')
   const step = compatibleStep(rules)
   let baseQuantity
   if (unit === 'BASE') {
-    baseQuantity = roundToStep(original, step, 'FLOOR')
+    requireAligned(original, step)
+    baseQuantity = original
   } else if (unit === 'QUOTE' || unit === 'USDT_NOTIONAL') {
     baseQuantity = floorRatioToStep(original, mark, step)
   } else if (unit === 'CONTRACTS') {
@@ -581,11 +623,7 @@ export function projectedNetOracle({
   let closeFill
   if (marketPricing) {
     liquidityRole = 'TAKER'
-    const reference = closingSide === 'SELL' ? bid : ask
-    const slippage = multiply(reference, decimal(DEMO_RATES.slippageRate))
-    closeFill = closingSide === 'SELL'
-      ? subtract(reference, slippage)
-      : add(reference, slippage)
+    closeFill = marketProjection('LINEAR_PERP', closingSide, bid, ask).filledPrice
   } else if (executionPath === 'IMMEDIATE_LIMIT' || executionPath === 'RESTING_LIMIT') {
     liquidityRole = executionPath === 'RESTING_LIMIT' ? 'MAKER' : 'TAKER'
     const limit = positive(limitPrice, 'limitPrice')
@@ -641,13 +679,16 @@ export function isolatedLiquidationOracle({
   const funding = decimal(fundingPnl, 'fundingPnl')
   const maintenanceRate = nonNegative(maintenanceMarginRate, 'maintenanceMarginRate')
   const closeRate = nonNegative(closeTakerFeeRate, 'closeTakerFeeRate')
-  const effectiveIsolatedMargin = add(margin, funding)
-  const unrealizedPnl = multiply(directionalDifference(side, mark, entry), baseQuantity)
-  const markNotional = multiply(baseQuantity, mark)
-  const maintenanceMargin = multiply(markNotional, maintenanceRate)
-  const estimatedCloseTakerFee = multiply(markNotional, closeRate)
-  const isolatedEquity = add(effectiveIsolatedMargin, unrealizedPnl)
-  const isolatedThreshold = add(maintenanceMargin, estimatedCloseTakerFee)
+  const effectiveIsolatedMargin = money(add(margin, funding))
+  const unrealizedPnl = money(multiply(
+    directionalDifference(side, mark, entry),
+    baseQuantity
+  ))
+  const markNotional = money(multiply(baseQuantity, mark))
+  const maintenanceMargin = money(multiply(markNotional, maintenanceRate))
+  const estimatedCloseTakerFee = money(multiply(markNotional, closeRate))
+  const isolatedEquity = money(add(effectiveIsolatedMargin, unrealizedPnl))
+  const isolatedThreshold = money(add(maintenanceMargin, estimatedCloseTakerFee))
   const rateTotal = add(maintenanceRate, closeRate)
   const denominatorRate = side === 'LONG'
     ? subtract(decimal('1'), rateTotal)
@@ -668,12 +709,12 @@ export function isolatedLiquidationOracle({
     ? roundFixed(ZERO, MONEY_SCALE, 'DOWN')
     : estimatedRaw
   return {
-    effectiveIsolatedMargin: moneyString(effectiveIsolatedMargin),
-    unrealizedPnl: moneyString(unrealizedPnl),
-    isolatedEquity: moneyString(isolatedEquity),
-    maintenanceMargin: moneyString(maintenanceMargin),
-    estimatedCloseTakerFee: moneyString(estimatedCloseTakerFee),
-    isolatedThreshold: moneyString(isolatedThreshold),
+    effectiveIsolatedMargin: formatFixed(effectiveIsolatedMargin),
+    unrealizedPnl: formatFixed(unrealizedPnl),
+    isolatedEquity: formatFixed(isolatedEquity),
+    maintenanceMargin: formatFixed(maintenanceMargin),
+    estimatedCloseTakerFee: formatFixed(estimatedCloseTakerFee),
+    isolatedThreshold: formatFixed(isolatedThreshold),
     estimatedLiquidationPrice: formatFixed(estimatedLiquidationPrice),
     liquidatable: compare(isolatedEquity, isolatedThreshold) <= 0,
     tolerances: tolerancesFromRules(rules)
@@ -683,8 +724,7 @@ export function isolatedLiquidationOracle({
 export function crossLiquidationOracle({
   perpBalance,
   isolatedPrincipal = '0',
-  positions,
-  rules
+  positions
 }) {
   const balance = nonNegative(perpBalance, 'perpBalance')
   const isolated = nonNegative(isolatedPrincipal, 'isolatedPrincipal')
@@ -694,8 +734,16 @@ export function crossLiquidationOracle({
   let crossUpl = ZERO
   let crossMaintenance = ZERO
   let estimatedCloseTakerFees = ZERO
+  const tolerances = []
   for (const [index, position] of positions.entries()) {
-    const quantity = requireQuantity(position.quantity, rules, `positions[${index}].quantity`)
+    if (!position?.rules || typeof position.rules !== 'object') {
+      throw new TypeError(`positions[${index}].rules are required`)
+    }
+    const quantity = requireQuantity(
+      position.quantity,
+      position.rules,
+      `positions[${index}].quantity`
+    )
     const entry = positive(position.entryPrice, `positions[${index}].entryPrice`)
     const mark = positive(position.markPrice, `positions[${index}].markPrice`)
     const maintenanceRate = nonNegative(
@@ -706,26 +754,32 @@ export function crossLiquidationOracle({
       position.closeTakerFeeRate ?? DEMO_RATES.takerFeeRate,
       `positions[${index}].closeTakerFeeRate`
     )
-    const markNotional = multiply(quantity, mark)
-    crossUpl = add(crossUpl, multiply(
+    const markNotional = money(multiply(quantity, mark))
+    crossUpl = add(crossUpl, money(multiply(
       directionalDifference(position.side, mark, entry),
       quantity
-    ))
-    crossMaintenance = add(crossMaintenance, multiply(markNotional, maintenanceRate))
+    )))
+    crossMaintenance = add(
+      crossMaintenance,
+      money(multiply(markNotional, maintenanceRate))
+    )
     estimatedCloseTakerFees = add(
       estimatedCloseTakerFees,
-      multiply(markNotional, closeRate)
+      money(multiply(markNotional, closeRate))
     )
+    tolerances.push(tolerancesFromRules(position.rules))
   }
-  const crossEquity = add(subtract(balance, isolated), crossUpl)
-  const crossThreshold = add(crossMaintenance, estimatedCloseTakerFees)
+  const crossEquity = money(add(subtract(balance, isolated), crossUpl))
+  crossMaintenance = money(crossMaintenance)
+  estimatedCloseTakerFees = money(estimatedCloseTakerFees)
+  const crossThreshold = money(add(crossMaintenance, estimatedCloseTakerFees))
   return {
-    crossEquity: moneyString(crossEquity),
-    crossMaintenance: moneyString(crossMaintenance),
-    estimatedCloseTakerFees: moneyString(estimatedCloseTakerFees),
-    crossThreshold: moneyString(crossThreshold),
+    crossEquity: formatFixed(crossEquity),
+    crossMaintenance: formatFixed(crossMaintenance),
+    estimatedCloseTakerFees: formatFixed(estimatedCloseTakerFees),
+    crossThreshold: formatFixed(crossThreshold),
     liquidatable: compare(crossEquity, crossThreshold) <= 0,
-    tolerances: tolerancesFromRules(rules)
+    tolerances
   }
 }
 
