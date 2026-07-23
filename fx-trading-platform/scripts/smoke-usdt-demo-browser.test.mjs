@@ -222,6 +222,11 @@ describe('real USDT demo browser smoke contract', () => {
 
   it('asserts REST and PostgreSQL state rather than relying only on visible text', () => {
     const text = source()
+    const databaseState = text.match(
+      /async function assertDatabaseState\(\) \{[\s\S]*?\r?\n\}\r?\n\r?\nasync function runDbSql/
+    )?.[0]
+
+    assert.ok(databaseState)
 
     for (const endpoint of [
       '/api/market/symbols',
@@ -246,10 +251,13 @@ describe('real USDT demo browser smoke contract', () => {
       'trading.orders',
       'trading.trades',
       'trading.positions',
+      'trading.spot_positions',
       'trading.funding_settlements'
     ]) {
       assert.match(text, new RegExp(escapeRegExp(table)))
     }
+    assert.match(databaseState, /trading\.positions[\s\S]*?status = 'OPEN'/)
+    assert.match(databaseState, /trading\.spot_positions[\s\S]*?wallet_type = 'SPOT'[\s\S]*?quantity > 0/)
     assert.match(text, /command: 'docker'[\s\S]*args: \['exec', '-i', postgresContainerId, 'psql'/)
   })
 
