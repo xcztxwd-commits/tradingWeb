@@ -9082,7 +9082,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
       throwIfP0Aborted(signal)
       redisSnapshot = await snapshotRedisKeys({ redis, keys: redisKeys, signal })
       throwIfP0Aborted(signal)
-      touchedRedisKeys = []
+      touchedRedisKeys = [...redisKeys]
       await writeRedisRecoveryState({
         runRoot: reservation.runRoot,
         runId: options.runId,

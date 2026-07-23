@@ -6750,6 +6750,7 @@ test('default P0 dependency factory wires local adapters and main injects it', a
           processFingerprint: `sha256:${'6'.repeat(64)}`
         }
       })
+      redisState.set(redisKey, { value: 'during-canonical', expiresAtMs: null })
       mkdirSync(invocation.env.USDT_DEMO_SMOKE_ARTIFACTS, { recursive: true })
       writeFileSync(
         join(invocation.env.USDT_DEMO_SMOKE_ARTIFACTS, 'report.json'),
@@ -6840,6 +6841,7 @@ test('default P0 dependency factory wires local adapters and main injects it', a
     const completed = await smokeContracts.runP0Suite(options, dependencies)
     assert.equal(completed.report.verdict, 'PASS')
     assert.equal(completed.cleanup.status, 'CLEANED')
+    assert.equal(completed.cleanup.restored, 10)
     assert.equal(canonicalInvocations.length, 1)
     assert.deepEqual(canonicalInvocations[0].args, [
       fileURLToPath(new URL('./smoke-usdt-demo-browser.mjs', import.meta.url))
@@ -6856,6 +6858,12 @@ test('default P0 dependency factory wires local adapters and main injects it', a
       expiresAtMs: 1_900_000_000_000
     })
     assert.equal(redisState.has('p0:e2e:owner'), false)
+    const redisRecovery = JSON.parse(readFileSync(
+      join(root, 'artifacts', options.runId, 'control', 'redis.json'),
+      'utf8'
+    ))
+    assert.equal(redisRecovery.touchedKeys.length, 10)
+    assert.equal(redisRecovery.touchedKeys.includes(redisKey), true)
     const cleaned = JSON.parse(readFileSync(
       join(root, 'artifacts', options.runId, 'control', 'ownership.json'),
       'utf8'
