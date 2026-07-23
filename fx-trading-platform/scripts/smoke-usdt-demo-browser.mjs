@@ -5990,10 +5990,13 @@ async function assertAdminBindingMode(page, mode) {
     )
     const option = select && [...select.options].find((candidate) => candidate.textContent?.includes(symbol))
     if (!select || !option) return false
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
-    setter?.call(select, option.value)
-    select.dispatchEvent(new Event('input', { bubbles: true }))
-    select.dispatchEvent(new Event('change', { bubbles: true }))
+    if (select.value !== option.value) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+      setter?.call(select, option.value)
+      select.dispatchEvent(new Event('input', { bubbles: true }))
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+      return false
+    }
     return true
   }, PERP_SYMBOL), `Admin ${PERP_SYMBOL} symbol option`, 15000)
   assert(selected, `Admin binding page must expose ${PERP_SYMBOL}`)
