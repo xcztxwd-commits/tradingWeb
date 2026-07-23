@@ -3566,6 +3566,8 @@ function supportsP0ProfileLifecycle(operations) {
 
 async function activateP0Profile({ phase, profile, attempt, context, operations, signal }) {
   throwIfP0Aborted(signal)
+  await restoreP0CaseFixtures(context, { signal })
+  throwIfP0Aborted(signal)
   await operations.stopProfileBackend(context, profile, { signal })
   throwIfP0Aborted(signal)
   await operations.assertProfilePortFree(18086, context, profile, { signal })
@@ -3607,6 +3609,15 @@ async function activateP0Profile({ phase, profile, attempt, context, operations,
     { signal }
   )
   throwIfP0Aborted(signal)
+  context.activeProfileRuntime = {
+    phase,
+    profile,
+    attempt,
+    segmentName: phaseDatabase.segmentName,
+    databaseUrl,
+    environment: context.activeProfileEnvironment ?? environment,
+    restartCount: 0
+  }
   return backend
 }
 
@@ -9841,10 +9852,777 @@ export function validateP0ResumeJournal(manifest, matrixDatabase) {
   return databases
 }
 
+function p0FixtureCleanupRegistry(prepared) {
+  prepared.p0FixtureCleanupRegistry ??= []
+  if (!Array.isArray(prepared.p0FixtureCleanupRegistry)) {
+    throw new Error('P0_FIXTURE_CLEANUP_REGISTRY_INVALID')
+  }
+  return prepared.p0FixtureCleanupRegistry
+}
+
+function registerP0FixtureCleanup(prepared, label, cleanup) {
+  if (typeof cleanup !== 'function') throw new Error('P0_FIXTURE_CLEANUP_INVALID')
+  const registry = p0FixtureCleanupRegistry(prepared)
+  let active = true
+  const entry = {
+    label,
+    async restore(options = {}) {
+      if (!active) return { status: 'ALREADY_RESTORED' }
+      const result = await cleanup(options)
+      active = false
+      const index = registry.lastIndexOf(entry)
+      if (index >= 0) registry.splice(index, 1)
+      return result
+    }
+  }
+  registry.push(entry)
+  return entry.restore
+}
+
+export async function restoreP0CaseFixtures(prepared, { signal } = {}) {
+  const registry = prepared?.p0FixtureCleanupRegistry
+  if (registry === undefined) return { status: 'PASS', restored: 0 }
+  if (!Array.isArray(registry)) throw new Error('P0_FIXTURE_CLEANUP_REGISTRY_INVALID')
+  const failures = []
+  let restored = 0
+  for (const entry of [...registry].reverse()) {
+    throwIfP0Aborted(signal)
+    try {
+      if (!entry || typeof entry.restore !== 'function') {
+        throw new Error('P0_FIXTURE_CLEANUP_INVALID')
+      }
+      await entry.restore({ signal })
+      restored += 1
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `failed to restore ${failures.length} P0 case fixture(s)`
+    )
+  }
+  return { status: 'PASS', restored }
+}
+
+function p0ActiveProfile(prepared, guard) {
+  guard()
+  const active = prepared.activeProfileRuntime
+  if (!active
+    || typeof active !== 'object'
+    || typeof active.phase !== 'string'
+    || typeof active.profile !== 'string'
+    || !Number.isSafeInteger(active.attempt)
+    || active.attempt < 1
+    || typeof active.segmentName !== 'string'
+    || typeof active.databaseUrl !== 'string'
+    || !active.environment
+    || typeof active.environment !== 'object'
+    || !Number.isSafeInteger(active.restartCount)
+    || active.restartCount < 0) {
+    throw new Error('P0_ACTIVE_PROFILE_REQUIRED')
+  }
+  if (!prepared.activeBackend) throw new Error('P0_ACTIVE_BACKEND_REQUIRED')
+  assertP0DatabaseName(active.segmentName)
+  if (prepared.activeDatabaseSegment !== active.segmentName) {
+    throw new Error('P0_ACTIVE_DATABASE_MISMATCH')
+  }
+  if (prepared.activeDatabaseUrl !== active.databaseUrl
+    || active.environment.DATABASE_URL !== active.databaseUrl
+    || (active.environment.SPRING_DATASOURCE_URL !== undefined
+      && active.environment.SPRING_DATASOURCE_URL !== active.databaseUrl)) {
+    throw new Error('P0_ACTIVE_DATABASE_MISMATCH')
+  }
+  return active
+}
+
+function safeP0ActiveProfile(active) {
+  return {
+    phase: active.phase,
+    profile: active.profile,
+    attempt: active.attempt,
+    segmentName: active.segmentName,
+    databaseUrl: active.databaseUrl,
+    restartCount: active.restartCount
+  }
+}
+
+function p0FixtureSymbol(value) {
+  const symbol = String(value ?? '').trim().toUpperCase()
+  if (!/^[A-Z0-9]+(?:-[A-Z0-9]+)?$/.test(symbol)) {
+    throw new Error('P0_FIXTURE_SYMBOL_INVALID')
+  }
+  return symbol
+}
+
+function p0FixtureUuid(value, label) {
+  const uuid = String(value ?? '').trim().toLowerCase()
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(uuid)) {
+    throw new Error(`P0_FIXTURE_${label}_INVALID`)
+  }
+  return uuid
+}
+
+function p0FixtureJson(raw, label) {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw
+  const line = String(raw ?? '').split(/\r?\n/).filter(Boolean).at(-1)
+  try {
+    return JSON.parse(line)
+  } catch (error) {
+    throw new Error(`P0_FIXTURE_${label}_INVALID`, { cause: error })
+  }
+}
+
+function p0AdminPageContent(value) {
+  if (Array.isArray(value)) return value
+  return value?.content ?? value?.items ?? value?.records ?? []
+}
+
+function p0BindingRequest(binding, enabled = binding.enabled) {
+  return {
+    providerId: binding.providerId,
+    providerInstrumentId: binding.providerInstrumentId,
+    providerSymbol: binding.providerSymbol,
+    priority: binding.priority,
+    enabled,
+    configJson: binding.configJson ?? '{}'
+  }
+}
+
+function safeP0BindingEvidence(symbol, providerCode, binding) {
+  return {
+    id: binding.id,
+    symbol,
+    providerCode,
+    providerSymbol: binding.providerSymbol,
+    priority: binding.priority,
+    enabled: binding.enabled
+  }
+}
+
+function p0FundingConfigRequest(config, reason) {
+  return {
+    fundingSourcePriority: config.fundingSourcePriority,
+    fixedFundingRate: config.fixedFundingRate,
+    fixedFundingIntervalMinutes: config.fixedFundingIntervalMinutes,
+    fundingStaleSeconds: config.fundingStaleSeconds,
+    reason
+  }
+}
+
+async function restoreP0ProviderBindingChanges(admin, changes, { signal } = {}) {
+  const failures = []
+  for (const change of [...changes].reverse()) {
+    try {
+      await admin(
+        `/api/admin/market/symbols/${encodeURIComponent(change.symbolId)}/provider-bindings/${
+          encodeURIComponent(change.original.id)
+        }`,
+        {
+          method: 'PUT',
+          body: p0BindingRequest(change.original),
+          signal
+        }
+      )
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `failed to restore ${failures.length} P0 provider binding(s)`
+    )
+  }
+  const bySymbol = new Map()
+  for (const change of changes) {
+    if (!bySymbol.has(change.symbolId)) {
+      bySymbol.set(
+        change.symbolId,
+        await admin(
+          `/api/admin/market/symbols/${encodeURIComponent(change.symbolId)}/provider-bindings`,
+          { signal }
+        )
+      )
+    }
+    const restored = p0AdminPageContent(bySymbol.get(change.symbolId))
+      .find(({ id }) => id === change.original.id)
+    if (!restored
+      || JSON.stringify(p0BindingRequest(restored))
+        !== JSON.stringify(p0BindingRequest(change.original))) {
+      throw new Error('P0_PROVIDER_BINDING_RESTORE_MISMATCH')
+    }
+  }
+  return { status: 'RESTORED', bindings: changes.length }
+}
+
+export function createP0CaseRuntimeCapabilities({
+  prepared,
+  signal,
+  guard = assertP0ProcessTreeCapability,
+  processManager,
+  infrastructure,
+  journalMutation,
+  verifyActiveDatabase,
+  adminApi,
+  createAdminApi,
+  query
+}) {
+  if (!prepared || typeof prepared !== 'object') {
+    throw new Error('P0_CASE_RUNTIME_CONTEXT_REQUIRED')
+  }
+  const adminForPage = async (page) => {
+    guard()
+    const admin = typeof createAdminApi === 'function'
+      ? await createAdminApi(page)
+      : (path, request) => adminApi(page, path, request)
+    if (typeof admin !== 'function') throw new Error('P0_ADMIN_SESSION_REQUIRED')
+    return admin
+  }
+  const ensureProfile = async (expectedProfile) => {
+    const active = p0ActiveProfile(prepared, guard)
+    if (expectedProfile !== undefined && active.profile !== expectedProfile) {
+      throw new Error(
+        `P0_ACTIVE_PROFILE_MISMATCH: expected ${expectedProfile}, got ${active.profile}`
+      )
+    }
+    if (typeof verifyActiveDatabase !== 'function') {
+      throw new Error('P0_ACTIVE_DATABASE_VERIFIER_REQUIRED')
+    }
+    await verifyActiveDatabase({
+      backend: prepared.activeBackend,
+      segmentName: active.segmentName,
+      databaseUrl: active.databaseUrl,
+      profile: active.profile,
+      signal
+    })
+    return safeP0ActiveProfile(active)
+  }
+  const restartBackend = async (input = {}) => {
+    const active = p0ActiveProfile(prepared, guard)
+    if (typeof processManager?.stopOwnedBackend !== 'function'
+      || typeof processManager?.startOwnedBackend !== 'function'
+      || typeof processManager?.waitForBackendHealth !== 'function'
+      || typeof processManager?.waitForBusinessEndpoint !== 'function'
+      || typeof infrastructure?.assertPortsFree !== 'function'
+      || typeof journalMutation !== 'function'
+      || typeof verifyActiveDatabase !== 'function') {
+      throw new Error('P0_RESTART_BACKEND_RUNTIME_INCOMPLETE')
+    }
+    const options = typeof input === 'function'
+      ? { duringDowntime: input }
+      : input
+    if (!options || typeof options !== 'object'
+      || (options.duringDowntime !== undefined
+        && typeof options.duringDowntime !== 'function')) {
+      throw new Error('P0_RESTART_BACKEND_OPTIONS_INVALID')
+    }
+    const callSignal = options.signal ?? signal
+    throwIfP0Aborted(callSignal)
+    const stopped = prepared.activeBackend
+    await processManager.stopOwnedBackend(stopped, { signal: callSignal })
+    if (prepared.activeBackend === stopped) prepared.activeBackend = undefined
+    throwIfP0Aborted(callSignal)
+    await infrastructure.assertPortsFree([18086], { signal: callSignal })
+    throwIfP0Aborted(callSignal)
+
+    let downtimeFailure
+    try {
+      await options.duringDowntime?.({ signal: callSignal })
+      throwIfP0Aborted(callSignal)
+    } catch (error) {
+      downtimeFailure = error
+    }
+
+    active.restartCount += 1
+    const restartAttempt = active.restartCount
+    let backend
+    let restartFailure
+    try {
+      backend = await journalMutation({
+        resource: {
+          type: 'process',
+          id: `backend:${active.phase}:${active.attempt}:${active.profile}:restart:${restartAttempt}`,
+          live: true,
+          commandFingerprint: sha256Text(
+            `owned-p0-backend:${active.phase}:${active.attempt}:${active.profile}:restart:${restartAttempt}`
+          )
+        },
+        start: () => processManager.startOwnedBackend({
+          profile: active.profile,
+          environment: { ...active.environment },
+          signal: callSignal
+        }),
+        stopLiveProcess: (handle, details) => (
+          processManager.stopOwnedBackend(handle, details)
+        ),
+        signal: callSignal
+      })
+      prepared.activeBackend = backend
+      await processManager.waitForBackendHealth(
+        backend,
+        'http://127.0.0.1:18086/actuator/health',
+        callSignal
+      )
+      throwIfP0Aborted(callSignal)
+      await processManager.waitForBusinessEndpoint(
+        backend,
+        'http://127.0.0.1:18086/api/market/symbols',
+        callSignal
+      )
+      throwIfP0Aborted(callSignal)
+      await verifyActiveDatabase({
+        backend,
+        segmentName: active.segmentName,
+        databaseUrl: active.databaseUrl,
+        profile: active.profile,
+        signal: callSignal
+      })
+      throwIfP0Aborted(callSignal)
+    } catch (error) {
+      restartFailure = error
+    }
+    if (downtimeFailure && restartFailure) {
+      throw new AggregateError(
+        [downtimeFailure, restartFailure],
+        'P0_DOWNTIME_AND_BACKEND_RESTART_FAILED'
+      )
+    }
+    if (restartFailure) throw restartFailure
+    if (downtimeFailure) throw downtimeFailure
+    return backend
+  }
+  const assertOwnedPorts = async (input = [18086, 5199, 5200]) => {
+    const ports = Array.isArray(input) ? input : input?.ports
+    if (!Array.isArray(ports)
+      || ports.length === 0
+      || new Set(ports).size !== ports.length
+      || ports.some((port) => ![18086, 5199, 5200].includes(port))) {
+      throw new Error('P0_OWNED_PORTS_INVALID')
+    }
+    const active = p0ActiveProfile(prepared, guard)
+    if (ports.includes(18086)) {
+      await processManager.waitForBackendHealth(
+        prepared.activeBackend,
+        'http://127.0.0.1:18086/actuator/health',
+        signal
+      )
+      await processManager.waitForBusinessEndpoint(
+        prepared.activeBackend,
+        'http://127.0.0.1:18086/api/market/symbols',
+        signal
+      )
+    }
+    const frontends = [
+      [5199, 'web', 'http://127.0.0.1:5199'],
+      [5200, 'admin', 'http://127.0.0.1:5200']
+    ]
+    for (const [port, surface, url] of frontends) {
+      if (!ports.includes(port)) continue
+      const frontend = prepared.parentFrontends?.get(surface)
+      if (!frontend || typeof processManager?.waitForFrontend !== 'function') {
+        throw new Error(`P0_OWNED_FRONTEND_REQUIRED: ${surface}`)
+      }
+      await processManager.waitForFrontend(frontend, url, signal)
+    }
+    return { ...safeP0ActiveProfile(active), ports: [...ports] }
+  }
+  const marketOverride = async (page, input = {}) => {
+    const admin = await adminForPage(page)
+    const symbol = p0FixtureSymbol(input.symbol)
+    const action = String(input.action ?? 'SET').toUpperCase()
+    if (['CLEAR', 'DELETE'].includes(action)) {
+      await admin(
+        `/api/admin/market/test-control/overrides/${encodeURIComponent(symbol)}`,
+        { method: 'DELETE', signal: input.signal ?? signal }
+      )
+      return {
+        kind: 'MARKET_OVERRIDE',
+        action: 'CLEAR',
+        symbol,
+        restorable: false
+      }
+    }
+    if (action !== 'SET') throw new Error('P0_MARKET_OVERRIDE_ACTION_INVALID')
+    const authority = prepared.authorityState?.authorityBundleFixture
+      ?? prepared.authorityBundleFixture
+    if (authority !== 'PASS') {
+      throw new Error('P0_AUTHORITY_BUNDLE_FIXTURE_REQUIRED')
+    }
+    const bid = String(input.bid ?? '')
+    const ask = String(input.ask ?? '')
+    if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(bid)
+      || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(ask)
+      || Number(bid) <= 0
+      || Number(ask) <= Number(bid)) {
+      throw new Error('P0_MARKET_OVERRIDE_PRICE_INVALID')
+    }
+    const ttl = input.ttl ?? 'PT5M'
+    if (typeof ttl !== 'string' || !/^PT[0-9A-Z.]+$/.test(ttl)) {
+      throw new Error('P0_MARKET_OVERRIDE_TTL_INVALID')
+    }
+    const request = { symbol, bid, ask, ttl }
+    const restore = registerP0FixtureCleanup(
+      prepared,
+      `market-override:${symbol}`,
+      async ({ signal: cleanupSignal } = {}) => {
+        await admin(
+          `/api/admin/market/test-control/overrides/${encodeURIComponent(symbol)}`,
+          { method: 'DELETE', signal: cleanupSignal }
+        )
+        return { status: 'RESTORED', symbol }
+      }
+    )
+    let result
+    try {
+      result = await admin('/api/admin/market/test-control/overrides', {
+        method: 'POST',
+        body: request,
+        signal: input.signal ?? signal
+      })
+    } catch (error) {
+      try {
+        await restore({ signal: input.signal ?? signal })
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          'P0_MARKET_OVERRIDE_APPLY_AND_RESTORE_FAILED'
+        )
+      }
+      throw error
+    }
+    return {
+      kind: 'MARKET_OVERRIDE',
+      action: 'SET',
+      symbol,
+      request,
+      result,
+      restore
+    }
+  }
+  const providerBindings = async (page, input = {}) => {
+    const admin = await adminForPage(page)
+    const requestedSymbols = input.symbols ?? (input.symbol ? [input.symbol] : [])
+    const symbols = [...new Set(requestedSymbols.map(p0FixtureSymbol))]
+    const enabledProviders = input.enabledProviders
+    if (symbols.length === 0
+      || !Array.isArray(enabledProviders)
+      || enabledProviders.some((code) => (
+        typeof code !== 'string' || code.trim().length === 0
+      ))) {
+      throw new Error('P0_PROVIDER_BINDING_FIXTURE_INVALID')
+    }
+    const enabled = new Set(enabledProviders.map((code) => code.trim().toLowerCase()))
+    const [providerRows, symbolPage] = await Promise.all([
+      admin('/api/admin/market/data-providers', { signal: input.signal ?? signal }),
+      admin('/api/admin/market/symbols?page=0&size=2000', {
+        signal: input.signal ?? signal
+      })
+    ])
+    const providerCodeById = new Map(
+      p0AdminPageContent(providerRows).map(({ id, code }) => [
+        id,
+        String(code).trim().toLowerCase()
+      ])
+    )
+    const symbolRows = p0AdminPageContent(symbolPage)
+    const fixtures = []
+    const seenProviderCodes = new Set()
+    for (const symbol of symbols) {
+      const metadata = symbolRows.find((candidate) => candidate.symbol === symbol)
+      if (!metadata) throw new Error(`P0_ADMIN_SYMBOL_REQUIRED: ${symbol}`)
+      const rows = p0AdminPageContent(await admin(
+        `/api/admin/market/symbols/${encodeURIComponent(metadata.id)}/provider-bindings`,
+        { signal: input.signal ?? signal }
+      ))
+      for (const binding of rows) {
+        const providerCode = providerCodeById.get(binding.providerId)
+        if (!providerCode) throw new Error('P0_PROVIDER_BINDING_PROVIDER_REQUIRED')
+        seenProviderCodes.add(providerCode)
+        fixtures.push({
+          symbol,
+          symbolId: metadata.id,
+          providerCode,
+          original: structuredClone(binding)
+        })
+      }
+    }
+    for (const providerCode of enabled) {
+      if (!seenProviderCodes.has(providerCode)) {
+        throw new Error(`P0_PROVIDER_BINDING_PROVIDER_REQUIRED: ${providerCode}`)
+      }
+    }
+    const changes = fixtures
+      .filter(({ providerCode, original }) => (
+        Boolean(original.enabled) !== enabled.has(providerCode)
+      ))
+    if (changes.length === 0) {
+      return {
+        kind: 'PROVIDER_BINDINGS',
+        symbols,
+        enabledProviders: [...enabled],
+        before: fixtures.map(({ symbol, providerCode, original }) => (
+          safeP0BindingEvidence(symbol, providerCode, original)
+        )),
+        after: fixtures.map(({ symbol, providerCode, original }) => (
+          safeP0BindingEvidence(symbol, providerCode, original)
+        )),
+        restore: async () => ({ status: 'ALREADY_RESTORED' })
+      }
+    }
+    const applied = []
+    const restore = registerP0FixtureCleanup(
+      prepared,
+      `provider-bindings:${symbols.join(',')}`,
+      (details) => restoreP0ProviderBindingChanges(admin, applied, details)
+    )
+    try {
+      for (const change of changes) {
+        applied.push(change)
+        await admin(
+          `/api/admin/market/symbols/${encodeURIComponent(change.symbolId)}/provider-bindings/${
+            encodeURIComponent(change.original.id)
+          }`,
+          {
+            method: 'PUT',
+            body: p0BindingRequest(
+              change.original,
+              enabled.has(change.providerCode)
+            ),
+            signal: input.signal ?? signal
+          }
+        )
+      }
+    } catch (error) {
+      try {
+        await restore({ signal: input.signal ?? signal })
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          'P0_PROVIDER_BINDING_APPLY_AND_RESTORE_FAILED'
+        )
+      }
+      throw error
+    }
+    const after = []
+    for (const symbol of symbols) {
+      const metadata = symbolRows.find((candidate) => candidate.symbol === symbol)
+      const rows = p0AdminPageContent(await admin(
+        `/api/admin/market/symbols/${encodeURIComponent(metadata.id)}/provider-bindings`,
+        { signal: input.signal ?? signal }
+      ))
+      after.push(...rows.map((binding) => safeP0BindingEvidence(
+        symbol,
+        providerCodeById.get(binding.providerId),
+        binding
+      )))
+    }
+    return {
+      kind: 'PROVIDER_BINDINGS',
+      symbols,
+      enabledProviders: [...enabled],
+      before: fixtures.map(({ symbol, providerCode, original }) => (
+        safeP0BindingEvidence(symbol, providerCode, original)
+      )),
+      after,
+      restore
+    }
+  }
+  const fundingConfig = async (page, input = {}) => {
+    const admin = await adminForPage(page)
+    const symbol = p0FixtureSymbol(input.symbol)
+    const symbolPage = await admin('/api/admin/market/symbols?page=0&size=2000', {
+      signal: input.signal ?? signal
+    })
+    const metadata = p0AdminPageContent(symbolPage)
+      .find((candidate) => candidate.symbol === symbol)
+    if (!metadata) throw new Error(`P0_ADMIN_SYMBOL_REQUIRED: ${symbol}`)
+    const path = `/api/admin/market/symbols/${encodeURIComponent(metadata.id)}/funding-config`
+    const original = await admin(path, { signal: input.signal ?? signal })
+    const next = {
+      ...p0FundingConfigRequest(
+        original,
+        input.reason ?? `P0 ${prepared.options?.runId ?? 'run'} funding fixture`
+      ),
+      ...Object.fromEntries([
+        'fundingSourcePriority',
+        'fixedFundingRate',
+        'fixedFundingIntervalMinutes',
+        'fundingStaleSeconds'
+      ].filter((key) => input[key] !== undefined).map((key) => [key, input[key]]))
+    }
+    const restore = registerP0FixtureCleanup(
+      prepared,
+      `funding-config:${symbol}`,
+      async ({ signal: cleanupSignal } = {}) => {
+        await admin(path, {
+          method: 'PUT',
+          body: p0FundingConfigRequest(
+            original,
+            `Restore P0 ${prepared.options?.runId ?? 'run'} funding fixture`
+          ),
+          signal: cleanupSignal
+        })
+        const restored = await admin(path, { signal: cleanupSignal })
+        for (const key of [
+          'fundingSourcePriority',
+          'fixedFundingRate',
+          'fixedFundingIntervalMinutes',
+          'fundingStaleSeconds'
+        ]) {
+          if (JSON.stringify(restored[key]) !== JSON.stringify(original[key])) {
+            throw new Error('P0_FUNDING_CONFIG_RESTORE_MISMATCH')
+          }
+        }
+        return { status: 'RESTORED', symbol }
+      }
+    )
+    let result
+    try {
+      result = await admin(path, {
+        method: 'PUT',
+        body: next,
+        signal: input.signal ?? signal
+      })
+    } catch (error) {
+      try {
+        await restore({ signal: input.signal ?? signal })
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          'P0_FUNDING_CONFIG_APPLY_AND_RESTORE_FAILED'
+        )
+      }
+      throw error
+    }
+    return {
+      kind: 'FUNDING_CONFIG',
+      symbol,
+      before: original,
+      after: result,
+      restore
+    }
+  }
+  const positionTime = async (input = {}) => {
+    guard()
+    if (typeof query !== 'function') throw new Error('P0_POSITION_TIME_DB_REQUIRED')
+    const accountId = p0FixtureUuid(input.accountId, 'ACCOUNT_ID')
+    const positionId = p0FixtureUuid(input.positionId, 'POSITION_ID')
+    const openedAtDate = new Date(input.openedAt)
+    if (!Number.isFinite(openedAtDate.getTime())) {
+      throw new Error('P0_FIXTURE_POSITION_TIME_INVALID')
+    }
+    const openedAt = openedAtDate.toISOString()
+    const original = p0FixtureJson(await query(`
+      SELECT json_build_object(
+        'count', count(*),
+        'openedAt', max(opened_at)
+      )::text
+      FROM trading.positions
+      WHERE id = '${sqlLiteral(positionId)}'
+        AND account_id = '${sqlLiteral(accountId)}'
+        AND status = 'OPEN';
+    `, { signal: input.signal ?? signal }), 'POSITION_TIME_SNAPSHOT')
+    if (Number(original.count) !== 1 || typeof original.openedAt !== 'string') {
+      throw new Error('P0_POSITION_TIME_TARGET_REQUIRED')
+    }
+    const restore = registerP0FixtureCleanup(
+      prepared,
+      `position-time:${accountId}:${positionId}`,
+      async ({ signal: cleanupSignal } = {}) => {
+        const restored = p0FixtureJson(await query(`
+          WITH changed AS (
+            UPDATE trading.positions
+            SET opened_at = '${sqlLiteral(original.openedAt)}'::timestamptz
+            WHERE id = '${sqlLiteral(positionId)}'
+              AND account_id = '${sqlLiteral(accountId)}'
+            RETURNING opened_at
+          )
+          SELECT json_build_object(
+            'count', count(*),
+            'openedAt', max(opened_at)
+          )::text
+          FROM changed;
+        `, { signal: cleanupSignal }), 'POSITION_TIME_RESTORE')
+        if (Number(restored.count) !== 1) {
+          throw new Error('P0_POSITION_TIME_RESTORE_MISMATCH')
+        }
+        if (restored.openedAt !== original.openedAt) {
+          throw new Error('P0_POSITION_TIME_RESTORE_MISMATCH')
+        }
+        return { status: 'RESTORED', accountId, positionId }
+      }
+    )
+    let current
+    try {
+      current = p0FixtureJson(await query(`
+        WITH changed AS (
+          UPDATE trading.positions
+          SET opened_at = '${sqlLiteral(openedAt)}'::timestamptz
+          WHERE id = '${sqlLiteral(positionId)}'
+            AND account_id = '${sqlLiteral(accountId)}'
+            AND status = 'OPEN'
+          RETURNING opened_at
+        )
+        SELECT json_build_object(
+          'count', count(*),
+          'openedAt', max(opened_at)
+        )::text
+        FROM changed;
+      `, { signal: input.signal ?? signal }), 'POSITION_TIME_UPDATE')
+      if (Number(current.count) !== 1) {
+        throw new Error('P0_POSITION_TIME_TARGET_REQUIRED')
+      }
+      if (Date.parse(current.openedAt) !== Date.parse(openedAt)) {
+        throw new Error('P0_POSITION_TIME_UPDATE_MISMATCH')
+      }
+    } catch (error) {
+      try {
+        await restore({ signal: input.signal ?? signal })
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          'P0_POSITION_TIME_APPLY_AND_RESTORE_FAILED'
+        )
+      }
+      throw error
+    }
+    return {
+      kind: 'POSITION_TIME',
+      accountId,
+      positionId,
+      before: original.openedAt,
+      after: current.openedAt,
+      restore
+    }
+  }
+  return {
+    services: {
+      ensureProfile,
+      restartBackend,
+      assertOwnedPorts
+    },
+    fixtures: {
+      marketOverride,
+      providerBindings,
+      fundingConfig,
+      positionTime,
+      async kline() {
+        throw new Error('P0_RUNTIME_OPERATION_REQUIRED: kline')
+      }
+    }
+  }
+}
+
 function createDefaultP0CaseContext({
   prepared,
   options,
   postgres,
+  processManager,
+  infrastructure,
+  journalMutation,
+  verifyActiveDatabase,
   runtime,
   inheritedEnv,
   signal
@@ -9868,18 +10646,65 @@ function createDefaultP0CaseContext({
     }
     return users.get(role)
   }
-  const requiredRuntimeOperation = (name) => (...args) => {
-    if (typeof runtime[name] !== 'function') {
-      throw new Error(`P0_RUNTIME_OPERATION_REQUIRED: ${name}`)
-    }
-    return runtime[name](...args)
-  }
   const userApi = (page, path, request = {}) => (
     requestP0BrowserApi(page, apiUrl, 'fx-platform-auth-token', path, request)
   )
   const adminApiForPage = (page, path, request = {}) => (
     requestP0BrowserApi(page, apiUrl, 'fx-platform-admin-token', path, request)
   )
+  const fixtureAdminSessions = new WeakMap()
+  const createFixtureAdminApi = async (page) => {
+    const existing = fixtureAdminSessions.get(page)
+    if (existing) return existing
+    let [accessToken, refreshToken] = await page.evaluate(
+      (storageKeys) => storageKeys.map((key) => localStorage.getItem(key)),
+      ['fx-platform-admin-token', 'fx-platform-admin-refresh-token']
+    )
+    if (typeof accessToken !== 'string' || accessToken.length === 0) {
+      throw new Error('P0_ADMIN_SESSION_REQUIRED')
+    }
+    let refreshing
+    const refresh = (requestSignal) => {
+      refreshing ??= requestP0Json(apiUrl, '/api/auth/refresh', {
+        method: 'POST',
+        body: { refreshToken },
+        signal: requestSignal
+      }).then((tokens) => {
+        if (typeof tokens?.accessToken !== 'string'
+          || tokens.accessToken.length === 0
+          || typeof tokens.refreshToken !== 'string'
+          || tokens.refreshToken.length === 0) {
+          throw new Error('P0_ADMIN_SESSION_REFRESH_INVALID')
+        }
+        accessToken = tokens.accessToken
+        refreshToken = tokens.refreshToken
+      }).finally(() => {
+        refreshing = undefined
+      })
+      return refreshing
+    }
+    const admin = async (path, request = {}) => {
+      try {
+        return await requestP0Json(apiUrl, path, {
+          ...request,
+          token: accessToken
+        })
+      } catch (error) {
+        if (error?.status !== 401
+          || typeof refreshToken !== 'string'
+          || refreshToken.length === 0) {
+          throw error
+        }
+        await refresh(request.signal)
+        return requestP0Json(apiUrl, path, {
+          ...request,
+          token: accessToken
+        })
+      }
+    }
+    fixtureAdminSessions.set(page, admin)
+    return admin
+  }
   const snapshotAccount = async (page) => {
     const accounts = await userApi(page, '/api/accounts')
     const activeDemoAccounts = accounts.filter((candidate) => (
@@ -9977,6 +10802,17 @@ function createDefaultP0CaseContext({
     )
     return actual
   }
+  const defaultCaseRuntime = createP0CaseRuntimeCapabilities({
+    prepared,
+    signal,
+    processManager,
+    infrastructure,
+    journalMutation,
+    verifyActiveDatabase,
+    createAdminApi: createFixtureAdminApi,
+    adminApi: adminApiForPage,
+    query
+  })
   const uiOverrides = { ...(runtime.p0Ui ?? {}) }
   const startBrowser = uiOverrides.launchBrowser ?? launchBrowser
   delete uiOverrides.launchBrowser
@@ -10048,17 +10884,17 @@ function createDefaultP0CaseContext({
       ...(runtime.p0Events ?? {})
     },
     services: {
-      ensureProfile: requiredRuntimeOperation('ensureProfile'),
-      restartBackend: requiredRuntimeOperation('restartBackend'),
-      assertOwnedPorts: requiredRuntimeOperation('assertOwnedPorts'),
+      ensureProfile: runtime.ensureProfile ?? defaultCaseRuntime.services.ensureProfile,
+      restartBackend: runtime.restartBackend ?? defaultCaseRuntime.services.restartBackend,
+      assertOwnedPorts: runtime.assertOwnedPorts ?? defaultCaseRuntime.services.assertOwnedPorts,
       ...(runtime.p0Services ?? {})
     },
     fixtures: {
-      marketOverride: requiredRuntimeOperation('marketOverride'),
-      providerBindings: requiredRuntimeOperation('providerBindings'),
-      fundingConfig: requiredRuntimeOperation('fundingConfig'),
-      positionTime: requiredRuntimeOperation('positionTime'),
-      kline: requiredRuntimeOperation('kline'),
+      marketOverride: runtime.marketOverride ?? defaultCaseRuntime.fixtures.marketOverride,
+      providerBindings: runtime.providerBindings ?? defaultCaseRuntime.fixtures.providerBindings,
+      fundingConfig: runtime.fundingConfig ?? defaultCaseRuntime.fixtures.fundingConfig,
+      positionTime: runtime.positionTime ?? defaultCaseRuntime.fixtures.positionTime,
+      kline: runtime.kline ?? defaultCaseRuntime.fixtures.kline,
       ...(runtime.p0Fixtures ?? {})
     },
     evidence: {
@@ -10084,7 +10920,12 @@ async function requestP0Json(baseUrl, path, request = {}) {
       ...(request.token ? { Authorization: `Bearer ${request.token}` } : {})
     },
     body: request.body === undefined ? undefined : JSON.stringify(request.body),
-    signal: operationSignal(request.timeoutMs ?? 30000)
+    signal: request.signal
+      ? AbortSignal.any([
+          request.signal,
+          AbortSignal.timeout(request.timeoutMs ?? 30000)
+        ])
+      : operationSignal(request.timeoutMs ?? 30000)
   })
   const payload = await response.json().catch(() => null)
   if (!response.ok || payload?.success === false) {
@@ -10765,6 +11606,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
           now
         })
         context.activeBackend = backend
+        context.activeProfileEnvironment = ownedEnvironment
         return backend
       },
       waitForProfileHealth(backend, _context, _profile, { signal } = {}) {
@@ -10888,6 +11730,30 @@ export function createDefaultP0Dependencies(runtime = {}) {
         prepared,
         options,
         postgres,
+        processManager,
+        infrastructure,
+        journalMutation(details) {
+          return runP0JournaledMutation({
+            artifactBase: prepared.artifactBase ?? artifactBase,
+            runId: options.runId,
+            runToken: prepared.ownerToken,
+            now,
+            ...details
+          })
+        },
+        verifyActiveDatabase({
+          segmentName,
+          databaseUrl,
+          signal: verificationSignal
+        }) {
+          return verifyLiveBackendDatabaseIdentity({
+            segmentName,
+            runToken: prepared.ownerToken,
+            databaseUrl,
+            postgres,
+            signal: verificationSignal
+          })
+        },
         runtime,
         inheritedEnv,
         signal
@@ -11040,6 +11906,10 @@ export function createDefaultP0Dependencies(runtime = {}) {
         requireTreeProof: platform === 'win32',
         signal
       })
+      if (prepared) {
+        await restoreP0CaseFixtures(prepared, { signal })
+        throwIfP0Aborted(signal)
+      }
       if (platform === 'win32' && hasJournaledProcesses) {
         await terminateOwnedProcesses()
         throwIfP0Aborted(signal)
@@ -11047,6 +11917,8 @@ export function createDefaultP0Dependencies(runtime = {}) {
       await processManager.stopParentBackend({ signal })
       if (prepared) {
         prepared.activeBackend = undefined
+        prepared.activeProfileRuntime = undefined
+        prepared.activeProfileEnvironment = undefined
         prepared.parentFrontends?.clear()
       }
       throwIfP0Aborted(signal)
@@ -11295,13 +12167,25 @@ export async function runP0Suite(options, dependencies) {
                     }
                   }
                 }
-                throwIfP0Aborted(signal)
-                const result = await dispatchCase(definition, caseContext, handlers, {
-                  signal,
-                  attempt: 1,
-                  profileAttempt
-                })
-                throwIfP0Aborted(signal)
+                let result
+                let failure
+                try {
+                  throwIfP0Aborted(signal)
+                  result = await dispatchCase(definition, caseContext, handlers, {
+                    signal,
+                    attempt: 1,
+                    profileAttempt
+                  })
+                  throwIfP0Aborted(signal)
+                } catch (error) {
+                  failure = error
+                }
+                try {
+                  await restoreP0CaseFixtures(prepared, { signal })
+                } catch (error) {
+                  failure = appendFailure(failure, error, 'P0 case fixture cleanup')
+                }
+                if (failure) throw failure
                 return result
               }
               if (supportsP0ProfileLifecycle(baseOperations)) {
