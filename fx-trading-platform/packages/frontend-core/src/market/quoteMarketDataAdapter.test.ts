@@ -46,8 +46,8 @@ describe('quote market data adapter', () => {
   it('invalidates the old bundle immediately while a provider source is changing', () => {
     assert.match(adapterSource, /subscribeMarketSourceChanges/)
     assert.match(adapterSource, /unavailableSnapshot\('source-changing'\)/)
-    assert.match(adapterSource, /matchesExpectedMarketSource/)
-    assert.doesNotMatch(adapterSource, /expectedSource = undefined/)
+    assert.match(adapterSource, /sourceChanging = true/)
+    assert.match(adapterSource, /controller\.signal\.aborted/)
   })
 
   it('aborts stale and disposed bundles without blocking the latest source', async () => {
@@ -96,6 +96,81 @@ describe('quote market data adapter', () => {
     stop()
 
     assert.equal([...quoteSignals, ...orderBookSignals, ...tradeSignals].every((signal) => signal.aborted), true)
+  })
+
+  it('accepts a complete fresh fallback bundle after the advertised source becomes unavailable', async () => {
+    const store = createMarketDataStore({ flushMs: 0 })
+    const quoteSignals: AbortSignal[] = []
+    const orderBookSignals: AbortSignal[] = []
+    const tradeSignals: AbortSignal[] = []
+    const fallbackSource = source(Date.now() + 10_000)
+    const advertisedSource = {
+      ...fallbackSource,
+      providerCode: 'binance-usdm',
+      sourceMode: 'PUBLIC_EXTERNAL' as const
+    }
+    const oldQuote = deferred<TradingQuote>()
+    const oldOrderBook = deferred<MarketOrderBook>()
+    const oldTrades = deferred<MarketTradeBatch>()
+    const publishedSources: Array<string | undefined> = []
+    let sourceChange: ((event: MarketSourceChangedEvent) => void) | undefined
+    const dependencies = {
+      fetchQuote: (_symbol, signal) => {
+        quoteSignals.push(signal)
+        return quoteSignals.length === 1
+          ? oldQuote.promise
+          : Promise.resolve(quote(fallbackSource))
+      },
+      fetchOrderBook: (_symbol, signal) => {
+        orderBookSignals.push(signal)
+        return orderBookSignals.length === 1
+          ? oldOrderBook.promise
+          : Promise.resolve(orderBook(fallbackSource))
+      },
+      fetchTrades: (_symbol, signal) => {
+        tradeSignals.push(signal)
+        return tradeSignals.length === 1
+          ? oldTrades.promise
+          : Promise.resolve(tradeBatch(fallbackSource))
+      },
+      subscribeQuote: () => () => {},
+      subscribeOrderBook: () => () => {},
+      subscribeRecentTrades: () => () => {},
+      subscribeSourceChanges: (_symbol, _token, handler) => {
+        sourceChange = handler
+        return () => {}
+      }
+    } satisfies QuoteMarketDataSessionDependencies
+    const stop = startQuoteSession('BTCUSDT-PERP', null, store, dependencies)
+    const unsubscribe = store.subscribe(() => {
+      if (store.getSnapshot().status === 'ready') publishedSources.push(store.getSnapshot().source?.providerCode)
+    })
+
+    try {
+      await waitFor(() => quoteSignals.length === 1 && orderBookSignals.length === 1 && tradeSignals.length === 1)
+      assert.ok(sourceChange)
+      sourceChange({
+        type: 'MARKET_SOURCE_CHANGED',
+        symbol: 'BTCUSDT-PERP',
+        providerCode: 'binance-usdm',
+        sourceMode: 'PUBLIC_EXTERNAL'
+      })
+
+      assert.equal(quoteSignals[0]?.aborted, true)
+      assert.equal(orderBookSignals[0]?.aborted, true)
+      assert.equal(tradeSignals[0]?.aborted, true)
+      oldQuote.resolve(quote(advertisedSource))
+      oldOrderBook.resolve(orderBook(advertisedSource))
+      oldTrades.resolve(tradeBatch(advertisedSource))
+
+      await waitFor(() => store.getSnapshot().status === 'ready', 1_000)
+      assert.deepEqual(publishedSources, ['local-perp'])
+      assert.equal(store.getSnapshot().source?.providerCode, 'local-perp')
+      assert.equal(store.getSnapshot().tradable, true)
+    } finally {
+      unsubscribe()
+      stop()
+    }
   })
 
   it('aborts a refresh that outlives the published bundle and starts a fresh one', async () => {
@@ -150,10 +225,53 @@ describe('quote market data adapter', () => {
     stop()
   })
 
+  it('retries unavailable and failed initial bundles without realtime events', async () => {
+    for (const firstFailure of ['source-mismatch', 'request-error'] as const) {
+      const store = createMarketDataStore({ flushMs: 0 })
+      const quoteSignals: AbortSignal[] = []
+      const orderBookSignals: AbortSignal[] = []
+      const tradeSignals: AbortSignal[] = []
+      const recoveredSource = source(Date.now() + 10_000)
+      const mismatchedSource = { ...recoveredSource, providerCode: 'transient-perp' }
+      const dependencies = {
+        fetchQuote: (_symbol, signal) => {
+          quoteSignals.push(signal)
+          return Promise.resolve(quote(recoveredSource))
+        },
+        fetchOrderBook: (_symbol, signal) => {
+          orderBookSignals.push(signal)
+          if (orderBookSignals.length === 1 && firstFailure === 'request-error') {
+            return Promise.reject(new Error('temporary order-book failure'))
+          }
+          return Promise.resolve(orderBook(orderBookSignals.length === 1 ? mismatchedSource : recoveredSource))
+        },
+        fetchTrades: (_symbol, signal) => {
+          tradeSignals.push(signal)
+          return Promise.resolve(tradeBatch(recoveredSource))
+        },
+        subscribeQuote: () => () => {},
+        subscribeOrderBook: () => () => {},
+        subscribeRecentTrades: () => () => {},
+        subscribeSourceChanges: () => () => {}
+      } satisfies QuoteMarketDataSessionDependencies
+      const stop = startQuoteSession('BTCUSDT-PERP', null, store, dependencies)
+
+      try {
+        await waitFor(() => quoteSignals.length === 2, 1_000)
+        await waitFor(() => store.getSnapshot().status === 'ready')
+        assert.equal(orderBookSignals.length, 2, firstFailure)
+        assert.equal(tradeSignals.length, 2, firstFailure)
+        assert.equal(store.getSnapshot().tradable, true, firstFailure)
+      } finally {
+        stop()
+      }
+    }
+  })
+
   it('retries an incomplete bundle while the provider source is changing', () => {
     assert.match(
       adapterSource,
-      /if \(expectedSource\) \{[\s\S]*store\.reset\(unavailableSnapshot\('source-changing'\)\)\s*scheduleBundleRefresh\(\)\s*return/
+      /if \(sourceChanging && \(snapshot\.status !== 'ready' \|\| !snapshot\.source\)\) \{\s*store\.reset\(unavailableSnapshot\('source-changing'\)\)\s*scheduleBundleRefresh\(\)\s*return/
     )
   })
 
@@ -167,7 +285,7 @@ describe('quote market data adapter', () => {
   it('retries when a slow refresh returns an already expired bundle', () => {
     assert.match(
       adapterSource,
-      /store\.reset\(snapshot\)\s*if \(snapshot\.status !== 'ready' \|\| !snapshot\.source\) \{\s*if \(snapshot\.status === 'stale'\) scheduleBundleRefresh\(\)\s*return\s*\}/
+      /store\.reset\(snapshot\)\s*if \(snapshot\.status !== 'ready' \|\| !snapshot\.source\) \{\s*scheduleBundleRefresh\(\)\s*return\s*\}/
     )
   })
 })
@@ -181,6 +299,14 @@ function pendingUntilAbort<T>(signal: AbortSignal): Promise<T> {
     }
     signal.addEventListener('abort', abort, { once: true })
   })
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
 }
 
 function fetchRound<T>(
