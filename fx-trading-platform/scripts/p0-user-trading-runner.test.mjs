@@ -199,6 +199,63 @@ test('financial oracle: Spot SELL keeps quote fee inside realized PnL and checks
   }).valid, false)
 })
 
+test('financial oracle: Spot pending and OCO holds match the backend ceiling policy', () => {
+  assert.deepEqual(financialOracles.spotOrderHoldOracle({
+    side: 'BUY',
+    orderType: 'LIMIT',
+    baseQuantity: '0.2',
+    limitPrice: '45',
+    ask: '50',
+    baseAsset: 'BTC'
+  }), {
+    amount: '9.00450000',
+    currency: 'USDT',
+    basis: 'LIMIT',
+    shared: false
+  })
+  assert.deepEqual(financialOracles.spotOrderHoldOracle({
+    side: 'BUY',
+    orderType: 'STOP_MARKET',
+    baseQuantity: '0.2',
+    stopTriggerPrice: '50.5',
+    ask: '50',
+    baseAsset: 'BTC'
+  }), {
+    amount: '10.10606051',
+    currency: 'USDT',
+    basis: 'STOP_MARKET',
+    shared: false
+  })
+  assert.deepEqual(financialOracles.spotOrderHoldOracle({
+    side: 'BUY',
+    orderType: 'OCO',
+    baseQuantity: '0.2',
+    limitPrice: '45',
+    stopTriggerPrice: '50.5',
+    ask: '50',
+    baseAsset: 'BTC'
+  }), {
+    amount: '10.10606051',
+    currency: 'USDT',
+    basis: 'STOP_MARKET',
+    shared: true
+  })
+  assert.deepEqual(financialOracles.spotOrderHoldOracle({
+    side: 'SELL',
+    orderType: 'OCO',
+    baseQuantity: '0.2',
+    limitPrice: '55',
+    stopTriggerPrice: '49',
+    ask: '50',
+    baseAsset: 'BTC'
+  }), {
+    amount: '0.20000000',
+    currency: 'BTC',
+    basis: 'LIMIT',
+    shared: true
+  })
+})
+
 test('financial oracle: linear Perp long and short use directional gross PnL', () => {
   assert.equal(typeof financialOracles.perpPositionOracle, 'function')
   const long = financialOracles.perpPositionOracle({
@@ -252,6 +309,100 @@ test('financial oracle: linear Perp long and short use directional gross PnL', (
       quantity: '0.00005',
       amount: '0.000000005'
     }
+  })
+})
+
+test('financial oracle: funding applies directional cashflow to the correct margin pool', () => {
+  assert.deepEqual(financialOracles.fundingSettlementOracle({
+    side: 'LONG',
+    marginMode: 'CROSS',
+    quantity: '0.01',
+    markPrice: '50000',
+    fundingRate: '0.0001',
+    balanceBefore: '50000',
+    marginHeld: '10',
+    previousFundingPnl: '0'
+  }), {
+    notional: '500.00000000',
+    settlementAmount: '-0.05000000',
+    appliedCashflow: '-0.05000000',
+    shortfall: '0.00000000',
+    balanceAfter: '49999.95000000',
+    isolatedMarginAfter: '0.00000000',
+    fundingPnlAfter: '-0.05000000',
+    ledgerAmount: '-0.05000000'
+  })
+  assert.deepEqual(financialOracles.fundingSettlementOracle({
+    side: 'SHORT',
+    marginMode: 'ISOLATED',
+    quantity: '0.01',
+    markPrice: '50000',
+    fundingRate: '0.0001',
+    balanceBefore: '50000',
+    marginHeld: '10',
+    previousFundingPnl: '0'
+  }), {
+    notional: '500.00000000',
+    settlementAmount: '0.05000000',
+    appliedCashflow: '0.05000000',
+    shortfall: '0.00000000',
+    balanceAfter: '50000.00000000',
+    isolatedMarginAfter: '10.05000000',
+    fundingPnlAfter: '0.05000000',
+    ledgerAmount: null
+  })
+  assert.deepEqual(financialOracles.fundingSettlementOracle({
+    side: 'LONG',
+    marginMode: 'ISOLATED',
+    quantity: '0.01',
+    markPrice: '50000',
+    fundingRate: '0.01',
+    balanceBefore: '50000',
+    marginHeld: '1',
+    previousFundingPnl: '0'
+  }), {
+    notional: '500.00000000',
+    settlementAmount: '-5.00000000',
+    appliedCashflow: '-1.00000000',
+    shortfall: '4.00000000',
+    balanceAfter: '50000.00000000',
+    isolatedMarginAfter: '0.00000000',
+    fundingPnlAfter: '-1.00000000',
+    ledgerAmount: '-4.00000000'
+  })
+})
+
+test('financial oracle: Spot and Perp transfer deltas conserve combined USDT', () => {
+  const spotToPerp = financialOracles.transferConservationOracle({
+    direction: 'SPOT_TO_PERP',
+    amount: '1000',
+    spotAvailable: '50000',
+    perpBalance: '50000',
+    perpEquity: '50000',
+    perpFreeMargin: '50000'
+  })
+  assert.deepEqual(spotToPerp, {
+    spotAvailableAfter: '49000.00000000',
+    perpBalanceAfter: '51000.00000000',
+    perpEquityAfter: '51000.00000000',
+    perpFreeMarginAfter: '51000.00000000',
+    combinedBefore: '100000.00000000',
+    combinedAfter: '100000.00000000'
+  })
+  assert.deepEqual(financialOracles.transferConservationOracle({
+    direction: 'PERP_TO_SPOT',
+    amount: '400',
+    spotAvailable: spotToPerp.spotAvailableAfter,
+    perpBalance: spotToPerp.perpBalanceAfter,
+    perpEquity: spotToPerp.perpEquityAfter,
+    perpFreeMargin: spotToPerp.perpFreeMarginAfter
+  }), {
+    spotAvailableAfter: '49400.00000000',
+    perpBalanceAfter: '50600.00000000',
+    perpEquityAfter: '50600.00000000',
+    perpFreeMarginAfter: '50600.00000000',
+    combinedBefore: '100000.00000000',
+    combinedAfter: '100000.00000000'
   })
 })
 

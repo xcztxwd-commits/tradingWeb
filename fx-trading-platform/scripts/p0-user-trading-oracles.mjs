@@ -131,6 +131,10 @@ function minimum(left, right) {
   return compare(left, right) <= 0 ? left : right
 }
 
+function maximum(left, right) {
+  return compare(left, right) >= 0 ? left : right
+}
+
 function divideFixed(numerator, denominator, scale, rounding) {
   if (denominator.units === 0n) throw new RangeError('division by zero')
   const exponent = denominator.scale + scale - numerator.scale
@@ -470,6 +474,187 @@ export function walletBalanceOracle({ total, available, locked, rules }) {
     nonNegative: nonNegativeBalances,
     valid: balanced && nonNegativeBalances,
     tolerance
+  }
+}
+
+export function spotOrderHoldOracle({
+  side,
+  orderType,
+  baseQuantity,
+  limitPrice,
+  stopTriggerPrice,
+  ask,
+  baseAsset,
+  worstFeeRate = DEMO_RATES.takerFeeRate,
+  slippageRate = DEMO_RATES.slippageRate
+}) {
+  if (side !== 'BUY' && side !== 'SELL') {
+    throw new TypeError('side must be BUY or SELL')
+  }
+  if (!['LIMIT', 'STOP_MARKET', 'OCO'].includes(orderType)) {
+    throw new TypeError('orderType must be LIMIT, STOP_MARKET or OCO')
+  }
+  if (typeof baseAsset !== 'string' || !/^[A-Z0-9]+$/.test(baseAsset)) {
+    throw new TypeError('baseAsset must be an uppercase asset code')
+  }
+  const quantity = positive(baseQuantity, 'baseQuantity')
+  const feeMultiplier = add(decimal('1'), nonNegative(worstFeeRate, 'worstFeeRate'))
+  const slippageMultiplier = add(decimal('1'), nonNegative(slippageRate, 'slippageRate'))
+  const sellHold = {
+    amount: formatFixed(roundFixed(quantity, MONEY_SCALE, 'CEILING')),
+    currency: baseAsset
+  }
+  const limitHold = () => side === 'SELL'
+    ? sellHold
+    : {
+        amount: formatFixed(roundFixed(
+          multiply(
+            multiply(quantity, positive(limitPrice, 'limitPrice')),
+            feeMultiplier
+          ),
+          MONEY_SCALE,
+          'CEILING'
+        )),
+        currency: 'USDT'
+      }
+  const stopHold = () => {
+    if (side === 'SELL') return sellHold
+    const worstReference = maximum(
+      positive(stopTriggerPrice, 'stopTriggerPrice'),
+      positive(ask, 'ask')
+    )
+    return {
+      amount: formatFixed(roundFixed(
+        multiply(
+          multiply(multiply(quantity, worstReference), slippageMultiplier),
+          feeMultiplier
+        ),
+        MONEY_SCALE,
+        'CEILING'
+      )),
+      currency: 'USDT'
+    }
+  }
+
+  if (orderType === 'LIMIT') {
+    return { ...limitHold(), basis: 'LIMIT', shared: false }
+  }
+  if (orderType === 'STOP_MARKET') {
+    return { ...stopHold(), basis: 'STOP_MARKET', shared: false }
+  }
+  const limit = limitHold()
+  const stop = stopHold()
+  const stopIsLarger = compare(decimal(stop.amount), decimal(limit.amount)) > 0
+  return {
+    ...(stopIsLarger ? stop : limit),
+    basis: stopIsLarger ? 'STOP_MARKET' : 'LIMIT',
+    shared: true
+  }
+}
+
+export function fundingSettlementOracle({
+  side,
+  marginMode,
+  quantity,
+  markPrice,
+  fundingRate,
+  balanceBefore,
+  marginHeld,
+  previousFundingPnl = '0'
+}) {
+  if (side !== 'LONG' && side !== 'SHORT') {
+    throw new TypeError('side must be LONG or SHORT')
+  }
+  if (marginMode !== 'CROSS' && marginMode !== 'ISOLATED') {
+    throw new TypeError('marginMode must be CROSS or ISOLATED')
+  }
+  const notional = money(multiply(
+    positive(quantity, 'quantity'),
+    positive(markPrice, 'markPrice')
+  ))
+  const unsignedCashflow = multiply(notional, decimal(fundingRate, 'fundingRate'))
+  const settlementAmount = money(side === 'LONG'
+    ? subtract(ZERO, unsignedCashflow)
+    : unsignedCashflow)
+  const balance = money(nonNegative(balanceBefore, 'balanceBefore'))
+  const margin = money(nonNegative(marginHeld, 'marginHeld'))
+  const previousFunding = money(decimal(previousFundingPnl, 'previousFundingPnl'))
+  const fundingPool = marginMode === 'ISOLATED'
+    ? maximum(money(add(margin, previousFunding)), ZERO)
+    : balance
+  const shortfall = money(maximum(
+    subtract(ZERO, add(fundingPool, settlementAmount)),
+    ZERO
+  ))
+  const appliedCashflow = money(add(settlementAmount, shortfall))
+  const balanceAfter = marginMode === 'CROSS'
+    ? money(maximum(add(balance, appliedCashflow), ZERO))
+    : balance
+  const isolatedMarginAfter = marginMode === 'ISOLATED'
+    ? money(maximum(add(fundingPool, appliedCashflow), ZERO))
+    : money(ZERO)
+  const fundingPnlAfter = money(add(previousFunding, appliedCashflow))
+  const ledgerAmount = settlementAmount.units === 0n
+    ? null
+    : marginMode === 'CROSS'
+      ? formatFixed(settlementAmount)
+      : shortfall.units > 0n
+        ? formatFixed(subtract(ZERO, shortfall))
+        : null
+  return {
+    notional: formatFixed(notional),
+    settlementAmount: formatFixed(settlementAmount),
+    appliedCashflow: formatFixed(appliedCashflow),
+    shortfall: formatFixed(shortfall),
+    balanceAfter: formatFixed(balanceAfter),
+    isolatedMarginAfter: formatFixed(isolatedMarginAfter),
+    fundingPnlAfter: formatFixed(fundingPnlAfter),
+    ledgerAmount
+  }
+}
+
+export function transferConservationOracle({
+  direction,
+  amount,
+  spotAvailable,
+  perpBalance,
+  perpEquity,
+  perpFreeMargin
+}) {
+  if (direction !== 'SPOT_TO_PERP' && direction !== 'PERP_TO_SPOT') {
+    throw new TypeError('direction must be SPOT_TO_PERP or PERP_TO_SPOT')
+  }
+  const transfer = money(positive(amount, 'amount'))
+  const spot = money(nonNegative(spotAvailable, 'spotAvailable'))
+  const balance = money(nonNegative(perpBalance, 'perpBalance'))
+  const equity = money(decimal(perpEquity, 'perpEquity'))
+  const freeMargin = money(nonNegative(perpFreeMargin, 'perpFreeMargin'))
+  if (direction === 'SPOT_TO_PERP' && compare(spot, transfer) < 0) {
+    throw new RangeError('transfer amount exceeds Spot available')
+  }
+  if (direction === 'PERP_TO_SPOT'
+    && (compare(balance, transfer) < 0 || compare(freeMargin, transfer) < 0)) {
+    throw new RangeError('transfer amount exceeds Perp available')
+  }
+  const spotAvailableAfter = money(direction === 'SPOT_TO_PERP'
+    ? subtract(spot, transfer)
+    : add(spot, transfer))
+  const perpBalanceAfter = money(direction === 'SPOT_TO_PERP'
+    ? add(balance, transfer)
+    : subtract(balance, transfer))
+  const perpEquityAfter = money(direction === 'SPOT_TO_PERP'
+    ? add(equity, transfer)
+    : subtract(equity, transfer))
+  const perpFreeMarginAfter = money(direction === 'SPOT_TO_PERP'
+    ? add(freeMargin, transfer)
+    : subtract(freeMargin, transfer))
+  return {
+    spotAvailableAfter: formatFixed(spotAvailableAfter),
+    perpBalanceAfter: formatFixed(perpBalanceAfter),
+    perpEquityAfter: formatFixed(perpEquityAfter),
+    perpFreeMarginAfter: formatFixed(perpFreeMarginAfter),
+    combinedBefore: formatFixed(money(add(spot, balance))),
+    combinedAfter: formatFixed(money(add(spotAvailableAfter, perpBalanceAfter)))
   }
 }
 
