@@ -7,6 +7,11 @@ const assetsDir = join(projectRoot, 'apps/web/dist/assets')
 
 const budgets = [
   {
+    label: 'Main application entry JS',
+    patterns: [/^index-.*\.js$/],
+    maxBytes: 500_000
+  },
+  {
     label: 'TradingRoute + PcTradingTerminal JS',
     patterns: [/^TradingRoute-.*\.js$/, /^PcTradingTerminal-.*\.js$/],
     maxBytes: 380_000
