@@ -1,0 +1,337 @@
+.root {
+  width: min(100%, 1040px);
+  margin: 0 auto;
+  color: var(--trading-text);
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-6) 0 var(--space-5);
+}
+
+.header h1 {
+  margin: var(--space-1) 0;
+  color: var(--trading-heading);
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.08;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--trading-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.summary {
+  margin: 0;
+  color: var(--trading-muted);
+}
+
+.headerActions,
+.cardActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.primaryButton,
+.secondaryButton,
+.hideButton,
+.tabs button,
+.error button,
+.cta {
+  min-height: 40px;
+  border: 1px solid var(--trading-border);
+  border-radius: var(--radius-3);
+  padding: 0 var(--space-4);
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-standard), background-color var(--motion-fast) var(--ease-standard);
+}
+
+.primaryButton,
+.cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: var(--trading-accent);
+  background: var(--trading-accent);
+  color: var(--trading-accent-text);
+  text-decoration: none;
+}
+
+.secondaryButton,
+.tabs button,
+.error button {
+  background: var(--trading-surface);
+  color: var(--trading-text-strong);
+}
+
+.hideButton {
+  border-color: var(--theme-danger-border);
+  background: var(--theme-danger-soft);
+  color: var(--theme-danger);
+}
+
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible,
+.hideButton:focus-visible,
+.tabs button:focus-visible,
+.error button:focus-visible,
+.cta:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: 2px;
+}
+
+.primaryButton:disabled,
+.secondaryButton:disabled,
+.hideButton:disabled {
+  cursor: wait;
+  opacity: .58;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-2);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--trading-border-soft);
+}
+
+.tabs button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--trading-muted);
+}
+
+.tab {
+  color: var(--trading-muted);
+}
+
+.tabs .activeTab {
+  border-color: var(--trading-accent-border);
+  background: var(--trading-accent-soft);
+  color: var(--trading-text-strong);
+}
+
+.count {
+  display: inline-grid;
+  min-width: 22px;
+  min-height: 22px;
+  margin-left: var(--space-1);
+  place-items: center;
+  border-radius: var(--radius-pill);
+  background: var(--trading-surface-3);
+  font-size: 12px;
+}
+
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--theme-danger-border);
+  border-radius: var(--radius-4);
+  background: var(--theme-danger-soft);
+  color: var(--theme-danger);
+}
+
+.error div,
+.pagination span {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.error span,
+.pagination small {
+  color: var(--trading-muted);
+  font-size: 12px;
+}
+
+.loadingLine {
+  min-height: 32px;
+  padding: var(--space-2) 0;
+  color: var(--trading-muted);
+  font-size: 13px;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--trading-border);
+  border-radius: var(--radius-4);
+  background: var(--trading-surface);
+  box-shadow: 0 12px 32px var(--theme-shadow-soft);
+}
+
+.unreadCard {
+  border-left: 3px solid var(--trading-accent);
+  background: color-mix(in srgb, var(--trading-accent) 4%, var(--trading-surface));
+}
+
+.cover {
+  width: 100%;
+  max-height: 280px;
+  object-fit: cover;
+  background: var(--trading-surface-2);
+}
+
+.cardBody {
+  min-width: 0;
+  padding: var(--space-5);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--trading-muted);
+  font-size: 12px;
+}
+
+.category,
+.unreadLabel {
+  padding: 3px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--trading-surface-3);
+  color: var(--trading-text-strong);
+  font-weight: 700;
+}
+
+.unreadLabel {
+  background: var(--trading-accent-soft);
+  color: var(--trading-accent);
+}
+
+.card h2 {
+  margin: var(--space-3) 0 var(--space-2);
+  color: var(--trading-heading);
+  font-size: 20px;
+}
+
+.messageHtml {
+  overflow-wrap: anywhere;
+  color: var(--trading-text);
+  line-height: 1.65;
+}
+
+.messageHtml > :first-child {
+  margin-top: 0;
+}
+
+.messageHtml > :last-child {
+  margin-bottom: 0;
+}
+
+.messageHtml img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-3);
+}
+
+.unavailable {
+  color: var(--theme-danger);
+}
+
+.cardActions {
+  margin-top: var(--space-4);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-6) 0;
+  text-align: center;
+}
+
+.state {
+  display: grid;
+  min-height: 260px;
+  place-items: center;
+  align-content: center;
+  gap: var(--space-2);
+  border: 1px dashed var(--trading-border-strong);
+  border-radius: var(--radius-4);
+  background: var(--trading-surface);
+  text-align: center;
+}
+
+.state > span {
+  color: var(--trading-accent);
+  font-size: 28px;
+}
+
+.state strong {
+  color: var(--trading-heading);
+  font-size: 18px;
+}
+
+.state p {
+  margin: 0;
+  color: var(--trading-muted);
+}
+
+.root[data-messages-platform='mobile'] .header {
+  align-items: stretch;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-2);
+}
+
+.root[data-messages-platform='mobile'] .headerActions,
+.root[data-messages-platform='mobile'] .cardActions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.root[data-messages-platform='mobile'] .headerActions > *,
+.root[data-messages-platform='mobile'] .cardActions > * {
+  justify-content: center;
+  min-height: 44px;
+}
+
+.root[data-messages-platform='mobile'] .cardActions .cta {
+  grid-column: 1 / -1;
+}
+
+.root[data-messages-platform='mobile'] .cardBody {
+  padding: var(--space-4);
+}
+
+.root[data-messages-platform='mobile'] .pagination {
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.root[data-messages-platform='mobile'] .pagination button {
+  min-width: 92px;
+  padding: 0 var(--space-2);
+}
+
+@media (max-width: 420px) {
+  .error {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

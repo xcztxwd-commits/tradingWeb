@@ -12,6 +12,7 @@ import com.fxplatform.market.realtime.MarketTestControlService;
 import com.fxplatform.market.service.MarketSourceSelectionTracker;
 import com.fxplatform.market.service.ProviderHealthRecorder;
 import com.fxplatform.market.service.SymbolProductTypes;
+import com.fxplatform.validation.service.ValidationMarketState;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -19,6 +20,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -38,6 +40,7 @@ public class MarketBundleResolver {
   private final ProviderHealthRecorder healthRecorder;
   private final MarketTestControlService testControlService;
   private final Clock clock;
+  private final ValidationMarketState validationMarketState;
 
   @Autowired
   public MarketBundleResolver(
@@ -45,7 +48,8 @@ public class MarketBundleResolver {
       MarketBundleValidator validator,
       MarketSourceSelectionTracker selectionTracker,
       ProviderHealthRecorder healthRecorder,
-      MarketTestControlService testControlService
+      MarketTestControlService testControlService,
+      ObjectProvider<ValidationMarketState> validationMarketState
   ) {
     this(
         providerResolver,
@@ -53,7 +57,24 @@ public class MarketBundleResolver {
         selectionTracker,
         healthRecorder,
         testControlService,
-        Clock.systemUTC());
+        Clock.systemUTC(),
+        validationMarketState.getIfAvailable());
+  }
+
+  public MarketBundleResolver(
+      ProviderResolver providerResolver,
+      MarketBundleValidator validator,
+      MarketSourceSelectionTracker selectionTracker,
+      ProviderHealthRecorder healthRecorder
+  ) {
+    this(
+        providerResolver,
+        validator,
+        selectionTracker,
+        healthRecorder,
+        null,
+        Clock.systemUTC(),
+        null);
   }
 
   public MarketBundleResolver(
@@ -67,7 +88,8 @@ public class MarketBundleResolver {
         selectionTracker,
         ProviderHealthRecorder.noop(),
         null,
-        Clock.systemUTC());
+        Clock.systemUTC(),
+        null);
   }
 
   public MarketBundleResolver(
@@ -77,7 +99,7 @@ public class MarketBundleResolver {
       ProviderHealthRecorder healthRecorder,
       Clock clock
   ) {
-    this(providerResolver, validator, selectionTracker, healthRecorder, null, clock);
+    this(providerResolver, validator, selectionTracker, healthRecorder, null, clock, null);
   }
 
   public MarketBundleResolver(
@@ -88,17 +110,58 @@ public class MarketBundleResolver {
       MarketTestControlService testControlService,
       Clock clock
   ) {
+    this(
+        providerResolver,
+        validator,
+        selectionTracker,
+        healthRecorder,
+        testControlService,
+        clock,
+        null);
+  }
+
+  public MarketBundleResolver(
+      ProviderResolver providerResolver,
+      MarketBundleValidator validator,
+      MarketSourceSelectionTracker selectionTracker,
+      ProviderHealthRecorder healthRecorder,
+      Clock clock,
+      ValidationMarketState validationMarketState
+  ) {
+    this(
+        providerResolver,
+        validator,
+        selectionTracker,
+        healthRecorder,
+        null,
+        clock,
+        validationMarketState);
+  }
+
+  public MarketBundleResolver(
+      ProviderResolver providerResolver,
+      MarketBundleValidator validator,
+      MarketSourceSelectionTracker selectionTracker,
+      ProviderHealthRecorder healthRecorder,
+      MarketTestControlService testControlService,
+      Clock clock,
+      ValidationMarketState validationMarketState
+  ) {
     this.providerResolver = providerResolver;
     this.validator = validator;
     this.selectionTracker = selectionTracker;
     this.healthRecorder = healthRecorder;
     this.testControlService = testControlService;
     this.clock = clock;
+    this.validationMarketState = validationMarketState;
   }
 
   public SpotMarketBundle resolveSpot(String platformSymbol, CandleRequest candleRequest) {
     CandleRequestPolicy.requireValid(candleRequest);
     String symbol = SymbolNormalizer.normalize(platformSymbol);
+    if (validationMarketState != null) {
+      return validationMarketState.requireSpot(symbol);
+    }
     for (ProviderResolution candidate : candidates(symbol, ProductType.CRYPTO_SPOT, SPOT_PROVIDERS)) {
       Instant startedAt = clock.instant();
       try {
@@ -136,6 +199,9 @@ public class MarketBundleResolver {
   public PerpetualMarketBundle resolvePerp(String platformSymbol, CandleRequest candleRequest) {
     CandleRequestPolicy.requireValid(candleRequest);
     String symbol = SymbolNormalizer.normalize(platformSymbol);
+    if (validationMarketState != null) {
+      return validationMarketState.requirePerpetual(symbol);
+    }
     for (ProviderResolution candidate : candidates(symbol, ProductType.LINEAR_PERP, PERP_PROVIDERS)) {
       Instant startedAt = clock.instant();
       try {

@@ -75,6 +75,12 @@ public class WebSocketJwtChannelInterceptor implements ChannelInterceptor {
     if (!StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
       return;
     }
+    if ("/topic/engagement/updates".equals(destination)) {
+      if (accessor.getUser() == null) {
+        throw new AccessDeniedException("Only authenticated engagement subscriptions are allowed");
+      }
+      return;
+    }
     if (destination.startsWith("/topic/trading/")
         || (destination.startsWith("/topic/") && !destination.startsWith("/topic/market/"))) {
       throw new AccessDeniedException("Only public market topics may be subscribed anonymously");
@@ -83,7 +89,9 @@ public class WebSocketJwtChannelInterceptor implements ChannelInterceptor {
       throw new AccessDeniedException("Direct broker queue subscriptions are not allowed");
     }
     if (destination.startsWith("/user/")
-        && (!"/user/queue/trading-events".equals(destination) || accessor.getUser() == null)) {
+        && (!("/user/queue/trading-events".equals(destination)
+            || "/user/queue/engagement-updates".equals(destination))
+            || accessor.getUser() == null)) {
       throw new AccessDeniedException("Only the authenticated private trading queue is allowed");
     }
   }

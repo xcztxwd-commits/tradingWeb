@@ -65,22 +65,25 @@ class Step05SpotWalletSettlementAuditTest {
   }
 
   @Test
-  void spotBuySettlesQuoteOutAndNetBaseInWithoutMarginPosition() {
+  void spotBuySettlesQuoteAndUsdtFeeOutAndFullBaseInWithoutMarginPosition() {
     TradingAccountEntity account = account();
     putBalance(account.getId(), "USDT", "10000.00000000", "10000.00000000", "0");
 
     service().settleBuyFill(
         order(account.getId(), OrderSide.BUY, "0.1"),
-        execution("50000.00000000", "0.1", "0.00005000", "BTC"),
+        execution("50000.00000000", "0.1", "2.50000000", "USDT"),
         btcUsdt(),
         account);
 
-    AuditAssertions.assertAmountClose(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable(), "5000.00000000");
-    AuditAssertions.assertBtcClose(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable(), "0.09995000");
+    AuditAssertions.assertAmountClose(balance(account.getId(), WalletType.SPOT, "USDT").getAvailable(), "4997.50000000");
+    AuditAssertions.assertBtcClose(balance(account.getId(), WalletType.SPOT, "BTC").getAvailable(), "0.10000000");
     AuditAssertions.assertAmountClose(account.getUsedMargin(), "0.00000000");
     assertThat(ledgerEntries)
         .extracting(AssetLedgerEntryEntity::getEntryType)
-        .containsExactly("SPOT_BUY_DEBIT", "SPOT_BUY_CREDIT", "TRADE_FEE");
+        .containsExactly("SPOT_BUY_DEBIT", "TRADE_FEE", "SPOT_BUY_CREDIT");
+    assertThat(ledgerEntries)
+        .extracting(AssetLedgerEntryEntity::getAsset)
+        .containsExactly("USDT", "USDT", "BTC");
   }
 
   @Test

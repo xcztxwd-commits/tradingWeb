@@ -1,4 +1,6 @@
 spring:
+  datasource:
+    password: database-it-non-secret-password
   task:
     scheduling:
       enabled: false
@@ -25,3 +27,8 @@ execution:
 trading:
   pending-order-execution-enabled: false
   protective-order-execution-enabled: false
+
+trading-lab:
+  report:
+    cleanup:
+      enabled: false

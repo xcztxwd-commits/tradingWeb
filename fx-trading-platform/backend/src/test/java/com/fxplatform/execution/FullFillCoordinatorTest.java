@@ -18,6 +18,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +30,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 @ExtendWith(MockitoExtension.class)
 class FullFillCoordinatorTest {
@@ -69,7 +72,7 @@ class FullFillCoordinatorTest {
     assertThat(result.feeRate()).isEqualByComparingTo(
         expectedRole == LiquidityRole.MAKER ? "0.0002" : "0.0005");
     assertThat(result.fee()).isEqualByComparingTo(expectedFee);
-    assertThat(result.feeAsset()).isEqualTo(side == OrderSide.BUY ? "BTC" : "USDT");
+    assertThat(result.feeAsset()).isEqualTo("USDT");
     assertThat(result.filledQuantity()).isEqualByComparingTo("2");
     assertThat(result.remainingQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
     assertThat(result.sourceMode()).isEqualTo(MarketSourceMode.PUBLIC_EXTERNAL);
@@ -79,22 +82,116 @@ class FullFillCoordinatorTest {
     assertThat(result.expiresAt()).isEqualTo(NOW.plusSeconds(2));
   }
 
+  @Test
+  void springSelectsTheAuthorityAwareProductionConstructor() {
+    try (AnnotationConfigApplicationContext context =
+        new AnnotationConfigApplicationContext()) {
+      context.registerBean(ExecutionAdapter.class, () -> executionAdapter);
+      context.registerBean(
+          DemoExecutionPolicyProvider.class,
+          () -> DemoExecutionPolicy::defaults);
+      context.registerBean(
+          ExecutableMarketTimeAuthority.class,
+          () -> new WallClockExecutableMarketTimeAuthority(
+              Clock.fixed(NOW, ZoneOffset.UTC)));
+      context.register(FullFillCoordinator.class);
+
+      context.refresh();
+
+      assertThat(context.getBean(FullFillCoordinator.class)).isNotNull();
+    }
+  }
+
   static Stream<Arguments> priceAndRoleCases() {
     return Stream.of(
         Arguments.of(OrderSide.BUY, FullFillExecutionPath.MARKET, null,
-            "100.0100", "0.0100", LiquidityRole.TAKER, "0.0010"),
+            "100.0100", "0.0100", LiquidityRole.TAKER, "0.10001000"),
         Arguments.of(OrderSide.SELL, FullFillExecutionPath.MARKET, null,
             "98.9901", "0.0099", LiquidityRole.TAKER, "0.09899010"),
         Arguments.of(OrderSide.BUY, FullFillExecutionPath.IMMEDIATE_LIMIT, "101",
-            "100", "0", LiquidityRole.TAKER, "0.0010"),
+            "100", "0", LiquidityRole.TAKER, "0.10000000"),
         Arguments.of(OrderSide.SELL, FullFillExecutionPath.IMMEDIATE_LIMIT, "98",
             "99", "0", LiquidityRole.TAKER, "0.0990"),
         Arguments.of(OrderSide.BUY, FullFillExecutionPath.RESTING_LIMIT, "101",
-            "100", "0", LiquidityRole.MAKER, "0.0004"),
+            "100", "0", LiquidityRole.MAKER, "0.04000000"),
         Arguments.of(OrderSide.SELL, FullFillExecutionPath.RESTING_LIMIT, "98",
             "99", "0", LiquidityRole.MAKER, "0.0396"),
         Arguments.of(OrderSide.BUY, FullFillExecutionPath.TRIGGERED_STOP_MARKET, null,
-            "100.0100", "0.0100", LiquidityRole.TAKER, "0.0010"));
+            "100.0100", "0.0100", LiquidityRole.TAKER, "0.10001000"));
+  }
+
+  @Test
+  void spotBuyChargesCanonicalQuoteNotionalFeeInUsdt() {
+    stubFullIntent("1");
+    ExecutableMarketSnapshot snapshot = new ExecutableMarketSnapshot(
+        "BTCUSDT",
+        ProductType.CRYPTO_SPOT,
+        "binance",
+        "BTCUSDT",
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        new BigDecimal("100"),
+        new BigDecimal("101"),
+        new BigDecimal("100.5"),
+        null,
+        null,
+        NOW.minusSeconds(1),
+        NOW.plusSeconds(2));
+
+    FullFillResult result = coordinator.execute(
+        request("BTCUSDT", ProductType.CRYPTO_SPOT, OrderSide.BUY,
+            FullFillExecutionPath.MARKET, "1", null),
+        snapshot);
+
+    assertThat(result.filledPrice()).isEqualByComparingTo("101.0101");
+    assertThat(result.feeAsset()).isEqualTo("USDT");
+    assertThat(result.fee()).isEqualByComparingTo("0.05050505");
+    assertThat(result.fee().scale()).isEqualTo(8);
+  }
+
+  @Test
+  void executeUsesExactlyOnePolicySnapshot() {
+    stubFullIntent("2");
+    AtomicInteger snapshots = new AtomicInteger();
+    DemoExecutionPolicyProvider provider = () -> {
+      snapshots.incrementAndGet();
+      return policy("0.0002", "0.0005", "0.0001");
+    };
+    coordinator = new FullFillCoordinator(
+        executionAdapter,
+        Clock.fixed(NOW, ZoneOffset.UTC),
+        provider);
+
+    FullFillResult result = coordinator.execute(
+        request("BTCUSDT", ProductType.CRYPTO_SPOT, OrderSide.BUY,
+            FullFillExecutionPath.MARKET, "2", null),
+        spotSnapshot("BTCUSDT"));
+
+    assertThat(snapshots).hasValue(1);
+    assertThat(result.fee()).isEqualByComparingTo("0.10001000");
+  }
+
+  @Test
+  void projectUsesExactlyOnePolicySnapshot() {
+    AtomicInteger snapshots = new AtomicInteger();
+    DemoExecutionPolicyProvider provider = () -> {
+      snapshots.incrementAndGet();
+      return policy("0.001", "0.002", "0.003");
+    };
+    coordinator = new FullFillCoordinator(
+        executionAdapter,
+        Clock.fixed(NOW, ZoneOffset.UTC),
+        provider);
+
+    FullFillPricingProjection projection = coordinator.project(
+        ProductType.CRYPTO_SPOT,
+        OrderSide.BUY,
+        FullFillExecutionPath.MARKET,
+        null,
+        spotSnapshot("BTCUSDT"));
+
+    assertThat(snapshots).hasValue(1);
+    assertThat(projection.slippageRate()).isEqualByComparingTo("0.003");
+    assertThat(projection.feeRate()).isEqualByComparingTo("0.002");
   }
 
   @Test
@@ -183,6 +280,47 @@ class FullFillCoordinatorTest {
     mutableClock.advance(Duration.ofSeconds(2));
 
     assertCode("MARKET_DATA_STALE", () -> coordinator.requireFresh(result));
+  }
+
+  @Test
+  void wallClockAuthorityRejectsValidationMarkedFutureSnapshots() {
+    Instant virtualTime = Instant.parse("2030-01-01T00:00:01Z");
+    ExecutableMarketSnapshot validation = snapshotWithAuthority(
+        spotSnapshot("BTCUSDT"),
+        "validation",
+        MarketSourceMode.LOCAL_SIMULATED,
+        virtualTime,
+        virtualTime.plusSeconds(60));
+
+    assertCode("MARKET_DATA_STALE", () -> coordinator.requireFresh(validation));
+  }
+
+  @Test
+  void injectedAuthorityOwnsValidationFilledAtAndFinalFreshness() {
+    Instant virtualTime = Instant.parse("2020-01-01T00:00:01Z");
+    ExecutableMarketSnapshot validation = snapshotWithAuthority(
+        spotSnapshot("BTCUSDT"),
+        "validation",
+        MarketSourceMode.LOCAL_SIMULATED,
+        virtualTime,
+        virtualTime.plusSeconds(60));
+    ExecutableMarketTimeAuthority authority = org.mockito.Mockito.mock(
+        ExecutableMarketTimeAuthority.class);
+    when(authority.currentTime(validation)).thenReturn(virtualTime);
+    when(authority.currentTime(any(FullFillResult.class))).thenReturn(virtualTime);
+    coordinator = new FullFillCoordinator(
+        executionAdapter,
+        DemoExecutionPolicy::defaults,
+        authority);
+    stubFullIntent("2");
+
+    FullFillResult result = coordinator.execute(
+        request("BTCUSDT", ProductType.CRYPTO_SPOT, OrderSide.BUY,
+            FullFillExecutionPath.MARKET, "2", null),
+        validation);
+
+    assertThat(result.filledAt()).isEqualTo(virtualTime);
+    coordinator.requireFresh(result);
   }
 
   @Test
@@ -451,6 +589,28 @@ class FullFillCoordinatorTest {
         NOW.plusSeconds(2));
   }
 
+  private static ExecutableMarketSnapshot snapshotWithAuthority(
+      ExecutableMarketSnapshot source,
+      String providerCode,
+      MarketSourceMode sourceMode,
+      Instant asOf,
+      Instant expiresAt
+  ) {
+    return new ExecutableMarketSnapshot(
+        source.platformSymbol(),
+        source.productType(),
+        providerCode,
+        source.providerSymbol(),
+        sourceMode,
+        source.bid(),
+        source.ask(),
+        source.last(),
+        source.mark(),
+        source.index(),
+        asOf,
+        expiresAt);
+  }
+
   private static ExecutableMarketSnapshot perpSnapshot(String symbol, String ask, String bid) {
     return new ExecutableMarketSnapshot(
         symbol,
@@ -493,6 +653,22 @@ class FullFillCoordinatorTest {
 
   private static BigDecimal decimal(String value) {
     return value == null ? null : new BigDecimal(value);
+  }
+
+  private static DemoExecutionPolicy policy(
+      String makerFeeRate,
+      String takerFeeRate,
+      String slippageRate
+  ) {
+    return new DemoExecutionPolicy(
+        DemoMatchingMode.SIMPLE,
+        new BigDecimal(makerFeeRate),
+        new BigDecimal(takerFeeRate),
+        new BigDecimal("0.001"),
+        new BigDecimal(slippageRate),
+        List.of(),
+        List.of(),
+        null);
   }
 
   private static final class MutableClock extends Clock {

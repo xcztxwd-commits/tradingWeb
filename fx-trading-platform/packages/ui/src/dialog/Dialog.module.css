@@ -1,10 +1,14 @@
 .layer {
   position: fixed;
   inset: 0;
-  z-index: var(--z-dialog, 40);
+  z-index: var(--z-modal, 1200);
   display: grid;
   place-items: center;
   padding: var(--space-4);
+}
+
+.layer[data-overlay-top='false'] {
+  pointer-events: none;
 }
 
 .backdrop {

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Locale;
 import java.util.UUID;
+import org.apache.ibatis.annotations.Select;
 
 /**
  * SymbolRepository 通过 MyBatis-Plus 访问交易品种。
@@ -40,6 +41,17 @@ public interface SymbolRepository extends FxBaseMapper<SymbolEntity> {
         .eq(SymbolEntity::getEnabled, true)
         .orderByAsc(SymbolEntity::getSymbol));
   }
+
+  @Select("""
+      SELECT *
+      FROM market.symbols
+      WHERE enabled = TRUE
+        AND tradable = TRUE
+        AND product_type = 'CRYPTO_SPOT'
+      ORDER BY symbol
+      FOR SHARE
+      """)
+  List<SymbolEntity> findTradableCryptoSpotForShareOrderBySymbolAsc();
 
   default List<SymbolEntity> findVisibleSymbols(String assetClass) {
     LambdaQueryWrapper<SymbolEntity> query = new LambdaQueryWrapper<SymbolEntity>()

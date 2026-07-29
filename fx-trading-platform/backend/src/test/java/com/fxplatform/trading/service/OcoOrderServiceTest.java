@@ -58,6 +58,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.MockedStatic;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -116,6 +117,9 @@ class OcoOrderServiceTest {
     TradingAccountEntity account = account(userId, accountId);
     SpotMarketBundle bundle = bundle();
     List<OrderEntity> saved = new ArrayList<>();
+    UUID groupId = new UUID(3L, 0L);
+    UUID limitId = new UUID(2L, 0L);
+    UUID stopId = new UUID(1L, 0L);
 
     stubNewGroup(userId, accountId, request, account, bundle);
     when(orderHoldCalculator.oco(
@@ -128,7 +132,11 @@ class OcoOrderServiceTest {
       return order;
     });
 
-    OcoOrderGroupResponse response = service().create(principal, request);
+    OcoOrderGroupResponse response;
+    try (MockedStatic<UUID> ids = org.mockito.Mockito.mockStatic(UUID.class)) {
+      ids.when(UUID::randomUUID).thenReturn(groupId, limitId, stopId);
+      response = service().create(principal, request);
+    }
 
     assertThat(saved).hasSize(2);
     assertThat(saved).extracting(OrderEntity::getOrderType)
@@ -136,6 +144,12 @@ class OcoOrderServiceTest {
     assertThat(saved).extracting(OrderEntity::getContingencyGroupId).containsOnly(response.contingencyGroupId());
     UUID ownerId = saved.getFirst().getHoldOwnerOrderId();
     assertThat(saved).extracting(OrderEntity::getHoldOwnerOrderId).containsOnly(ownerId);
+    assertThat(ownerId)
+        .as("The LIMIT leg is the deterministic OCO hold owner even when its UUID sorts last")
+        .isEqualTo(limitId);
+    assertThat(saved).filteredOn(order -> order.getOrderType() == OrderType.LIMIT)
+        .singleElement().extracting(OrderEntity::getId)
+        .isEqualTo(limitId);
     assertThat(saved).filteredOn(order -> order.getId().equals(ownerId))
         .singleElement().extracting(OrderEntity::getHoldAmount)
         .isEqualTo(new BigDecimal("0.10000000"));
@@ -166,6 +180,17 @@ class OcoOrderServiceTest {
     lockOrder.verify(spotPositionService).lockOrCreate(accountId, "BTC", "USDT");
     lockOrder.verify(fullFillCoordinator).requireFresh(ExecutableMarketSnapshot.from(bundle));
     lockOrder.verify(orderRepository, org.mockito.Mockito.times(2)).save(any(OrderEntity.class));
+    ArgumentCaptor<UUID> eventOrderIds = ArgumentCaptor.forClass(UUID.class);
+    verify(orderEventService, org.mockito.Mockito.times(2)).record(
+        eventOrderIds.capture(),
+        eq("ORDER_PENDING"),
+        eq(OrderStatus.ACCEPTED),
+        eq(OrderStatus.PENDING),
+        eq(null),
+        eq("OCO leg accepted and waiting"));
+    assertThat(eventOrderIds.getAllValues())
+        .as("OCO create events follow semantic leg order, independent of random UUID order")
+        .containsExactly(limitId, stopId);
   }
 
   @Test
@@ -203,12 +228,14 @@ class OcoOrderServiceTest {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
     UUID groupId = UUID.randomUUID();
-    UUID ownerId = UUID.randomUUID();
+    UUID ownerId = new UUID(2L, 0L);
+    UUID stopId = new UUID(1L, 0L);
     OrderEntity owner = leg(userId, accountId, groupId, ownerId, OrderType.LIMIT);
     owner.setId(ownerId);
     owner.setHoldAmount(new BigDecimal("5002.50000000"));
     owner.setHoldCurrency("USDT");
     OrderEntity peer = leg(userId, accountId, groupId, ownerId, OrderType.STOP_MARKET);
+    peer.setId(stopId);
     TradingAccountEntity account = account(userId, accountId);
     List<OrderEntity> ordered = List.of(owner, peer).stream()
         .sorted(Comparator.comparing(OrderEntity::getId)).toList();
@@ -229,6 +256,17 @@ class OcoOrderServiceTest {
     verify(walletService).releaseLockedWithEntryType(
         accountId, "USDT", new BigDecimal("5002.50000000"), "ORDER", ownerId,
         "OCO shared Spot hold released", "SPOT_ORDER_RELEASE");
+    ArgumentCaptor<UUID> eventOrderIds = ArgumentCaptor.forClass(UUID.class);
+    verify(orderEventService, org.mockito.Mockito.times(2)).record(
+        eventOrderIds.capture(),
+        eq("ORDER_CANCELED"),
+        eq(OrderStatus.PENDING),
+        eq(OrderStatus.CANCELED),
+        eq(null),
+        eq("OCO group canceled"));
+    assertThat(eventOrderIds.getAllValues())
+        .as("OCO cancel events follow semantic leg order, independent of random UUID order")
+        .containsExactly(ownerId, stopId);
   }
 
   @Test
@@ -260,7 +298,7 @@ class OcoOrderServiceTest {
     when(orderHoldCalculator.oco(
         OrderSide.BUY, new BigDecimal("0.1000"), new BigDecimal("49000"),
         new BigDecimal("51000"), ExecutableMarketSnapshot.from(bundle)))
-        .thenReturn(new OrderHoldCalculator.OrderHold(new BigDecimal("5105.60100000"), "USDT"));
+        .thenReturn(new OrderHoldCalculator.OrderHold(new BigDecimal("5100.51000000"), "USDT"));
     when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
       OrderEntity order = invocation.getArgument(0);
       saved.add(order);
@@ -324,6 +362,48 @@ class OcoOrderServiceTest {
         request(accountId, OrderSide.SELL, "55000", "49000", "same-idem", "new-client"));
 
     assertThat(replay.contingencyGroupId()).isEqualTo(groupId);
+    verify(marketBundleResolver, never()).resolveSpot(any(), any());
+    verify(transactionExecutor, never()).execute(any());
+  }
+
+  @Test
+  void permanentIdempotencyReplayWinsAfterTheClientKeyIsReusedByAnActiveGroup() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID originalGroupId = UUID.randomUUID();
+    UUID activeGroupId = UUID.randomUUID();
+    CreateOcoOrderRequest request = request(
+        accountId, OrderSide.SELL, "55000", "49000", "original-idem", "reused-client");
+    String idempotencyLimitKey = OcoOrderService.deriveLegKey("original-idem", "L");
+    String clientLimitKey = OcoOrderService.deriveLegKey("reused-client", "L");
+
+    UUID originalOwnerId = UUID.randomUUID();
+    OrderEntity originalLimit = leg(
+        userId, accountId, originalGroupId, originalOwnerId, OrderType.LIMIT);
+    OrderEntity originalStop = leg(
+        userId, accountId, originalGroupId, originalOwnerId, OrderType.STOP_MARKET);
+    originalLimit.setStatus(OrderStatus.FILLED);
+    originalStop.setStatus(OrderStatus.CANCELED);
+    originalLimit.setIdempotencyKey(idempotencyLimitKey);
+
+    OrderEntity activeLimit = leg(
+        userId, accountId, activeGroupId, UUID.randomUUID(), OrderType.LIMIT);
+    activeLimit.setClientOrderId(clientLimitKey);
+    activeLimit.setIdempotencyKey(OcoOrderService.deriveLegKey("new-idem", "L"));
+    activeLimit.setHoldAmount(new BigDecimal("0.10000000"));
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(
+        userId, accountId, clientLimitKey)).thenReturn(Optional.of(activeLimit));
+    when(orderRepository.findByUserIdAndIdempotencyKey(userId, idempotencyLimitKey))
+        .thenReturn(Optional.of(originalLimit));
+    when(orderRepository.findByContingencyGroupId(originalGroupId))
+        .thenReturn(List.of(originalStop, originalLimit));
+    when(accountRepository.findByIdAndUserId(accountId, userId))
+        .thenReturn(Optional.of(account(userId, accountId)));
+
+    OcoOrderGroupResponse replay = service().create(principal(userId), request);
+
+    assertThat(replay.contingencyGroupId()).isEqualTo(originalGroupId);
     verify(marketBundleResolver, never()).resolveSpot(any(), any());
     verify(transactionExecutor, never()).execute(any());
   }

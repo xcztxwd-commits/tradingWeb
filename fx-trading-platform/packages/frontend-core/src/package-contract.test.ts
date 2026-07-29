@@ -19,6 +19,7 @@ describe('@fx-platform/frontend-core package contract', () => {
       './storage': sourceExport('./src/storage/index.ts'),
       './models': sourceExport('./src/models/index.ts'),
       './market': sourceExport('./src/market/index.ts'),
+      './engagement': sourceExport('./src/engagement/index.ts'),
       './account': sourceExport('./src/account/index.ts'),
       './trading': sourceExport('./src/trading/index.ts')
     })
@@ -45,6 +46,7 @@ describe('@fx-platform/frontend-core package contract', () => {
     assert.match(indexSource, /export \* from '\.\/models\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/storage\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/market\/index\.ts'/u)
+    assert.match(indexSource, /export \* from '\.\/engagement\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/account\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/trading\/index\.ts'/u)
   })

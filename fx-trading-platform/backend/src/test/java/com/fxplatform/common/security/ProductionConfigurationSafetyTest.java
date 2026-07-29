@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.Profile;
 
 class ProductionConfigurationSafetyTest {
 
@@ -42,5 +43,13 @@ class ProductionConfigurationSafetyTest {
         "unit-test-config-encryption-key-32chars");
 
     validator.run(null);
+  }
+
+  @Test
+  void scenarioIntegrationProfileDoesNotRunTheProductionSecretValidator() {
+    Profile profile = ProductionSecuritySettingsValidator.class.getAnnotation(Profile.class);
+
+    assertThat(profile).isNotNull();
+    assertThat(profile.value()).contains("!dev & !test & !scenario-it");
   }
 }

@@ -9,6 +9,7 @@ import com.fxplatform.audit.service.AuditLogService;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -20,6 +21,7 @@ public class AdminUserRoleAssignmentService {
   private final AuditLogService auditLogService;
 
   @Transactional
+  @PreAuthorize("hasAuthority('ROLE_ADMIN') and hasAuthority('SUPER_ADMIN')")
   public AdminUserRoleResponse assignUserRole(UUID actorUserId, AdminAssignUserRoleRequest request) {
     AdminRbacServiceSupport.requireRole(roleRepository, request.roleId());
     AdminUserRoleEntity userRole = userRoleRepository

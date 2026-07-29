@@ -14,11 +14,19 @@ public class TradingAlgorithmEngine {
   private static final int INTERNAL_SCALE = 18;
 
   public SpotBuyResult spotBuyWithQuoteBudget(BigDecimal quoteBudget, BigDecimal price, BigDecimal feeRate) {
-    BigDecimal grossBase = divide(quoteBudget, price);
-    BigDecimal feeBase = grossBase.multiply(feeRate).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
-    BigDecimal netBase = grossBase.subtract(feeBase).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
-    BigDecimal averageCost = divide(quoteBudget, netBase);
-    return new SpotBuyResult(grossBase, feeBase, netBase, averageCost);
+    BigDecimal baseQuantity = quoteBudget.divide(
+        price.multiply(BigDecimal.ONE.add(feeRate)),
+        MONEY_SCALE,
+        RoundingMode.DOWN);
+    BigDecimal grossQuote = baseQuantity.multiply(price)
+        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    BigDecimal feeQuote = grossQuote.multiply(feeRate)
+        .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+    return new SpotBuyResult(
+        baseQuantity,
+        grossQuote,
+        feeQuote,
+        price.setScale(PRICE_SCALE, RoundingMode.HALF_UP));
   }
 
   public SpotSellResult spotSell(BigDecimal baseQuantity, BigDecimal price, BigDecimal feeRate, BigDecimal costBasis) {
@@ -166,9 +174,9 @@ public class TradingAlgorithmEngine {
   }
 
   public record SpotBuyResult(
-      BigDecimal grossBase,
-      BigDecimal feeBase,
-      BigDecimal netBase,
+      BigDecimal baseQuantity,
+      BigDecimal grossQuote,
+      BigDecimal feeQuote,
       BigDecimal averageCost
   ) {
   }

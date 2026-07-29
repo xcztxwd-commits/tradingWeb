@@ -205,9 +205,9 @@ describe('bottom account panel tabs', () => {
     assert.match(dialogSource, /role="dialog"/)
     assert.match(dialogSource, /aria-modal="true"/)
     assert.match(dialogSource, /if \(!open\) return null/)
-    assert.match(dialogSource, /event\.key === 'Escape'/)
-    assert.match(dialogSource, /firstFocusable/)
-    assert.match(dialogSource, /previousFocusRef\.current\?\.focus\(\)/)
+    assert.match(dialogSource, /event\.key !== 'Escape'/)
+    assert.match(dialogSource, /focusInitialElement/)
+    assert.match(dialogSource, /previousFocus\?\.focus\(\)/)
     assert.match(dialogSource, /source: 'backdrop'/)
   })
 

@@ -19,24 +19,49 @@ import org.springframework.stereotype.Component;
 public class FullFillCoordinator {
 
   private static final int MONEY_SCALE = 8;
-  private static final BigDecimal MAKER_FEE_RATE = new BigDecimal("0.0002");
-  private static final BigDecimal TAKER_FEE_RATE = new BigDecimal("0.0005");
-  private static final BigDecimal SLIPPAGE_RATE = new BigDecimal("0.0001");
 
   private final ExecutionAdapter executionAdapter;
-  private final Clock clock;
+  private final DemoExecutionPolicyProvider policyProvider;
+  private final ExecutableMarketTimeAuthority timeAuthority;
 
-  @Autowired
   public FullFillCoordinator(ExecutionAdapter executionAdapter) {
-    this(executionAdapter, Clock.systemUTC());
+    this(
+        executionAdapter,
+        DemoExecutionPolicy::defaults,
+        new WallClockExecutableMarketTimeAuthority());
   }
 
   public FullFillCoordinator(ExecutionAdapter executionAdapter, Clock clock) {
+    this(
+        executionAdapter,
+        DemoExecutionPolicy::defaults,
+        new WallClockExecutableMarketTimeAuthority(clock));
+  }
+
+  @Autowired
+  public FullFillCoordinator(
+      ExecutionAdapter executionAdapter,
+      DemoExecutionPolicyProvider policyProvider,
+      ExecutableMarketTimeAuthority timeAuthority
+  ) {
     this.executionAdapter = executionAdapter;
-    this.clock = clock;
+    this.policyProvider = policyProvider;
+    this.timeAuthority = timeAuthority;
+  }
+
+  public FullFillCoordinator(
+      ExecutionAdapter executionAdapter,
+      Clock clock,
+      DemoExecutionPolicyProvider policyProvider
+  ) {
+    this(
+        executionAdapter,
+        policyProvider,
+        new WallClockExecutableMarketTimeAuthority(clock));
   }
 
   public FullFillResult execute(FullFillRequest request, ExecutableMarketSnapshot snapshot) {
+    DemoExecutionPolicy policy = currentPolicy();
     validateRequest(request);
     validateSnapshot(request, snapshot);
 
@@ -51,17 +76,19 @@ public class FullFillCoordinator {
         request.side(),
         request.executionPath(),
         request.limitPrice(),
-        snapshot);
+        snapshot,
+        policy);
     BigDecimal fee = fee(request, pricing.filledPrice(), pricing.feeRate());
+    Instant filledAt = requireFreshTime(snapshot);
 
     FullFillResult result = new FullFillResult(
         pricing.filledPrice(),
-        clock.instant(),
+        filledAt,
         request.requestedBaseQuantity(),
         BigDecimal.ZERO,
         pricing.feeRate(),
         fee,
-        feeAsset(request),
+        "USDT",
         pricing.liquidityRole(),
         pricing.slippage(),
         snapshot.sourceMode(),
@@ -81,13 +108,30 @@ public class FullFillCoordinator {
       BigDecimal limitPrice,
       ExecutableMarketSnapshot snapshot
   ) {
+    return project(
+        productType,
+        side,
+        executionPath,
+        limitPrice,
+        snapshot,
+        currentPolicy());
+  }
+
+  private FullFillPricingProjection project(
+      ProductType productType,
+      OrderSide side,
+      FullFillExecutionPath executionPath,
+      BigDecimal limitPrice,
+      ExecutableMarketSnapshot snapshot,
+      DemoExecutionPolicy policy
+  ) {
     if (productType == null || side == null || executionPath == null || snapshot == null) {
       throw incomplete("Full-fill pricing projection is incomplete");
     }
     validateSnapshot(snapshot.platformSymbol(), productType, snapshot);
     BigDecimal referencePrice = side == OrderSide.BUY ? snapshot.ask() : snapshot.bid();
     BigDecimal slippage = executionPath.marketPricing()
-        ? referencePrice.multiply(SLIPPAGE_RATE)
+        ? referencePrice.multiply(policy.slippageRate())
         : BigDecimal.ZERO;
     BigDecimal filledPrice = fillPrice(side, executionPath, limitPrice, referencePrice, slippage);
     if (productType == ProductType.LINEAR_PERP) {
@@ -97,13 +141,15 @@ public class FullFillCoordinator {
           : referencePrice.subtract(filledPrice));
     }
     LiquidityRole role = executionPath.liquidityRole();
-    BigDecimal feeRate = role == LiquidityRole.MAKER ? MAKER_FEE_RATE : TAKER_FEE_RATE;
+    BigDecimal feeRate = role == LiquidityRole.MAKER
+        ? policy.makerFeeRate()
+        : policy.takerFeeRate();
     return new FullFillPricingProjection(
         filledPrice,
         slippage,
-        SLIPPAGE_RATE,
+        policy.slippageRate(),
         feeRate,
-        TAKER_FEE_RATE.max(MAKER_FEE_RATE),
+        policy.takerFeeRate().max(policy.makerFeeRate()),
         role);
   }
 
@@ -112,8 +158,9 @@ public class FullFillCoordinator {
     if (result == null || result.filledAt() == null || result.expiresAt() == null) {
       throw incomplete("Canonical full-fill freshness metadata is incomplete");
     }
+    Instant currentTime = timeAuthority.currentTime(result);
     if (!result.filledAt().isBefore(result.expiresAt())
-        || !clock.instant().isBefore(result.expiresAt())) {
+        || !currentTime.isBefore(result.expiresAt())) {
       throw new BusinessException(ErrorCode.MARKET_DATA_STALE, "Executable market snapshot expired");
     }
   }
@@ -124,7 +171,7 @@ public class FullFillCoordinator {
       throw incomplete("Executable market snapshot freshness metadata is incomplete");
     }
     if (snapshot.asOf().isAfter(snapshot.expiresAt())
-        || !clock.instant().isBefore(snapshot.expiresAt())) {
+        || !requireFreshTime(snapshot).isBefore(snapshot.expiresAt())) {
       throw new BusinessException(ErrorCode.MARKET_DATA_STALE, "Executable market snapshot expired");
     }
   }
@@ -148,26 +195,20 @@ public class FullFillCoordinator {
   }
 
   private BigDecimal fee(FullFillRequest request, BigDecimal filledPrice, BigDecimal feeRate) {
-    if (request.productType() == ProductType.CRYPTO_SPOT && request.side() == OrderSide.BUY) {
-      return request.requestedBaseQuantity().multiply(feeRate);
-    }
-    BigDecimal fee = request.requestedBaseQuantity().multiply(filledPrice).multiply(feeRate);
-    return request.productType() == ProductType.LINEAR_PERP ? money(fee) : fee;
+    BigDecimal quoteNotional = request.requestedBaseQuantity().multiply(filledPrice);
+    return money(quoteNotional.multiply(feeRate));
   }
 
   private static BigDecimal money(BigDecimal value) {
     return value.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
   }
 
-  private String feeAsset(FullFillRequest request) {
-    if (request.productType() == ProductType.LINEAR_PERP || request.side() == OrderSide.SELL) {
-      return "USDT";
+  private DemoExecutionPolicy currentPolicy() {
+    DemoExecutionPolicy policy = policyProvider.current();
+    if (policy == null) {
+      throw incomplete("Demo execution policy is unavailable");
     }
-    String symbol = normalize(request.platformSymbol());
-    if (!symbol.endsWith("USDT") || symbol.length() <= 4) {
-      throw incomplete("Spot symbol does not expose a USDT base asset");
-    }
-    return symbol.substring(0, symbol.length() - 4);
+    return policy;
   }
 
   private void validateRequest(FullFillRequest request) {
@@ -211,10 +252,13 @@ public class FullFillCoordinator {
       ExecutableMarketSnapshot snapshot
   ) {
     ExecutableMarketSnapshots.requireComplete(platformSymbol, productType, snapshot);
-    Instant now = clock.instant();
-    if (!now.isBefore(snapshot.expiresAt())) {
+    if (!requireFreshTime(snapshot).isBefore(snapshot.expiresAt())) {
       throw new BusinessException(ErrorCode.MARKET_DATA_STALE, "Executable market snapshot expired");
     }
+  }
+
+  private Instant requireFreshTime(ExecutableMarketSnapshot snapshot) {
+    return timeAuthority.currentTime(snapshot);
   }
 
   private void requireFullIntent(BigDecimal requestedQuantity, ExecutionResult intent) {

@@ -5,6 +5,7 @@
 当前完整前后端架构和数据库设计请先看：
 
 - [FX Trading Platform 前后端架构与数据库设计总览](./architecture-and-database-design-cn.md)
+- [Java 后端架构、业务闭环与关键代码深度说明（2026-07-14）](./java-backend-architecture-closed-loop-2026-07-14.zh-CN.md)
 
 ## 分层边界
 

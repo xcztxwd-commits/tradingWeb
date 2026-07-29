@@ -72,6 +72,16 @@ jobs:
           cache: npm
           cache-dependency-path: fx-trading-platform/package-lock.json
 
+      - uses: pnpm/action-setup@v4.4.0
+        with:
+          version: 10.4.1
+
+      - name: Build KLineCharts workspace dependency
+        working-directory: .
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+
       - run: npm ci
 
       - name: Start backend

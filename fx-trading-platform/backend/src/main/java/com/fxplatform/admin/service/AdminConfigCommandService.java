@@ -6,6 +6,7 @@ import com.fxplatform.admin.dto.response.AdminDictionaryResponse;
 import com.fxplatform.admin.dto.response.AdminSystemSettingResponse;
 import com.fxplatform.audit.service.AuditDetailsBuilder;
 import com.fxplatform.audit.service.AuditLogService;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.config.entity.SystemDictionaryEntity;
 import com.fxplatform.config.entity.SystemSettingEntity;
 import com.fxplatform.config.repository.SystemDictionaryRepository;
@@ -22,6 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 public class AdminConfigCommandService {
+
+  private static final String MAX_POPUPS_KEY = "engagement.popup.maxSequentialPopups";
+  private static final String DELIVERY_RETENTION_KEY = "engagement.popup.deliveryRetentionDays";
 
   /** 字典仓储，用于查询和保存系统字典项。 */
   private final SystemDictionaryRepository dictionaryRepository;
@@ -60,6 +64,12 @@ public class AdminConfigCommandService {
    */
   @Transactional
   public AdminSystemSettingResponse updateSetting(UUID actorUserId, AdminSystemSettingRequest request) {
+    if (MAX_POPUPS_KEY.equals(request.settingKey())
+        || DELIVERY_RETENTION_KEY.equals(request.settingKey())) {
+      throw new BusinessException(
+          "ENGAGEMENT_POLICY_SETTING_PROTECTED",
+          "Engagement policy settings require the dedicated API");
+    }
     SystemSettingEntity setting = settingRepository
         .findBySettingKey(request.settingKey())
         .orElseGet(SystemSettingEntity::new);

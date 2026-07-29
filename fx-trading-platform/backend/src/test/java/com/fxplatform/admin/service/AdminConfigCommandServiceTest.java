@@ -1,15 +1,18 @@
 package com.fxplatform.admin.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.admin.dto.request.AdminDictionaryRequest;
 import com.fxplatform.admin.dto.request.AdminSystemSettingRequest;
 import com.fxplatform.audit.service.AuditLogService;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.config.entity.SystemDictionaryEntity;
 import com.fxplatform.config.entity.SystemSettingEntity;
 import com.fxplatform.config.repository.SystemDictionaryRepository;
@@ -18,6 +21,8 @@ import com.fxplatform.config.service.SensitiveSettingService;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -37,6 +42,24 @@ class AdminConfigCommandServiceTest {
 
   private final SensitiveSettingService sensitiveSettingService =
       new SensitiveSettingService("unit-test-config-encryption-key-32chars");
+
+  @ParameterizedTest
+  @ValueSource(strings = {
+      "engagement.popup.maxSequentialPopups",
+      "engagement.popup.deliveryRetentionDays"
+  })
+  void genericSettingCommandRejectsDedicatedEngagementPolicyKeys(String settingKey) {
+    AdminConfigCommandService service = new AdminConfigCommandService(
+        dictionaryRepository, settingRepository, auditLogService, sensitiveSettingService);
+    AdminSystemSettingRequest request = new AdminSystemSettingRequest(
+        settingKey, "7", "INTEGER", "Managed by the dedicated policy API", true);
+
+    assertThatThrownBy(() -> service.updateSetting(UUID.randomUUID(), request))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo("ENGAGEMENT_POLICY_SETTING_PROTECTED"));
+    verifyNoInteractions(settingRepository, auditLogService);
+  }
 
   @Test
   void upsertDictionaryCreatesMissingItemAndAudits() {

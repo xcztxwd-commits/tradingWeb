@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
 import com.fxplatform.wallet.enums.WalletType;
@@ -348,8 +349,10 @@ class WalletServiceTest {
         .thenReturn(Optional.of(balance));
 
     assertThatThrownBy(() -> service().debitAvailable(accountId, "USD", new BigDecimal("6.00000000"), "TEST", UUID.randomUUID(), "Too much"))
-        .isInstanceOf(BusinessException.class)
-        .hasMessageContaining("Available balance is not enough");
+        .isInstanceOfSatisfying(BusinessException.class, exception -> {
+          assertThat(exception.getCode()).isEqualTo(ErrorCode.INSUFFICIENT_BALANCE);
+          assertThat(exception).hasMessageContaining("Available balance is not enough");
+        });
   }
 
   @Test
@@ -360,8 +363,10 @@ class WalletServiceTest {
         .thenReturn(Optional.of(balance));
 
     assertThatThrownBy(() -> service().lockAvailable(accountId, "BTC", new BigDecimal("0.20000000"), "ORDER", UUID.randomUUID(), "Lock too much"))
-        .isInstanceOf(BusinessException.class)
-        .hasMessageContaining("Available balance is not enough");
+        .isInstanceOfSatisfying(BusinessException.class, exception -> {
+          assertThat(exception.getCode()).isEqualTo(ErrorCode.INSUFFICIENT_BALANCE);
+          assertThat(exception).hasMessageContaining("Available balance is not enough");
+        });
   }
 
   private WalletService service() {

@@ -4,6 +4,7 @@ import { Link, NavLink } from 'react-router-dom'
 import { LanguageSwitcher } from '../../components/LanguageSwitcher'
 import { TopbarToolIcon } from '../../components/TopbarToolIcon'
 import { AccountUserMenu } from '../../app/components/AccountUserMenu'
+import { NotificationBell } from '../../app/components/NotificationBell'
 import { TradingNavMenu } from '../../app/components/TradingNavMenu'
 import { isConfiguredNavPathActive, type AppNavItem } from '../../app/navigation'
 import type { ShellChromeModel } from '../../app/shell/shellChromeModel'
@@ -37,6 +38,7 @@ export function PcShellChrome({ model }: { model: ShellChromeModel }) {
               <Link className={styles.icon} to="/wallet" aria-label="Wallet">
                 <TopbarToolIcon name="wallet" />
               </Link>
+              <NotificationBell model={model} mode="menu" />
             </>
           ) : (
             <>
@@ -44,9 +46,6 @@ export function PcShellChrome({ model }: { model: ShellChromeModel }) {
               <Link className={styles.primary} to="/register">注册</Link>
             </>
           )}
-          <button type="button" className={styles.icon} aria-label="Notifications">
-            <TopbarToolIcon name="bell" />
-          </button>
           <button type="button" className={styles.icon} aria-label="Customer support">
             <TopbarToolIcon name="support" />
           </button>

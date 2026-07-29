@@ -26,6 +26,8 @@ import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.QuantityUnit;
+import com.fxplatform.trading.enums.TimeInForce;
+import com.fxplatform.trading.enums.TriggerPriceType;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
@@ -326,6 +328,29 @@ class InstrumentRulesEngineTest {
   }
 
   @Test
+  void stopLimitValidatesLimitAndTriggerPricesAgainstTickSizeSeparately() {
+    SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setTickSize(new BigDecimal("0.10"));
+    symbol.setLotSize(new BigDecimal("0.001"));
+    symbol.setMinLot(new BigDecimal("0.001"));
+
+    assertThatThrownBy(() -> engine().validateOrderRules(
+        stopLimitOrder("BTCUSDT", "0.100", "100.05", "99.90"),
+        symbol))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("PRICE_TICK_MISMATCH"));
+    assertThatThrownBy(() -> engine().validateOrderRules(
+        stopLimitOrder("BTCUSDT", "0.100", "100.00", "99.95"),
+        symbol))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("PRICE_TICK_MISMATCH"));
+    assertThatCode(() -> engine().validateOrderRules(
+        stopLimitOrder("BTCUSDT", "0.100", "100.00", "99.90"),
+        symbol))
+        .doesNotThrowAnyException();
+  }
+
+  @Test
   void linearPerpetualCanonicalBaseNotionalDoesNotApplyContractSizeTwice() {
     SymbolEntity symbol = cryptoSpotSymbol();
     symbol.setSymbol("BTCUSDT-PERP");
@@ -456,5 +481,20 @@ class InstrumentRulesEngineTest {
         null, null, null, null, "idem-stop-" + symbol, "client-stop-" + symbol,
         new BigDecimal(quantity), null, 1, PositionSide.BOTH, QuantityUnit.BASE,
         MarginMode.CASH, new BigDecimal(triggerPrice), null, false, List.of());
+  }
+
+  private CreateOrderRequest stopLimitOrder(
+      String symbol,
+      String quantity,
+      String price,
+      String triggerPrice
+  ) {
+    return new CreateOrderRequest(
+        UUID.randomUUID(), symbol, OrderSide.BUY, OrderType.STOP_LIMIT,
+        null, null, null, null, "idem-stop-limit-" + symbol,
+        "client-stop-limit-" + symbol, new BigDecimal(quantity),
+        new BigDecimal(price), 1, PositionSide.BOTH, QuantityUnit.BASE,
+        MarginMode.CASH, new BigDecimal(triggerPrice), TriggerPriceType.LAST_PRICE,
+        false, List.of(), TimeInForce.GTC, false, null, null, null);
   }
 }

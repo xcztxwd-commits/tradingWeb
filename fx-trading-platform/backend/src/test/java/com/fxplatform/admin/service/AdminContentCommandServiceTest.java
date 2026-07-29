@@ -1,16 +1,18 @@
 package com.fxplatform.admin.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.admin.dto.request.AdminArticleRequest;
 import com.fxplatform.admin.dto.request.AdminMessageRequest;
 import com.fxplatform.audit.service.AuditLogService;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.content.entity.ContentArticleEntity;
-import com.fxplatform.content.entity.ContentMessageEntity;
 import com.fxplatform.content.repository.ContentArticleRepository;
 import com.fxplatform.content.repository.ContentMessageRepository;
 import java.util.Optional;
@@ -33,35 +35,33 @@ class AdminContentCommandServiceTest {
   private AuditLogService auditLogService;
 
   @Test
-  void createMessageStoresTargetedMessageAndAudits() {
-    UUID actorUserId = UUID.randomUUID();
-    UUID targetUserId = UUID.randomUUID();
-    AdminMessageRequest request = new AdminMessageRequest(
-        targetUserId,
-        "Margin reminder",
-        "Please review your margin level.",
-        "RISK_NOTICE",
-        "DRAFT");
-    when(messageRepository.save(org.mockito.ArgumentMatchers.any(ContentMessageEntity.class)))
-        .thenAnswer(invocation -> {
-          ContentMessageEntity message = invocation.getArgument(0);
-          message.setId(UUID.randomUUID());
-          return message;
-        });
+  void createLegacyMessageIsReadOnlyWithoutRepositoryOrAuditWrites() {
+    BusinessException failure = catchThrowableOfType(
+        () -> service().createMessage(UUID.randomUUID(), messageRequest()),
+        BusinessException.class);
 
-    AdminContentCommandService service = new AdminContentCommandService(messageRepository, articleRepository, auditLogService);
+    assertLegacyReadOnly(failure);
+    verifyNoInteractions(messageRepository, auditLogService);
+  }
 
-    var response = service.createMessage(actorUserId, request);
+  @Test
+  void updateLegacyMessageIsReadOnlyWithoutRepositoryOrAuditWrites() {
+    BusinessException failure = catchThrowableOfType(
+        () -> service().updateMessage(UUID.randomUUID(), UUID.randomUUID(), messageRequest()),
+        BusinessException.class);
 
-    assertThat(response.title()).isEqualTo("Margin reminder");
-    assertThat(response.targetUserId()).isEqualTo(targetUserId);
-    assertThat(response.status()).isEqualTo("DRAFT");
-    verify(auditLogService).record(
-        eq(actorUserId),
-        eq("ADMIN_MESSAGE_CREATE"),
-        eq("MESSAGE"),
-        eq(response.id().toString()),
-        contains("Margin reminder"));
+    assertLegacyReadOnly(failure);
+    verifyNoInteractions(messageRepository, auditLogService);
+  }
+
+  @Test
+  void deleteLegacyMessageIsReadOnlyWithoutRepositoryOrAuditWrites() {
+    BusinessException failure = catchThrowableOfType(
+        () -> service().deleteMessage(UUID.randomUUID(), UUID.randomUUID(), "legacy delete"),
+        BusinessException.class);
+
+    assertLegacyReadOnly(failure);
+    verifyNoInteractions(messageRepository, auditLogService);
   }
 
   @Test
@@ -82,7 +82,7 @@ class AdminContentCommandServiceTest {
           return article;
         });
 
-    AdminContentCommandService service = new AdminContentCommandService(messageRepository, articleRepository, auditLogService);
+    AdminContentCommandService service = new AdminContentCommandService(articleRepository, auditLogService);
 
     var response = service.createArticle(actorUserId, request);
 
@@ -110,7 +110,7 @@ class AdminContentCommandServiceTest {
     when(articleRepository.findById(articleId)).thenReturn(Optional.of(article));
     when(articleRepository.save(article)).thenReturn(article);
 
-    AdminContentCommandService service = new AdminContentCommandService(messageRepository, articleRepository, auditLogService);
+    AdminContentCommandService service = new AdminContentCommandService(articleRepository, auditLogService);
     var updated = service.updateArticle(actorUserId, articleId, new AdminArticleRequest(
         "NEWS",
         "Market update",
@@ -128,33 +128,21 @@ class AdminContentCommandServiceTest {
     verify(auditLogService).record(eq(actorUserId), eq("ADMIN_ARTICLE_DELETE"), eq("ARTICLE"), eq(articleId.toString()), contains("后台删除新闻"));
   }
 
-  @Test
-  void updatesAndDeletesMessageWithAuditTrail() {
-    UUID actorUserId = UUID.randomUUID();
-    UUID messageId = UUID.randomUUID();
-    UUID targetUserId = UUID.randomUUID();
-    ContentMessageEntity message = new ContentMessageEntity();
-    message.setId(messageId);
-    message.setTitle("Old message");
-    message.setBody("Old body");
-    message.setMessageType("SYSTEM");
-    message.setStatus("DRAFT");
-    when(messageRepository.findById(messageId)).thenReturn(Optional.of(message));
-    when(messageRepository.save(message)).thenReturn(message);
+  private AdminContentCommandService service() {
+    return new AdminContentCommandService(articleRepository, auditLogService);
+  }
 
-    AdminContentCommandService service = new AdminContentCommandService(messageRepository, articleRepository, auditLogService);
-    var updated = service.updateMessage(actorUserId, messageId, new AdminMessageRequest(
-        targetUserId,
-        "实名提醒",
-        "请完成实名",
+  private static AdminMessageRequest messageRequest() {
+    return new AdminMessageRequest(
+        UUID.randomUUID(),
+        "Legacy message",
+        "Legacy body",
         "SYSTEM",
-        "PUBLISHED"));
-    service.deleteMessage(actorUserId, messageId, "后台删除通知");
+        "DRAFT");
+  }
 
-    assertThat(updated.title()).isEqualTo("实名提醒");
-    assertThat(updated.targetUserId()).isEqualTo(targetUserId);
-    verify(messageRepository).deleteById(messageId);
-    verify(auditLogService).record(eq(actorUserId), eq("ADMIN_MESSAGE_UPDATE"), eq("MESSAGE"), eq(messageId.toString()), contains("实名提醒"));
-    verify(auditLogService).record(eq(actorUserId), eq("ADMIN_MESSAGE_DELETE"), eq("MESSAGE"), eq(messageId.toString()), contains("后台删除通知"));
+  private static void assertLegacyReadOnly(BusinessException failure) {
+    assertThat(failure).isNotNull();
+    assertThat(failure.getCode()).isEqualTo("LEGACY_MESSAGE_READ_ONLY");
   }
 }

@@ -86,7 +86,7 @@ describe('simplified liquidation disclaimer', () => {
     assert.match(source, /marginMode === 'ISOLATED'/)
     assert.match(source, /const actionControlsDisabled = disabled \|\| pending/)
     assert.match(source, /disabled=\{actionControlsDisabled\}/)
-    assert.match(source, /pending=\{pending\}/)
+    assert.match(source, /<Dialog[\s\S]*pending=\{pending\}/)
     assert.match(source, /role="alert"/)
   })
 })

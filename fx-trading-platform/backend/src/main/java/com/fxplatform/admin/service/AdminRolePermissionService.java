@@ -16,6 +16,7 @@ import com.fxplatform.audit.service.AuditLogService;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -29,6 +30,7 @@ public class AdminRolePermissionService {
   private final AuditLogService auditLogService;
 
   @Transactional
+  @PreAuthorize("hasAuthority('ROLE_ADMIN') and hasAuthority('SUPER_ADMIN')")
   public AdminRoleMenuPermissionResponse saveRoleMenuPermission(
       UUID actorUserId,
       UUID roleId,
@@ -49,6 +51,7 @@ public class AdminRolePermissionService {
   }
 
   @Transactional
+  @PreAuthorize("hasAuthority('ROLE_ADMIN') and hasAuthority('SUPER_ADMIN')")
   public AdminRoleDataScopeResponse saveDataScope(UUID actorUserId, UUID roleId, AdminRoleDataScopeRequest request) {
     AdminRbacServiceSupport.requireRole(roleRepository, roleId);
     AdminRoleDataScopeEntity scope = dataScopeRepository.findByRoleId(roleId)

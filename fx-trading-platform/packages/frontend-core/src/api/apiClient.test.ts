@@ -147,7 +147,7 @@ describe('api client error model', () => {
       return jsonResponse(200, { success: true, code: 'OK', message: 'OK', data: { ok: true } })
     }) as typeof fetch
 
-    await apiGet('/api/market/quotes/BTCUSDT', undefined, controller.signal)
+    await apiGet('/api/market/quotes/BTCUSDT', undefined, { signal: controller.signal })
 
     assert.equal(capturedSignal, controller.signal)
   })

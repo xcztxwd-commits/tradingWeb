@@ -1,0 +1,4 @@
+trading-lab:
+  report:
+    cleanup:
+      enabled: true

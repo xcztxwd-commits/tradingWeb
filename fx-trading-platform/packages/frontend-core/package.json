@@ -30,6 +30,10 @@
       "types": "./src/market/index.ts",
       "import": "./src/market/index.ts"
     },
+    "./engagement": {
+      "types": "./src/engagement/index.ts",
+      "import": "./src/engagement/index.ts"
+    },
     "./account": {
       "types": "./src/account/index.ts",
       "import": "./src/account/index.ts"

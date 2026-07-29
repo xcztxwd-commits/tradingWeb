@@ -5,6 +5,18 @@ app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:}
     allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:}
+  engagement:
+    assets:
+      storage: ${ENGAGEMENT_ASSET_STORAGE:disabled}
+      local-root: ${ENGAGEMENT_ASSET_LOCAL_ROOT:./var/engagement-assets}
+      max-bytes: ${ENGAGEMENT_ASSET_MAX_BYTES:5242880}
+    scheduler:
+      enabled: ${ENGAGEMENT_SCHEDULER_ENABLED:false}
+    retention:
+      enabled: ${ENGAGEMENT_RETENTION_ENABLED:false}
+      fixed-delay: ${ENGAGEMENT_RETENTION_FIXED_DELAY:PT24H}
+    outbox:
+      enabled: false
 
 admin:
   bootstrap:
@@ -15,6 +27,11 @@ admin:
 spring:
   application:
     name: fx-platform-backend
+
+  servlet:
+    multipart:
+      max-file-size: ${ENGAGEMENT_ASSET_HTTP_MAX_FILE_SIZE:5MB}
+      max-request-size: ${ENGAGEMENT_ASSET_HTTP_MAX_REQUEST_SIZE:6MB}
 
   datasource:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/fx_platform}
@@ -110,6 +127,12 @@ market:
 
 execution:
   mode: ${EXECUTION_MODE:disabled}
+  demo:
+    matching-mode: ${DEMO_MATCHING_MODE:SIMPLE}
+    maker-fee-rate: ${DEMO_MAKER_FEE_RATE:0.0002}
+    taker-fee-rate: ${DEMO_TAKER_FEE_RATE:0.0005}
+    liquidation-fee-rate: ${DEMO_LIQUIDATION_FEE_RATE:0.001}
+    slippage-rate: ${DEMO_SLIPPAGE_RATE:0.0001}
   broker:
     endpoint: ${EXECUTION_BROKER_ENDPOINT:}
     api-key: ${EXECUTION_BROKER_API_KEY:}
@@ -157,3 +180,15 @@ mybatis-plus:
   global-config:
     db-config:
       id-type: input
+
+trading-lab:
+  queue:
+    enabled: ${TRADING_LAB_QUEUE_ENABLED:false}
+  report:
+    chunk-bytes: ${TRADING_LAB_REPORT_CHUNK_BYTES:262144}
+    max-logical-value-bytes: ${TRADING_LAB_REPORT_MAX_LOGICAL_VALUE_BYTES:1048576}
+    max-active-writers: ${TRADING_LAB_REPORT_MAX_ACTIVE_WRITERS:1}
+    retention: ${TRADING_LAB_REPORT_RETENTION:P30D}
+    cleanup:
+      enabled: ${TRADING_LAB_REPORT_CLEANUP_ENABLED:false}
+      fixed-delay: ${TRADING_LAB_REPORT_CLEANUP_FIXED_DELAY:PT1H}

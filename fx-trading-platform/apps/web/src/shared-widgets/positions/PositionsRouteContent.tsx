@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
-import type { DataViewColumn } from '@fx-platform/ui'
+import { Dialog, type DataViewColumn } from '@fx-platform/ui'
 import type { PositionResponse } from '@fx-platform/frontend-core'
 
 import { ApiErrorState, LoadingState, LoginRequiredState } from '../data/PageState'
@@ -33,34 +33,9 @@ export function PositionsRouteContent({
 }) {
   const { t } = useTranslation()
   const closeDialogCancelButtonRef = useRef<HTMLButtonElement | null>(null)
-  const closeDialogTriggerRef = useRef<HTMLButtonElement | null>(null)
   const closeDialogIsBusy = model.pendingClosePosition
     ? model.busyPositionId === model.pendingClosePosition.id
     : false
-
-  const dismissCloseDialog = useCallback(() => {
-    model.dismissCloseDialog()
-    window.requestAnimationFrame(() => {
-      closeDialogTriggerRef.current?.focus()
-      closeDialogTriggerRef.current = null
-    })
-  }, [model])
-
-  useEffect(() => {
-    if (model.pendingClosePosition) closeDialogCancelButtonRef.current?.focus()
-  }, [model.pendingClosePosition])
-
-  useEffect(() => {
-    if (!model.pendingClosePosition) return
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !closeDialogIsBusy) {
-        event.preventDefault()
-        dismissCloseDialog()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [closeDialogIsBusy, dismissCloseDialog, model.pendingClosePosition])
 
   if (model.loginRequired) {
     return <section className={css(styles, "user-page")}><LoginRequiredState message={t('positions.loginMessage')} onLogin={model.openLogin} /></section>
@@ -93,10 +68,7 @@ export function PositionsRouteContent({
 
       {renderDataCollection<PositionResponse>({
         rows: model.visiblePositions,
-        columns: positionColumns(model, t, (position, trigger) => {
-          closeDialogTriggerRef.current = trigger
-          model.openCloseDialog(position)
-        }),
+        columns: positionColumns(model, t, model.openCloseDialog),
         rowKey: (position) => position.id,
         emptyMessage: model.view === 'CURRENT' ? t('positions.emptyCurrent') : t('positions.emptyHistory'),
         emptyAction: { label: t('dashboard.viewMarkets'), href: '/markets' }
@@ -104,16 +76,17 @@ export function PositionsRouteContent({
 
       {model.editingPosition ? <ProtectionForm model={model} /> : null}
       {model.pendingClosePosition ? (
-        <div
-          className={css(styles, "confirm-dialog")}
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('positions.closeConfirmDialog')}
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget && !closeDialogIsBusy) dismissCloseDialog()
-          }}
+        <Dialog
+          open
+          onClose={model.dismissCloseDialog}
+          ariaLabel={t('positions.closeConfirmDialog')}
+          closeLabel={t('common.cancel')}
+          pending={closeDialogIsBusy}
+          priority="critical"
+          initialFocusRef={closeDialogCancelButtonRef}
+          panelClassName={css(styles, "confirm-dialog__panel")}
         >
-          <div className={css(styles, "confirm-dialog__panel")}>
+          <div>
             <h2>{t('positions.closeConfirmTitle')}</h2>
             <p>{t('positions.closeConfirmBody')}</p>
             <dl className={css(styles, "confirm-dialog__details")}>
@@ -126,10 +99,10 @@ export function PositionsRouteContent({
             <p className={css(styles, "confirm-dialog__risk")}>{t('positions.closeRiskNotice')}</p>
             <div className={css(styles, "user-page__actions")}>
               <button type="button" className={css(styles, "table-action", "table-action--danger")} onClick={() => void model.closePosition(model.pendingClosePosition!)} disabled={closeDialogIsBusy}>{t('positions.closeConfirmTitle')}</button>
-              <button type="button" className={css(styles, "table-action", "table-action--secondary")} ref={closeDialogCancelButtonRef} onClick={dismissCloseDialog} disabled={closeDialogIsBusy}>{t('common.cancel')}</button>
+              <button type="button" className={css(styles, "table-action", "table-action--secondary")} ref={closeDialogCancelButtonRef} onClick={model.dismissCloseDialog} disabled={closeDialogIsBusy}>{t('common.cancel')}</button>
             </div>
           </div>
-        </div>
+        </Dialog>
       ) : null}
     </section>
   )
@@ -174,7 +147,7 @@ function ProtectionForm({ model }: { model: PositionsRouteModel }) {
 function positionColumns(
   model: PositionsRouteModel,
   t: TFunction,
-  openCloseDialog: (position: PositionResponse, trigger: HTMLButtonElement) => void
+  openCloseDialog: (position: PositionResponse) => void
 ): Array<DataViewColumn<PositionResponse>> {
   const columns: Array<DataViewColumn<PositionResponse>> = [
     { key: 'symbol', label: 'Symbol', sortable: true, render: (position) => <span className={css(styles, "asset-symbol-cell")}><AssetMark symbol={position.symbol} size="sm" /><strong>{position.symbol}</strong></span> },
@@ -198,7 +171,7 @@ function positionColumns(
       return (
         <div className={css(styles, "user-page__actions")} data-position-id={position.id} data-position-status={position.status}>
           <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => canonicalPath ? model.openProtectionWorkflow(position) : model.startProtectionEdit(position)} disabled={model.busyPositionId === position.id}>{canonicalPath ? t('positions.manageProtectionOrders') : 'TP/SL'}</button>
-          <button type="button" className={css(styles, "table-action", "table-action--danger")} onClick={(event) => openCloseDialog(position, event.currentTarget)} disabled={model.busyPositionId === position.id}>{t('positions.closePosition')}</button>
+          <button type="button" className={css(styles, "table-action", "table-action--danger")} onClick={() => openCloseDialog(position)} disabled={model.busyPositionId === position.id}>{t('positions.closePosition')}</button>
         </div>
       )
     }

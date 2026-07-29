@@ -6,8 +6,9 @@ import {
 import { friendlyApiErrorMessage } from '@fx-platform/shared-types'
 import type { ApiResponse } from '@fx-platform/shared-types'
 
-type RequestOptions = {
+export type ApiRequestOptions = {
   retryOnAuthFailure?: boolean
+  signal?: AbortSignal
 }
 
 type AuthRefreshResponse = {
@@ -52,11 +53,11 @@ export function parseApiErrorPayload(payload: unknown, status: number, requestId
   }
 }
 
-export async function apiGet<T>(path: string, token?: string, signal?: AbortSignal): Promise<T> {
-  return request<T>(path, { method: 'GET', signal }, token)
+export async function apiGet<T>(path: string, token?: string, options?: ApiRequestOptions): Promise<T> {
+  return request<T>(path, { method: 'GET' }, token, options)
 }
 
-export async function apiPost<T>(path: string, body: unknown, token?: string): Promise<T> {
+export async function apiPost<T>(path: string, body: unknown, token?: string, options?: ApiRequestOptions): Promise<T> {
   return request<T>(
     path,
     {
@@ -64,11 +65,12 @@ export async function apiPost<T>(path: string, body: unknown, token?: string): P
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     },
-    token
+    token,
+    options
   )
 }
 
-export async function apiPut<T>(path: string, body: unknown, token?: string): Promise<T> {
+export async function apiPut<T>(path: string, body: unknown, token?: string, options?: ApiRequestOptions): Promise<T> {
   return request<T>(
     path,
     {
@@ -76,11 +78,12 @@ export async function apiPut<T>(path: string, body: unknown, token?: string): Pr
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     },
-    token
+    token,
+    options
   )
 }
 
-export async function apiPatch<T>(path: string, body: unknown, token?: string): Promise<T> {
+export async function apiPatch<T>(path: string, body: unknown, token?: string, options?: ApiRequestOptions): Promise<T> {
   return request<T>(
     path,
     {
@@ -88,29 +91,31 @@ export async function apiPatch<T>(path: string, body: unknown, token?: string): 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     },
-    token
+    token,
+    options
   )
 }
 
-export async function apiDelete<T>(path: string, token?: string): Promise<T> {
-  return request<T>(path, { method: 'DELETE' }, token)
+export async function apiDelete<T>(path: string, token?: string, options?: ApiRequestOptions): Promise<T> {
+  return request<T>(path, { method: 'DELETE' }, token, options)
 }
 
-async function request<T>(path: string, init: RequestInit, token?: string, options: RequestOptions = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit, token?: string, options: ApiRequestOptions = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers
+    headers,
+    signal: options.signal
   })
   const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null
   const requestId = response.headers.get('X-Request-Id') ?? payload?.requestId
   if (response.status === 401 && options.retryOnAuthFailure !== false) {
-    const refreshedToken = await refreshStoredAuthSession()
+    const refreshedToken = await refreshStoredAuthSession(options.signal)
     if (refreshedToken) {
-      return request<T>(path, init, refreshedToken, { retryOnAuthFailure: false })
+      return request<T>(path, init, refreshedToken, { ...options, retryOnAuthFailure: false })
     }
   }
   if (!response.ok || !payload?.success) {
@@ -119,7 +124,7 @@ async function request<T>(path: string, init: RequestInit, token?: string, optio
   return payload.data
 }
 
-async function refreshStoredAuthSession() {
+async function refreshStoredAuthSession(signal?: AbortSignal) {
   const refreshToken = readStoredRefreshToken()
   if (!refreshToken) return null
   try {
@@ -131,11 +136,12 @@ async function refreshStoredAuthSession() {
         body: JSON.stringify({ refreshToken })
       },
       undefined,
-      { retryOnAuthFailure: false }
+      { retryOnAuthFailure: false, signal }
     )
     writeStoredAuthTokens(auth.accessToken, auth.refreshToken)
     return auth.accessToken
-  } catch {
+  } catch (error) {
+    if (signal?.aborted) throw signal.reason ?? error
     clearStoredAuthToken()
     return null
   }

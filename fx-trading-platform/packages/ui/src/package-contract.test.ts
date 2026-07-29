@@ -37,5 +37,7 @@ describe('@fx-platform/ui package contract', () => {
     assert.match(indexSource, /export \* from '\.\/theme'/u)
     assert.match(indexSource, /export \* from '\.\/select-field\/SelectField'/u)
     assert.match(indexSource, /export \* from '\.\/icon-button\/IconButton'/u)
+    assert.match(indexSource, /getCriticalDialogOpen/u)
+    assert.match(indexSource, /subscribeDialogOverlay/u)
   })
 })

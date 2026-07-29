@@ -12,9 +12,11 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.enums.AccountStatus;
 import com.fxplatform.account.enums.AccountType;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.execution.ExecutableMarketSnapshot;
 import com.fxplatform.execution.FullFillCoordinator;
+import com.fxplatform.execution.FullFillExecutionPath;
 import com.fxplatform.execution.FullFillRequest;
 import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.market.model.MarketSourceMode;
@@ -40,13 +42,18 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @ExtendWith(MockitoExtension.class)
@@ -64,8 +71,10 @@ class PendingOrderExecutionProcessorTest {
   @Mock private TradingTransactionExecutor transactionExecutor;
 
   @BeforeEach
-  void inlineRequiresNewExecutor() {
+  void inlineTransactionExecutors() {
     org.mockito.Mockito.lenient().when(transactionExecutor.execute(any()))
+        .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
+    org.mockito.Mockito.lenient().when(transactionExecutor.executeJoined(any()))
         .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(0)).get());
   }
 
@@ -106,7 +115,16 @@ class PendingOrderExecutionProcessorTest {
     locks.verify(orderRepository).findByContingencyGroupIdForUpdate(groupId);
     verify(orderRepository).claimPending(winner.getId());
     verify(orderFillService).fill(
-        winner, owner, account, fill, owner.getHoldAmount(), "Pending OCO order hold");
+        winner, owner, account, fill, new BigDecimal("5203.12026000"),
+        "Pending OCO order hold");
+    verify(walletService).lockAvailableWithEntryType(
+        accountId,
+        "USDT",
+        new BigDecimal("100.06000500"),
+        "ORDER_TRIGGER",
+        ownerId,
+        "Pending Spot BUY trigger hold increased",
+        "SPOT_ORDER_LOCK");
     ArgumentCaptor<FullFillRequest> request = ArgumentCaptor.forClass(FullFillRequest.class);
     verify(fullFillCoordinator).execute(request.capture(), eq(snapshot));
     assertThat(request.getValue().executionIntent().quantityUnit()).isEqualTo(QuantityUnit.BASE);
@@ -126,19 +144,27 @@ class PendingOrderExecutionProcessorTest {
     when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
     when(orderRepository.findByContingencyGroupIdForUpdate(groupId)).thenReturn(List.of(owner, candidate));
 
-    assertThatThrownBy(() -> processor().process(candidate, snapshot("52000")))
+    assertThatThrownBy(() -> processor().processStrict(candidate, snapshot("52000")))
         .isInstanceOfSatisfying(com.fxplatform.common.exception.BusinessException.class,
             exception -> assertThat(exception.getCode()).isEqualTo("OCO_GROUP_INCOMPLETE"));
+    verify(transactionExecutor).executeJoined(any());
+    verify(transactionExecutor, never()).execute(any());
     verify(orderRepository, never()).claimPending(any());
     verify(fullFillCoordinator, never()).execute(any(), any());
     verify(orderFillService, never()).fill(any(), any(), any(), any(FullFillResult.class), any(), any());
   }
 
   @Test
-  void processorDeclaresNoTransactionBoundaryOfItsOwn() {
+  void strictProcessorRequiresTheOwningTransactionWithoutChangingTheWorkerEntry() throws Exception {
     assertThat(PendingOrderExecutionProcessor.class.getAnnotation(Transactional.class)).isNull();
-    assertThat(List.of(PendingOrderExecutionProcessor.class.getDeclaredMethods()))
-        .allSatisfy(method -> assertThat(method.getAnnotation(Transactional.class)).isNull());
+    assertThat(PendingOrderExecutionProcessor.class
+        .getMethod("process", OrderEntity.class, ExecutableMarketSnapshot.class)
+        .getAnnotation(Transactional.class)).isNull();
+    Transactional strict = PendingOrderExecutionProcessor.class
+        .getMethod("processStrict", OrderEntity.class, ExecutableMarketSnapshot.class)
+        .getAnnotation(Transactional.class);
+    assertThat(strict).isNotNull();
+    assertThat(strict.propagation()).isEqualTo(Propagation.MANDATORY);
   }
 
   @Test
@@ -207,7 +233,8 @@ class PendingOrderExecutionProcessorTest {
     when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
     org.mockito.Mockito.doThrow(new IllegalStateException("injected settlement failure"))
         .when(orderFillService).fill(
-            winner, owner, account, fill, owner.getHoldAmount(), "Pending OCO order hold");
+            winner, owner, account, fill, new BigDecimal("5203.12026000"),
+            "Pending OCO order hold");
 
     assertThatThrownBy(() -> processor().process(winner, snapshot))
         .isInstanceOf(IllegalStateException.class)
@@ -274,6 +301,169 @@ class PendingOrderExecutionProcessorTest {
         any(), any(), any(), any(FullFillResult.class), any(), any());
   }
 
+  @ParameterizedTest(name = "{0}: last={1}, hold={2}, fill={3}, fee-inclusive topUp={4}")
+  @CsvSource({
+      "exact,51000,5100.00000000,51000,2.55000000",
+      "cross,52000,5100.00000000,52000,102.60000000",
+      "gap,60000,5100.00000000,60000,903.00000000"
+  })
+  void buyStopMarketLocksActualQuoteSpendAndUsdtFeeBeforeClaimAndFill(
+      String scenario,
+      String last,
+      String initialHold,
+      String fillPrice,
+      String expectedTopUp
+  ) {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = ordinaryBuyStopMarket(accountId, initialHold);
+    TradingAccountEntity account = account(accountId);
+    ExecutableMarketSnapshot snapshot = snapshot(last);
+    FullFillResult fill = fill("0.1", fillPrice);
+    BigDecimal topUp = new BigDecimal(expectedTopUp);
+    BigDecimal expectedHold = new BigDecimal(initialHold).add(topUp).setScale(8);
+
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(fullFillCoordinator.execute(any(FullFillRequest.class), eq(snapshot))).thenReturn(fill);
+    when(orderRepository.claimPending(candidate.getId())).thenReturn(1);
+
+    assertThat(processor().process(candidate, snapshot))
+        .as(scenario)
+        .isTrue();
+
+    if (topUp.signum() == 0) {
+      verify(walletService, never()).lockAvailableWithEntryType(
+          any(), any(), any(), any(), any(), any(), any(String.class));
+    } else {
+      verify(walletService).lockAvailableWithEntryType(
+          eq(accountId),
+          eq("USDT"),
+          eq(topUp),
+          eq("ORDER_TRIGGER"),
+          eq(candidate.getId()),
+          any(String.class),
+          eq("SPOT_ORDER_LOCK"));
+      org.mockito.InOrder topUpBeforeClaim = org.mockito.Mockito.inOrder(
+          fullFillCoordinator, walletService, orderRepository);
+      topUpBeforeClaim.verify(fullFillCoordinator).requireFresh(fill);
+      topUpBeforeClaim.verify(walletService).lockAvailableWithEntryType(
+          eq(accountId),
+          eq("USDT"),
+          eq(topUp),
+          eq("ORDER_TRIGGER"),
+          eq(candidate.getId()),
+          any(String.class),
+          eq("SPOT_ORDER_LOCK"));
+      topUpBeforeClaim.verify(orderRepository).claimPending(candidate.getId());
+    }
+    assertThat(candidate.getHoldAmount()).isEqualByComparingTo(expectedHold);
+    verify(orderFillService).fill(
+        candidate, candidate, account, fill, expectedHold, "Pending order hold");
+  }
+
+  @Test
+  void insufficientBuyStopMarketTopUpLeavesOrderAndHoldUntouchedBeforeClaim() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = ordinaryBuyStopMarket(accountId, "5100.00000000");
+    TradingAccountEntity account = account(accountId);
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    FullFillResult fill = fill("0.1", "52000");
+    BusinessException insufficient = new BusinessException(
+        "INSUFFICIENT_BALANCE",
+        "Available balance is insufficient for the trigger gap");
+
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(fullFillCoordinator.execute(any(FullFillRequest.class), eq(snapshot))).thenReturn(fill);
+    org.mockito.Mockito.doThrow(insufficient).when(walletService).lockAvailableWithEntryType(
+        accountId,
+        "USDT",
+        new BigDecimal("102.60000000"),
+        "ORDER_TRIGGER",
+        candidate.getId(),
+        "Pending Spot BUY trigger hold increased",
+        "SPOT_ORDER_LOCK");
+
+    assertThatThrownBy(() -> processor().process(candidate, snapshot))
+        .isSameAs(insufficient);
+
+    assertThat(candidate.getStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(candidate.getHoldAmount()).isEqualByComparingTo("5100.00000000");
+    verify(orderRepository, never()).claimPending(any());
+    verify(orderRepository, never()).save(any());
+    verify(orderFillService, never()).fill(
+        any(), any(), any(), any(FullFillResult.class), any(), any());
+    verify(orderEventService, never()).record(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void claimLossAfterBuyStopMarketTopUpRollsBackWalletLedgerAndOwnerHold() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = ordinaryBuyStopMarket(accountId, "5100.00000000");
+    TradingAccountEntity account = account(accountId);
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    FullFillResult fill = fill("0.1", "52000");
+    AtomicReference<BigDecimal> available = new AtomicReference<>(
+        new BigDecimal("1000.00000000"));
+    AtomicReference<BigDecimal> locked = new AtomicReference<>(
+        new BigDecimal("5100.00000000"));
+    AtomicInteger triggerLedgerEntries = new AtomicInteger();
+
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(fullFillCoordinator.execute(any(FullFillRequest.class), eq(snapshot))).thenReturn(fill);
+    when(orderRepository.claimPending(candidate.getId())).thenReturn(0);
+    org.mockito.Mockito.doAnswer(invocation -> {
+      BigDecimal amount = invocation.getArgument(2);
+      available.set(available.get().subtract(amount));
+      locked.set(locked.get().add(amount));
+      triggerLedgerEntries.incrementAndGet();
+      return null;
+    }).when(walletService).lockAvailableWithEntryType(
+        accountId,
+        "USDT",
+        new BigDecimal("102.60000000"),
+        "ORDER_TRIGGER",
+        candidate.getId(),
+        "Pending Spot BUY trigger hold increased",
+        "SPOT_ORDER_LOCK");
+    org.mockito.Mockito.doAnswer(invocation -> {
+      BigDecimal availableBefore = available.get();
+      BigDecimal lockedBefore = locked.get();
+      int ledgerBefore = triggerLedgerEntries.get();
+      BigDecimal holdBefore = candidate.getHoldAmount();
+      try {
+        return ((Supplier<?>) invocation.getArgument(0)).get();
+      } catch (RuntimeException exception) {
+        available.set(availableBefore);
+        locked.set(lockedBefore);
+        triggerLedgerEntries.set(ledgerBefore);
+        candidate.setHoldAmount(holdBefore);
+        throw exception;
+      }
+    }).when(transactionExecutor).execute(any());
+
+    assertThat(processor().process(candidate, snapshot)).isFalse();
+
+    assertThat(available.get()).isEqualByComparingTo("1000.00000000");
+    assertThat(locked.get()).isEqualByComparingTo("5100.00000000");
+    assertThat(triggerLedgerEntries).hasValue(0);
+    assertThat(candidate.getStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(candidate.getHoldAmount()).isEqualByComparingTo("5100.00000000");
+    verify(walletService).lockAvailableWithEntryType(
+        accountId,
+        "USDT",
+        new BigDecimal("102.60000000"),
+        "ORDER_TRIGGER",
+        candidate.getId(),
+        "Pending Spot BUY trigger hold increased",
+        "SPOT_ORDER_LOCK");
+    verify(orderRepository, never()).save(any());
+    verify(orderFillService, never()).fill(
+        any(), any(), any(), any(FullFillResult.class), any(), any());
+    verify(orderEventService, never()).record(any(), any(), any(), any(), any(), any());
+  }
+
   @Test
   void lockedAccountUserMustMatchCandidateAndLockedGroupBeforePricing() {
     UUID accountId = UUID.randomUUID();
@@ -298,6 +488,319 @@ class PendingOrderExecutionProcessorTest {
     verify(orderRepository, never()).findByContingencyGroupIdForUpdate(any());
     verify(fullFillCoordinator, never()).execute(any(), any());
     verify(orderRepository, never()).claimPending(any());
+  }
+
+  @Test
+  void triggeredRestingSpotStopLimitActivatesOnceWithoutFill() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "51990", "52000");
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(orderRepository.activateStopLimitPending(candidate.getId())).thenReturn(1);
+
+    assertThat(processor().process(candidate, snapshot)).isFalse();
+
+    assertThat(candidate.getStatus()).isEqualTo(OrderStatus.PENDING);
+    verify(orderRepository).activateStopLimitPending(candidate.getId());
+    verify(orderEventService).record(
+        candidate.getId(), "ORDER_TRIGGERED", OrderStatus.PENDING_ACTIVATION,
+        OrderStatus.PENDING, null, "Spot STOP_LIMIT activated and resting");
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderFillService, never()).fill(
+        any(), any(), any(), any(FullFillResult.class), any(), any());
+  }
+
+  @Test
+  void scanActivationStatusDriftCannotExecuteLockedRestingStopLimitWithOldSnapshot() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity scanned = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "52000", "52000");
+    OrderEntity locked = stopLimit(
+        accountId, OrderStatus.PENDING, OrderSide.BUY, "52000", "52000");
+    locked.setId(scanned.getId());
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(orderRepository.findByIdForUpdate(scanned.getId())).thenReturn(Optional.of(locked));
+
+    assertThat(processor().process(scanned, snapshot)).isFalse();
+
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderRepository, never()).claimPending(any());
+    verify(orderRepository, never()).activateStopLimitPending(any());
+    verify(orderRepository, never()).activateStopLimitWorking(any());
+    verify(orderFillService, never()).fill(
+        any(), any(), any(), any(FullFillResult.class), any(), any());
+    verify(orderEventService, never()).record(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void sameStatusStopLimitModificationCannotUseSnapshotForScannedExecutionContract() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity scanned = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "51990", "52000");
+    OrderEntity locked = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "52000", "52000");
+    locked.setId(scanned.getId());
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(orderRepository.findByIdForUpdate(scanned.getId())).thenReturn(Optional.of(locked));
+
+    assertThat(processor().process(scanned, snapshot)).isFalse();
+
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderRepository, never()).claimPending(any());
+    verify(orderRepository, never()).activateStopLimitPending(any());
+    verify(orderRepository, never()).activateStopLimitWorking(any());
+    verify(orderFillService, never()).fill(
+        any(), any(), any(), any(FullFillResult.class), any(), any());
+    verify(orderEventService, never()).record(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void triggeredMarketableSpotStopLimitUsesLimitIntentAndImmediateTakerPath() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "52000", "52000");
+    TradingAccountEntity account = account(accountId);
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    FullFillResult fill = fill("0.1", "52000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(fullFillCoordinator.execute(any(FullFillRequest.class), eq(snapshot))).thenReturn(fill);
+    when(orderRepository.activateStopLimitWorking(candidate.getId())).thenReturn(1);
+
+    assertThat(processor().process(candidate, snapshot)).isTrue();
+
+    ArgumentCaptor<FullFillRequest> request = ArgumentCaptor.forClass(FullFillRequest.class);
+    verify(fullFillCoordinator).execute(request.capture(), eq(snapshot));
+    assertThat(request.getValue().executionPath()).isEqualTo(FullFillExecutionPath.IMMEDIATE_LIMIT);
+    assertThat(request.getValue().executionIntent().orderType()).isEqualTo(OrderType.LIMIT);
+    assertThat(request.getValue().limitPrice()).isEqualByComparingTo("52000");
+    assertThat(candidate.getOrderType()).isEqualTo(OrderType.STOP_LIMIT);
+    verify(orderRepository).activateStopLimitWorking(candidate.getId());
+    verify(orderEventService).record(
+        candidate.getId(), "ORDER_TRIGGERED", OrderStatus.PENDING_ACTIVATION,
+        OrderStatus.WORKING, null, "Spot STOP_LIMIT activated for immediate execution");
+    verify(orderFillService).fill(
+        candidate, candidate, account, fill, candidate.getHoldAmount(),
+        "Pending order hold");
+  }
+
+  @Test
+  void sellStopLimitTriggersAndTakesWhenLastAndBidEqualItsBoundaries() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.SELL, "51990", "52000");
+    TradingAccountEntity account = account(accountId);
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    FullFillResult fill = fill("0.1", "51990");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(fullFillCoordinator.execute(any(FullFillRequest.class), eq(snapshot))).thenReturn(fill);
+    when(orderRepository.activateStopLimitWorking(candidate.getId())).thenReturn(1);
+
+    assertThat(processor().process(candidate, snapshot)).isTrue();
+
+    ArgumentCaptor<FullFillRequest> request = ArgumentCaptor.forClass(FullFillRequest.class);
+    verify(fullFillCoordinator).execute(request.capture(), eq(snapshot));
+    assertThat(request.getValue().executionPath()).isEqualTo(FullFillExecutionPath.IMMEDIATE_LIMIT);
+    assertThat(request.getValue().executionIntent().orderType()).isEqualTo(OrderType.LIMIT);
+    assertThat(request.getValue().limitPrice()).isEqualByComparingTo("51990");
+    verify(orderRepository).activateStopLimitWorking(candidate.getId());
+    verify(orderFillService).fill(
+        candidate, candidate, account, fill, candidate.getHoldAmount(), "Pending order hold");
+  }
+
+  @Test
+  void sellStopLimitAtTriggerRestsWhenLimitIsAboveBid() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.SELL, "52000", "52000");
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(orderRepository.activateStopLimitPending(candidate.getId())).thenReturn(1);
+
+    assertThat(processor().process(candidate, snapshot)).isFalse();
+
+    assertThat(candidate.getStatus()).isEqualTo(OrderStatus.PENDING);
+    verify(orderRepository).activateStopLimitPending(candidate.getId());
+    verify(fullFillCoordinator).requireFresh(snapshot);
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderFillService, never()).fill(
+        any(), any(), any(), any(FullFillResult.class), any(), any());
+  }
+
+  @Test
+  void activatedSpotStopLimitLaterFillsAsRestingMakerIntent() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING, OrderSide.BUY, "52000", "52000");
+    TradingAccountEntity account = account(accountId);
+    ExecutableMarketSnapshot snapshot = snapshot("53000");
+    FullFillResult fill = fill("0.1", "52000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(fullFillCoordinator.execute(any(FullFillRequest.class), eq(snapshot))).thenReturn(fill);
+    when(orderRepository.claimPending(candidate.getId())).thenReturn(1);
+
+    assertThat(processor().process(candidate, snapshot)).isTrue();
+
+    ArgumentCaptor<FullFillRequest> request = ArgumentCaptor.forClass(FullFillRequest.class);
+    verify(fullFillCoordinator).execute(request.capture(), eq(snapshot));
+    assertThat(request.getValue().executionPath()).isEqualTo(FullFillExecutionPath.RESTING_LIMIT);
+    assertThat(request.getValue().executionIntent().orderType()).isEqualTo(OrderType.LIMIT);
+    verify(orderRepository).claimPending(candidate.getId());
+    verify(orderEventService, never()).record(
+        eq(candidate.getId()), eq("ORDER_TRIGGERED"), any(), any(), any(), any());
+    verify(orderFillService).fill(
+        candidate, candidate, account, fill, candidate.getHoldAmount(), "Pending order hold");
+  }
+
+  @Test
+  void restingStopLimitActivationCasLossLeavesActivationStateWithoutEventOrFill() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "51990", "52000");
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(orderRepository.activateStopLimitPending(candidate.getId())).thenReturn(0);
+
+    assertThat(processor().process(candidate, snapshot)).isFalse();
+
+    assertThat(candidate.getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    verify(orderRepository).activateStopLimitPending(candidate.getId());
+    verify(orderEventService, never()).record(any(), any(), any(), any(), any(), any());
+    verify(orderFillService, never()).fill(
+        any(), any(), any(), any(FullFillResult.class), any(), any());
+  }
+
+  @Test
+  void immediateStopLimitActivationCasLossNeverFillsTheLosingWorker() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "52000", "52000");
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(fullFillCoordinator.execute(any(FullFillRequest.class), eq(snapshot)))
+        .thenReturn(fill("0.1", "52000"));
+    when(orderRepository.activateStopLimitWorking(candidate.getId())).thenReturn(0);
+
+    assertThat(processor().process(candidate, snapshot)).isFalse();
+
+    assertThat(candidate.getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    verify(orderRepository).activateStopLimitWorking(candidate.getId());
+    verify(orderEventService, never()).record(any(), any(), any(), any(), any(), any());
+    verify(orderFillService, never()).fill(
+        any(), any(), any(), any(FullFillResult.class), any(), any());
+  }
+
+  @Test
+  void activatedStopLimitFillClaimLossNeverFillsTheLosingWorker() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING, OrderSide.BUY, "52000", "52000");
+    ExecutableMarketSnapshot snapshot = snapshot("53000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(fullFillCoordinator.execute(any(FullFillRequest.class), eq(snapshot)))
+        .thenReturn(fill("0.1", "52000"));
+    when(orderRepository.claimPending(candidate.getId())).thenReturn(0);
+
+    assertThat(processor().process(candidate, snapshot)).isFalse();
+
+    assertThat(candidate.getStatus()).isEqualTo(OrderStatus.PENDING);
+    verify(orderRepository).claimPending(candidate.getId());
+    verify(orderFillService, never()).fill(
+        any(), any(), any(), any(FullFillResult.class), any(), any());
+  }
+
+  @Test
+  void immediateSpotStopLimitFillFailureRestoresActualActivationSourceState() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "52000", "52000");
+    TradingAccountEntity account = account(accountId);
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    FullFillResult fill = fill("0.1", "52000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    when(fullFillCoordinator.execute(any(FullFillRequest.class), eq(snapshot))).thenReturn(fill);
+    when(orderRepository.activateStopLimitWorking(candidate.getId())).thenReturn(1);
+    org.mockito.Mockito.doThrow(new IllegalStateException("fill persistence failed"))
+        .when(orderFillService).fill(
+            candidate, candidate, account, fill, candidate.getHoldAmount(), "Pending order hold");
+
+    assertThatThrownBy(() -> processor().process(candidate, snapshot))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("fill persistence failed");
+
+    assertThat(candidate.getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    verify(orderRepository).activateStopLimitWorking(candidate.getId());
+  }
+
+  @Test
+  void untriggeredSpotStopLimitLeavesActivationStateWithoutClaimPricingOrEvent() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "52000", "52000");
+    ExecutableMarketSnapshot snapshot = snapshot("51999");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+
+    assertThat(processor().process(candidate, snapshot)).isFalse();
+
+    assertThat(candidate.getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    assertThat(candidate.getHoldAmount()).isEqualByComparingTo("5202.60000000");
+    verify(orderRepository, never()).activateStopLimitPending(any());
+    verify(orderRepository, never()).activateStopLimitWorking(any());
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderEventService, never()).record(any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void staleRestingActivationSnapshotLeavesStopLimitAndHoldUntouched() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "51990", "52000");
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    BusinessException stale = new BusinessException("MARKET_DATA_STALE", "activation expired");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+    org.mockito.Mockito.doThrow(stale).when(fullFillCoordinator).requireFresh(snapshot);
+
+    assertThatThrownBy(() -> processor().process(candidate, snapshot)).isSameAs(stale);
+
+    assertThat(candidate.getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    assertThat(candidate.getHoldAmount()).isEqualByComparingTo("5202.60000000");
+    verify(orderRepository, never()).activateStopLimitPending(any());
+    verify(orderEventService, never()).record(any(), any(), any(), any(), any(), any());
+    verify(orderFillService, never()).fill(
+        any(), any(), any(), any(FullFillResult.class), any(), any());
+  }
+
+  @Test
+  void protectiveStopLimitCannotEnterTheUserActivationStateMachine() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity candidate = stopLimit(
+        accountId, OrderStatus.PENDING_ACTIVATION, OrderSide.BUY, "52000", "52000");
+    candidate.setOrderOrigin(OrderOrigin.PROTECTIVE);
+    candidate.setProtectionType(com.fxplatform.trading.enums.ProtectionType.STOP_LOSS);
+    candidate.setParentPositionId(UUID.randomUUID());
+    ExecutableMarketSnapshot snapshot = snapshot("52000");
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(orderRepository.findByIdForUpdate(candidate.getId())).thenReturn(Optional.of(candidate));
+
+    assertThat(processor().process(candidate, snapshot)).isFalse();
+
+    verify(orderRepository, never()).activateStopLimitPending(any());
+    verify(orderRepository, never()).activateStopLimitWorking(any());
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderEventService, never()).record(any(), any(), any(), any(), any(), any());
   }
 
   private PendingOrderExecutionProcessor processor() {
@@ -342,6 +845,36 @@ class PendingOrderExecutionProcessorTest {
     return order;
   }
 
+  private static OrderEntity ordinaryBuyStopMarket(UUID accountId, String holdAmount) {
+    OrderEntity order = leg(accountId, null, null, OrderType.STOP_MARKET);
+    order.setOrderOrigin(OrderOrigin.USER);
+    order.setHoldOwnerOrderId(null);
+    order.setHoldAmount(new BigDecimal(holdAmount));
+    return order;
+  }
+
+  private static OrderEntity stopLimit(
+      UUID accountId,
+      OrderStatus status,
+      OrderSide side,
+      String price,
+      String trigger
+  ) {
+    OrderEntity order = leg(accountId, null, null, OrderType.LIMIT);
+    order.setOrderType(OrderType.STOP_LIMIT);
+    order.setOrderOrigin(OrderOrigin.USER);
+    order.setSide(side);
+    order.setStatus(status);
+    order.setPrice(new BigDecimal(price));
+    order.setRequestedPrice(new BigDecimal(price));
+    order.setTriggerPrice(new BigDecimal(trigger));
+    order.setTriggerPriceType(TriggerPriceType.LAST_PRICE);
+    order.setTriggerExecutionType(TriggerExecutionType.LIMIT);
+    order.setHoldOwnerOrderId(null);
+    order.setHoldAmount(new BigDecimal("5202.60000000"));
+    return order;
+  }
+
   private static TradingAccountEntity account(UUID accountId) {
     TradingAccountEntity account = new TradingAccountEntity();
     account.setId(accountId);
@@ -362,9 +895,14 @@ class PendingOrderExecutionProcessorTest {
 
   private static FullFillResult fill(String quantity, String price) {
     Instant now = Instant.now();
+    BigDecimal filledQuantity = new BigDecimal(quantity);
+    BigDecimal filledPrice = new BigDecimal(price);
+    BigDecimal fee = filledQuantity.multiply(filledPrice)
+        .multiply(new BigDecimal("0.0005"))
+        .setScale(8, java.math.RoundingMode.HALF_UP);
     return new FullFillResult(
-        new BigDecimal(price), now, new BigDecimal(quantity), BigDecimal.ZERO,
-        new BigDecimal("0.0005"), new BigDecimal("0.00005"), "BTC",
+        filledPrice, now, filledQuantity, BigDecimal.ZERO,
+        new BigDecimal("0.0005"), fee, "USDT",
         LiquidityRole.TAKER, new BigDecimal("5.2"), MarketSourceMode.PUBLIC_EXTERNAL,
         "binance", "BTCUSDT", now.minusSeconds(1), now.plusSeconds(30));
   }

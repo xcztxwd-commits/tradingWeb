@@ -47,8 +47,8 @@ class OrderResponseMapperTest {
     order.setTimeInForce(TimeInForce.GTC);
     order.setReduceOnly(false);
     order.setOrderOrigin(OrderOrigin.OCO);
-    order.setFee(new BigDecimal("0.00000095"));
-    order.setFeeAsset("BTC");
+    order.setFee(new BigDecimal("0.05006173"));
+    order.setFeeAsset("USDT");
     order.setLiquidityRole(LiquidityRole.TAKER);
     order.setTriggerPrice(new BigDecimal("51000"));
     order.setTriggerPriceType(TriggerPriceType.LAST_PRICE);
@@ -71,7 +71,7 @@ class OrderResponseMapperTest {
     assertThat(response.timeInForce()).isEqualTo(TimeInForce.GTC);
     assertThat(response.reduceOnly()).isFalse();
     assertThat(response.origin()).isEqualTo(OrderOrigin.OCO);
-    assertThat(response.feeAsset()).isEqualTo("BTC");
+    assertThat(response.feeAsset()).isEqualTo("USDT");
     assertThat(response.liquidityRole()).isEqualTo(LiquidityRole.TAKER);
     assertThat(response.triggerPrice()).isEqualByComparingTo("51000");
     assertThat(response.triggerPriceType()).isEqualTo(TriggerPriceType.LAST_PRICE);

@@ -44,6 +44,8 @@ describe('wallet Spot and Perpetual operations', () => {
     }
     assert.match(transfer, /import \{ Dialog \} from '@fx-platform\/ui'/)
     assert.match(transfer, /pending=\{pending\}/)
+    assert.match(transfer, /priority="critical"/)
+    assert.match(reset, /priority="critical"/)
     assert.match(reset, /aria-busy=\{pending\}/)
     assert.match(reset, /requestId: string/)
     assert.match(reset, /onConfirm:/)

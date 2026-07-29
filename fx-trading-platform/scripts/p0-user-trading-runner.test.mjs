@@ -9865,7 +9865,7 @@ test('managed preflight runs exact gates invocation scoped IT and owned OpenAPI 
     status: 'PASS',
     invocationStartedAt,
     gates: 12,
-    itClasses: 14,
+    itClasses: 15,
     guardClasses: 6
   })
   assert.deepEqual(commands.map(({ id }) => id), [
@@ -9903,7 +9903,8 @@ test('managed preflight runs exact gates invocation scoped IT and owned OpenAPI 
     'DemoTradingConcurrencyIT',
     'PerpetualPositionConcurrencyIT',
     'ProtectionOrderConcurrencyIT',
-    'FundingLiquidationConcurrencyIT'
+    'FundingLiquidationConcurrencyIT',
+    'DepthPendingExecutionPostgresIT'
   ]
   const itCommand = commands.find(({ id }) => id === 'database-concurrency-it')
   assert.deepEqual(itCommand.args, [
@@ -11904,7 +11905,8 @@ test('typed P0 gate evidence round-trips verdict modes timestamps and backend cl
     'DemoTradingConcurrencyIT',
     'PerpetualPositionConcurrencyIT',
     'ProtectionOrderConcurrencyIT',
-    'FundingLiquidationConcurrencyIT'
+    'FundingLiquidationConcurrencyIT',
+    'DepthPendingExecutionPostgresIT'
   ]
   const invocationStartedAt = '2026-07-15T00:00:00.000Z'
   const suites = expectedClasses.map((className, index) => ({
@@ -17310,6 +17312,40 @@ test('Surefire parser accepts one fresh exact suite for every requested class', 
     'Task5PostgresFullFillIT'
   ])
   assert.deepEqual(parsed.totals, { tests: 3, skipped: 0, failures: 0, errors: 0 })
+})
+
+test('Surefire parser requires all four DEPTH pending PostgreSQL boundary scenarios', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-surefire-depth-pending-count-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const startedAt = new Date(Date.now() - 5_000)
+  const incompleteDirectory = join(root, 'three-of-four')
+  writeSurefireSuite(incompleteDirectory, 'TEST-depth-pending.xml', {
+    name: 'com.fxplatform.trading.service.DepthPendingExecutionPostgresIT',
+    tests: 3
+  })
+
+  assert.throws(
+    () => parseSurefireReports(
+      incompleteDirectory,
+      ['DepthPendingExecutionPostgresIT'],
+      startedAt
+    ),
+    /^Error: SUREFIRE_INVALID_SUITE: DepthPendingExecutionPostgresIT$/
+  )
+
+  const completeDirectory = join(root, 'four-of-four')
+  writeSurefireSuite(completeDirectory, 'TEST-depth-pending.xml', {
+    name: 'com.fxplatform.trading.service.DepthPendingExecutionPostgresIT',
+    tests: 4
+  })
+  const parsed = parseSurefireReports(
+    completeDirectory,
+    ['DepthPendingExecutionPostgresIT'],
+    startedAt
+  )
+
+  assert.equal(parsed.status, 'PASS')
+  assert.deepEqual(parsed.totals, { tests: 4, skipped: 0, failures: 0, errors: 0 })
 })
 
 test('Surefire parser rejects missing, duplicate and stale exact suites', (t) => {

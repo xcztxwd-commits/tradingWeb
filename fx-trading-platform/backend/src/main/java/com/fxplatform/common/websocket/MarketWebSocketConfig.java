@@ -31,7 +31,7 @@ public class MarketWebSocketConfig implements WebSocketMessageBrokerConfigurer {
    */
   @Override
   public void configureMessageBroker(MessageBrokerRegistry registry) {
-    registry.enableSimpleBroker("/topic/market", "/queue");
+    registry.enableSimpleBroker("/topic/market", "/topic/engagement", "/queue");
     registry.setApplicationDestinationPrefixes("/app");
     registry.setUserDestinationPrefix("/user");
   }

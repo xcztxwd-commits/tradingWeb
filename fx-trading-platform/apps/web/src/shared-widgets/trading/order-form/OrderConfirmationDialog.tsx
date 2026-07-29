@@ -33,6 +33,7 @@ export function OrderConfirmationDialog({
       ariaLabel={t('trading.orderConfirmAria', { side: sideLabel, symbol: payload.symbol })}
       closeLabel={t('trading.closeOrderConfirm')}
       pending={submitting}
+      priority="critical"
       className={styles['trade-panel__confirm-layer']}
       backdropClassName={styles['trade-panel__confirm-backdrop']}
       panelClassName={styles['trade-panel__confirm']}

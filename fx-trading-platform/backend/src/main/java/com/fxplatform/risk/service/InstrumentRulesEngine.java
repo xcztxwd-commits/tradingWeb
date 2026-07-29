@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.common.market.SymbolNormalizer;
+import com.fxplatform.execution.DemoMatchFill;
 import com.fxplatform.market.entity.ProviderInstrumentEntity;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.model.ProductType;
@@ -141,13 +142,24 @@ public class InstrumentRulesEngine {
         && quantity.compareTo(rules.maxQty()) > 0) {
       throw new BusinessException("QUANTITY_TOO_LARGE", "Quantity is above maximum");
     }
-    BigDecimal priceForTick = request.orderType() == OrderType.STOP_MARKET
-        ? request.triggerPrice()
-        : requiresRequestedPrice(request.orderType()) ? request.price() : null;
+    BigDecimal priceForTick = requiresRequestedPrice(request.orderType())
+        ? request.price()
+        : null;
     if (priceForTick != null) {
       if (rules.tickSize() != null && !isMultiple(priceForTick, rules.tickSize())) {
         throw new BusinessException("PRICE_TICK_MISMATCH", "Price does not match tick size");
       }
+    }
+    BigDecimal triggerPriceForTick = request.orderType() == OrderType.STOP_MARKET
+        || request.orderType() == OrderType.STOP_LIMIT
+        ? request.triggerPrice()
+        : null;
+    if (triggerPriceForTick != null
+        && rules.tickSize() != null
+        && !isMultiple(triggerPriceForTick, rules.tickSize())) {
+      throw new BusinessException(
+          "PRICE_TICK_MISMATCH",
+          "Trigger price does not match tick size");
     }
     if (request.leverage() != null && rules.maxLeverage() != null && request.leverage() > rules.maxLeverage()) {
       throw new BusinessException("MAX_LEVERAGE_EXCEEDED", "Leverage is above maximum");
@@ -167,6 +179,161 @@ public class InstrumentRulesEngine {
   ) {
     validateOrderRules(request, symbol, canonicalBaseQuantity);
     validateOrderNotional(request, symbol, canonicalBaseQuantity, referencePrice);
+  }
+
+  /** Validates the exact current DEPTH fills plus the sealed conservative future tail. */
+  public void validateCanonicalDepthExecution(
+      SymbolEntity symbol,
+      List<DemoMatchFill> fills,
+      BigDecimal remainingBaseQuantity,
+      BigDecimal remainingReferencePrice
+  ) {
+    validateCanonicalDepthExecution(
+        symbol,
+        symbol == null ? null : rules(symbol),
+        fills,
+        remainingBaseQuantity,
+        remainingReferencePrice);
+  }
+
+  /** Validates a DEPTH execution against one caller-sealed instrument-rules snapshot. */
+  public void validateCanonicalDepthExecution(
+      SymbolEntity symbol,
+      InstrumentRules rules,
+      List<DemoMatchFill> fills,
+      BigDecimal remainingBaseQuantity,
+      BigDecimal remainingReferencePrice
+  ) {
+    if (symbol == null || fills == null
+        || remainingBaseQuantity == null || remainingBaseQuantity.signum() < 0) {
+      throw new BusinessException(
+          "INVALID_INSTRUMENT_RULES",
+          "Canonical DEPTH execution authority is incomplete");
+    }
+    validateDepthRulesSnapshot(symbol, rules);
+    BigDecimal canonicalUnitSize = canonicalUnitSize(symbol);
+    BigDecimal totalNotional = canonicalDepthFillNotional(fills, rules, canonicalUnitSize);
+    if (remainingBaseQuantity.signum() > 0) {
+      if (remainingReferencePrice == null || remainingReferencePrice.signum() <= 0) {
+        throw new BusinessException(
+            "INVALID_INSTRUMENT_RULES",
+            "Canonical DEPTH tail price is required");
+      }
+      validateExecutionPriceTick(rules, remainingReferencePrice);
+      totalNotional = totalNotional.add(
+          remainingBaseQuantity.multiply(remainingReferencePrice).multiply(canonicalUnitSize));
+    }
+    if (rules.minNotional() != null
+        && totalNotional.compareTo(rules.minNotional()) < 0) {
+      throw new BusinessException(
+          ErrorCode.ORDER_NOTIONAL_TOO_SMALL,
+          "DEPTH execution notional is below minimum");
+    }
+    if (rules.maxNotional() != null
+        && totalNotional.compareTo(rules.maxNotional()) > 0) {
+      throw new BusinessException(
+          "ORDER_NOTIONAL_TOO_LARGE",
+          "DEPTH execution notional is above maximum");
+    }
+  }
+
+  /** Validates only fills executable in the current DEPTH Tick. */
+  public void validateCanonicalDepthFills(
+      SymbolEntity symbol,
+      List<DemoMatchFill> fills
+  ) {
+    validateCanonicalDepthFills(
+        symbol,
+        symbol == null ? null : rules(symbol),
+        fills);
+  }
+
+  /** Validates current fills against the same rules snapshot used for quantity-step checks. */
+  public void validateCanonicalDepthFills(
+      SymbolEntity symbol,
+      InstrumentRules rules,
+      List<DemoMatchFill> fills
+  ) {
+    if (symbol == null || fills == null) {
+      throw new BusinessException(
+          "INVALID_INSTRUMENT_RULES",
+          "Canonical DEPTH fill authority is incomplete");
+    }
+    validateDepthExecutionAuthority(symbol, rules);
+    BigDecimal currentFillNotional = canonicalDepthFillNotional(
+        fills,
+        rules,
+        canonicalUnitSize(symbol));
+    if (rules.maxNotional() != null
+        && currentFillNotional.compareTo(rules.maxNotional()) > 0) {
+      throw new BusinessException(
+          "ORDER_NOTIONAL_TOO_LARGE",
+          "Current DEPTH fill notional is above maximum");
+    }
+  }
+
+  /** Validates the caller-sealed DEPTH instrument authority before matching can run. */
+  public void validateDepthExecutionAuthority(SymbolEntity symbol, InstrumentRules rules) {
+    if (symbol == null) {
+      throw new BusinessException(
+          "INVALID_INSTRUMENT_RULES",
+          "Canonical DEPTH instrument authority is incomplete");
+    }
+    validateDepthRulesSnapshot(symbol, rules);
+  }
+
+  private void validateDepthRulesSnapshot(SymbolEntity symbol, InstrumentRules rules) {
+    if (rules == null
+        || !normalizeSymbol(symbol.getSymbol()).equals(normalizeSymbol(rules.symbol()))
+        || rules.productType() != SymbolProductTypes.readOrLegacy(symbol)) {
+      throw new BusinessException(
+          "INVALID_INSTRUMENT_RULES",
+          "Canonical DEPTH instrument-rules snapshot is inconsistent");
+    }
+    if (!rules.exists() || !rules.enabled() || !rules.tradable() || !rules.orderEnabled()) {
+      throw new BusinessException(
+          ErrorCode.SYMBOL_NOT_TRADABLE,
+          "Symbol is not currently tradable for DEPTH execution");
+    }
+  }
+
+  private BigDecimal canonicalDepthFillNotional(
+      List<DemoMatchFill> fills,
+      InstrumentRules rules,
+      BigDecimal canonicalUnitSize
+  ) {
+    BigDecimal totalNotional = BigDecimal.ZERO;
+    for (DemoMatchFill fill : fills) {
+      if (fill == null
+          || fill.quantity() == null || fill.quantity().signum() <= 0
+          || fill.price() == null || fill.price().signum() <= 0) {
+        throw new BusinessException(
+            "INVALID_INSTRUMENT_RULES",
+            "Canonical DEPTH fill is incomplete");
+      }
+      validateExecutionPriceTick(rules, fill.price());
+      totalNotional = totalNotional.add(
+          fill.quantity().multiply(fill.price()).multiply(canonicalUnitSize));
+    }
+    return totalNotional;
+  }
+
+  private BigDecimal canonicalUnitSize(SymbolEntity symbol) {
+    InstrumentProfile profile = instrumentClassifier.profile(symbol);
+    return profile.kind() == InstrumentKind.LINEAR_PERPETUAL
+        ? BigDecimal.ONE
+        : profile.unitSize();
+  }
+
+  private void validateExecutionPriceTick(
+      InstrumentRules rules,
+      BigDecimal price
+  ) {
+    if (rules.tickSize() != null && !isMultiple(price, rules.tickSize())) {
+      throw new BusinessException(
+          ErrorCode.PRICE_TICK_MISMATCH,
+          "DEPTH execution price does not match tick size");
+    }
   }
 
   private void validateOrderNotional(
@@ -238,7 +405,9 @@ public class InstrumentRulesEngine {
   }
 
   private boolean requiresRequestedPrice(OrderType orderType) {
-    return orderType == OrderType.LIMIT || orderType == OrderType.STOP;
+    return orderType == OrderType.LIMIT
+        || orderType == OrderType.STOP
+        || orderType == OrderType.STOP_LIMIT;
   }
 
   private boolean isMultiple(BigDecimal value, BigDecimal step) {

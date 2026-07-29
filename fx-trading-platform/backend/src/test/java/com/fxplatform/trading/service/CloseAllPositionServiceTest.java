@@ -27,6 +27,7 @@ import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
+import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.PositionRepository;
 import java.math.BigDecimal;
@@ -198,6 +199,42 @@ class CloseAllPositionServiceTest {
     closeOrder.verify(systemCloseOrderService).closeWhole(
         eq(accountId), eq(POSITION_3), eq(OrderOrigin.BATCH_CLOSE),
         anyString(), anyString(), any());
+  }
+
+  @Test
+  void closeUserFreezesAndExecutesScopeBySymbolPositionSideThenId() {
+    PositionEntity eth = position(id(1), "ETHUSDT-PERP");
+    eth.setPositionSide(PositionSide.BOTH);
+    PositionEntity btcShort = position(id(2), "BTCUSDT-PERP");
+    btcShort.setPositionSide(PositionSide.SHORT);
+    PositionEntity btcLongSecond = position(id(4), "BTCUSDT-PERP");
+    btcLongSecond.setPositionSide(PositionSide.LONG);
+    PositionEntity btcLongFirst = position(id(3), "BTCUSDT-PERP");
+    btcLongFirst.setPositionSide(PositionSide.LONG);
+    when(positionRepository.findOpenLinearPerpByAccountId(accountId))
+        .thenReturn(List.of(eth, btcShort, btcLongSecond, btcLongFirst));
+    when(systemCloseOrderService.closeWhole(
+        eq(accountId),
+        any(UUID.class),
+        eq(OrderOrigin.BATCH_CLOSE),
+        anyString(),
+        anyString(),
+        any()))
+        .thenAnswer(invocation -> {
+          UUID positionId = invocation.getArgument(1);
+          PositionEntity closed = List.of(eth, btcShort, btcLongSecond, btcLongFirst).stream()
+              .filter(candidate -> positionId.equals(candidate.getId()))
+              .findFirst()
+              .orElseThrow();
+          return closeResult(filledOrder(positionId, positionId), closed, false);
+        });
+
+    BatchActionResponse response = service().closeUser(
+        userId, accountId, "semantic-slot-order");
+
+    assertThat(response.items())
+        .extracting(BatchActionResponse.Item::positionId)
+        .containsExactly(id(3), id(4), id(2), id(1));
   }
 
   @Test

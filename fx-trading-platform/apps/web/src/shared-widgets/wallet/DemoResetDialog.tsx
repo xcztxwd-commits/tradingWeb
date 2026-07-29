@@ -34,6 +34,7 @@ export function DemoResetDialog({
       labelledBy="wallet-reset-title"
       closeLabel="Close reset dialog"
       pending={pending}
+      priority="critical"
       panelClassName={css(styles, "confirm-dialog__panel")}
     >
       <form

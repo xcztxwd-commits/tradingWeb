@@ -6,7 +6,6 @@ import com.fxplatform.market.websocket.MarketWsPublisher;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
@@ -26,7 +25,6 @@ public class QuoteBroadcastService {
   @Value("${market.quote-broadcast-symbols:}")
   private String symbols;
 
-  @Scheduled(fixedDelayString = "${market.quote-broadcast-ms:1000}")
   public void broadcastLatestQuotes() {
     if (!enabled) {
       return;

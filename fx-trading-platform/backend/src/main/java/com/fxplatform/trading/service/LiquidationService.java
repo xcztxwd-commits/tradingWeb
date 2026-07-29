@@ -42,6 +42,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /** Coordinates fresh, cancel-first Demo liquidation without holding provider calls under locks. */
 @Service
@@ -147,13 +149,17 @@ public class LiquidationService {
   }
 
   public int scanAccount(UUID accountId) {
+    return scanAccount(accountId, false);
+  }
+
+  private int scanAccount(UUID accountId, boolean joinCallerTransaction) {
     TradingAccountEntity preflightAccount = accountRepository.findById(accountId)
         .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
     demoExecutionGuard.requireDemoRiskReductionAccount(preflightAccount);
     if (preflightAccount.getStatus() == AccountStatus.RISK_REDUCTION_PENDING) {
       return 0;
     }
-    int closed = scanForex(accountId);
+    int closed = scanForex(accountId, joinCallerTransaction);
     if (!perpetualWorkflowAvailable()) {
       return closed;
     }
@@ -161,12 +167,30 @@ public class LiquidationService {
         positionRepository.findOpenLinearPerpByAccountId(accountId));
     if (perpetuals.isEmpty()) {
       if (preflightAccount.getStatus() == AccountStatus.ISOLATED_LIQUIDATION_PENDING) {
-        restoreIsolatedGate(accountId);
+        restoreIsolatedGate(accountId, joinCallerTransaction);
       }
-      settleCrossIfReady(accountId);
+      settleCrossIfReady(accountId, joinCallerTransaction);
       return closed;
     }
-    return closed + scanPerpetual(accountId);
+    boolean preflightHadCross = perpetuals.stream()
+        .filter(position -> position != null)
+        .anyMatch(position -> position.getMarginMode() == MarginMode.CROSS);
+    try {
+      return closed + scanPerpetual(
+          accountId, preflightHadCross, joinCallerTransaction);
+    } catch (BusinessException exception) {
+      if (joinCallerTransaction
+          || !ErrorCode.MARKET_DATA_STALE.equals(exception.getCode())
+          || !preflightHadCross
+          || hasOpenCrossPosition(accountId)) {
+        throw exception;
+      }
+      // A user close may commit while the liquidation projection waits for the account lock.
+      // Once the stale snapshot is revalidated as a flat Cross scope, the scan is the losing
+      // competitor but still owns the account-level deficit settlement.
+      settleCrossIfReady(accountId, joinCallerTransaction);
+      return closed;
+    }
   }
 
   public int scanAllAccounts() {
@@ -186,6 +210,20 @@ public class LiquidationService {
     return closed;
   }
 
+  /** Validation-only fail-closed scan that joins the owning system-step transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public int scanAllAccountsStrict() {
+    int closed = 0;
+    for (TradingAccountEntity account : safe(
+        accountRepository.findDemoLiquidationScanCandidates())) {
+      if (account == null || account.getId() == null) {
+        continue;
+      }
+      closed += scanAccount(account.getId(), true);
+    }
+    return closed;
+  }
+
   /** Legacy FX gate retained for callers that render a stop-out preview. */
   public boolean shouldLiquidate(AccountSnapshot snapshot) {
     return snapshot != null && fxMarginBreached(snapshot);
@@ -193,6 +231,14 @@ public class LiquidationService {
 
   /** Legacy FX close facade; P0 Perpetual closes use SystemCloseOrderService. */
   public boolean liquidatePosition(PositionEntity position, String reason) {
+    return liquidatePosition(position, reason, false);
+  }
+
+  private boolean liquidatePosition(
+      PositionEntity position,
+      String reason,
+      boolean failClosed
+  ) {
     if (position == null || position.getStatus() != PositionStatus.OPEN) {
       return false;
     }
@@ -211,14 +257,14 @@ public class LiquidationService {
       positionService.closeSystemPosition(position.getAccountId(), position.getId(), reason);
       return true;
     } catch (BusinessException exception) {
-      if ("POSITION_NOT_OPEN".equals(exception.getCode())) {
+      if (!failClosed && "POSITION_NOT_OPEN".equals(exception.getCode())) {
         return false;
       }
       throw exception;
     }
   }
 
-  private int scanForex(UUID accountId) {
+  private int scanForex(UUID accountId, boolean joinCallerTransaction) {
     if (perpetualWorkflowAvailable()
         && safe(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
             accountId, PositionStatus.OPEN)).stream().noneMatch(this::isForex)) {
@@ -243,8 +289,11 @@ public class LiquidationService {
       }
       PositionEntity selected = candidate.orElseThrow();
       attemptedPositionIds.add(selected.getId());
-      boolean didClose = transactionExecutor.execute(() ->
-          liquidatePosition(selected, FX_MARGIN_STOP_OUT));
+      boolean didClose = joinCallerTransaction
+          ? transactionExecutor.executeJoined(() ->
+              liquidatePosition(selected, FX_MARGIN_STOP_OUT, true))
+          : transactionExecutor.execute(() ->
+              liquidatePosition(selected, FX_MARGIN_STOP_OUT, false));
       if (!didClose) {
         return closed;
       }
@@ -252,8 +301,12 @@ public class LiquidationService {
     }
   }
 
-  private int scanPerpetual(UUID accountId) {
-    LockedRisk initial = projectFresh(accountId);
+  private int scanPerpetual(
+      UUID accountId,
+      boolean preflightHadCross,
+      boolean joinCallerTransaction
+  ) {
+    LockedRisk initial = projectFresh(accountId, joinCallerTransaction);
     boolean pendingRetry = initial.account().getStatus() == AccountStatus.LIQUIDATION_PENDING;
     LockedRisk current = initial;
     int closed = 0;
@@ -265,8 +318,12 @@ public class LiquidationService {
         .sorted()
         .toList();
     for (UUID positionId : isolatedCandidates) {
-      cancelAllOrderService.cancelRiskIncreasingSlot(accountId, positionId);
-      LockedRisk afterCancel = projectFresh(accountId);
+      if (joinCallerTransaction) {
+        cancelAllOrderService.cancelRiskIncreasingSlotStrict(accountId, positionId);
+      } else {
+        cancelAllOrderService.cancelRiskIncreasingSlot(accountId, positionId);
+      }
+      LockedRisk afterCancel = projectFresh(accountId, joinCallerTransaction);
       current = afterCancel;
       if (!isolatedLiquidatable(afterCancel.projection(), positionId)) {
         continue;
@@ -275,35 +332,52 @@ public class LiquidationService {
       boolean ownsIsolatedGate = statusBeforeGate == AccountStatus.ACTIVE
           || statusBeforeGate == AccountStatus.ISOLATED_LIQUIDATION_PENDING;
       if (statusBeforeGate == AccountStatus.ACTIVE) {
-        updateStatus(accountId, AccountStatus.ISOLATED_LIQUIDATION_PENDING);
+        updateStatus(
+            accountId,
+            AccountStatus.ISOLATED_LIQUIDATION_PENDING,
+            joinCallerTransaction);
       }
       try {
         // The slot is now conclusively unsafe. Drain its remaining risk-reducing orders too,
         // otherwise an ordinary opposite order may reopen after the liquidation fill and a
         // reduce-only order may keep an orphaned hold after the position disappears.
-        cancelAllOrderService.cancelActiveSlot(accountId, positionId);
-        LockedRisk afterSlotDrain = projectFresh(accountId);
+        if (joinCallerTransaction) {
+          cancelAllOrderService.cancelActiveSlotStrict(accountId, positionId);
+        } else {
+          cancelAllOrderService.cancelActiveSlot(accountId, positionId);
+        }
+        LockedRisk afterSlotDrain = projectFresh(accountId, joinCallerTransaction);
         current = afterSlotDrain;
         if (!isolatedLiquidatable(afterSlotDrain.projection(), positionId)) {
           continue;
         }
         try {
-          SystemCloseOrderService.CloseResult result = systemCloseOrderService.closeWhole(
-              accountId,
-              positionId,
-              OrderOrigin.LIQUIDATION,
-              "ISOLATED_MAINTENANCE_MARGIN",
-              liquidationRequestId(accountId, positionId));
+          SystemCloseOrderService.CloseResult result = joinCallerTransaction
+              ? systemCloseOrderService.closeWholeStrict(
+                  accountId,
+                  positionId,
+                  OrderOrigin.LIQUIDATION,
+                  "ISOLATED_MAINTENANCE_MARGIN",
+                  liquidationRequestId(accountId, positionId))
+              : systemCloseOrderService.closeWhole(
+                  accountId,
+                  positionId,
+                  OrderOrigin.LIQUIDATION,
+                  "ISOLATED_MAINTENANCE_MARGIN",
+                  liquidationRequestId(accountId, positionId));
           if (!result.replayed()) {
             closed++;
           }
         } catch (RuntimeException exception) {
+          if (joinCallerTransaction) {
+            throw exception;
+          }
           log.warn("Isolated liquidation item failed: accountId={}, positionId={}",
               accountId, positionId, exception);
         }
       } finally {
         if (ownsIsolatedGate) {
-          restoreIsolatedGate(accountId);
+          restoreIsolatedGate(accountId, joinCallerTransaction);
         }
       }
     }
@@ -311,46 +385,71 @@ public class LiquidationService {
     // Crash recovery: the gated slot may already be safe or closed after restart, so no
     // candidate-level finally block would otherwise release the typed Isolated gate.
     if (initial.account().getStatus() == AccountStatus.ISOLATED_LIQUIDATION_PENDING) {
-      restoreIsolatedGate(accountId);
+      restoreIsolatedGate(accountId, joinCallerTransaction);
     }
 
     boolean hasCross = current.positions().stream()
         .anyMatch(position -> position.getMarginMode() == MarginMode.CROSS);
-    if (pendingRetry && !hasCross) {
-      settleCrossIfReady(accountId);
+    if ((pendingRetry || preflightHadCross) && !hasCross) {
+      settleCrossIfReady(accountId, joinCallerTransaction);
       return closed;
     }
-    LockedRisk crossRisk = closed > 0 && hasCross ? projectFresh(accountId) : current;
+    LockedRisk crossRisk = closed > 0 && hasCross
+        ? projectFresh(accountId, joinCallerTransaction)
+        : current;
     if (!pendingRetry && !crossRisk.projection().crossLiquidatable()) {
       return closed;
     }
 
     if (!pendingRetry) {
-      updateStatus(accountId, AccountStatus.LIQUIDATION_PENDING);
+      updateStatus(accountId, AccountStatus.LIQUIDATION_PENDING, joinCallerTransaction);
     }
-    cancelAllOrderService.cancelActivePerpetual(accountId);
-    LockedRisk afterCancel = projectFresh(accountId);
+    if (joinCallerTransaction) {
+      cancelAllOrderService.cancelActivePerpetualStrict(accountId);
+    } else {
+      cancelAllOrderService.cancelActivePerpetual(accountId);
+    }
+    LockedRisk afterCancel = projectFresh(accountId, joinCallerTransaction);
     if (!pendingRetry && !afterCancel.projection().crossLiquidatable()) {
-      updateStatus(accountId, AccountStatus.ACTIVE);
+      updateStatus(accountId, AccountStatus.ACTIVE, joinCallerTransaction);
       return closed;
     }
 
     boolean failed = false;
     for (PositionEntity position : afterCancel.positions().stream()
         .filter(candidate -> candidate.getMarginMode() == MarginMode.CROSS)
-        .sorted(Comparator.comparing(PositionEntity::getId))
+        .sorted(Comparator
+            .comparing(
+                PositionEntity::getSymbol,
+                Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(
+                PositionEntity::getPositionSide,
+                Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(
+                PositionEntity::getId,
+                Comparator.nullsLast(Comparator.naturalOrder())))
         .toList()) {
       try {
-        SystemCloseOrderService.CloseResult result = systemCloseOrderService.closeWhole(
-            accountId,
-            position.getId(),
-            OrderOrigin.LIQUIDATION,
-            "CROSS_MAINTENANCE_MARGIN",
-            liquidationRequestId(accountId, position.getId()));
+        SystemCloseOrderService.CloseResult result = joinCallerTransaction
+            ? systemCloseOrderService.closeWholeStrict(
+                accountId,
+                position.getId(),
+                OrderOrigin.LIQUIDATION,
+                "CROSS_MAINTENANCE_MARGIN",
+                liquidationRequestId(accountId, position.getId()))
+            : systemCloseOrderService.closeWhole(
+                accountId,
+                position.getId(),
+                OrderOrigin.LIQUIDATION,
+                "CROSS_MAINTENANCE_MARGIN",
+                liquidationRequestId(accountId, position.getId()));
         if (!result.replayed()) {
           closed++;
         }
       } catch (RuntimeException exception) {
+        if (joinCallerTransaction) {
+          throw exception;
+        }
         failed = true;
         log.warn("Cross liquidation item failed: accountId={}, positionId={}",
             accountId, position.getId(), exception);
@@ -358,17 +457,17 @@ public class LiquidationService {
     }
     if (liquidationSettlementService == null) {
       if (!failed) {
-        updateStatus(accountId, AccountStatus.ACTIVE);
+        updateStatus(accountId, AccountStatus.ACTIVE, joinCallerTransaction);
       }
     } else {
-      settleCrossIfReady(accountId);
+      settleCrossIfReady(accountId, joinCallerTransaction);
     }
     return closed;
   }
 
-  private LockedRisk projectFresh(UUID accountId) {
+  private LockedRisk projectFresh(UUID accountId, boolean joinCallerTransaction) {
     PreparedAccountRisk prepared = accountRiskSnapshotService.prepare(accountId, Map.of());
-    return transactionExecutor.execute(() -> {
+    java.util.function.Supplier<LockedRisk> mutation = () -> {
       TradingAccountEntity account = accountRepository.findByIdForUpdate(accountId)
           .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
       demoExecutionGuard.requireDemoRiskReductionAccount(account);
@@ -383,11 +482,18 @@ public class LiquidationService {
       accountRepository.save(account);
       positions.forEach(positionRepository::save);
       return new LockedRisk(account, List.copyOf(positions), projection);
-    });
+    };
+    return joinCallerTransaction
+        ? transactionExecutor.executeJoined(mutation)
+        : transactionExecutor.execute(mutation);
   }
 
-  private void updateStatus(UUID accountId, AccountStatus status) {
-    transactionExecutor.execute(() -> {
+  private void updateStatus(
+      UUID accountId,
+      AccountStatus status,
+      boolean joinCallerTransaction
+  ) {
+    java.util.function.Supplier<Void> mutation = () -> {
       TradingAccountEntity account = accountRepository.findByIdForUpdate(accountId)
           .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
       demoExecutionGuard.requireDemoRiskReductionAccount(account);
@@ -395,11 +501,16 @@ public class LiquidationService {
       account.setStatus(status);
       accountRepository.save(account);
       return null;
-    });
+    };
+    if (joinCallerTransaction) {
+      transactionExecutor.executeJoined(mutation);
+    } else {
+      transactionExecutor.execute(mutation);
+    }
   }
 
-  private void restoreIsolatedGate(UUID accountId) {
-    transactionExecutor.execute(() -> {
+  private void restoreIsolatedGate(UUID accountId, boolean joinCallerTransaction) {
+    java.util.function.Supplier<Void> mutation = () -> {
       TradingAccountEntity account = accountRepository.findByIdForUpdate(accountId)
           .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
       demoExecutionGuard.requireDemoRiskReductionAccount(account);
@@ -408,7 +519,12 @@ public class LiquidationService {
         accountRepository.save(account);
       }
       return null;
-    });
+    };
+    if (joinCallerTransaction) {
+      transactionExecutor.executeJoined(mutation);
+    } else {
+      transactionExecutor.execute(mutation);
+    }
   }
 
   private static void requireNotAdminCleanup(TradingAccountEntity account) {
@@ -426,10 +542,20 @@ public class LiquidationService {
     this.liquidationSettlementService = liquidationSettlementService;
   }
 
-  private void settleCrossIfReady(UUID accountId) {
+  private void settleCrossIfReady(UUID accountId, boolean joinCallerTransaction) {
     if (liquidationSettlementService != null) {
-      liquidationSettlementService.settleIfReady(accountId);
+      if (joinCallerTransaction) {
+        liquidationSettlementService.settleIfReadyStrict(accountId);
+      } else {
+        liquidationSettlementService.settleIfReady(accountId);
+      }
     }
+  }
+
+  private boolean hasOpenCrossPosition(UUID accountId) {
+    return safe(positionRepository.findOpenLinearPerpByAccountId(accountId)).stream()
+        .filter(position -> position != null)
+        .anyMatch(position -> position.getMarginMode() == MarginMode.CROSS);
   }
 
   private boolean isolatedLiquidatable(AccountRiskProjection projection, UUID positionId) {

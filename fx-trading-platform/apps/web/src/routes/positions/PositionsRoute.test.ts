@@ -19,16 +19,14 @@ const source = [
 ].join('\n')
 
 describe('positions close confirmation dialog', () => {
-  it('supports keyboard dismissal and predictable focus lifecycle', () => {
+  it('uses the shared critical Dialog for keyboard, focus, and overlay lifecycle', () => {
+    assert.match(source, /import \{ Dialog,/)
     assert.match(source, /useRef<HTMLButtonElement \| null>\(null\)/)
-    assert.match(source, /closeDialogCancelButtonRef\.current\?\.focus\(\)/)
-    assert.match(source, /event\.key === 'Escape'/)
-    assert.match(source, /closeDialogTriggerRef\.current\?\.focus\(\)/)
-    assert.match(source, /event\.currentTarget/)
-  })
-
-  it('keeps outside click dismissal on the dialog layer', () => {
-    assert.match(source, /onMouseDown=\{\(event\) => \{[\s\S]*event\.target === event\.currentTarget[\s\S]*dismissCloseDialog\(\)/)
+    assert.match(source, /<Dialog[\s\S]*priority="critical"/)
+    assert.match(source, /initialFocusRef=\{closeDialogCancelButtonRef\}/)
+    assert.match(source, /pending=\{closeDialogIsBusy\}/)
+    assert.doesNotMatch(source, /role="dialog"/)
+    assert.doesNotMatch(source, /event\.key === 'Escape'/)
   })
 })
 

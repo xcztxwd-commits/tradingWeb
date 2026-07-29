@@ -163,7 +163,32 @@ class CancelAllOrderServiceTest {
   }
 
   @Test
-  void accountScopeLocksInOrderCancelsByUuidAndReleasesEveryAuthorityHoldExactlyOnce() {
+  void cancelUserUsesStableClientOrderSequenceInsteadOfRandomUuidOrder() {
+    OrderEntity first = order(
+        id(200), ProductType.LINEAR_PERP, MarginMode.CROSS,
+        BigDecimal.ZERO, "USDT");
+    first.setClientOrderId("scenario-client-1");
+    OrderEntity second = order(
+        id(100), ProductType.LINEAR_PERP, MarginMode.CROSS,
+        BigDecimal.ZERO, "USDT");
+    second.setClientOrderId("scenario-client-2");
+    when(orderRepository.findActiveByAccountIdForUpdate(accountId))
+        .thenReturn(List.of(second, first));
+
+    BatchActionResponse response = service().cancelUser(
+        userId, accountId, "stable-business-order");
+
+    assertThat(response.items())
+        .extracting(BatchActionResponse.Item::orderId)
+        .containsExactly(first.getId(), second.getId());
+    InOrder writes = inOrder(orderRepository);
+    writes.verify(orderRepository).findActiveByAccountIdForUpdate(accountId);
+    writes.verify(orderRepository).save(first);
+    writes.verify(orderRepository).save(second);
+  }
+
+  @Test
+  void accountScopeLocksInOrderAndReleasesEveryAuthorityHoldExactlyOnce() {
     OrderEntity spot = order(
         ORDER_1, ProductType.CRYPTO_SPOT, MarginMode.CASH,
         new BigDecimal("12.00000000"), "USDT");

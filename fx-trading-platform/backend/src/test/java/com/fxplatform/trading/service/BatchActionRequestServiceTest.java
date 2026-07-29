@@ -100,15 +100,15 @@ class BatchActionRequestServiceTest {
         requestId,
         "origin=BATCH_CLOSE|reason=USER_CLOSE_ALL",
         () -> List.of(second, first, second));
-    assertThat(execution.scopeIds()).containsExactly(first, second);
+    assertThat(execution.scopeIds()).containsExactly(second, first);
     assertThat(execution.completedResponse()).isNull();
 
     BatchActionResponse response = new BatchActionResponse(
         accountId,
         requestId,
         List.of(
-            new BatchActionResponse.Item(first, id(101), "FILLED", null, null),
-            new BatchActionResponse.Item(second, null, "FAILED", "MARKET_DATA_STALE", null)));
+            new BatchActionResponse.Item(second, null, "FAILED", "MARKET_DATA_STALE", null),
+            new BatchActionResponse.Item(first, id(101), "FILLED", null, null)));
     service.completeIndependent(execution, response);
 
     AtomicBoolean lateScopeWasRead = new AtomicBoolean();
@@ -123,7 +123,7 @@ class BatchActionRequestServiceTest {
         });
 
     assertThat(lateScopeWasRead).isFalse();
-    assertThat(replay.scopeIds()).containsExactly(first, second);
+    assertThat(replay.scopeIds()).containsExactly(second, first);
     assertThat(replay.completedResponse()).isEqualTo(response);
     assertThat(stored.get().getScopeIds()).startsWith("[\"000");
     assertThat(stored.get().getResponsePayload()).contains("MARKET_DATA_STALE");

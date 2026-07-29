@@ -16,6 +16,7 @@ const tradePanelLines = tradePanelComponentSource.split(/\r?\n/)
 const sessionStatusSource = existsSync(sessionStatusPath) ? readFileSync(sessionStatusPath, 'utf8') : ''
 const submitHookSource = existsSync(submitHookPath) ? readFileSync(submitHookPath, 'utf8') : ''
 const confirmDialogSource = readFileSync(join(currentDir, 'OrderConfirmationDialog.tsx'), 'utf8')
+const leverageDialogSource = readFileSync(join(currentDir, 'TradePanelLeverageControls.tsx'), 'utf8')
 const orderSideSource = readFileSync(join(currentDir, 'OrderFormSide.tsx'), 'utf8')
 const orderSubmitButtonSource = readFileSync(join(currentDir, 'OrderSubmitButton.tsx'), 'utf8')
 const orderTypeTabsSource = readFileSync(join(currentDir, 'OrderTypeTabs.tsx'), 'utf8')
@@ -118,6 +119,7 @@ describe('OKX-style trade panel density', () => {
     assert.match(submitHookSource, /key: 'trading\.submitConfirmFirst'/)
     assert.match(confirmDialogSource, /import \{ Dialog \} from '@fx-platform\/ui'/)
     assert.match(confirmDialogSource, /<Dialog/)
+    assert.match(confirmDialogSource, /priority="critical"/)
     assert.match(confirmDialogSource, /pending=\{submitting\}/)
     assert.match(confirmDialogSource, /t\('trading\.orderConfirmTitle'\)/)
     assert.match(confirmDialogSource, /t\('trading\.skipConfirm'\)/)
@@ -213,6 +215,12 @@ describe('OKX-style trade panel density', () => {
   it('formats the caught order submission error instead of stale parent error state', () => {
     assert.match(submitHookSource, /createOrderSubmitFailureMessage\(error\)/)
     assert.doesNotMatch(submitHookSource, /orderError \?\? error/)
+  })
+
+  it('keeps leverage adjustment above campaign popups', () => {
+    assert.match(leverageDialogSource, /import \{ Dialog \} from '@fx-platform\/ui'/)
+    assert.match(leverageDialogSource, /<Dialog[\s\S]*priority="critical"/)
+    assert.doesNotMatch(leverageDialogSource, /role="dialog"/)
   })
 
   it('owns trade-panel styles through hashed module classes without cross-module global overrides', () => {

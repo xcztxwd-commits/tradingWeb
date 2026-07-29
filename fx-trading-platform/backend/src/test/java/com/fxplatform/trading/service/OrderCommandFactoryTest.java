@@ -62,6 +62,7 @@ class OrderCommandFactoryTest {
         new BigDecimal("60736.3"));
 
     OrderCommand command = new OrderCommandFactory().from(principal, request);
+    OrderCommand nextRequest = new OrderCommandFactory().from(principal, request);
 
     assertThat(command.userId()).isEqualTo(userId);
     assertThat(command.accountId()).isEqualTo(accountId);
@@ -69,7 +70,10 @@ class OrderCommandFactoryTest {
     assertThat(command.quantity()).isEqualByComparingTo("0.02");
     assertThat(command.price()).isEqualByComparingTo("60736.3");
     assertThat(command.clientOrderId()).isEqualTo("client-123");
-    assertThat(command.idempotencyKey()).isEqualTo("client-123");
+    assertThat(command.idempotencyKey()).isNotEqualTo("client-123");
+    assertThat(UUID.fromString(command.idempotencyKey()).toString())
+        .isEqualTo(command.idempotencyKey());
+    assertThat(nextRequest.idempotencyKey()).isNotEqualTo(command.idempotencyKey());
     assertThat(command.toRequest().lots()).isEqualByComparingTo("0.02");
     assertThat(command.toRequest().requestedPrice()).isEqualByComparingTo("60736.3");
   }

@@ -32,6 +32,7 @@ import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.repository.AccountSymbolSettingRepository;
+import com.fxplatform.trading.repository.CrossLiquidationChargeRepository;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.SpotPositionRepository;
@@ -114,6 +115,11 @@ class OrderPositionConcurrencyTest {
         "ORDER BY id",
         UUID.class,
         String.class);
+    assertSortedForUpdate(
+        CrossLiquidationChargeRepository.class,
+        "findPendingByAccountIdForUpdate",
+        "ORDER BY p.symbol, p.position_side, c.position_id, c.order_id",
+        UUID.class);
     assertForUpdate(
         AccountSymbolSettingRepository.class,
         "findByAccountIdAndSymbolForUpdate",

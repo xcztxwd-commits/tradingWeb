@@ -128,9 +128,10 @@ export function OrdersRouteContent({
         labelledBy="order-cancel-title"
         closeLabel={t('common.cancel')}
         pending={Boolean(model.pendingCancelOrder && model.busyOrderId === model.pendingCancelOrder.id)}
-        panelClassName={css(styles, "confirm-dialog")}
+        priority="critical"
+        panelClassName={css(styles, "confirm-dialog__panel")}
       >
-        <div className={css(styles, "confirm-dialog__panel")}>
+        <div>
           <h2 id="order-cancel-title">{t('orders.cancelConfirm')}</h2>
           <p>{t('orders.cancelConfirmBody', { symbol: model.pendingCancelOrder?.symbol ?? '' })}</p>
           <div className={css(styles, "user-page__actions")}>

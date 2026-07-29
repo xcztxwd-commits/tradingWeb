@@ -57,6 +57,11 @@ public class OrderEntity {
   private BigDecimal baseQuantity;
   private BigDecimal price;
   private TimeInForce timeInForce = TimeInForce.GTC;
+  private Boolean postOnly = false;
+  private BigDecimal activationPrice;
+  private BigDecimal trailingDelta;
+  private BigDecimal trailingRate;
+  private BigDecimal trailingExtreme;
   private Boolean reduceOnly = false;
   private OrderOrigin orderOrigin = OrderOrigin.USER;
   private String systemReason;
@@ -82,6 +87,7 @@ public class OrderEntity {
   private BigDecimal stopLoss;
   private BigDecimal takeProfit;
   private String idempotencyKey;
+  private String requestFingerprint;
   private Integer leverage;
   private Long version = 0L;
 

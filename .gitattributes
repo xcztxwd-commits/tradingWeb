@@ -1,0 +1,4 @@
+# Byte-stable contracts must keep LF on every platform.
+fx-trading-platform/backend/src/main/resources/db/migration/*.sql text eol=lf
+fx-trading-platform/docs/testing/spot-perp-scenario-matrix.json text eol=lf
+fx-trading-platform/docs/testing/spot-perp-scenario-matrix.csv text eol=lf

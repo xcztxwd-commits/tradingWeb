@@ -249,7 +249,14 @@ class TradingWorkflowRegressionProtectionTest {
         "ledgerService.recordTransfer");
     assertTokensInOrder(
         "src/main/java/com/fxplatform/trading/service/PendingOrderExecutionProcessor.java",
-        "private boolean processLocked",
+        "private boolean processSimpleLocked",
+        "accountRepository.findByIdForUpdate",
+        "walletBalanceRepository.findByAccountIdForUpdate",
+        "spotPositionService.lockExisting",
+        "orderRepository.findByIdForUpdate");
+    assertTokensInOrder(
+        "src/main/java/com/fxplatform/trading/service/PendingOrderExecutionProcessor.java",
+        "private boolean processDepthLocked",
         "accountRepository.findByIdForUpdate",
         "walletBalanceRepository.findByAccountIdForUpdate",
         "spotPositionService.lockExisting",
@@ -263,7 +270,10 @@ class TradingWorkflowRegressionProtectionTest {
         "orderRepository.findActive");
     assertTokensInOrder(
         "src/main/java/com/fxplatform/trading/service/FundingService.java",
-        "public FundingSettlementOutcome settleFundingForPositionOutcome",
+        "public FundingSettlementOutcome settleFundingForPositionOutcome(\n"
+            + "      PositionEntity position,\n"
+            + "      FundingRateEntity fundingRate,\n"
+            + "      Instant authorityTime",
         "accountRepository.findByIdForUpdate",
         "positionRepository.findByIdForUpdate",
         "settleLockedPosition");
@@ -492,7 +502,9 @@ class TradingWorkflowRegressionProtectionTest {
   }
 
   private static void assertTokensInOrder(String sourcePath, String... tokens) throws IOException {
-    String source = Files.readString(Path.of(sourcePath));
+    String source = Files.readString(Path.of(sourcePath))
+        .replace("\r\n", "\n")
+        .replace('\r', '\n');
     int methodStart = source.indexOf(tokens[0]);
     assertThat(methodStart)
         .as("%s should contain target method %s", sourcePath, tokens[0])

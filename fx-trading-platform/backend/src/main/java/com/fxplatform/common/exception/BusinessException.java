@@ -15,6 +15,11 @@ public class BusinessException extends RuntimeException {
     this.code = code;
   }
 
+  public BusinessException(String code, String message, Throwable cause) {
+    super(message, cause);
+    this.code = code;
+  }
+
   /**
    * 处理 getCode 异常相关逻辑。
    */

@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/trading-lab/scenarios/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["scenario"];
+        put: operations["updateScenario"];
+        post?: never;
+        delete: operations["deleteScenario"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/table-tools/preferences/{pageKey}": {
         parameters: {
             query?: never;
@@ -260,6 +276,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/engagement/popup-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["policy"];
+        put: operations["update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/messages/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["message"];
+        put: operations["update_1"];
+        post?: never;
+        delete: operations["delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["campaign"];
+        put: operations["update_2"];
+        post?: never;
+        delete: operations["delete_1"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/content/messages/{messageId}": {
         parameters: {
             query?: never;
@@ -452,6 +516,166 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/me/messages/{publicationId}/unread": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["markUnread"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/messages/{publicationId}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["markRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/messages/{publicationId}/hide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["hide"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/messages/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["markAllRead"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/engagement/popup-queues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["startQueue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/engagement/popup-queues/{sessionId}/next": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["next"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/engagement/popup-deliveries/{deliveryToken}/shown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["shown"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/engagement/popup-deliveries/{deliveryToken}/opt-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["optOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/engagement/popup-deliveries/{deliveryToken}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["close"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/engagement/popup-deliveries/{deliveryToken}/click": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["click"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/finance/fund-orders": {
         parameters: {
             query?: never;
@@ -606,6 +830,134 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["cancelOrder_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/scenarios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["scenarios"];
+        put?: never;
+        post: operations["createScenario"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/scenarios/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/runs/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/runs/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/runs/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/reports/{id}/print-confirmation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["printConfirmation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/reports/{id}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["permanent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/environment/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["action"];
         delete?: never;
         options?: never;
         head?: never;
@@ -798,22 +1150,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["reviewKyc_1"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/market/test-control/overrides": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["override"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1076,7 +1412,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/content/messages": {
+    "/api/admin/engagement/messages": {
         parameters: {
             query?: never;
             header?: never;
@@ -1084,6 +1420,214 @@ export interface paths {
             cookie?: never;
         };
         get: operations["messages"];
+        put?: never;
+        post: operations["create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/messages/{id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["send"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/messages/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/messages/{id}/cancel-schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancelSchedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["campaigns"];
+        put?: never;
+        post: operations["create_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns/{id}/test-popup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["testPopup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resume_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns/{id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns/{id}/reset-delivery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["resetDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["publish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns/{id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["pause_1"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns/{id}/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["end"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/content/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["messages_1"];
         put?: never;
         post: operations["createMessage"];
         delete?: never;
@@ -1412,6 +1956,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/trading/orders/by-client-order-id": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["orderByClientOrderId"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/trading/funding/settlements": {
         parameters: {
             query?: never;
@@ -1436,6 +1996,54 @@ export interface paths {
             cookie?: never;
         };
         get: operations["homeCounters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/public/engagement/assets/{assetId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["asset"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/me/messages/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["unreadCount"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1716,6 +2324,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/users/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/trading/trades": {
         parameters: {
             query?: never;
@@ -1764,7 +2388,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/members/{userId}": {
+    "/api/admin/trading-lab/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["run"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/runs/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["events"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/reports/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1772,6 +2428,102 @@ export interface paths {
             cookie?: never;
         };
         get: operations["detail"];
+        put?: never;
+        post?: never;
+        delete: operations["delete_2"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/reports/{id}/print": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["print"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/reports/{id}/print-info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["printInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/reports/{id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["download"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/environment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["status_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trading-lab/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["config"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/members/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["detail_1"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1819,7 +2571,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_1"];
+        get: operations["status_2"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1835,7 +2587,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["status_2"];
+        get: operations["status_3"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1932,6 +2684,38 @@ export interface paths {
             cookie?: never;
         };
         get: operations["page"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns/{id}/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["users_1"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/engagement/campaigns/{id}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["stats"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2132,22 +2916,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/market/test-control/overrides/{symbol}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete: operations["endOverride"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2170,6 +2938,52 @@ export interface components {
             data?: string[];
             /** Format: date-time */
             timestamp?: string;
+        };
+        JsonNode: unknown;
+        TradingLabScenarioWriteRequest: {
+            name: string;
+            description?: string;
+            negativeMode?: boolean;
+            seed: string;
+            modelVersion: string;
+            scenario: components["schemas"]["JsonNode"];
+            configSnapshot: components["schemas"]["JsonNode"];
+            configSnapshotHash: string;
+            /** Format: int64 */
+            expectedVersion?: number;
+        };
+        ApiResponseTradingLabScenarioResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingLabScenarioResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingLabScenarioResponse: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            description?: string;
+            status?: string;
+            negativeMode?: boolean;
+            seed?: string;
+            modelVersion?: string;
+            scenario?: components["schemas"]["JsonNode"];
+            configSnapshot?: components["schemas"]["JsonNode"];
+            configSnapshotHash?: string;
+            symbolConfigVersion?: string;
+            codeVersion?: string;
+            /** Format: uuid */
+            createdBy?: string;
+            /** Format: uuid */
+            updatedBy?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            /** Format: int64 */
+            version?: number;
         };
         AdminTableColumnPreferenceRequest: {
             hiddenColumns?: string[];
@@ -2674,6 +3488,202 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
+        PopupPolicyUpdateRequest: {
+            /** Format: int32 */
+            maxSequentialPopups?: number;
+            /** Format: int32 */
+            deliveryRetentionDays?: number;
+            reason: string;
+        };
+        ApiResponsePopupPolicyResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["PopupPolicyResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        PopupPolicyResponse: {
+            /** Format: int32 */
+            maxSequentialPopups?: number;
+            /** Format: int32 */
+            deliveryRetentionDays?: number;
+        };
+        MessageContentRequest: {
+            title: string;
+            bodyDocument: string;
+            /** Format: uuid */
+            coverAssetId?: string;
+            cta?: components["schemas"]["MessageCtaRequest"];
+        };
+        MessageCtaRequest: {
+            label: string;
+            routeKey: string;
+            paramsJson: string;
+        };
+        MessageUpdateRequest: {
+            /** @enum {string} */
+            audienceType?: "ALL" | "SELECTED";
+            targetUserIds?: string[];
+            content: components["schemas"]["MessageContentRequest"];
+            reason: string;
+        };
+        ApiResponseMessageDetailResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["MessageDetailResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        MessageDetailResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            contentItemId?: string;
+            /** @enum {string} */
+            lifecycleStatus?: "DRAFT" | "SCHEDULED" | "SENT" | "DELETED";
+            /** @enum {string} */
+            audienceType?: "ALL" | "SELECTED";
+            category?: string;
+            targetUserIds?: string[];
+            /** Format: date-time */
+            scheduledAt?: string;
+            /** Format: date-time */
+            sentAt?: string;
+            /** Format: date-time */
+            audienceCutoffAt?: string;
+            /** Format: date-time */
+            deletedAt?: string;
+            /** Format: uuid */
+            revisionId?: string;
+            /** Format: int32 */
+            revisionNo?: number;
+            title?: string;
+            bodyDocument?: string;
+            sanitizedHtml?: string;
+            /** Format: uuid */
+            coverAssetId?: string;
+            ctaLabel?: string;
+            ctaRouteKey?: string;
+            ctaParams?: string;
+            /** Format: int64 */
+            targetCount?: number;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        CampaignContentRequest: {
+            title: string;
+            bodyDocument: string;
+            /** Format: uuid */
+            coverAssetId?: string;
+            cta?: components["schemas"]["CampaignCtaRequest"];
+        };
+        CampaignCtaRequest: {
+            label: string;
+            routeKey: string;
+            paramsJson: string;
+        };
+        CampaignSaveRequest: {
+            name: string;
+            content: components["schemas"]["CampaignContentRequest"];
+            /** @enum {string} */
+            audienceType: "ALL" | "SELECTED";
+            targetUserIds?: string[];
+            syncToInbox?: boolean;
+            /** Format: int32 */
+            priority?: number;
+            /** @enum {string} */
+            displayScope: "ALL_BUSINESS_PAGES" | "SELECTED_PAGES";
+            pageKeys?: ("HOME" | "TRADE_SPOT" | "TRADE_PERPETUAL" | "DASHBOARD" | "MARKETS" | "ORDERS" | "POSITIONS" | "WALLET" | "ACCOUNT_OVERVIEW" | "ACCOUNT_ASSETS" | "FUNDING_RECORDS" | "TRADE_RECORDS" | "KYC" | "ACCOUNT_SETTINGS" | "SECURITY" | "SETTINGS" | "MESSAGES")[];
+            /** @enum {string} */
+            deviceScope: "ALL" | "PC" | "MOBILE";
+            /** @enum {string} */
+            templateSize: "SMALL" | "MEDIUM" | "LARGE";
+            timeZone: string;
+            /** Format: date-time */
+            startAt: string;
+            /** Format: date-time */
+            endAt: string;
+            /** Format: int32 */
+            maxTotalImpressions?: number;
+            /** Format: int32 */
+            maxDailyImpressions?: number;
+            /** Format: int32 */
+            minIntervalSeconds?: number;
+            reason: string;
+        };
+        ApiResponseCampaignDetailResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["CampaignDetailResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        CampaignDetailResponse: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            /** @enum {string} */
+            lifecycleStatus?: "DRAFT" | "SCHEDULED" | "ACTIVE" | "PAUSED" | "ENDED" | "DELETED";
+            /** @enum {string} */
+            audienceType?: "ALL" | "SELECTED";
+            targetUserIds?: string[];
+            syncToInbox?: boolean;
+            /** Format: int32 */
+            priority?: number;
+            /** @enum {string} */
+            displayScope?: "ALL_BUSINESS_PAGES" | "SELECTED_PAGES";
+            pageKeys?: ("HOME" | "TRADE_SPOT" | "TRADE_PERPETUAL" | "DASHBOARD" | "MARKETS" | "ORDERS" | "POSITIONS" | "WALLET" | "ACCOUNT_OVERVIEW" | "ACCOUNT_ASSETS" | "FUNDING_RECORDS" | "TRADE_RECORDS" | "KYC" | "ACCOUNT_SETTINGS" | "SECURITY" | "SETTINGS" | "MESSAGES")[];
+            /** @enum {string} */
+            deviceScope?: "ALL" | "PC" | "MOBILE";
+            /** @enum {string} */
+            templateSize?: "SMALL" | "MEDIUM" | "LARGE";
+            timeZone?: string;
+            /** Format: date-time */
+            startAt?: string;
+            /** Format: date-time */
+            endAt?: string;
+            /** Format: int32 */
+            maxTotalImpressions?: number;
+            /** Format: int32 */
+            maxDailyImpressions?: number;
+            /** Format: int32 */
+            minIntervalSeconds?: number;
+            /** Format: date-time */
+            firstPublishedAt?: string;
+            /** Format: date-time */
+            lastPublishedAt?: string;
+            /** Format: date-time */
+            pausedAt?: string;
+            /** Format: date-time */
+            endedAt?: string;
+            /** Format: date-time */
+            deletedAt?: string;
+            /** Format: uuid */
+            contentItemId?: string;
+            /** Format: uuid */
+            revisionId?: string;
+            /** Format: int32 */
+            revisionNo?: number;
+            title?: string;
+            bodyDocument?: string;
+            sanitizedHtml?: string;
+            /** Format: uuid */
+            coverAssetId?: string;
+            ctaLabel?: string;
+            ctaRouteKey?: string;
+            ctaParams?: string;
+            /** Format: int64 */
+            targetCount?: number;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
         AdminMessageRequest: {
             /** Format: uuid */
             targetUserId?: string;
@@ -2910,7 +3920,12 @@ export interface components {
             originalQuantity?: number;
             baseQuantity?: number;
             /** @enum {string} */
-            timeInForce?: "GTC";
+            timeInForce?: "GTC" | "IOC" | "FOK";
+            postOnly?: boolean;
+            activationPrice?: number;
+            trailingDelta?: number;
+            trailingRate?: number;
+            trailingExtreme?: number;
             reduceOnly?: boolean;
             /** @enum {string} */
             origin?: "USER" | "PROTECTIVE" | "LIQUIDATION" | "ADMIN_FORCE_CLOSE" | "BATCH_CLOSE" | "OCO";
@@ -3043,7 +4058,7 @@ export interface components {
             /** @enum {string} */
             side: "BUY" | "SELL";
             /** @enum {string} */
-            orderType: "MARKET" | "LIMIT" | "STOP_MARKET";
+            orderType: "MARKET" | "LIMIT" | "STOP_MARKET" | "STOP_LIMIT" | "TRAILING_STOP_MARKET";
             lots?: number;
             requestedPrice?: number;
             stopLoss?: number;
@@ -3065,6 +4080,12 @@ export interface components {
             triggerPriceType?: "LAST_PRICE" | "MARK_PRICE";
             reduceOnly: boolean;
             attachedProtections?: components["schemas"]["AttachedProtectionRequest"][];
+            /** @enum {string} */
+            timeInForce: "GTC" | "IOC" | "FOK";
+            postOnly: boolean;
+            activationPrice?: number;
+            trailingDelta?: number;
+            trailingRate?: number;
         };
         CreateOcoOrderRequest: {
             /** Format: uuid */
@@ -3095,6 +4116,57 @@ export interface components {
             contingencyGroupId?: string;
             limitOrder?: components["schemas"]["OrderResponse"];
             stopOrder?: components["schemas"]["OrderResponse"];
+        };
+        PopupSurface: {
+            triggerType?: string;
+            pageKey?: string;
+            /** @enum {string} */
+            deviceClass?: "PC" | "MOBILE";
+        };
+        ApiResponsePopupClaim: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["PopupClaim"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        PopupClaim: {
+            /** Format: uuid */
+            queueSessionId?: string;
+            /** Format: uuid */
+            deliveryId?: string;
+            /** Format: uuid */
+            campaignId?: string;
+            /** Format: uuid */
+            revisionId?: string;
+            deliveryToken?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            /** @enum {string} */
+            templateSize?: "SMALL" | "MEDIUM" | "LARGE";
+            title?: string;
+            sanitizedHtml?: string;
+            /** Format: uuid */
+            coverAssetId?: string;
+            ctaLabel?: string;
+            ctaRouteKey?: string;
+            ctaParams?: string;
+        };
+        ApiResponsePopupOutcomeResult: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["PopupOutcomeResult"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        PopupOutcomeResult: {
+            accepted?: boolean;
+            /** @enum {string} */
+            status?: "ISSUED" | "SHOWN" | "CLOSED" | "CLICKED" | "INVALIDATED" | "EXPIRED";
+            /** @enum {string} */
+            queueDirective?: "KEEP_CURRENT" | "CONTINUE" | "TERMINATE";
         };
         FundOrderRequest: {
             /** Format: uuid */
@@ -3272,6 +4344,125 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
+        TradingLabRunCreateRequest: {
+            /** Format: int64 */
+            scenarioVersion: number;
+            configSnapshotHash: string;
+            localCalculation: components["schemas"]["JsonNode"];
+        };
+        ApiResponseTradingLabRunResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingLabRunResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingLabRunResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            scenarioId?: string;
+            /** Format: uuid */
+            reportId?: string;
+            state?: string;
+            /** Format: int64 */
+            queueSequence?: number;
+            pauseRequested?: boolean;
+            cancelRequested?: boolean;
+            /** Format: date-time */
+            virtualStartedAt?: string;
+            /** Format: date-time */
+            virtualCurrentAt?: string;
+            /** Format: int64 */
+            processedTicks?: number;
+            /** Format: int64 */
+            totalTicks?: number;
+            speedMultiplier?: number;
+            /** Format: int64 */
+            currentStep?: number;
+            failureCode?: string;
+            failureMessage?: string;
+            configSnapshotHash?: string;
+            modelVersion?: string;
+            symbolConfigVersion?: string;
+            codeVersion?: string;
+            /** Format: uuid */
+            createdBy?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+            /** Format: int64 */
+            version?: number;
+        };
+        ApiResponseTradingLabRunControlResult: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingLabRunControlResult"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingLabRunControlResult: {
+            /** Format: uuid */
+            runId?: string;
+            /** @enum {string} */
+            state?: "DRAFT" | "VALIDATING" | "QUEUED" | "RESETTING" | "RUNNING" | "PAUSED" | "CANCELLING" | "CANCELLED" | "FAILED" | "COMPLETED" | "CLEANING";
+            /** Format: int64 */
+            runVersion?: number;
+            pauseRequested?: boolean;
+            cancelRequested?: boolean;
+        };
+        ApiResponseTradingLabPrintConfirmationResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingLabPrintConfirmationResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingLabPrintConfirmationResponse: {
+            /** Format: uuid */
+            reportId?: string;
+            token?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+        };
+        TradingLabPermanentRequest: {
+            permanent: boolean;
+        };
+        ApiResponseTradingLabPermanentResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingLabPermanentResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingLabPermanentResponse: {
+            /** Format: uuid */
+            reportId?: string;
+            permanent?: boolean;
+            /** Format: int64 */
+            version?: number;
+        };
+        ApiResponseTradingLabEnvironmentActionResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingLabEnvironmentActionResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingLabEnvironmentActionResponse: {
+            action?: string;
+            relayRunning?: boolean;
+        };
         AdminImportTaskRequest: {
             pageKey: string;
             fileName: string;
@@ -3447,45 +4638,6 @@ export interface components {
         AdminKycApplicationReviewRequest: {
             status: string;
             reason: string;
-        };
-        MarketTestControlRequest: {
-            symbol?: string;
-            bid?: number;
-            ask?: number;
-            ttl?: string;
-        };
-        ApiResponseQuoteResponse: {
-            success?: boolean;
-            code?: string;
-            message?: string;
-            data?: components["schemas"]["QuoteResponse"];
-            /** Format: date-time */
-            timestamp?: string;
-        };
-        QuoteResponse: {
-            type?: string;
-            symbol?: string;
-            bid?: number;
-            ask?: number;
-            mid?: number;
-            markPrice?: number;
-            spread?: number;
-            source?: string;
-            /** Format: int64 */
-            timestamp?: number;
-            changePercent?: number;
-            high24h?: number;
-            low24h?: number;
-            volume24h?: number;
-            /** @enum {string} */
-            sourceMode?: "PUBLIC_EXTERNAL" | "LOCAL_SIMULATED";
-            providerCode?: string;
-            providerSymbol?: string;
-            /** Format: date-time */
-            asOf?: string;
-            /** Format: date-time */
-            expiresAt?: string;
-            stale?: boolean;
         };
         AdminPriceAdjustmentRequest: {
             mode: string;
@@ -3720,6 +4872,81 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
+        MessageSaveRequest: {
+            category: string;
+            /** @enum {string} */
+            audienceType: "ALL" | "SELECTED";
+            targetUserIds?: string[];
+            content: components["schemas"]["MessageContentRequest"];
+            reason: string;
+        };
+        MessageSendRequest: {
+            /** Format: date-time */
+            sendAt?: string;
+            reason: string;
+        };
+        MessageActionRequest: {
+            reason: string;
+        };
+        CampaignActionRequest: {
+            reason: string;
+        };
+        ApiResponseCampaignPreviewResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["CampaignPreviewResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        CampaignPreviewResponse: {
+            preview?: boolean;
+            /** Format: uuid */
+            campaignId?: string;
+            /** Format: uuid */
+            revisionId?: string;
+            /** @enum {string} */
+            templateSize?: "SMALL" | "MEDIUM" | "LARGE";
+            title?: string;
+            sanitizedHtml?: string;
+            /** Format: uuid */
+            coverAssetId?: string;
+            ctaLabel?: string;
+            ctaRouteKey?: string;
+            ctaParams?: string;
+        };
+        ApiResponseCampaignResetResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["CampaignResetResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        CampaignResetResponse: {
+            /** Format: int32 */
+            affectedUsers?: number;
+        };
+        ApiResponseUploadResult: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["UploadResult"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        UploadResult: {
+            /** Format: uuid */
+            assetId?: string;
+            url?: string;
+            mimeType?: string;
+            /** Format: int64 */
+            byteSize?: number;
+            /** Format: int32 */
+            width?: number;
+            /** Format: int32 */
+            height?: number;
+        };
         AdminAccountCleanupRequest: {
             reason: string;
             /** Format: uuid */
@@ -3866,6 +5093,7 @@ export interface components {
         UpdateOrderRequest: {
             quantity?: number;
             price?: number;
+            triggerPrice?: number;
             stopLoss?: number;
             takeProfit?: number;
         };
@@ -4103,6 +5331,64 @@ export interface components {
             backTitle?: string;
             backValue?: string;
         };
+        ApiResponseUserMessagePageResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["UserMessagePageResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        UserMessagePageResponse: {
+            items?: components["schemas"]["UserMessageResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        UserMessageResponse: {
+            /** Format: uuid */
+            publicationId?: string;
+            /** Format: uuid */
+            contentItemId?: string;
+            /** Format: uuid */
+            revisionId?: string;
+            /** @enum {string} */
+            sourceType?: "MANUAL" | "CAMPAIGN";
+            category?: string;
+            /** Format: date-time */
+            sentAt?: string;
+            /** Format: date-time */
+            deliveredAt?: string;
+            title?: string;
+            sanitizedHtml?: string;
+            /** Format: uuid */
+            coverAssetId?: string;
+            ctaLabel?: string;
+            ctaRouteKey?: string;
+            ctaParams?: string;
+            unread?: boolean;
+            /** Format: date-time */
+            readAt?: string;
+            /** @enum {string} */
+            readSource?: "USER" | "POPUP" | "READ_ALL";
+        };
+        ApiResponseUnreadMessageCountResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["UnreadMessageCountResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        UnreadMessageCountResponse: {
+            /** Format: int64 */
+            count?: number;
+        };
         ApiResponseListRecentTradeResponse: {
             success?: boolean;
             code?: string;
@@ -4255,6 +5541,39 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
+        QuoteResponse: {
+            type?: string;
+            symbol?: string;
+            bid?: number;
+            ask?: number;
+            mid?: number;
+            markPrice?: number;
+            spread?: number;
+            source?: string;
+            /** Format: int64 */
+            timestamp?: number;
+            changePercent?: number;
+            high24h?: number;
+            low24h?: number;
+            volume24h?: number;
+            /** @enum {string} */
+            sourceMode?: "PUBLIC_EXTERNAL" | "LOCAL_SIMULATED";
+            providerCode?: string;
+            providerSymbol?: string;
+            /** Format: date-time */
+            asOf?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            stale?: boolean;
+        };
+        ApiResponseQuoteResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["QuoteResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
         ApiResponsePerpetualReferenceResponse: {
             success?: boolean;
             code?: string;
@@ -4334,7 +5653,6 @@ export interface components {
             products?: components["schemas"]["JsonNode"][];
             fearGreed?: components["schemas"]["BinanceFearGreedResponse"];
         };
-        JsonNode: unknown;
         ApiResponseBinanceFuturesDashboardSourceResponse: {
             success?: boolean;
             code?: string;
@@ -4463,6 +5781,33 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
+        AdminPageResponseAdminUserSearchResponse: {
+            items?: components["schemas"]["AdminUserSearchResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        AdminUserSearchResponse: {
+            /** Format: uuid */
+            id?: string;
+            email?: string;
+            phone?: string;
+            /** @enum {string} */
+            status?: "ACTIVE" | "FROZEN" | "DISABLED";
+        };
+        ApiResponseAdminPageResponseAdminUserSearchResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["AdminPageResponseAdminUserSearchResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
         AdminPageResponseAdminTradeResponse: {
             items?: components["schemas"]["AdminTradeResponse"][];
             /** Format: int32 */
@@ -4555,6 +5900,111 @@ export interface components {
             data?: components["schemas"]["AdminPageResponseAdminOrderResponse"];
             /** Format: date-time */
             timestamp?: string;
+        };
+        AdminPageResponseTradingLabScenarioResponse: {
+            items?: components["schemas"]["TradingLabScenarioResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        ApiResponseAdminPageResponseTradingLabScenarioResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["AdminPageResponseTradingLabScenarioResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        SseEmitter: {
+            /** Format: int64 */
+            timeout?: number | null;
+        };
+        ApiResponseTradingLabReportResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingLabReportResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingLabReportResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            runId?: string;
+            /** Format: uuid */
+            scenarioId?: string;
+            status?: string;
+            modelVersion?: string;
+            configSnapshotHash?: string;
+            codeVersion?: string;
+            /** Format: int64 */
+            uncompressedBytes?: number;
+            /** Format: int64 */
+            compressedBytes?: number;
+            /** Format: int32 */
+            chunkCount?: number;
+            /** Format: date-time */
+            retainedUntil?: string;
+            permanent?: boolean;
+            failureCode?: string;
+            failureMessage?: string;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            completedAt?: string;
+            /** Format: int64 */
+            version?: number;
+        };
+        StreamingResponseBody: unknown;
+        ApiResponseTradingLabPrintInfoResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingLabPrintInfoResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingLabPrintInfoResponse: {
+            /** Format: int64 */
+            uncompressedBytes?: number;
+            /** Format: int64 */
+            estimatedPageCount?: number;
+            /** Format: int64 */
+            thresholdBytes?: number;
+            requiresConfirmation?: boolean;
+        };
+        ApiResponseTradingLabEnvironmentStatusResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingLabEnvironmentStatusResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingLabEnvironmentStatusResponse: {
+            relayRunning?: boolean;
+            validationHealth?: string;
+        };
+        ApiResponseTradingLabConfigResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["TradingLabConfigResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        TradingLabConfigResponse: {
+            configSnapshot?: components["schemas"]["JsonNode"];
+            configSnapshotHash?: string;
+            modelVersion?: string;
+            symbolConfigVersion?: string;
+            codeVersion?: string;
         };
         ApiResponseListAdminRiskConfigResponse: {
             success?: boolean;
@@ -4955,6 +6405,173 @@ export interface components {
             /** Format: date-time */
             timestamp?: string;
         };
+        AdminPageResponseMessageSummaryResponse: {
+            items?: components["schemas"]["MessageSummaryResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        ApiResponseAdminPageResponseMessageSummaryResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["AdminPageResponseMessageSummaryResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        MessageSummaryResponse: {
+            /** Format: uuid */
+            id?: string;
+            /** @enum {string} */
+            lifecycleStatus?: "DRAFT" | "SCHEDULED" | "SENT" | "DELETED";
+            /** @enum {string} */
+            audienceType?: "ALL" | "SELECTED";
+            category?: string;
+            /** Format: date-time */
+            scheduledAt?: string;
+            /** Format: date-time */
+            sentAt?: string;
+            /** Format: uuid */
+            revisionId?: string;
+            title?: string;
+            /** Format: int64 */
+            targetCount?: number;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        AdminPageResponseCampaignSummaryResponse: {
+            items?: components["schemas"]["CampaignSummaryResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        ApiResponseAdminPageResponseCampaignSummaryResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["AdminPageResponseCampaignSummaryResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        CampaignSummaryResponse: {
+            /** Format: uuid */
+            id?: string;
+            name?: string;
+            /** @enum {string} */
+            lifecycleStatus?: "DRAFT" | "SCHEDULED" | "ACTIVE" | "PAUSED" | "ENDED" | "DELETED";
+            /** @enum {string} */
+            audienceType?: "ALL" | "SELECTED";
+            syncToInbox?: boolean;
+            /** Format: int32 */
+            priority?: number;
+            /** Format: date-time */
+            startAt?: string;
+            /** Format: date-time */
+            endAt?: string;
+            /** Format: date-time */
+            firstPublishedAt?: string;
+            /** Format: uuid */
+            revisionId?: string;
+            title?: string;
+            /** Format: int64 */
+            targetCount?: number;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        AdminPageResponseCampaignUserResponse: {
+            items?: components["schemas"]["CampaignUserResponse"][];
+            /** Format: int32 */
+            page?: number;
+            /** Format: int32 */
+            size?: number;
+            /** Format: int64 */
+            total?: number;
+            /** Format: int32 */
+            totalPages?: number;
+        };
+        ApiResponseAdminPageResponseCampaignUserResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["AdminPageResponseCampaignUserResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        CampaignUserResponse: {
+            /** Format: uuid */
+            userId?: string;
+            email?: string;
+            /** @enum {string} */
+            status?: "ACTIVE" | "FROZEN" | "DISABLED";
+            /** Format: int32 */
+            totalImpressions?: number;
+            /** Format: date */
+            dailyBucket?: string;
+            /** Format: int32 */
+            dailyImpressions?: number;
+            /** Format: date-time */
+            lastImpressionAt?: string;
+            /** Format: date-time */
+            optedOutAt?: string;
+            /** Format: date-time */
+            lastClickedAt?: string;
+            /** Format: int64 */
+            issuedDeliveries?: number;
+            /** Format: int64 */
+            shownDeliveries?: number;
+            /** Format: int64 */
+            closedDeliveries?: number;
+            /** Format: int64 */
+            clickedDeliveries?: number;
+            /** Format: int64 */
+            invalidatedDeliveries?: number;
+            /** Format: int64 */
+            expiredDeliveries?: number;
+        };
+        ApiResponseCampaignStatsResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["CampaignStatsResponse"];
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        CampaignStatsResponse: {
+            /** Format: uuid */
+            campaignId?: string;
+            /** Format: int64 */
+            targetCount?: number;
+            /** Format: int64 */
+            usersWithState?: number;
+            /** Format: int64 */
+            totalImpressions?: number;
+            /** Format: int64 */
+            optedOutUsers?: number;
+            /** Format: int64 */
+            clickedUsers?: number;
+            /** Format: int64 */
+            issuedDeliveries?: number;
+            /** Format: int64 */
+            shownDeliveries?: number;
+            /** Format: int64 */
+            closedDeliveries?: number;
+            /** Format: int64 */
+            clickedDeliveries?: number;
+            /** Format: int64 */
+            invalidatedDeliveries?: number;
+            /** Format: int64 */
+            expiredDeliveries?: number;
+        };
         AdminDashboardSummaryResponse: {
             /** Format: int64 */
             userCount?: number;
@@ -5244,7 +6861,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListString"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5264,6 +6881,199 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    scenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabScenarioResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    updateScenario: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TradingLabScenarioWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabScenarioResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    deleteScenario: {
+        parameters: {
+            query: {
+                expectedVersion: number;
+            };
+            header?: {
+                "X-Request-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5293,7 +7103,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminTableColumnPreferenceResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5313,6 +7123,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5346,7 +7165,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminTableColumnPreferenceResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5366,6 +7185,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5399,7 +7227,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminRiskConfigResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5419,6 +7247,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5452,7 +7289,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5472,6 +7309,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5505,7 +7351,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminRoleResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5525,6 +7371,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5558,7 +7413,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5578,6 +7433,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5611,7 +7475,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminRoleMenuPermissionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5631,6 +7495,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5664,7 +7537,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminRoleDataScopeResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5684,6 +7557,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5717,7 +7599,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPostResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5737,6 +7619,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5770,7 +7661,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5790,6 +7681,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5823,7 +7723,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminMenuResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5843,6 +7743,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5876,7 +7785,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5896,6 +7805,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5929,7 +7847,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminDepartmentResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -5949,6 +7867,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5982,7 +7909,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6002,6 +7929,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6035,7 +7971,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminUserProfileResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6055,6 +7991,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6088,7 +8033,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminSymbolResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6108,6 +8053,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6141,7 +8095,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6161,6 +8115,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6195,7 +8158,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminSymbolProviderBindingResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6215,6 +8178,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6248,7 +8220,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminSymbolResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6268,6 +8240,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6297,7 +8278,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminFundingConfigResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6317,6 +8298,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6350,7 +8340,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminFundingConfigResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6370,6 +8360,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6403,7 +8402,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminDataProviderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6423,6 +8422,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6456,7 +8464,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminSymbolCategoryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6476,6 +8484,495 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    policy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePopupPolicyResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PopupPolicyUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePopupPolicyResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    message: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMessageDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    update_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMessageDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMessageDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    campaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    update_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    delete_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6509,7 +9006,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminMessageResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6529,6 +9026,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6562,7 +9068,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6582,6 +9088,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6615,7 +9130,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminArticleResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6635,6 +9150,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6668,7 +9192,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6688,6 +9212,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6723,7 +9256,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminSystemSettingResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6743,6 +9276,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6774,7 +9316,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminSystemSettingResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6794,6 +9336,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6829,7 +9380,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminDictionaryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6849,6 +9400,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6880,7 +9440,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminDictionaryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6900,6 +9460,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6933,7 +9502,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdjustPositionMarginResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -6953,6 +9522,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6986,7 +9564,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7006,6 +9584,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7041,7 +9628,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponsePositionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7061,6 +9648,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7092,7 +9688,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseBatchActionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7112,6 +9708,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7145,7 +9750,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseTradingPageResponseOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7165,6 +9770,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7196,7 +9810,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7216,6 +9830,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7245,7 +9868,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7265,6 +9888,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7296,7 +9928,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseBatchActionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7316,6 +9948,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7347,7 +9988,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseOcoOrderGroupResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7367,6 +10008,599 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    markUnread: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publicationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    markRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publicationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    hide: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                publicationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    markAllRead: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    startQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PopupSurface"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePopupClaim"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    next: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sessionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PopupSurface"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePopupClaim"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    shown: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliveryToken: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePopupOutcomeResult"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    optOut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliveryToken: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePopupOutcomeResult"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    close: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliveryToken: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePopupOutcomeResult"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    click: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                deliveryToken: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponsePopupOutcomeResult"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7396,7 +10630,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListFundOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7416,6 +10650,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7447,7 +10690,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseFundOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7467,6 +10710,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7498,7 +10750,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAuthResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7518,6 +10770,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7549,7 +10810,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAuthResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7569,6 +10830,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7600,7 +10870,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7620,6 +10890,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7651,7 +10930,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAuthResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7671,6 +10950,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7704,7 +10992,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminUserNoteResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7724,6 +11012,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7757,7 +11054,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminUserResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7777,6 +11074,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7810,7 +11116,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7830,6 +11136,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7863,7 +11178,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponsePositionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7883,6 +11198,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7916,7 +11240,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7936,6 +11260,558 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    scenarios: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseAdminPageResponseTradingLabScenarioResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    createScenario: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TradingLabScenarioWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabScenarioResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    createRun: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TradingLabRunCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabRunResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    resume: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabRunControlResult"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    pause: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabRunControlResult"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    cancel: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Request-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabRunControlResult"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    printConfirmation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabPrintConfirmationResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    permanent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TradingLabPermanentRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabPermanentResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    action: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                action: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabEnvironmentActionResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7967,7 +11843,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminImportTaskResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7987,6 +11863,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8018,7 +11903,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminExportTaskResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8038,6 +11923,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8069,7 +11963,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminBatchOperationResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8089,6 +11983,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8116,7 +12019,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminRiskConfigResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8136,6 +12039,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8167,7 +12079,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminRiskConfigResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8187,6 +12099,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8218,7 +12139,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminUserRoleResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8238,6 +12159,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8273,7 +12203,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminRoleResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8293,6 +12223,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8324,7 +12263,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminRoleResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8344,6 +12283,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8379,7 +12327,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminPostResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8399,6 +12347,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8430,7 +12387,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPostResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8450,6 +12407,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8485,7 +12451,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminMenuResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8505,6 +12471,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8536,7 +12511,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminMenuResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8556,6 +12531,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8591,7 +12575,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminDepartmentResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8611,6 +12595,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8642,7 +12635,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminDepartmentResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8662,6 +12655,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8691,7 +12693,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminMemberPaymentAccountResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8711,6 +12713,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8744,7 +12755,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminMemberPaymentAccountResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8764,6 +12775,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8797,7 +12817,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminKycApplicationResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8817,6 +12837,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8850,7 +12879,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminKycApplicationResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8877,50 +12906,8 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-        };
-    };
-    override: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MarketTestControlRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseQuoteResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8956,7 +12943,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminSymbolResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -8976,6 +12963,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9007,7 +13003,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminSymbolResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9027,6 +13023,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9056,7 +13061,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminSymbolProviderBindingResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9076,6 +13081,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9109,7 +13123,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminSymbolProviderBindingResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9129,6 +13143,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9162,7 +13185,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPriceAdjustmentResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9182,6 +13205,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9215,7 +13247,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPriceAdjustmentResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9235,6 +13267,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9262,7 +13303,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminDataProviderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9282,6 +13323,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9313,7 +13363,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminDataProviderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9333,6 +13383,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9362,7 +13421,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminDataProviderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9382,6 +13441,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9411,7 +13479,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminProviderSyncResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9431,6 +13499,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9466,7 +13543,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminSymbolCategoryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9486,6 +13563,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9517,7 +13603,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminSymbolCategoryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9537,6 +13623,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9566,7 +13661,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminVerificationCodeLogResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9586,6 +13681,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9617,7 +13721,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminVerificationCodeLogResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9637,6 +13741,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9672,7 +13785,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminPaymentMethodResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9692,6 +13805,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9723,7 +13845,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPaymentMethodResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9743,6 +13865,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9779,7 +13910,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminFundOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9799,6 +13930,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9830,7 +13970,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminFundOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9850,6 +13990,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9883,7 +14032,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminFundOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9903,6 +14052,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9936,7 +14094,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminFundOperationResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -9956,6 +14114,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9989,7 +14156,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminFundOperationResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10009,6 +14176,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10042,7 +14218,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminFundOperationResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10062,6 +14238,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10095,7 +14280,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminFeatureOperationResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10122,9 +14307,947 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
         };
     };
     messages: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                lifecycleStatus?: "DRAFT" | "SCHEDULED" | "SENT" | "DELETED";
+                title?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseAdminPageResponseMessageSummaryResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMessageDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    send: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageSendRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMessageDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMessageDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    cancelSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMessageDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    campaigns: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                lifecycleStatus?: "DRAFT" | "SCHEDULED" | "ACTIVE" | "PAUSED" | "ENDED" | "DELETED";
+                name?: string;
+                audienceType?: "ALL" | "SELECTED";
+                syncToInbox?: boolean;
+                effectiveFrom?: string;
+                effectiveTo?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseAdminPageResponseCampaignSummaryResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    create_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignSaveRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    testPopup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignPreviewResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    resume_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    restore_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    resetDelivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignResetResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    publish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    pause_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    end: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignActionRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignDetailResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseUploadResult"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    messages_1: {
         parameters: {
             query: {
                 page?: number;
@@ -10150,7 +15273,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminMessageResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10170,6 +15293,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10201,7 +15333,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminMessageResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10221,6 +15353,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10257,7 +15398,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminArticleResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10277,6 +15418,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10308,7 +15458,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminArticleResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10328,6 +15478,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10361,7 +15520,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseBatchActionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10381,6 +15540,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10414,7 +15582,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseDemoResetResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10434,6 +15602,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10467,7 +15644,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseTradingPageResponseAccountTransferResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10487,6 +15664,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10520,7 +15706,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAccountTransferResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10540,6 +15726,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10573,7 +15768,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseDemoResetResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10593,6 +15788,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10626,7 +15830,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAssetConversionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10646,6 +15850,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10673,7 +15886,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAccountResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10693,6 +15906,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10722,7 +15944,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10742,6 +15964,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10775,7 +16006,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10795,6 +16026,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10830,7 +16070,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponsePositionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10850,6 +16090,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10883,7 +16132,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10903,6 +16152,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10936,7 +16194,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminUserResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10956,6 +16214,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10989,7 +16256,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminUserResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11009,6 +16276,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11042,7 +16318,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminSymbolResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11062,6 +16338,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11095,7 +16380,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11115,6 +16400,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11148,7 +16442,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPaymentMethodResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11168,6 +16462,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11202,7 +16505,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseTradingSettingsResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11222,6 +16525,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11255,7 +16567,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseTradingSettingsResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11275,6 +16587,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11307,7 +16628,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseTradingPageResponseTradeResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11327,6 +16648,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11359,7 +16689,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseTradingPageResponsePositionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11379,6 +16709,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11411,7 +16750,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseTradingPageResponsePositionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11431,6 +16770,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11460,7 +16808,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListOrderEventResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11480,6 +16828,74 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    orderByClientOrderId: {
+        parameters: {
+            query: {
+                accountId: string;
+                clientOrderId: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseOrderResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11512,7 +16928,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseTradingPageResponseFundingSettlementResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11532,6 +16948,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11559,7 +16984,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseHomeCountersResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11579,6 +17004,189 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    asset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                assetId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": string;
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    list: {
+        parameters: {
+            query?: {
+                page?: number;
+                size?: number;
+                unreadOnly?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseUserMessagePageResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    unreadCount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseUnreadMessageCountResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11610,7 +17218,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListRecentTradeResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11630,6 +17238,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11660,7 +17277,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListSymbolResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11680,6 +17297,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11709,7 +17335,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseInstrumentRulesResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11729,6 +17355,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11758,7 +17393,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListInstrumentRulesResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11778,6 +17413,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11805,7 +17449,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseMarketStatusResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11825,6 +17469,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11854,7 +17507,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseMapStringQuoteResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11874,6 +17527,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11903,7 +17565,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseQuoteResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11923,6 +17585,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11952,7 +17623,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponsePerpetualReferenceResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11972,6 +17643,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12001,7 +17681,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseMarketDepthResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12021,6 +17701,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12048,7 +17737,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListString"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12068,6 +17757,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12095,7 +17793,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseBinanceMarketOverviewSourceResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12115,6 +17813,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12145,7 +17852,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseBinanceFuturesDashboardSourceResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12165,6 +17872,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12194,7 +17910,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListLedgerEntryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12214,6 +17930,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12246,7 +17971,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListCandleResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12266,6 +17991,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12293,7 +18027,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseSessionStatusResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12313,6 +18047,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12340,7 +18083,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseMeResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12360,6 +18103,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12390,7 +18142,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminUserResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12410,6 +18162,75 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    search: {
+        parameters: {
+            query?: {
+                q?: string;
+                page?: number;
+                size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminUserSearchResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12445,7 +18266,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminTradeResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12465,6 +18286,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12500,7 +18330,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminPositionResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12520,6 +18350,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12555,7 +18394,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminOrderResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12582,9 +18421,540 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabRunResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    events: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Last-Event-ID"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["SseEmitter"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
         };
     };
     detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabReportResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    delete_2: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    print: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Trading-Lab-Print-Confirmation"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["StreamingResponseBody"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    printInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabPrintInfoResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    download: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["StreamingResponseBody"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    status_1: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabEnvironmentStatusResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseTradingLabConfigResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    detail_1: {
         parameters: {
             query?: never;
             header?: never;
@@ -12604,7 +18974,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminMemberDetailResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12624,6 +18994,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12653,7 +19032,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminMemberPaymentAccountResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12673,6 +19052,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12703,7 +19091,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminKycApplicationResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12730,46 +19118,8 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-        };
-    };
-    status_1: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseMarketStatusResponse"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12794,10 +19144,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "*/*": components["schemas"]["ApiResponseMarketRealtimeStatus"];
+                    "*/*": components["schemas"]["ApiResponseMarketStatusResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12817,6 +19167,71 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    status_3: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseMarketRealtimeStatus"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12847,7 +19262,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminPriceAdjustmentResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12867,6 +19282,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12896,7 +19320,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminProviderInstrumentResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12916,6 +19340,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12945,7 +19378,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminRequestLogResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12965,6 +19398,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13000,7 +19442,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminLedgerEntryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13020,6 +19462,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13047,7 +19498,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAdminFeaturePageResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13067,6 +19518,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13096,7 +19556,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminFeaturePageResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13116,6 +19576,135 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    users_1: {
+        parameters: {
+            query: {
+                page?: number;
+                size?: number;
+                reason: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseAdminPageResponseCampaignUserResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+        };
+    };
+    stats: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseCampaignStatsResponse"];
+                };
+            };
+            /** @description Business rule violation */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13143,7 +19732,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminDashboardSummaryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13163,6 +19752,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13193,7 +19791,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminAuditLogResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13213,6 +19811,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13243,7 +19850,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAdminPageResponseAdminAccountResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13263,6 +19870,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13292,7 +19908,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListWalletBalanceResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13312,6 +19928,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13341,7 +19966,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListFundingSettlementResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13361,6 +19986,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13397,7 +20031,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAssetLedgerEntryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13417,6 +20051,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13446,7 +20089,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListLedgerEntryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13466,6 +20109,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13493,7 +20145,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAccountResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13513,6 +20165,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13542,7 +20203,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListWalletBalanceResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13562,6 +20223,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13591,7 +20261,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseTradingSettingsResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13611,6 +20281,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13640,7 +20319,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseAccountResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13660,6 +20339,15 @@ export interface operations {
             };
             /** @description Internal Server Error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": components["schemas"]["ApiResponseVoid"];
+                };
+            };
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13696,7 +20384,7 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseListAssetLedgerEntryResponse"];
                 };
             };
-            /** @description Bad Request */
+            /** @description Business rule violation */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13723,48 +20411,8 @@ export interface operations {
                     "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
-        };
-    };
-    endOverride: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                symbol: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
+            /** @description Execution service unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

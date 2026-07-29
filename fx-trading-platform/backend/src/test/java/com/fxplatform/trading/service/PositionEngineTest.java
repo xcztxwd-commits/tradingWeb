@@ -413,6 +413,7 @@ class PositionEngineTest {
     UUID accountId = UUID.randomUUID();
     TradingAccountEntity account = account(
         accountId, new BigDecimal("100.00000000"), new BigDecimal("10.00000000"), 10);
+    account.setEquity(new BigDecimal("92.00000000"));
     account.setPositionMode(PositionMode.ONE_WAY);
     PositionEntity existing = canonicalPosition(
         accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "100", "10",
@@ -447,6 +448,7 @@ class PositionEngineTest {
     assertThat(existing.getRealizedPnl()).isEqualByComparingTo("-10.00000000");
     assertThat(result.realizedPnlDelta()).isEqualByComparingTo("-10.00000000");
     assertThat(account.getBalance()).isEqualByComparingTo("82.00000000");
+    assertThat(account.getEquity()).isEqualByComparingTo("82.00000000");
     assertThat(account.getUsedMargin()).isEqualByComparingTo("0.00000000");
     assertThat(account.getFreeMargin()).isEqualByComparingTo("82.00000000");
     verify(ledgerService).recordFundingFee(
@@ -459,6 +461,38 @@ class PositionEngineTest {
         new BigDecimal("-10.00000000"),
         existing.getId(),
         "Position realized PnL");
+  }
+
+  @Test
+  void authorityLinearPerpetualKeepsTenDecimalMarkConsistentWithDerivedSnapshot() {
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(
+        accountId, new BigDecimal("20000.00000000"), new BigDecimal("20.00000000"), 10);
+    account.setPositionMode(PositionMode.ONE_WAY);
+    when(positionRepository.findOpenPerpetualSlotForUpdate(
+        accountId, "BTCUSDT-PERP", PositionMode.ONE_WAY, PositionSide.BOTH))
+        .thenReturn(Optional.empty());
+    when(positionRepository.save(any(PositionEntity.class)))
+        .thenAnswer(invocation -> withId(invocation.getArgument(0)));
+    OrderEntity order = perpetualOrder(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "2", PositionMode.ONE_WAY,
+        PositionSide.BOTH, MarginMode.CROSS, 10, false);
+    BigDecimal authorityMark = new BigDecimal("100.0000000050");
+
+    PositionEntity opened = engine().applyPerpetualFill(
+        account,
+        order,
+        fill(new BigDecimal("100.0000000000"), new BigDecimal("2")),
+        linearWithMaintenance(),
+        authorityMark,
+        10,
+        new BigDecimal("20.00000000"),
+        "Perpetual DEPTH fill").position();
+
+    assertThat(opened.getMarkPrice()).isEqualByComparingTo("100.0000000050");
+    assertThat(opened.getCurrentPrice()).isEqualByComparingTo("100.0000000050");
+    assertThat(opened.getNotional()).isEqualByComparingTo("200.00000001");
+    assertThat(opened.getFloatingPnl()).isEqualByComparingTo("0.00000001");
   }
 
   @Test

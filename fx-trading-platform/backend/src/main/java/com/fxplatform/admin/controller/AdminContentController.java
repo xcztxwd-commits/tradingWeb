@@ -9,6 +9,7 @@ import com.fxplatform.admin.dto.response.AdminMessageResponse;
 import com.fxplatform.admin.service.AdminContentCommandService;
 import com.fxplatform.admin.service.AdminContentQueryService;
 import com.fxplatform.admin.service.AdminFeaturePageQuery;
+import com.fxplatform.admin.service.AdminPermissionCatalog;
 import com.fxplatform.common.response.ApiResponse;
 import com.fxplatform.common.security.UserPrincipal;
 import jakarta.validation.Valid;
@@ -45,6 +46,8 @@ public class AdminContentController {
    * 分页查询站内消息。
    */
   @GetMapping("/messages")
+  @PreAuthorize("hasRole('ADMIN') and hasAuthority('"
+      + AdminPermissionCatalog.CONTENT_MESSAGE_READ + "')")
   public ApiResponse<AdminPageResponse<AdminMessageResponse>> messages(
       @RequestParam(defaultValue = "0") int page,
       @RequestParam(defaultValue = "20") int size,
@@ -60,6 +63,8 @@ public class AdminContentController {
    * 创建站内消息。
    */
   @PostMapping("/messages")
+  @PreAuthorize("hasRole('ADMIN') and hasAuthority('"
+      + AdminPermissionCatalog.CONTENT_MESSAGE_EDIT + "')")
   public ApiResponse<AdminMessageResponse> createMessage(
       @AuthenticationPrincipal UserPrincipal principal,
       @Valid @RequestBody AdminMessageRequest request
@@ -69,6 +74,8 @@ public class AdminContentController {
 
   /** 编辑站内消息，供通知表编辑按钮调用。 */
   @PutMapping("/messages/{messageId}")
+  @PreAuthorize("hasRole('ADMIN') and hasAuthority('"
+      + AdminPermissionCatalog.CONTENT_MESSAGE_EDIT + "')")
   public ApiResponse<AdminMessageResponse> updateMessage(
       @AuthenticationPrincipal UserPrincipal principal,
       @PathVariable UUID messageId,
@@ -79,6 +86,8 @@ public class AdminContentController {
 
   /** 删除站内消息，供通知表删除按钮调用。 */
   @DeleteMapping("/messages/{messageId}")
+  @PreAuthorize("hasRole('ADMIN') and hasAuthority('"
+      + AdminPermissionCatalog.CONTENT_MESSAGE_DELETE + "')")
   public ApiResponse<Void> deleteMessage(
       @AuthenticationPrincipal UserPrincipal principal,
       @PathVariable UUID messageId,

@@ -7,13 +7,20 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.security.SecurityProperties;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 @Component
 @RequiredArgsConstructor
+@Order(SecurityProperties.DEFAULT_FILTER_ORDER - 1)
 public class RequestLogFilter extends OncePerRequestFilter {
+
+  private static final Pattern POPUP_DELIVERY_OUTCOME_PATH = Pattern.compile(
+      "^(/api/me/engagement/popup-deliveries/)[^/]+(/(?:shown|close|opt-out|click))$");
 
   private final RequestLogService requestLogService;
 
@@ -63,7 +70,9 @@ public class RequestLogFilter extends OncePerRequestFilter {
 
   private String requestPath(HttpServletRequest request) {
     String query = request.getQueryString();
-    return StrUtil.isBlank(query) ? request.getRequestURI() : request.getRequestURI() + "?" + query;
+    String path = POPUP_DELIVERY_OUTCOME_PATH.matcher(request.getRequestURI())
+        .replaceFirst("$1<redacted>$2");
+    return StrUtil.isBlank(query) ? path : path + "?" + query;
   }
 
   private String clientIp(HttpServletRequest request) {

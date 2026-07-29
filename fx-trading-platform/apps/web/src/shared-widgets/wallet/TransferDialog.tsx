@@ -54,6 +54,7 @@ export function TransferDialog({
       labelledBy="wallet-transfer-title"
       closeLabel="Close transfer dialog"
       pending={pending}
+      priority="critical"
       panelClassName={css(styles, "confirm-dialog__panel")}
     >
       <form

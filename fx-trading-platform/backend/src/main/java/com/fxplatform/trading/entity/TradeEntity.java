@@ -45,6 +45,7 @@ public class TradeEntity {
   private String systemReason;
   private String sourceMode;
   private String providerCode;
+  private String fillIdentity;
 
   @TableField(fill = FieldFill.INSERT)
   private Instant executedAt;

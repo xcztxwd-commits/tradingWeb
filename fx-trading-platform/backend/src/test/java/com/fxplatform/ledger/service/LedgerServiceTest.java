@@ -89,6 +89,7 @@ class LedgerServiceTest {
     demoDeposit.setAmount(new BigDecimal("10000.00000000"));
     demoDeposit.setBalanceAfter(new BigDecimal("10000.00000000"));
     demoDeposit.setCurrency("USD");
+    demoDeposit.setSequenceNo(10L);
     demoDeposit.setCreatedAt(Instant.parse("2026-06-16T00:00:00Z"));
     AssetLedgerEntryEntity spotEntry = new AssetLedgerEntryEntity();
     spotEntry.setId(UUID.randomUUID());
@@ -100,7 +101,8 @@ class LedgerServiceTest {
     spotEntry.setReferenceType("ORDER");
     spotEntry.setReferenceId(orderId);
     spotEntry.setDescription("Spot buy quote spent");
-    spotEntry.setCreatedAt(Instant.parse("2026-06-16T00:01:00Z"));
+    spotEntry.setSequenceNo(11L);
+    spotEntry.setCreatedAt(Instant.parse("2026-06-16T00:00:00Z"));
 
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(ledgerEntryRepository.findByAccountIdOrderByCreatedAtDesc(accountId)).thenReturn(List.of(demoDeposit));

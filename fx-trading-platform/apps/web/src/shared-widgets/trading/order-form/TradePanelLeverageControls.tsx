@@ -1,3 +1,4 @@
+import { Dialog } from '@fx-platform/ui'
 import { ChevronDown, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -47,10 +48,16 @@ export function TradePanelLeverageControls({ leverage, open, onClose, onOpen, on
 
   return (
     <>
-      {open ? (
-        <div className={styles['trade-panel__leverage-layer']} role="presentation">
-          <button type="button" className={styles['trade-panel__leverage-backdrop']} aria-label={t('trading.closeLeverageDialog')} onClick={onClose} />
-          <section className={styles['trade-panel__leverage-popover']} role="dialog" aria-modal="true" aria-label={t('trading.adjustLeverage')}>
+      <Dialog
+        open={open}
+        onClose={onClose}
+        ariaLabel={t('trading.adjustLeverage')}
+        closeLabel={t('trading.closeLeverageDialog')}
+        priority="critical"
+        className={styles['trade-panel__leverage-layer']}
+        backdropClassName={styles['trade-panel__leverage-backdrop']}
+        panelClassName={styles['trade-panel__leverage-popover']}
+      >
             <div className={styles['trade-panel__leverage-popover-head']}>
               <strong>{t('trading.adjustLeverage')}</strong>
               <button type="button" aria-label={t('trading.closeLeverageDialog')} onClick={onClose}>
@@ -100,9 +107,7 @@ export function TradePanelLeverageControls({ leverage, open, onClose, onOpen, on
                 {t('common.confirm')}
               </button>
             </footer>
-          </section>
-        </div>
-      ) : null}
+      </Dialog>
 
       <div className={styles['trade-panel__leverage-row']} aria-label={t('trading.leverageRow')}>
         <LeverageCell side="buy" leverage={leverage} onOpen={onOpen} />

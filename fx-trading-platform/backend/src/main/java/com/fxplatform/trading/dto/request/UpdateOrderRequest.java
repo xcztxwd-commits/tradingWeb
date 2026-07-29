@@ -9,7 +9,17 @@ import java.math.BigDecimal;
 public record UpdateOrderRequest(
     @DecimalMin(value = "0", inclusive = false) BigDecimal quantity,
     BigDecimal price,
+    BigDecimal triggerPrice,
     BigDecimal stopLoss,
     BigDecimal takeProfit
 ) {
+
+  public UpdateOrderRequest(
+      BigDecimal quantity,
+      BigDecimal price,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit
+  ) {
+    this(quantity, price, null, stopLoss, takeProfit);
+  }
 }

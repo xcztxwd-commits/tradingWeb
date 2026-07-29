@@ -28,6 +28,7 @@ import com.fxplatform.common.exception.BusinessException;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -44,6 +45,7 @@ public class AdminRbacResourceManagementService {
   private final AuditLogService auditLogService;
 
   @Transactional
+  @PreAuthorize("hasAuthority('ROLE_ADMIN') and hasAuthority('SUPER_ADMIN')")
   public AdminRoleResponse createRole(UUID actorUserId, AdminRoleRequest request) {
     AdminRoleEntity role = new AdminRoleEntity();
     role.setRoleName(request.name());
@@ -57,6 +59,7 @@ public class AdminRbacResourceManagementService {
   }
 
   @Transactional
+  @PreAuthorize("hasAuthority('ROLE_ADMIN') and hasAuthority('SUPER_ADMIN')")
   public AdminRoleResponse updateRole(UUID actorUserId, UUID roleId, AdminRoleRequest request) {
     AdminRoleEntity role = AdminRbacServiceSupport.requireRole(roleRepository, roleId);
     role.setRoleName(request.name());
@@ -70,6 +73,7 @@ public class AdminRbacResourceManagementService {
   }
 
   @Transactional
+  @PreAuthorize("hasAuthority('ROLE_ADMIN') and hasAuthority('SUPER_ADMIN')")
   public void deleteRole(UUID actorUserId, UUID roleId, String reason) {
     AdminRoleEntity role = AdminRbacServiceSupport.requireRole(roleRepository, roleId);
     roleMenuPermissionRepository.delete(new QueryWrapper<AdminRoleMenuPermissionEntity>().eq("role_id", roleId));
@@ -86,6 +90,7 @@ public class AdminRbacResourceManagementService {
   }
 
   @Transactional
+  @PreAuthorize("hasAuthority('ROLE_ADMIN') and hasAuthority('SUPER_ADMIN')")
   public AdminMenuResponse createMenu(UUID actorUserId, AdminMenuRequest request) {
     AdminMenuEntity menu = new AdminMenuEntity();
     applyMenu(menu, request);
@@ -95,6 +100,7 @@ public class AdminRbacResourceManagementService {
   }
 
   @Transactional
+  @PreAuthorize("hasAuthority('ROLE_ADMIN') and hasAuthority('SUPER_ADMIN')")
   public AdminMenuResponse updateMenu(UUID actorUserId, UUID menuId, AdminMenuRequest request) {
     AdminMenuEntity menu = AdminRbacServiceSupport.requireMenu(menuRepository, menuId);
     applyMenu(menu, request);
@@ -104,6 +110,7 @@ public class AdminRbacResourceManagementService {
   }
 
   @Transactional
+  @PreAuthorize("hasAuthority('ROLE_ADMIN') and hasAuthority('SUPER_ADMIN')")
   public void deleteMenu(UUID actorUserId, UUID menuId, String reason) {
     AdminMenuEntity menu = AdminRbacServiceSupport.requireMenu(menuRepository, menuId);
     menuRepository.deleteById(menuId);
