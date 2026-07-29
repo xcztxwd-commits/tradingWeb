@@ -220,6 +220,16 @@ describe('visual QA acceptance matrix', () => {
     assert.doesNotMatch(runtimeSource, /mobile-order-sheet-title/u)
   })
 
+  it('waits for the submitted order result through the live dialog aria contract', () => {
+    const interactionSource = source.slice(
+      source.indexOf('async function assertTradingInteractions'),
+      source.indexOf('async function assertTradingAppearanceMatrix')
+    )
+
+    assert.match(interactionSource, /\[role="dialog"\]\[aria-modal="true"\]\[aria-labelledby\] \[role="status"\]/u)
+    assert.doesNotMatch(interactionSource, /mobile-order-sheet-title/u)
+  })
+
   it('selects a different routable market and verifies drawer, route and model state', () => {
     const interactionSource = source.slice(
       source.indexOf('async function assertTradingInteractions'),

@@ -988,7 +988,7 @@ async function assertTradingInteractions(page, route, viewport) {
   assert(confirmed, 'Order confirmation did not expose an enabled confirm action')
   await page.waitForFunction(
     () => !document.querySelector('[role="dialog"][aria-label]') &&
-      Boolean(document.querySelector('[role="dialog"][aria-labelledby="mobile-order-sheet-title"] [role="status"]')),
+      Boolean(document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby] [role="status"]')),
     'mocked order submission result'
   )
   await closeOpenDialog()
