@@ -209,6 +209,11 @@ public class ProtectionOrderService {
   ) {
     validateUpdateRequest(userId, protectionOrderId, request);
     OrderEntity preflight = requireProtectionSnapshot(userId, protectionOrderId);
+    if (preflight.getOrderType() == OrderType.TRAILING_STOP_MARKET) {
+      throw new BusinessException(
+          "PROTECTION_NOT_MODIFIABLE",
+          "Trailing stops cannot be converted through the static protection update API");
+    }
     requirePendingActivation(preflight);
     MutationContext context = requireContext(userId, preflight.getParentPositionId());
     BusinessException staleFailure = null;
@@ -333,6 +338,90 @@ public class ProtectionOrderService {
         || !Objects.equals(parentOrder.getAccountId(), lockedAccount.getId())) {
       throw accountNotFound();
     }
+    expireUnboundAttachedLocked(
+        parentOrder,
+        lockedAccount,
+        "Parent cancellation released attached protection hold");
+  }
+
+  /** Finalizes attached carriers after canceling a parent that already applied some fills. */
+  public void finalizeAttachedForPartiallyFilledCanceledParentLocked(
+      OrderEntity parentOrder,
+      TradingAccountEntity lockedAccount,
+      List<PositionEntity> lockedPositions,
+      List<OrderEntity> lockedActiveOrders
+  ) {
+    if (parentOrder == null || parentOrder.getId() == null) {
+      return;
+    }
+    if (lockedAccount == null
+        || !Objects.equals(parentOrder.getAccountId(), lockedAccount.getId())) {
+      throw accountNotFound();
+    }
+    List<PositionEntity> targets = safeList(lockedPositions).stream()
+        .filter(Objects::nonNull)
+        .filter(position -> Objects.equals(position.getAccountId(), parentOrder.getAccountId()))
+        .filter(position -> Objects.equals(position.getSymbol(), parentOrder.getSymbol()))
+        .filter(position -> position.getProductType() == ProductType.LINEAR_PERP)
+        .filter(position -> matchesParentOpeningSlot(parentOrder, position))
+        .toList();
+    if (targets.isEmpty()) {
+      expireUnboundAttachedLocked(
+          parentOrder,
+          lockedAccount,
+          "Partially filled parent cancellation released unbound protection hold");
+      return;
+    }
+    if (targets.size() != 1) {
+      throw new BusinessException(
+          ErrorCode.INVALID_POSITION_SIDE,
+          "Partially filled parent has an ambiguous protection target position");
+    }
+    PositionEntity target = targets.getFirst();
+    bindAttachedLocked(
+        parentOrder,
+        target,
+        protectionAuthorityMark(target),
+        safeList(lockedActiveOrders));
+  }
+
+  private boolean matchesParentOpeningSlot(
+      OrderEntity parentOrder,
+      PositionEntity position
+  ) {
+    if (position.getStatus() != PositionStatus.OPEN
+        || !positive(position.getLots())
+        || position.getSide() != parentOrder.getSide()
+        || position.getPositionMode() != parentOrder.getPositionMode()) {
+      return false;
+    }
+    if (parentOrder.getPositionMode() == PositionMode.ONE_WAY) {
+      return parentOrder.getPositionSide() == PositionSide.BOTH
+          && position.getPositionSide() == PositionSide.BOTH;
+    }
+    return parentOrder.getPositionMode() == PositionMode.HEDGE
+        && parentOrder.getPositionSide() == position.getPositionSide();
+  }
+
+  private BigDecimal protectionAuthorityMark(PositionEntity position) {
+    for (BigDecimal price : List.of(
+        orZero(position.getMarkPrice()),
+        orZero(position.getCurrentPrice()),
+        orZero(position.getOpenPrice()))) {
+      if (positive(price)) {
+        return price;
+      }
+    }
+    throw new BusinessException(
+        ErrorCode.MARKET_BUNDLE_INCOMPLETE,
+        "Partially filled parent protection target requires an authority mark");
+  }
+
+  private void expireUnboundAttachedLocked(
+      OrderEntity parentOrder,
+      TradingAccountEntity lockedAccount,
+      String holdReleaseDescription
+  ) {
     List<OrderEntity> attached = safeList(
         orderRepository.findProtectionsByParentOrderIdForUpdate(parentOrder.getId())).stream()
         .filter(order -> Objects.equals(order.getParentOrderId(), parentOrder.getId()))
@@ -340,11 +429,16 @@ public class ProtectionOrderService {
         .filter(order -> order.getParentPositionId() == null)
         .filter(order -> order.getStatus() == OrderStatus.PENDING_ACTIVATION)
         .toList();
+    TradingAccountEntity account = lockedAccount;
     for (OrderEntity carrier : attached) {
+      if (orZero(carrier.getHoldAmount()).compareTo(BigDecimal.ZERO) > 0 && account == null) {
+        account = accountRepository.findByIdForUpdate(parentOrder.getAccountId())
+            .orElseThrow(ProtectionOrderService::accountNotFound);
+      }
       releaseProtectionHold(
-          lockedAccount,
+          account,
           carrier,
-          "Parent cancellation released attached protection hold");
+          holdReleaseDescription);
       carrier.setStatus(OrderStatus.EXPIRED);
       carrier.setQuantity(BigDecimal.ZERO);
       carrier.setOriginalQuantity(BigDecimal.ZERO);
@@ -370,6 +464,16 @@ public class ProtectionOrderService {
       PositionEngine.PositionUpdateResult update,
       BigDecimal authorityMark
   ) {
+    afterPerpetualFillLocked(filledOrder, update, authorityMark, true);
+  }
+
+  /** Reconciles reductions per fill and binds parent-attached protection only at parent terminal. */
+  public void afterPerpetualFillLocked(
+      OrderEntity filledOrder,
+      PositionEngine.PositionUpdateResult update,
+      BigDecimal authorityMark,
+      boolean parentTerminal
+  ) {
     if (filledOrder == null
         || filledOrder.getId() == null
         || filledOrder.getAccountId() == null
@@ -385,7 +489,25 @@ public class ProtectionOrderService {
       activeOrders = safeList(orderRepository.findActiveLinearPerpBySymbolForUpdate(
           filledOrder.getAccountId(), filledOrder.getSymbol()));
     }
-    bindAttachedLocked(filledOrder, update.position(), authorityMark, activeOrders);
+    if (parentTerminal) {
+      if (filledOrder.getTimeInForce() == TimeInForce.IOC
+          && terminalFillOnlyReducedExistingPosition(update)) {
+        expireUnboundAttachedLocked(
+            filledOrder,
+            null,
+            "Parent terminal fill released attached protection hold");
+      } else {
+        bindAttachedLocked(filledOrder, update.position(), authorityMark, activeOrders);
+      }
+    }
+  }
+
+  private boolean terminalFillOnlyReducedExistingPosition(
+      PositionEngine.PositionUpdateResult update
+  ) {
+    return update.reducedPositionId() != null
+        && (update.position() == null
+            || Objects.equals(update.reducedPositionId(), update.position().getId()));
   }
 
   /** Returns whether one untriggered protection carrier crosses its authority mark condition. */
@@ -872,40 +994,86 @@ public class ProtectionOrderService {
       throw positionNotFound();
     }
     List<OrderEntity> alreadyBound = boundProtections(activeOrders, position.getId());
-    if (alreadyBound.size() + attached.size() > MAX_ACTIVE_PROTECTIONS) {
+    BigDecimal capacity = position.getLots().abs();
+    Map<ProtectionType, BigDecimal> remainingCapacity = new EnumMap<>(ProtectionType.class);
+    for (ProtectionType type : ProtectionType.values()) {
+      BigDecimal alreadyAllocated = alreadyBound.stream()
+          .filter(existing -> existing.getProtectionType() == type)
+          .map(this::canonicalRemaining)
+          .reduce(BigDecimal.ZERO, BigDecimal::add);
+      if (alreadyAllocated.compareTo(capacity) > 0) {
+        throw new BusinessException(
+            ErrorCode.PROTECTION_QUANTITY_EXCEEDED,
+            "Existing protection quantity exceeds the filled position");
+      }
+      remainingCapacity.put(type, capacity.subtract(alreadyAllocated));
+    }
+    Comparator<OrderEntity> oldestFirst = Comparator
+        .comparing(
+            OrderEntity::getCreatedAt,
+            Comparator.nullsFirst(Comparator.naturalOrder()))
+        .thenComparing(
+            OrderEntity::getId,
+            Comparator.nullsFirst(Comparator.naturalOrder()));
+    List<OrderEntity> orderedAttached = attached.stream()
+        .sorted(oldestFirst)
+        .toList();
+    Map<UUID, BigDecimal> boundQuantities = new java.util.HashMap<>();
+    for (OrderEntity carrier : orderedAttached) {
+      BigDecimal available = remainingCapacity.getOrDefault(
+          carrier.getProtectionType(), BigDecimal.ZERO);
+      BigDecimal boundQuantity = canonicalRemaining(carrier).min(available);
+      if (positive(boundQuantity)) {
+        validateDirection(
+            position,
+            carrier.getProtectionType(),
+            carrier.getTriggerPrice(),
+            authorityMark);
+      }
+      boundQuantities.put(carrier.getId(), boundQuantity);
+      remainingCapacity.put(
+          carrier.getProtectionType(), available.subtract(boundQuantity));
+    }
+    long activeProtections = alreadyBound.stream()
+        .map(this::canonicalRemaining)
+        .filter(quantity -> positive(quantity))
+        .count()
+        + boundQuantities.values().stream()
+            .filter(quantity -> positive(quantity))
+            .count();
+    if (activeProtections > MAX_ACTIVE_PROTECTIONS) {
       throw new BusinessException(
           ErrorCode.PROTECTION_LIMIT_EXCEEDED,
           "Attached protections exceed the position limit");
     }
-    Map<ProtectionType, BigDecimal> totals = new EnumMap<>(ProtectionType.class);
-    for (OrderEntity existing : alreadyBound) {
-      totals.merge(existing.getProtectionType(), canonicalRemaining(existing), BigDecimal::add);
-    }
-    BigDecimal capacity = position.getLots().abs();
-    Map<UUID, BigDecimal> boundQuantities = new java.util.HashMap<>();
-    for (OrderEntity carrier : attached) {
-      validateDirection(
-          position,
-          carrier.getProtectionType(),
-          carrier.getTriggerPrice(),
-          authorityMark);
-      BigDecimal boundQuantity = canonicalRemaining(carrier).min(capacity);
-      if (!positive(boundQuantity)) {
-        throw new BusinessException(
-            ErrorCode.PROTECTION_QUANTITY_EXCEEDED,
-            "Attached protection has no resulting position quantity");
-      }
-      boundQuantities.put(carrier.getId(), boundQuantity);
-      totals.merge(carrier.getProtectionType(), boundQuantity, BigDecimal::add);
-    }
-    if (totals.values().stream().anyMatch(total -> total.compareTo(capacity) > 0)) {
-      throw new BusinessException(
-          ErrorCode.PROTECTION_QUANTITY_EXCEEDED,
-          "Attached protection quantity exceeds the filled position");
-    }
-    for (OrderEntity carrier : attached) {
+    TradingAccountEntity account = null;
+    for (OrderEntity carrier : orderedAttached) {
       BigDecimal oldQuantity = canonicalRemaining(carrier);
       BigDecimal boundQuantity = boundQuantities.get(carrier.getId());
+      if (!positive(boundQuantity)) {
+        if (positive(carrier.getHoldAmount()) && account == null) {
+          account = accountRepository.findByIdForUpdate(filledOrder.getAccountId())
+              .orElseThrow(ProtectionOrderService::accountNotFound);
+        }
+        releaseProtectionHold(
+            account,
+            carrier,
+            "Attached protection capacity exhausted");
+        OrderStatus fromStatus = carrier.getStatus();
+        resizeQuantities(carrier, oldQuantity, BigDecimal.ZERO);
+        carrier.setHoldAmount(BigDecimal.ZERO);
+        carrier.setStatus(OrderStatus.EXPIRED);
+        carrier.setVersion(version(carrier) + 1L);
+        requireWrite(orderRepository.updateById(carrier));
+        orderEventService.record(
+            carrier.getId(),
+            "PROTECTION_EXPIRED",
+            fromStatus,
+            OrderStatus.EXPIRED,
+            null,
+            null);
+        continue;
+      }
       if (oldQuantity.compareTo(boundQuantity) != 0) {
         resizeQuantities(carrier, oldQuantity, boundQuantity);
       }

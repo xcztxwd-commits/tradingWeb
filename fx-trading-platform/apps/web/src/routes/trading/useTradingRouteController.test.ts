@@ -20,7 +20,7 @@ describe('trading route controller contract', () => {
   it('keeps the shared route model independent from PC workspace layout state', () => {
     for (const field of [
       'accountPanel', 'accountId', 'balances', 'chartCallbacks', 'chartSettings', 'chartThemeMode',
-      'chartTitle', 'controllerSentinel', 'indicators', 'loginRequired', 'market', 'markets', 'favorites',
+      'controllerSentinel', 'indicators', 'loginRequired', 'market', 'markets', 'favorites',
       'marketDataStatusView', 'onLoginRequired', 'onOpenMarkets', 'onOpenQuote', 'onOpenTrade',
       'onSelectPrice', 'onRetrySession', 'onSelectSymbol', 'onFavorite', 'product', 'quote', 'quotes',
       'sessionError', 'sessionReady', 'sessionStatusLabel', 'sessionStatusText', 'submitOrder',
@@ -30,6 +30,7 @@ describe('trading route controller contract', () => {
     ]) {
       assert.match(routeTypesSource, new RegExp(`\\b${field}[?]?:`), `missing TradingRouteModel.${field}`)
     }
+    assert.doesNotMatch(`${routeTypesSource}\n${controllerSource}`, /chartTitle|formatTradingChartTitle/)
     assert.doesNotMatch(routeTypesSource, /workspaceLayoutControls|TradingTerminalViewProps|layoutStore/)
     assert.match(pcSource, /useResizableLayout\(\)/)
     assert.doesNotMatch(mobileSource, /useResizableLayout|TradingWorkspace/)

@@ -1,3 +1,5 @@
+import { chartTheme } from './chartTheme.ts'
+
 type ChartDrawingStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
 export type PersistedDrawingPoint = {
@@ -68,9 +70,9 @@ export function clonePersistedDrawing(drawing: PersistedChartDrawing): Persisted
 export function buildRiskTemplateDrawings(lastPrice: number): PersistedChartDrawing[] {
   if (!Number.isFinite(lastPrice) || lastPrice <= 0) return []
   return [
-    createRiskTemplateDrawing('Entry', lastPrice, '#fcd535'),
-    createRiskTemplateDrawing('Take profit', roundPrice(lastPrice * 1.02), '#2ebd85'),
-    createRiskTemplateDrawing('Stop loss', roundPrice(lastPrice * 0.99), '#f6465d')
+    createRiskTemplateDrawing('Entry', lastPrice, chartTheme.palette.accent),
+    createRiskTemplateDrawing('Take profit', roundPrice(lastPrice * 1.02), chartTheme.palette.buy),
+    createRiskTemplateDrawing('Stop loss', roundPrice(lastPrice * 0.99), chartTheme.palette.sell)
   ]
 }
 
@@ -83,7 +85,7 @@ function createRiskTemplateDrawing(label: string, price: number, color: string):
     styles: {
       line: { color, size: 1, style: 'solid' },
       text: {
-        color: '#050505',
+        color: chartTheme.palette.ink,
         backgroundColor: color,
         borderColor: color
       }

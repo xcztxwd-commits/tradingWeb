@@ -20,6 +20,11 @@ import org.apache.ibatis.annotations.Select;
  */
 public interface PositionRepository extends FxBaseMapper<PositionEntity> {
 
+  default long countByAccountId(UUID accountId) {
+    return selectCount(new LambdaQueryWrapper<PositionEntity>()
+        .eq(PositionEntity::getAccountId, accountId));
+  }
+
   @Select("""
       SELECT id, source, sort_time AS "sortTime"
       FROM (

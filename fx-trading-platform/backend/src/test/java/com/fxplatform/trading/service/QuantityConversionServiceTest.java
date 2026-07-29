@@ -17,7 +17,7 @@ class QuantityConversionServiceTest {
   private final QuantityConversionService service = new QuantityConversionService();
 
   @Test
-  void convertsMarketBuyQuoteBudgetAtCanonicalPriceAndRoundsBaseDownToStep() {
+  void convertsMarketBuyTotalQuoteBudgetAtCanonicalPriceAndFeeRate() {
     QuantityConversionService.Conversion conversion = service.convertSpot(
         OrderSide.BUY,
         OrderType.MARKET,
@@ -29,8 +29,24 @@ class QuantityConversionServiceTest {
     assertThat(conversion.originalQuantity()).isEqualByComparingTo("100.00");
     assertThat(conversion.originalUnit()).isEqualTo(QuantityUnit.QUOTE);
     assertThat(conversion.baseQuantity()).isEqualByComparingTo("0.0019");
-    assertThat(conversion.projectedQuoteSpend()).isEqualByComparingTo("95.00950000");
+    assertThat(conversion.projectedQuoteSpend()).isEqualByComparingTo("95.05700475");
     assertThat(conversion.projectedQuoteSpend()).isLessThanOrEqualTo(conversion.originalQuantity());
+  }
+
+  @Test
+  void quoteBudgetReductionIncludesTheUsdtFeeBeforeChoosingTheBaseStep() {
+    QuantityConversionService.Conversion conversion = service.convertSpot(
+        OrderSide.BUY,
+        OrderType.MARKET,
+        QuantityUnit.QUOTE,
+        new BigDecimal("100.04"),
+        new BigDecimal("0.1"),
+        marketPricing("100"));
+
+    assertThat(conversion.baseQuantity()).isEqualByComparingTo("0.9");
+    assertThat(conversion.projectedQuoteSpend()).isEqualByComparingTo("90.04500000");
+    assertThat(conversion.projectedQuoteSpend())
+        .isLessThanOrEqualTo(new BigDecimal("100.04"));
   }
 
   @Test
@@ -161,6 +177,9 @@ class QuantityConversionServiceTest {
     assertCode("QUANTITY_STEP_MISMATCH", () -> service.convertPerpetual(
         QuantityUnit.CONTRACTS, BigDecimal.ONE, new BigDecimal("0.0001"),
         new BigDecimal("0.00015"), BigDecimal.ONE, new BigDecimal("50000"), new BigDecimal("5")));
+    assertCode("QUANTITY_CONVERTS_TO_ZERO", () -> service.convertPerpetual(
+        QuantityUnit.BASE, new BigDecimal("0.00000001"), new BigDecimal("0.0001"),
+        BigDecimal.ONE, BigDecimal.ONE, new BigDecimal("100"), new BigDecimal("5")));
     assertCode("QUANTITY_CONVERTS_TO_ZERO", () -> service.convertPerpetual(
         QuantityUnit.QUOTE, BigDecimal.ONE, new BigDecimal("0.0001"),
         BigDecimal.ONE, BigDecimal.ONE, new BigDecimal("50000"), new BigDecimal("5")));

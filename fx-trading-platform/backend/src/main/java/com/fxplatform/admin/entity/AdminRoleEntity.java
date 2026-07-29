@@ -25,6 +25,7 @@ public class AdminRoleEntity {
   private String roleName;
   private String roleCode;
   private Boolean enabled = true;
+  private Boolean systemManaged = false;
   private Integer sortOrder = 0;
   private String description;
   @TableField(fill = FieldFill.INSERT)

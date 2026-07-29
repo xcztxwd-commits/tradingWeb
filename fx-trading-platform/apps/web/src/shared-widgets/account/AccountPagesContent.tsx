@@ -5,8 +5,9 @@ import { Link, NavLink } from 'react-router-dom'
 import type { DataViewColumn } from '@fx-platform/ui'
 
 import { AssetMark } from '../asset/AssetMark'
-import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
-import { formatApiError } from '../../components/user-page/userPageModels'
+import { ApiErrorState, LoadingState, LoginRequiredState } from '../data/PageState'
+import { cssModuleClasses as css } from '../data/cssModuleClasses'
+import { formatApiError } from '../data/userPageModels'
 import type { AccountRouteModel } from '../../routes/account/accountRoute.types'
 import type { AccountDataCollectionComponent } from './dataCollection.types'
 import {
@@ -20,6 +21,10 @@ import {
   type PositionResponse,
   type WalletBalance
 } from '@fx-platform/frontend-core'
+import surfaceStyles from '../data/UserPageSurface.module.css'
+import accountStyles from './AccountPagesContent.module.css'
+
+const styles = { ...surfaceStyles, ...accountStyles }
 
 const accountNav = [
   { to: '/account/overview', label: 'Overview' },
@@ -88,7 +93,7 @@ export function AccountOverviewContent({ model }: AccountContentProps) {
         sessionError={sessionError}
         sessionMode={sessionMode}
       />
-      <div className="account-dashboard-layout">
+      <div className={css(styles, "account-dashboard-layout")}>
         <AccountProfileSummary account={account} positions={positions} />
         <AccountOnboardingSteps account={account} />
         <AccountAssetActionPanel account={account} walletBalances={walletBalances} />
@@ -129,7 +134,7 @@ export function AccountAssetsContent({ model, DataCollection }: AccountContentPr
         sessionError={sessionError}
         sessionMode={sessionMode}
       />
-      <div className="account-split-grid">
+      <div className={css(styles, "account-split-grid")}>
         <AssetAccountCards account={account} rows={assetRows} />
         <RecentLedgerPanel entries={ledgerEntries.slice(0, 6)} />
       </div>
@@ -196,9 +201,9 @@ export function FundingRecordsContent({ model, DataCollection }: AccountContentP
         sessionMode={sessionMode}
       />
       {apiError ? <ApiErrorState error={apiError} onAction={() => void model.funding.load()} /> : null}
-      {notice ? <div className="user-page__notice">{notice}</div> : null}
+      {notice ? <div className={css(styles, "user-page__notice")}>{notice}</div> : null}
 
-      <form className="user-page__form" onSubmit={handleSubmit}>
+      <form className={css(styles, "user-page__form")} onSubmit={handleSubmit}>
         <label>
           <span>Type</span>
           <select name="orderType" value={fundOrderType} onChange={(event) => setFundOrderType(event.target.value === 'WITHDRAWAL' ? 'WITHDRAWAL' : 'RECHARGE')}>
@@ -227,7 +232,7 @@ export function FundingRecordsContent({ model, DataCollection }: AccountContentP
           <input name="note" placeholder="Optional request note" />
         </label>
         <button
-          className={`table-action ${fundOrderType === 'WITHDRAWAL' ? 'table-action--danger' : 'table-action--primary'}`}
+          className={css(styles, 'table-action', fundOrderType === 'WITHDRAWAL' ? 'table-action--danger' : 'table-action--primary')}
           disabled={!token || !accountId}
           type="submit"
         >
@@ -235,7 +240,7 @@ export function FundingRecordsContent({ model, DataCollection }: AccountContentP
         </button>
       </form>
 
-      <div className="account-filter-row">
+      <div className={css(styles, "account-filter-row")}>
         {fundOrderTypes.map((type) => (
           <button key={type} type="button" aria-pressed={typeFilter === type} onClick={() => setTypeFilter(type)}>
             {type}
@@ -291,7 +296,7 @@ export function TradeOrdersContent({ model, DataCollection }: AccountContentProp
         sessionError={sessionError}
         sessionMode={sessionMode}
       />
-      <div className="account-filter-row">
+      <div className={css(styles, "account-filter-row")}>
         {tradeOrderTabs.map((tab) => (
           <button key={tab.value} type="button" aria-pressed={activeTab === tab.value} onClick={() => setActiveTab(tab.value)}>
             {tab.label}
@@ -327,12 +332,12 @@ export function KycContent({ model }: AccountContentProps) {
         sessionError={sessionError}
         sessionMode={sessionMode}
       />
-      <section className="account-panel account-panel--kyc">
+      <section className={css(styles, "account-panel", "account-panel--kyc")}>
         <ShieldCheck size={28} aria-hidden="true" />
         <div>
           <h2>KYC Coming soon</h2>
           <p>Internal test only. Real identity verification is not enabled for user accounts yet.</p>
-          <button className="table-action table-action--secondary" type="button" disabled>
+          <button className={css(styles, "table-action", "table-action--secondary")} type="button" disabled>
             Coming soon
           </button>
         </div>
@@ -353,7 +358,7 @@ export function AccountSettingsContent({ model }: AccountContentProps) {
         sessionError={sessionError}
         sessionMode={sessionMode}
       />
-      <div className="settings-list">
+      <div className={css(styles, "settings-list")}>
         <PreferenceRows icon={<UserRound size={19} aria-hidden="true" />} title="Nickname and avatar" value="FX member" />
         <PreferenceRows icon={<Bell size={19} aria-hidden="true" />} title="Notification language" value="Simplified Chinese" />
         <PreferenceRows icon={<Settings size={19} aria-hidden="true" />} title="Trading preferences" value="Open the latest trading symbol by default" />
@@ -392,9 +397,9 @@ function AccountShell({
   children: ReactNode
 }) {
   return (
-    <section className="user-page account-shell" aria-labelledby="account-page-title">
-      <aside className="account-sidebar" aria-label="Account center navigation">
-        <div className="account-sidebar__profile">
+    <section className={css(styles, "user-page", "account-shell")} aria-labelledby="account-page-title">
+      <aside className={css(styles, "account-sidebar")} aria-label="Account center navigation">
+        <div className={css(styles, "account-sidebar__profile")}>
           <span>{account?.baseCurrency?.slice(0, 2) ?? 'FX'}</span>
           <div>
             <strong>{account?.accountType ?? 'Trading account'}</strong>
@@ -409,8 +414,8 @@ function AccountShell({
           ))}
         </nav>
       </aside>
-      <main className="account-main">
-        <header className="user-page__header">
+      <main className={css(styles, "account-main")}>
+        <header className={css(styles, "user-page__header")}>
           <div>
             <h1 id="account-page-title">{title}</h1>
             <p>{summary}</p>
@@ -424,15 +429,15 @@ function AccountShell({
 
 function AccountProfileSummary({ account, positions }: { account?: AccountSummary; positions: PositionResponse[] }) {
   return (
-    <section className="account-profile-summary" aria-label="Account profile summary">
-      <div className="account-profile-summary__identity">
+    <section className={css(styles, "account-profile-summary")} aria-label="Account profile summary">
+      <div className={css(styles, "account-profile-summary__identity")}>
         <span>{account?.baseCurrency?.slice(0, 2) ?? 'FX'}</span>
         <div>
           <strong>{account?.accountType ?? 'Trading account'}</strong>
           <small>{account?.id ? `UID ${shortId(account.id)} · ${account.status}` : 'No active session'}</small>
         </div>
       </div>
-      <div className="account-profile-summary__stats">
+      <div className={css(styles, "account-profile-summary__stats")}>
         <AccountProfileStat label="Equity" value={formatAmount(account?.equity, account?.baseCurrency)} />
         <AccountProfileStat label="Open positions" value={String(positions.length)} />
         <AccountProfileStat label="Margin level" value={account?.marginLevel ? `${account.marginLevel}%` : '-'} />
@@ -474,22 +479,22 @@ function AccountOnboardingSteps({ account }: { account?: AccountSummary }) {
   ]
 
   return (
-    <section className="account-onboarding-section">
-      <div className="account-panel__head">
+    <section className={css(styles, "account-onboarding-section")}>
+      <div className={css(styles, "account-panel__head")}>
         <div>
           <h2>Account workflow</h2>
           <p>Verification, funding and trading stay under the same authenticated account.</p>
         </div>
       </div>
-      <div className="account-onboarding-grid">
+      <div className={css(styles, "account-onboarding-grid")}>
         {steps.map((step, index) => (
-          <article className={step.active ? 'account-step-card account-step-card--active' : 'account-step-card'} key={step.title}>
+          <article className={css(styles, 'account-step-card', step.active && 'account-step-card--active')} key={step.title}>
             <span>{String(index + 1).padStart(2, '0')}</span>
             <div>
               <strong>{step.title}</strong>
               <small>{step.note}</small>
             </div>
-            <Link className={step.active ? 'table-action table-action--primary' : 'table-action table-action--secondary'} to={step.to}>
+            <Link className={css(styles, 'table-action', step.active ? 'table-action--primary' : 'table-action--secondary')} to={step.to}>
               {step.action}
             </Link>
           </article>
@@ -504,22 +509,22 @@ function AccountAssetActionPanel({ account, walletBalances }: { account?: Accoun
   const currency = account?.baseCurrency ?? walletBalances[0]?.asset ?? 'USDT'
 
   return (
-    <section className="account-asset-panel">
+    <section className={css(styles, "account-asset-panel")}>
       <div>
         <span>Total assets</span>
         <strong>{formatAmount(totalWallet || account?.balance, currency)}</strong>
         <small>Available {formatAmount(account?.freeMargin, currency)}</small>
       </div>
-      <div className="account-action-strip" aria-label="Asset shortcuts">
-        <Link className="table-action table-action--primary" to="/account/orders/funding">
+      <div className={css(styles, "account-action-strip")} aria-label="Asset shortcuts">
+        <Link className={css(styles, "table-action", "table-action--primary")} to="/account/orders/funding">
           <ArrowDownCircle size={16} aria-hidden="true" />
           Deposit
         </Link>
-        <Link className="table-action table-action--secondary" to="/account/orders/funding">
+        <Link className={css(styles, "table-action", "table-action--secondary")} to="/account/orders/funding">
           <ArrowUpCircle size={16} aria-hidden="true" />
           Withdraw
         </Link>
-        <Link className="table-action table-action--secondary" to="/trading">
+        <Link className={css(styles, "table-action", "table-action--secondary")} to="/trading">
           <CircleDollarSign size={16} aria-hidden="true" />
           Trade
         </Link>
@@ -561,9 +566,9 @@ function AccountDashboardInsights({
   ]
 
   return (
-    <div className="account-insight-grid">
+    <div className={css(styles, "account-insight-grid")}>
       {insights.map((insight) => (
-        <section className="account-insight-card" key={insight.title}>
+        <section className={css(styles, "account-insight-card")} key={insight.title}>
           {insight.icon}
           <div>
             <span>{insight.title}</span>
@@ -583,9 +588,9 @@ function AssetAccountCards({ account, rows }: { account?: AccountSummary; rows: 
     { title: 'Available margin', value: formatAmount(account?.marginAvailable ?? account?.freeMargin, account?.baseCurrency), note: 'Available for trading' }
   ]
   return (
-    <div className="account-overview-grid">
+    <div className={css(styles, "account-overview-grid")}>
       {cards.map((card) => (
-        <section key={card.title} className="account-card">
+        <section key={card.title} className={css(styles, "account-card")}>
           <CheckCircle2 size={20} aria-hidden="true" />
           <div>
             <span>{card.title}</span>
@@ -602,13 +607,13 @@ function DemoWalletOperationsLink({ account, walletBalances }: { account?: Accou
   const spotAvailable = walletBalances.find((balance) => balance.walletType === 'SPOT' && balance.asset === 'USDT')?.available
 
   return (
-    <section className="account-panel">
-      <div className="account-panel__head">
+    <section className={css(styles, "account-panel")}>
+      <div className={css(styles, "account-panel__head")}>
         <div>
           <h2>Demo Spot and Perpetual</h2>
           <p>Use the shared wallet controls to transfer Demo USDT or reset the Demo account.</p>
         </div>
-        <Link className="table-action table-action--primary" to="/wallet#wallet-assets">
+        <Link className={css(styles, "table-action", "table-action--primary")} to="/wallet#wallet-assets">
           Open transfer / reset
         </Link>
       </div>
@@ -619,12 +624,12 @@ function DemoWalletOperationsLink({ account, walletBalances }: { account?: Accou
 
 function RecentLedgerPanel({ entries }: { entries: LedgerEntry[] }) {
   return (
-    <section className="account-panel">
-      <div className="account-panel__head">
+    <section className={css(styles, "account-panel")}>
+      <div className={css(styles, "account-panel__head")}>
         <h2>Recent ledger</h2>
         <Link to="/account/orders/funding">All</Link>
       </div>
-      <ul className="ledger-list">
+      <ul className={css(styles, "ledger-list")}>
         {entries.length ? (
           entries.map((entry) => (
             <li key={entry.id}>
@@ -649,7 +654,7 @@ function RecentLedgerPanel({ entries }: { entries: LedgerEntry[] }) {
 
 function PreferenceRows({ icon, title, value }: { icon: ReactNode; title: string; value: string }) {
   return (
-    <section className="preference-row">
+    <section className={css(styles, "preference-row")}>
       {icon}
       <div>
         <strong>{title}</strong>
@@ -668,7 +673,7 @@ function createAssetColumns(): Array<DataViewColumn<AssetRow>> {
       label: 'Asset',
       sortable: true,
       render: (asset) => (
-        <span className="asset-symbol-cell">
+        <span className={css(styles, "asset-symbol-cell")}>
           <AssetMark symbol={asset.currency} size="sm" />
           <strong>{asset.currency}</strong>
         </span>
@@ -725,7 +730,7 @@ function StatusChip({ status }: { status: string }) {
         : status === 'REJECTED' || status === 'CANCELED'
           ? 'negative'
           : ''
-  return <span className={`status-chip${tone ? ` status-chip--${tone}` : ''}`}>{status}</span>
+  return <span className={css(styles, 'status-chip', tone && `status-chip--${tone}`)}>{status}</span>
 }
 
 function getAssetRows(

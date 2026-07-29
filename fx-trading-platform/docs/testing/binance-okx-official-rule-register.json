@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2026-07-18",
+  "scope": "Binance Spot、Binance USDⓈ-M Futures、OKX Spot、OKX USDT-margined SWAP 的公开标准语义；数值型动态参数使用场景输入，不连接真实账户或交易所。",
+  "rules": [
+    {
+      "ruleId": "BINANCE_SPOT_FILTERS",
+      "exchange": "BINANCE",
+      "product": "SPOT",
+      "officialUrl": "https://developers.binance.com/en/docs/products/spot/filters",
+      "semantic": "价格必须符合 PRICE_FILTER 的 tickSize，基础币数量必须符合 LOT_SIZE 的 stepSize，名义价值必须符合 MIN_NOTIONAL/NOTIONAL。",
+      "dynamicInputs": ["tickSize", "stepSize", "minNotional", "market-order reference price window"],
+      "scenarioMapping": "场景中的价格精度、数量精度和最小成交额拒绝按相同取模/比较语义校验。",
+      "auditLimit": "真实阈值必须从 exchangeInfo 动态读取；本审计只验证公式与场景参数。"
+    },
+    {
+      "ruleId": "BINANCE_SPOT_MARKET_QUANTITY",
+      "exchange": "BINANCE",
+      "product": "SPOT",
+      "officialUrl": "https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/trade",
+      "semantic": "MARKET 的 quantity 表示基础币数量；quoteOrderQty 表示买入时要花、卖出时要收的计价币金额。",
+      "dynamicInputs": ["order-book liquidity", "symbol quoteOrderQtyMarketAllowed"],
+      "scenarioMapping": "BASE 映射 quantity，QUOTE 买入预算映射 quoteOrderQty。",
+      "auditLimit": "真实市价单可能多笔或部分成交；场景使用确定性 DEMO 撮合。"
+    },
+    {
+      "ruleId": "BINANCE_SPOT_COMMISSION_RECEIVED_ASSET",
+      "exchange": "BINANCE",
+      "product": "SPOT",
+      "officialUrl": "https://developers.binance.com/en/docs/products/spot/faqs/commission_faq",
+      "semantic": "未使用 BNB 抵扣时，手续费从成交后收到的资产扣除：买入扣基础币，卖出扣计价币。",
+      "dynamicInputs": ["account commission rate", "BNB discount setting", "special/tax commission"],
+      "scenarioMapping": "买入理论净入账=成交基础币数量−基础币手续费；卖出净收入=成交额−计价币手续费。",
+      "auditLimit": "场景没有 BNB 钱包或折扣字段，因此按未使用 BNB 的标准路径审计。"
+    },
+    {
+      "ruleId": "BINANCE_SPOT_OCO",
+      "exchange": "BINANCE",
+      "product": "SPOT",
+      "officialUrl": "https://developers.binance.com/en/docs/catalog/core-trading-spot-trading/api/rest-api/trade",
+      "semantic": "订单列表/OCO 的两腿共享业务数量；一腿执行后另一腿取消，整体状态由各腿状态共同决定。",
+      "dynamicInputs": ["supported order-list endpoint", "symbol filters"],
+      "scenarioMapping": "场景 OCO 两腿互斥、共用冻结资产并只允许一个成交赢家。",
+      "auditLimit": "场景 API 名称是平台抽象，真实适配器需映射当前 Binance order-list 字段。"
+    },
+    {
+      "ruleId": "BINANCE_USDM_ORDER_POSITION_MODE",
+      "exchange": "BINANCE",
+      "product": "USD_M_PERPETUAL",
+      "officialUrl": "https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade#new-order",
+      "semantic": "单向模式默认 positionSide=BOTH；双向模式必须 LONG/SHORT。Hedge 模式不能发送 reduceOnly；STOP_MARKET/TAKE_PROFIT_MARKET 的 closePosition=true 表示全部平仓且不能同时发送 quantity/reduceOnly。",
+      "dynamicInputs": ["account position mode", "symbol order-type support"],
+      "scenarioMapping": "ONE_WAY/BOTH 与 HEDGE/LONG|SHORT 直接映射；显式 reduceOnly 仅映射单向减仓。",
+      "auditLimit": "平台的 FULL_CLOSE 是业务命令，适配器可选择 quantity+reduceOnly 或 closePosition。"
+    },
+    {
+      "ruleId": "BINANCE_USDM_FILTERS",
+      "exchange": "BINANCE",
+      "product": "USD_M_PERPETUAL",
+      "officialUrl": "https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/common-definition",
+      "semantic": "USDⓈ-M 合约同样按 PRICE_FILTER、LOT_SIZE、MIN_NOTIONAL 等交易规则检查价格、数量和名义价值。",
+      "dynamicInputs": ["exchangeInfo filters", "risk limits"],
+      "scenarioMapping": "场景的合约整数张先归一化为 BTC 基础数量，再按 Binance quantity/stepSize 发送。",
+      "auditLimit": "场景 CONTRACTS=BTC 数量是归一化模型，不代表 Binance API 存在独立张数单位。"
+    },
+    {
+      "ruleId": "BINANCE_USDM_MARK_PNL_FUNDING",
+      "exchange": "BINANCE",
+      "product": "USD_M_PERPETUAL",
+      "officialUrl": "https://academy.binance.com/en/articles/what-are-perpetual-futures-contracts",
+      "semantic": "线性多头已实现盈亏=(平仓价−开仓均价)×平仓数量，空头方向相反；未实现盈亏使用标记价格。正资金费率由多头支付空头，负费率方向相反。",
+      "dynamicInputs": ["mark price", "funding rate", "settlement interval"],
+      "scenarioMapping": "逐成交重算开仓均价、平仓毛盈亏、标记价未实现盈亏和资金费方向。",
+      "auditLimit": "费率与标记价取场景输入，不推断真实时刻的交易所数值。"
+    },
+    {
+      "ruleId": "OKX_SPOT_TGT_CCY_AND_AMEND",
+      "exchange": "OKX",
+      "product": "SPOT",
+      "officialUrl": "https://www.okx.com/docs-v5/en/",
+      "semantic": "现货市价单 tgtCcy 默认买入用 quote_ccy、卖出用 base_ccy；余额不足时默认可自动缩量，banAmend=true 才会整单拒绝。",
+      "dynamicInputs": ["tgtCcy", "banAmend", "available balance", "slippage tolerance"],
+      "scenarioMapping": "QUOTE 买入映射 tgtCcy=quote_ccy，BASE 卖出映射 base_ccy；场景的严格余额拒绝需要 banAmend=true。",
+      "auditLimit": "平台不保存原始 OKX 请求字段，因此严格拒绝只可判为有条件符合。"
+    },
+    {
+      "ruleId": "OKX_SPOT_FEE_TYPE",
+      "exchange": "OKX",
+      "product": "SPOT",
+      "officialUrl": "https://www.okx.com/en-us/help/okx-to-introduce-spot-fee-payment-option-in-quote-currency",
+      "semantic": "feeType=0 默认从收到的资产扣费；feeType=1 可让现货买单用计价币额外付费并完整收到基础币。卖单仍从收到的计价币扣费。",
+      "dynamicInputs": ["sub-account feeType", "account fee rate"],
+      "scenarioMapping": "场景买入完整收到 BTC 且另扣 USDT 手续费，仅在 feeType=1 下成立。",
+      "auditLimit": "场景未保存 feeType，因此这类结果判为有条件符合而不是无条件通过。"
+    },
+    {
+      "ruleId": "OKX_SWAP_CONTRACT_QUANTITY",
+      "exchange": "OKX",
+      "product": "USDT_SWAP",
+      "officialUrl": "https://www.okx.com/docs-v5/en/",
+      "semantic": "FUTURES/SWAP 的 sz 单位是合约张数，基础币敞口=sz×ctVal×ctMult。",
+      "dynamicInputs": ["ctVal", "ctMult", "lotSz", "instrument state"],
+      "scenarioMapping": "场景采用归一化 ctVal=1 BTC、ctMult=1，因此 CONTRACTS 数字等于 BTC 敞口。",
+      "auditLimit": "真实 BTC-USDT-SWAP 的 ctVal 必须从 instruments API 获取，不能直接把场景数字当真实 sz。"
+    },
+    {
+      "ruleId": "OKX_SWAP_POSITION_MODE_REDUCE_ONLY",
+      "exchange": "OKX",
+      "product": "USDT_SWAP",
+      "officialUrl": "https://www.okx.com/docs-v5/en/",
+      "semantic": "net 模式使用 posSide=net，可显式 reduceOnly；long/short 模式必须指定 posSide，平仓动作天然只减对应方向仓位。",
+      "dynamicInputs": ["account position mode", "tdMode", "posSide"],
+      "scenarioMapping": "ONE_WAY 映射 net，HEDGE 映射 long/short；双向模式平仓不发送显式 reduceOnly。",
+      "auditLimit": "平台字段名与 OKX 原始字段不同，结论是适配映射层语义。"
+    },
+    {
+      "ruleId": "OKX_SWAP_TRADING_FEE",
+      "exchange": "OKX",
+      "product": "USDT_SWAP",
+      "officialUrl": "https://www.okx.com/en-us/help/how-to-calculate-the-contract-transaction-fee",
+      "semantic": "USDT 合约开/平仓手续费=合约面值×张数×成交价×费率。",
+      "dynamicInputs": ["ctVal", "number of contracts", "maker/taker fee tier", "fill price"],
+      "scenarioMapping": "以归一化 ctVal=1、ctMult=1 和每笔成交 maker/taker 费率逐笔重算。",
+      "auditLimit": "真实账户费率随等级和交易对变化。"
+    },
+    {
+      "ruleId": "OKX_SWAP_MARK_AND_PNL",
+      "exchange": "OKX",
+      "product": "USDT_SWAP",
+      "officialUrl": "https://www.okx.com/en-us/help/ii-mark-price-and-last-price",
+      "semantic": "USDT 线性合约多头未实现盈亏=ctVal×张数×ctMult×(标记价−开仓均价)，空头方向相反；已实现盈亏使用实际平仓价。",
+      "dynamicInputs": ["mark price", "average entry price", "ctVal", "ctMult"],
+      "scenarioMapping": "逐检查点重算名义价值、未实现盈亏和逐成交已实现盈亏。",
+      "auditLimit": "标记价取场景行情，非真实 OKX 实时标记价。"
+    },
+    {
+      "ruleId": "OKX_SWAP_MARGIN",
+      "exchange": "OKX",
+      "product": "USDT_SWAP",
+      "officialUrl": "https://www.okx.com/en-us/help/futures-margin-calculation-rules",
+      "semantic": "USDT 合约 cross 初始保证金=ctVal×张数×ctMult×标记价/杠杆，随标记价变化；isolated 初始保证金按开仓均价/杠杆。",
+      "dynamicInputs": ["mark price", "average entry price", "leverage", "margin mode", "open orders"],
+      "scenarioMapping": "分别重算 CROSS 与 ISOLATED 的 initialMargin；逐仓额外加减保证金单列为 marginHeld 调整。",
+      "auditLimit": "组合保证金、挂单占用和风险档位需要真实账户 API，本审计只覆盖场景已有字段。"
+    },
+    {
+      "ruleId": "OKX_SWAP_FUNDING",
+      "exchange": "OKX",
+      "product": "USDT_SWAP",
+      "officialUrl": "https://www.okx.com/en-us/help/perps-funding-fee-mechanism",
+      "semantic": "资金费=仓位价值×资金费率；正费率多头付空头，负费率空头付多头。只有结算时仍持仓才收付。",
+      "dynamicInputs": ["position value", "funding rate", "settlement time", "ctVal", "ctMult"],
+      "scenarioMapping": "按结算动作之前的标记价仓位价值逐方向重算资金费。",
+      "auditLimit": "场景直接给定费率，不复算真实 premium index、上下限和结算间隔。"
+    },
+    {
+      "ruleId": "EXCHANGE_DYNAMIC_RISK_AND_FILL",
+      "exchange": "BOTH",
+      "product": "ALL",
+      "officialUrl": "https://www.okx.com/docs-v5/en/",
+      "semantic": "手续费档位、合约规格、风险限额、维持保证金档位、价格过滤器与真实成交拆分均是动态数据。",
+      "dynamicInputs": ["fee tier", "instrument metadata", "risk tier", "order book", "mark/index price"],
+      "scenarioMapping": "公式使用场景注入值；DEMO 一次全量成交只证明离线算法，不证明真实市场也会一次成交。",
+      "auditLimit": "不连接 live broker，不把 DEMO 结果描述成真实交易所成交。"
+    }
+  ]
+}

@@ -6,6 +6,15 @@ export * from './state-surface/StateSurface'
 export * from './data-view/dataViewState'
 export * from './data-view/DataTable'
 export * from './data-view/DataCardList'
-export * from './dialog/overlayState'
+export {
+  getCriticalDialogOpen,
+  shouldCloseOverlay,
+  subscribeDialogOverlay
+} from './dialog/overlayState'
+export type {
+  OverlayCloseOptions,
+  OverlayCloseSource,
+  OverlayPriority
+} from './dialog/overlayState'
 export * from './dialog/Dialog'
 export * from './drawer/Drawer'

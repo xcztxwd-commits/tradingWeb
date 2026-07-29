@@ -51,8 +51,7 @@
   height: 2px;
 }
 
-@media (max-width: 768px) {
-  .handle {
-    display: none;
-  }
+:global(body.dragging) {
+  user-select: none;
+  cursor: col-resize;
 }

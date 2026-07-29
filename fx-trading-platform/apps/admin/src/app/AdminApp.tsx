@@ -1,7 +1,9 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { AdminLayout } from './AdminLayout'
 import { RequireAdmin } from './RequireAdmin'
+import { hasAdminAuthority } from '../services/adminToken'
 import { AccountsPage } from '../pages/AccountsPage'
 import { AccountDetailPage } from '../pages/AccountDetailPage'
 import { ArticlesPage } from '../pages/ArticlesPage'
@@ -15,10 +17,15 @@ import { FundingSettlementsPage } from '../pages/FundingSettlementsPage'
 import { LedgerPage } from '../pages/LedgerPage'
 import { LoginPage } from '../pages/LoginPage'
 import { MarketStatusPage } from '../pages/MarketStatusPage'
-import { MessagesPage } from '../pages/MessagesPage'
+import { MemberNoticeEditorPage } from '../pages/MemberNoticeEditorPage'
+import { MemberNoticePage } from '../pages/MemberNoticePage'
 import { OrdersPage } from '../pages/OrdersPage'
 import { PaymentMethodsPage } from '../pages/PaymentMethodsPage'
 import { PositionsPage } from '../pages/PositionsPage'
+import { PopupCampaignEditorPage } from '../pages/PopupCampaignEditorPage'
+import { PopupCampaignPage } from '../pages/PopupCampaignPage'
+import { PopupCampaignPolicyPage } from '../pages/PopupCampaignPolicyPage'
+import { PopupCampaignStatsPage } from '../pages/PopupCampaignStatsPage'
 import { ProviderInstrumentsPage } from '../pages/ProviderInstrumentsPage'
 import { RiskPage } from '../pages/RiskPage'
 import { SettingsPage } from '../pages/SettingsPage'
@@ -26,6 +33,10 @@ import { SymbolDataBindingsPage } from '../pages/SymbolDataBindingsPage'
 import { SymbolsPage } from '../pages/SymbolsPage'
 import { TradesPage } from '../pages/TradesPage'
 import { UsersPage } from '../pages/UsersPage'
+
+const TradingLabPage = lazy(() =>
+  import('../features/tradingLab').then((module) => ({ default: module.TradingLabPage }))
+)
 
 export function AdminApp() {
   return (
@@ -61,7 +72,15 @@ export function AdminApp() {
           <Route path="/logs/request-logs" element={<FeatureCrudPage pageKey="request-logs" />} />
           <Route path="/content/notices" element={<FeatureCrudPage pageKey="notices" />} />
           <Route path="/content/news" element={<FeatureCrudPage pageKey="news" />} />
-          <Route path="/content/member-notices" element={<FeatureCrudPage pageKey="member-notices" />} />
+          <Route path="/content/member-notices" element={<MemberNoticePage />} />
+          <Route path="/content/member-notices/new" element={<MemberNoticeEditorPage />} />
+          <Route path="/content/member-notices/:id/edit" element={<MemberNoticeEditorPage />} />
+          <Route path="/content/popup-campaigns" element={<PopupCampaignPage />} />
+          <Route path="/content/popup-campaigns/new" element={<PopupCampaignEditorPage />} />
+          <Route path="/content/popup-campaigns/:id/edit" element={<PopupCampaignEditorPage />} />
+          <Route path="/content/popup-campaigns/policy" element={<PopupCampaignPolicyPage />} />
+          <Route path="/content/popup-campaigns/:id/stats" element={<PopupCampaignStatsPage />} />
+          <Route path="/content/popup-campaigns/:id/users" element={<PopupCampaignStatsPage userDetail />} />
           <Route path="/config/settings/site" element={<FeatureCrudPage pageKey="settings-site" />} />
           <Route path="/config/settings/upload" element={<FeatureCrudPage pageKey="settings-upload" />} />
           <Route path="/config/settings/sms" element={<FeatureCrudPage pageKey="settings-sms" />} />
@@ -75,13 +94,14 @@ export function AdminApp() {
           <Route path="/trading/positions" element={<PositionsPage />} />
           <Route path="/trading/trades" element={<TradesPage />} />
           <Route path="/trading/funding-settlements" element={<FundingSettlementsPage />} />
+          <Route path="/trading/lab" element={<TradingLabRoute />} />
           <Route path="/legacy/finance/ledger" element={<LedgerPage />} />
           <Route path="/legacy/finance/payment-methods" element={<PaymentMethodsPage />} />
           <Route path="/market/symbols" element={<SymbolsPage />} />
           <Route path="/market/status" element={<MarketStatusPage />} />
           <Route path="/market/funding-config" element={<FundingConfigPage />} />
           <Route path="/risk" element={<RiskPage />} />
-          <Route path="/content/messages" element={<MessagesPage />} />
+          <Route path="/content/messages" element={<Navigate to="/content/member-notices" replace />} />
           <Route path="/legacy/content/articles" element={<ArticlesPage />} />
           <Route path="/config/dictionaries" element={<DictionariesPage />} />
           <Route path="/legacy/config/settings" element={<SettingsPage />} />
@@ -90,5 +110,16 @@ export function AdminApp() {
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
+  )
+}
+
+function TradingLabRoute() {
+  if (!hasAdminAuthority('TRADING_LAB_VIEW')) {
+    return <Navigate to="/dashboard" replace />
+  }
+  return (
+    <Suspense fallback={<div className="state-block loading">正在加载交易路径实验室...</div>}>
+      <TradingLabPage />
+    </Suspense>
   )
 }

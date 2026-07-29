@@ -24,6 +24,7 @@ import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.PositionStatus;
 import com.fxplatform.trading.service.CancelAllOrderService;
 import com.fxplatform.trading.service.CloseAllPositionService;
+import com.fxplatform.trading.service.OrderRecoveryQueryService;
 import com.fxplatform.trading.service.OrderService;
 import com.fxplatform.trading.service.OcoOrderService;
 import com.fxplatform.trading.service.PositionService;
@@ -62,6 +63,7 @@ public class TradingController {
   private CancelAllOrderService cancelAllOrderService;
   private CloseAllPositionService closeAllPositionService;
   private TradingHistoryQueryService tradingHistoryQueryService;
+  private OrderRecoveryQueryService orderRecoveryQueryService;
 
   /**
    * 处理 createOrder 提交接口请求。
@@ -96,6 +98,16 @@ public class TradingController {
   ) {
     return ApiResponse.success(tradingHistoryQueryService.orders(
         principal.id(), accountId, status, symbol, page, size));
+  }
+
+  @GetMapping("/orders/by-client-order-id")
+  public ApiResponse<OrderResponse> orderByClientOrderId(
+      @AuthenticationPrincipal UserPrincipal principal,
+      @RequestParam UUID accountId,
+      @RequestParam String clientOrderId
+  ) {
+    return ApiResponse.success(
+        orderRecoveryQueryService.find(principal, accountId, clientOrderId));
   }
 
   @GetMapping("/trades")
@@ -276,5 +288,10 @@ public class TradingController {
   @Autowired
   void setTradingHistoryQueryService(TradingHistoryQueryService tradingHistoryQueryService) {
     this.tradingHistoryQueryService = tradingHistoryQueryService;
+  }
+
+  @Autowired
+  void setOrderRecoveryQueryService(OrderRecoveryQueryService orderRecoveryQueryService) {
+    this.orderRecoveryQueryService = orderRecoveryQueryService;
   }
 }

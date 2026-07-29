@@ -7,6 +7,7 @@ import { describe, it } from 'node:test'
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const readSource = (relativePath) => readFileSync(join(currentDir, relativePath), 'utf8')
 const appSource = readSource('AdminApp.tsx')
+const layoutSource = readSource('AdminLayout.tsx')
 const menuSource = readSource('adminMenu.ts')
 const accountsSource = readSource('../pages/AccountsPage.tsx')
 const marketStatusSource = readSource('../pages/MarketStatusPage.tsx')
@@ -59,5 +60,17 @@ describe('admin trading operations navigation', () => {
     assert.match(pageUtilsSource, /generationRef/)
     assert.match(pageUtilsSource, /generation !== generationRef\.current/)
     assert.match(pageUtilsSource, /setData\(undefined\)/)
+  })
+
+  it('shows the Trading Lab menu and route only with the exact VIEW authority', () => {
+    const tradingLabMenuItem =
+      menuSource.match(/\{[^{}]*to:\s*'\/trading\/lab'[^{}]*\}/)?.[0] ?? ''
+
+    assert.match(menuSource, /authority\?:\s*string/)
+    assert.match(tradingLabMenuItem, /label:\s*'交易路径实验室'/)
+    assert.match(tradingLabMenuItem, /authority:\s*'TRADING_LAB_VIEW'/)
+    assert.match(layoutSource, /hasAdminAuthority/)
+    assert.match(layoutSource, /hasAdminAuthority\(item\.authority\)/)
+    assert.match(appSource, /hasAdminAuthority\(['"]TRADING_LAB_VIEW['"]\)/)
   })
 })

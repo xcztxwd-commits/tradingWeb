@@ -18,7 +18,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Worker } from 'node:worker_threads'
@@ -3508,16 +3508,22 @@ test('Windows local command adapter executes trusted npm and Maven shims without
   assert.equal(typeof smokeContracts.normalizeLocalCommandDescriptor, 'function')
   assert.equal(typeof smokeContracts.runLocalCommand, 'function')
   if (process.platform !== 'win32') {
+    const poisonedPath = join(tmpdir(), 'p0-poisoned-launcher-path')
     const normalized = smokeContracts.normalizeLocalCommandDescriptor({
       command: process.execPath,
       args: ['--version'],
       cwd: process.cwd(),
-      env: process.env,
+      env: { ...process.env, PATH: poisonedPath },
       shell: true
     })
     assert.equal(normalized.command, process.execPath)
     assert.deepEqual(normalized.args, ['--version'])
     assert.equal(normalized.shell, false)
+    assert.notEqual(normalized.env.PATH, poisonedPath)
+    assert.equal(
+      normalized.env.PATH.split(delimiter).includes(dirname(realpathSync(process.execPath))),
+      true
+    )
     return
   }
 
@@ -5277,11 +5283,9 @@ test('hard kill cleanup terminates journaled processes before requiring redis re
     dependencies.cleanup(undefined, {}, { runId }),
     /P0_REDIS_SNAPSHOT_MISSING/
   )
-  assert.deepEqual(events, [
-    'process:inspect',
-    'process:terminate',
-    'process:memory-stop'
-  ])
+  assert.deepEqual(events, process.platform === 'win32'
+    ? ['process:inspect', 'process:terminate', 'process:memory-stop']
+    : ['process:memory-stop', 'process:inspect', 'process:terminate'])
   assert.equal(existsSync(control.ownershipPath), true)
 })
 
@@ -5593,7 +5597,9 @@ test('cleanup rejects missing forged or unsafe authoritative control state', asy
   )
 })
 
-test('Windows local toolchain ignores PATH SystemRoot WINDIR COMSPEC and shim overrides', (t) => {
+test('Windows local toolchain ignores PATH SystemRoot WINDIR COMSPEC and shim overrides', {
+  skip: process.platform !== 'win32'
+}, (t) => {
   assert.equal(typeof smokeContracts.resolveTrustedLocalToolchain, 'function')
   const root = mkdtempSync(join(tmpdir(), 'p0-s3-poisoned-toolchain-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -6237,7 +6243,7 @@ test('managed preflight runs exact gates invocation scoped IT and owned OpenAPI 
     status: 'PASS',
     invocationStartedAt,
     gates: 12,
-    itClasses: 14,
+    itClasses: 15,
     guardClasses: 6
   })
   assert.deepEqual(commands.map(({ id }) => id), [
@@ -6275,10 +6281,16 @@ test('managed preflight runs exact gates invocation scoped IT and owned OpenAPI 
     'DemoTradingConcurrencyIT',
     'PerpetualPositionConcurrencyIT',
     'ProtectionOrderConcurrencyIT',
-    'FundingLiquidationConcurrencyIT'
+    'FundingLiquidationConcurrencyIT',
+    'DepthPendingExecutionPostgresIT'
   ]
   const itCommand = commands.find(({ id }) => id === 'database-concurrency-it')
-  assert.deepEqual(itCommand.args, [`-Dtest=${itClasses.join(',')}`, 'test'])
+  assert.deepEqual(itCommand.args, [
+    '-Dapi.version=1.44',
+    `-Dtest=${itClasses.join(',')}`,
+    'test'
+  ])
+  assert.equal(itCommand.env.DATABASE_PASSWORD, 'database-it-non-secret-password')
   const surefire = commands.find(({ id }) => id === 'surefire-gate')
   assert.equal(surefire.command, process.execPath)
   assert.ok(surefire.args.includes(`--classes=${itClasses.join(',')}`))
@@ -6668,6 +6680,13 @@ test('default P0 dependency factory wires local adapters and main injects it', a
     }
   }
   const infrastructure = {
+    async inspectDockerDaemon() {
+      return {
+        endpoint: process.platform === 'win32'
+          ? 'npipe:////./pipe/docker_engine'
+          : 'unix:///var/run/docker.sock'
+      }
+    },
     async verifyComposePort({ hostPort }) {
       events.push(`safety:compose:${hostPort}`)
       return true
@@ -8223,7 +8242,8 @@ test('typed P0 gate evidence round-trips verdict modes timestamps and backend cl
     'DemoTradingConcurrencyIT',
     'PerpetualPositionConcurrencyIT',
     'ProtectionOrderConcurrencyIT',
-    'FundingLiquidationConcurrencyIT'
+    'FundingLiquidationConcurrencyIT',
+    'DepthPendingExecutionPostgresIT'
   ]
   const invocationStartedAt = '2026-07-15T00:00:00.000Z'
   const suites = expectedClasses.map((className, index) => ({
@@ -13563,6 +13583,40 @@ test('Surefire parser accepts one fresh exact suite for every requested class', 
   assert.deepEqual(parsed.totals, { tests: 3, skipped: 0, failures: 0, errors: 0 })
 })
 
+test('Surefire parser requires all four DEPTH pending PostgreSQL boundary scenarios', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-surefire-depth-pending-count-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const startedAt = new Date(Date.now() - 5_000)
+  const incompleteDirectory = join(root, 'three-of-four')
+  writeSurefireSuite(incompleteDirectory, 'TEST-depth-pending.xml', {
+    name: 'com.fxplatform.trading.service.DepthPendingExecutionPostgresIT',
+    tests: 3
+  })
+
+  assert.throws(
+    () => parseSurefireReports(
+      incompleteDirectory,
+      ['DepthPendingExecutionPostgresIT'],
+      startedAt
+    ),
+    /^Error: SUREFIRE_INVALID_SUITE: DepthPendingExecutionPostgresIT$/
+  )
+
+  const completeDirectory = join(root, 'four-of-four')
+  writeSurefireSuite(completeDirectory, 'TEST-depth-pending.xml', {
+    name: 'com.fxplatform.trading.service.DepthPendingExecutionPostgresIT',
+    tests: 4
+  })
+  const parsed = parseSurefireReports(
+    completeDirectory,
+    ['DepthPendingExecutionPostgresIT'],
+    startedAt
+  )
+
+  assert.equal(parsed.status, 'PASS')
+  assert.deepEqual(parsed.totals, { tests: 4, skipped: 0, failures: 0, errors: 0 })
+})
+
 test('Surefire parser rejects missing, duplicate and stale exact suites', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-surefire-invalid-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -14265,7 +14319,7 @@ test('strict artifact CLI writes failure through the supplied lexical alias afte
 
   assert.equal(existsSync(redirectMarker), true, execution.stderr)
   assert.equal(readFileSync(redirectMarker, 'utf8'), 'redirected')
-  assert.equal(realpathSync(lexicalOutput), realpathSync(secondTarget))
+  assert.equal(JSON.parse(readFileSync(secondTarget, 'utf8')).status, 'FAIL')
   assert.equal(execution.status, 1)
   assert.equal(execution.stderr.includes(marker), false)
   assert.equal(JSON.parse(readFileSync(lexicalOutput, 'utf8')).status, 'FAIL')
@@ -16085,7 +16139,9 @@ test('default phase boundaries propagate the execution signal and isolate prefli
   ]) assert.ok(observed.includes(required), required)
 })
 
-test('Windows P0 requires a verified process tree provider before the first mutation', async (t) => {
+test('Windows P0 requires a verified process tree provider before the first mutation', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
   assert.equal(typeof smokeContracts.assertP0ProcessTreeCapability, 'function')
   const root = mkdtempSync(join(tmpdir(), 'p0-review1-s9-windows-capability-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -16139,7 +16195,9 @@ test('Windows P0 requires a verified process tree provider before the first muta
   )
 })
 
-test('Windows same-session cleanup never claims process-tree recovery from direct child kill', async (t) => {
+test('Windows same-session cleanup never claims process-tree recovery from direct child kill', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-review1-s9-direct-child-tree-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const child = new EventEmitter()

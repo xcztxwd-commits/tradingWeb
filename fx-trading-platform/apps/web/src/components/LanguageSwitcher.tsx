@@ -4,6 +4,7 @@ import { SelectField, type SelectFieldOption } from '@fx-platform/ui'
 
 import { changeLanguage, supportedLanguages, type SupportedLanguage } from '../i18n'
 import { TopbarToolIcon } from './TopbarToolIcon'
+import styles from './LanguageSwitcher.module.css'
 
 const languageLabelKeys: Record<SupportedLanguage, string> = {
   'zh-CN': 'language.zhCN',
@@ -21,13 +22,13 @@ export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
   }))
 
   return (
-    <div className={`language-switcher${compact ? ' language-switcher--compact' : ''}`}>
-      <span id={labelId} className="language-switcher__label">
-        <TopbarToolIcon className="language-switcher__icon" name="globe" size={compact ? 30 : 15} />
-        <span className="language-switcher__label-text">{t('language.label')}</span>
+    <div className={[styles.root, compact && styles.compact].filter(Boolean).join(' ')}>
+      <span id={labelId} className={styles.label}>
+        <TopbarToolIcon name="globe" size={compact ? 30 : 15} />
+        <span className={styles.labelText}>{t('language.label')}</span>
       </span>
       <SelectField
-        className={`language-switcher__select${compact ? ' language-switcher__select--compact' : ''}`}
+        className={[styles.select, compact && styles.selectCompact].filter(Boolean).join(' ')}
         ariaLabel={t('language.label')}
         labelledBy={labelId}
         value={activeLanguage}

@@ -8,6 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class ExecutionProperties {
 
   private ExecutionMode mode = ExecutionMode.DISABLED;
+  private DemoProperties demo = new DemoProperties();
   private LiveAdapterProperties broker = new LiveAdapterProperties();
   private LiveAdapterProperties fix = new LiveAdapterProperties();
   private LiveAdapterProperties lp = new LiveAdapterProperties();
@@ -22,6 +23,14 @@ public class ExecutionProperties {
 
   public void setMode(ExecutionMode mode) {
     this.mode = mode;
+  }
+
+  public DemoProperties getDemo() {
+    return demo;
+  }
+
+  public void setDemo(DemoProperties demo) {
+    this.demo = demo == null ? new DemoProperties() : demo;
   }
 
   public LiveAdapterProperties getBroker() {
@@ -55,6 +64,84 @@ public class ExecutionProperties {
       case LP -> lp;
       default -> throw new IllegalArgumentException("No live adapter settings for " + executionMode.propertyValue());
     };
+  }
+
+  public static class DemoProperties {
+
+    private static final DemoExecutionPolicy DEFAULTS = DemoExecutionPolicy.defaults();
+
+    private DemoMatchingMode matchingMode = DEFAULTS.matchingMode();
+    private java.math.BigDecimal makerFeeRate = DEFAULTS.makerFeeRate();
+    private java.math.BigDecimal takerFeeRate = DEFAULTS.takerFeeRate();
+    private java.math.BigDecimal liquidationFeeRate = DEFAULTS.liquidationFeeRate();
+    private java.math.BigDecimal slippageRate = DEFAULTS.slippageRate();
+    private List<DemoBookLevel> bids = DEFAULTS.bids();
+    private List<DemoBookLevel> asks = DEFAULTS.asks();
+    private java.math.BigDecimal maxFillQuantityPerTick = DEFAULTS.maxFillQuantityPerTick();
+
+    public DemoMatchingMode getMatchingMode() {
+      return matchingMode;
+    }
+
+    public void setMatchingMode(DemoMatchingMode matchingMode) {
+      this.matchingMode = matchingMode;
+    }
+
+    public java.math.BigDecimal getMakerFeeRate() {
+      return makerFeeRate;
+    }
+
+    public void setMakerFeeRate(java.math.BigDecimal makerFeeRate) {
+      this.makerFeeRate = makerFeeRate;
+    }
+
+    public java.math.BigDecimal getTakerFeeRate() {
+      return takerFeeRate;
+    }
+
+    public void setTakerFeeRate(java.math.BigDecimal takerFeeRate) {
+      this.takerFeeRate = takerFeeRate;
+    }
+
+    public java.math.BigDecimal getLiquidationFeeRate() {
+      return liquidationFeeRate;
+    }
+
+    public void setLiquidationFeeRate(java.math.BigDecimal liquidationFeeRate) {
+      this.liquidationFeeRate = liquidationFeeRate;
+    }
+
+    public java.math.BigDecimal getSlippageRate() {
+      return slippageRate;
+    }
+
+    public void setSlippageRate(java.math.BigDecimal slippageRate) {
+      this.slippageRate = slippageRate;
+    }
+
+    public List<DemoBookLevel> getBids() {
+      return bids;
+    }
+
+    public void setBids(List<DemoBookLevel> bids) {
+      this.bids = bids == null ? List.of() : bids;
+    }
+
+    public List<DemoBookLevel> getAsks() {
+      return asks;
+    }
+
+    public void setAsks(List<DemoBookLevel> asks) {
+      this.asks = asks == null ? List.of() : asks;
+    }
+
+    public java.math.BigDecimal getMaxFillQuantityPerTick() {
+      return maxFillQuantityPerTick;
+    }
+
+    public void setMaxFillQuantityPerTick(java.math.BigDecimal maxFillQuantityPerTick) {
+      this.maxFillQuantityPerTick = maxFillQuantityPerTick;
+    }
   }
 
   public static class LiveAdapterProperties {

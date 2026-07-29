@@ -9,10 +9,12 @@ import {
   readStoredAuthToken,
   readStoredRefreshToken
 } from '@fx-platform/frontend-core'
+import styles from './AccountUserMenu.module.css'
 
 type AccountUserMenuProps = {
   email?: string | null
   onLogout: () => void
+  triggerClassName?: string
 }
 
 const accountLinks = [
@@ -22,7 +24,7 @@ const accountLinks = [
   { to: '/account/security/kyc', label: '身份认证', icon: ShieldCheck }
 ] as const
 
-export function AccountUserMenu({ email, onLogout }: AccountUserMenuProps) {
+export function AccountUserMenu({ email, onLogout, triggerClassName }: AccountUserMenuProps) {
   const navigate = useNavigate()
   const menuRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
@@ -59,10 +61,10 @@ export function AccountUserMenu({ email, onLogout }: AccountUserMenuProps) {
   }
 
   return (
-    <div className="account-user-menu" ref={menuRef}>
+    <div className={styles.root} ref={menuRef}>
       <button
         type="button"
-        className="app-topbar__icon account-user-menu__trigger"
+        className={[triggerClassName, styles.trigger].filter(Boolean).join(' ')}
         aria-label="个人中心"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -72,9 +74,9 @@ export function AccountUserMenu({ email, onLogout }: AccountUserMenuProps) {
       </button>
 
       {open ? (
-        <div className="account-user-menu__panel" role="menu" aria-label="个人中心">
-          <div className="account-user-menu__profile">
-            <span className="account-user-menu__avatar" aria-hidden="true">
+        <div className={styles.panel} role="menu" aria-label="个人中心">
+          <div className={styles.profile}>
+            <span className={styles.avatar} aria-hidden="true">
               FX
             </span>
             <div>
@@ -93,7 +95,7 @@ export function AccountUserMenu({ email, onLogout }: AccountUserMenuProps) {
               )
             })}
           </nav>
-          <button type="button" className="account-user-menu__logout" role="menuitem" onClick={logout}>
+          <button type="button" className={styles.logout} role="menuitem" onClick={logout}>
             <LogOut size={17} aria-hidden="true" />
             <span>退出登录</span>
           </button>

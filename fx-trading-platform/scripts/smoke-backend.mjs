@@ -71,7 +71,12 @@ assert(orders.some((order) => order.id === marketOrder.id), 'Market order must a
 assert(orders.some((order) => order.id === pendingLimit.id), 'Limit order must appear in order history')
 
 const positions = await loadAllPages('/api/trading/positions', accountId, token, 1)
-assert(!positions.some((position) => position.symbol === symbol),
+assert(!positions.some((position) =>
+  position.symbol === symbol && (
+    position.instrumentType !== 'SPOT'
+    || position.marginMode !== 'CASH'
+    || position.leverage != null
+  )),
   'Spot fills must not create leveraged positions')
 
 const canceledLimit = await request(`/api/trading/orders/${pendingLimit.id}/cancel`, {

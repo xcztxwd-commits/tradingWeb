@@ -18,7 +18,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.LongUnaryOperator;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -167,7 +166,6 @@ public class BinanceRealtimeClient implements BinanceRealtimeControlClient {
     return parseFailureCount.get();
   }
 
-  @Scheduled(fixedDelayString = "${market.realtime.rotation-check-ms:60000}")
   void runMaintenance() {
     if (connected && connectedAt().isPresent()
         && clock.instant().toEpochMilli() - connectedAt > ROTATE_AFTER.toMillis()) {

@@ -12,9 +12,16 @@ describe('@fx-platform/frontend-core package contract', () => {
     assert.equal(packageJson.name, '@fx-platform/frontend-core')
     assert.equal(packageJson.private, true)
     assert.equal(packageJson.type, 'module')
-    assert.deepEqual(packageJson.exports['.'], {
-      types: './src/index.ts',
-      import: './src/index.ts'
+    assert.deepEqual(packageJson.exports, {
+      '.': sourceExport('./src/index.ts'),
+      './api': sourceExport('./src/api/index.ts'),
+      './auth': sourceExport('./src/auth/index.ts'),
+      './storage': sourceExport('./src/storage/index.ts'),
+      './models': sourceExport('./src/models/index.ts'),
+      './market': sourceExport('./src/market/index.ts'),
+      './engagement': sourceExport('./src/engagement/index.ts'),
+      './account': sourceExport('./src/account/index.ts'),
+      './trading': sourceExport('./src/trading/index.ts')
     })
     assert.equal(packageJson.scripts.test, 'node --test "src/**/*.test.ts"')
     assert.equal(packageJson.scripts.typecheck, 'tsc --noEmit -p tsconfig.json')
@@ -39,7 +46,12 @@ describe('@fx-platform/frontend-core package contract', () => {
     assert.match(indexSource, /export \* from '\.\/models\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/storage\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/market\/index\.ts'/u)
+    assert.match(indexSource, /export \* from '\.\/engagement\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/account\/index\.ts'/u)
     assert.match(indexSource, /export \* from '\.\/trading\/index\.ts'/u)
   })
 })
+
+function sourceExport(path: string) {
+  return { types: path, import: path }
+}

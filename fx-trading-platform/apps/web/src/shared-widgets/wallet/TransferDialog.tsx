@@ -4,6 +4,9 @@ import type { AccountTransferDirection } from '@fx-platform/shared-types'
 
 import type { Amount } from '@fx-platform/frontend-core'
 
+import { cssModuleClasses as css } from '../data/cssModuleClasses'
+import styles from '../data/UserPageSurface.module.css'
+
 export type TransferDialogProps = {
   open: boolean
   direction: AccountTransferDirection
@@ -51,10 +54,11 @@ export function TransferDialog({
       labelledBy="wallet-transfer-title"
       closeLabel="Close transfer dialog"
       pending={pending}
-      panelClassName="confirm-dialog__panel"
+      priority="critical"
+      panelClassName={css(styles, "confirm-dialog__panel")}
     >
       <form
-        className="user-page__form"
+        className={css(styles, "user-page__form")}
         onSubmit={handleSubmit}
       >
         <h2 id="wallet-transfer-title">Transfer Demo USDT</h2>
@@ -94,14 +98,14 @@ export function TransferDialog({
         </label>
         <small>Available: {availableNumber} USDT</small>
         {amountNumber > availableNumber ? <p role="alert">Amount exceeds the available {fromLabel} balance.</p> : null}
-        {error ? <p className="confirm-dialog__risk" role="alert">{error}</p> : null}
+        {error ? <p className={css(styles, "confirm-dialog__risk")} role="alert">{error}</p> : null}
         <small>Request ID: {requestId}</small>
 
-        <div className="user-page__actions">
-          <button type="submit" className="table-action table-action--primary" disabled={pending || amountInvalid}>
+        <div className={css(styles, "user-page__actions")}>
+          <button type="submit" className={css(styles, "table-action", "table-action--primary")} disabled={pending || amountInvalid}>
             {pending ? 'Transferring…' : 'Confirm transfer'}
           </button>
-          <button type="button" className="table-action table-action--secondary" disabled={pending} onClick={onClose}>
+          <button type="button" className={css(styles, "table-action", "table-action--secondary")} disabled={pending} onClick={onClose}>
             Cancel
           </button>
         </div>

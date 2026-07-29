@@ -1,6 +1,7 @@
 package com.fxplatform.ledger.entity;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -33,6 +34,12 @@ public class LedgerEntryEntity {
   private String referenceType;
   private UUID referenceId;
   private String description;
+
+  @TableField(
+      insertStrategy = FieldStrategy.NEVER,
+      updateStrategy = FieldStrategy.NEVER
+  )
+  private Long sequenceNo;
 
   @TableField(fill = FieldFill.INSERT)
   private Instant createdAt;

@@ -1,6 +1,7 @@
 package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.execution.DemoExecutionGuard;
 import com.fxplatform.execution.ExecutableMarketSnapshot;
 import com.fxplatform.execution.FullFillCoordinator;
@@ -31,6 +33,7 @@ import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.entity.TradeEntity;
 import com.fxplatform.trading.enums.OrderSide;
+import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.repository.OrderRepository;
@@ -50,6 +53,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -141,6 +146,139 @@ class PendingOrderExecutionServiceTest {
   }
 
   @Test
+  void strictSpotScannerPropagatesTheFirstFailureWithoutRetryOrWorkerEvent() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity order = p0PendingOrder(accountId, "strict-no-retry");
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any()))
+        .thenReturn(spotBundle(), spotBundle());
+    when(pendingOrderExecutionProcessor.processStrict(eq(order), any()))
+        .thenThrow(new BusinessException(
+            ErrorCode.MARKET_DATA_STALE,
+            "strict validation snapshot expired"));
+
+    PendingOrderExecutionService service = p0Service();
+    service.setPendingOrderExecutionProcessor(pendingOrderExecutionProcessor);
+
+    assertThatThrownBy(service::executeRestingOrdersStrict)
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(ErrorCode.MARKET_DATA_STALE));
+
+    verify(marketBundleResolver).resolveSpot(eq("BTCUSDT"), any());
+    verify(pendingOrderExecutionProcessor).processStrict(eq(order), any());
+    verify(pendingOrderExecutionProcessor, never()).process(eq(order), any());
+    verify(orderEventService, never()).recordWorkerFailure(
+        any(), any(), any(), any(), any(), any(PendingOrderExecutionFingerprint.class));
+  }
+
+  @Test
+  void staleNegativeSpotTriggerSnapshotIsRetriedBeforeDeferringActivation() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity activation = p0StopLimitAwaitingActivation(accountId, "stale-negative");
+    TradingAccountEntity account = account(accountId);
+    SpotMarketBundle staleNegative = spotBundle("99.4");
+    SpotMarketBundle freshTriggered = spotBundle("99.5");
+    ExecutableMarketSnapshot staleSnapshot = ExecutableMarketSnapshot.from(staleNegative);
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of());
+    when(orderRepository.findUserStopLimitsAwaitingActivation()).thenReturn(List.of(activation));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any()))
+        .thenReturn(staleNegative, freshTriggered);
+    org.mockito.Mockito.doThrow(new BusinessException(
+            ErrorCode.MARKET_DATA_STALE,
+            "negative trigger snapshot expired"))
+        .when(fullFillCoordinator).requireFresh(staleSnapshot);
+    when(pendingOrderExecutionProcessor.process(
+        eq(activation), eq(ExecutableMarketSnapshot.from(freshTriggered)))).thenReturn(false);
+
+    PendingOrderExecutionService service = p0Service();
+    service.setPendingOrderExecutionProcessor(pendingOrderExecutionProcessor);
+
+    assertThat(service.executePendingOrders()).isZero();
+
+    verify(marketBundleResolver, org.mockito.Mockito.times(2)).resolveSpot(eq("BTCUSDT"), any());
+    verify(fullFillCoordinator).requireFresh(staleSnapshot);
+    verify(fullFillCoordinator).requireFresh(ExecutableMarketSnapshot.from(freshTriggered));
+    verify(pendingOrderExecutionProcessor).process(
+        activation, ExecutableMarketSnapshot.from(freshTriggered));
+  }
+
+  @Test
+  void scannerIncludesOnlyRepositoryApprovedUserStopLimitsAwaitingActivation() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity activation = p0StopLimitAwaitingActivation(accountId, "activation-scan");
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of());
+    when(orderRepository.findUserStopLimitsAwaitingActivation()).thenReturn(List.of(activation));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(spotBundle("99.5"));
+    when(pendingOrderExecutionProcessor.process(eq(activation), any())).thenReturn(false);
+
+    PendingOrderExecutionService service = p0Service();
+    service.setPendingOrderExecutionProcessor(pendingOrderExecutionProcessor);
+
+    assertThat(service.executePendingOrders()).isZero();
+
+    verify(orderRepository).findByStatus(OrderStatus.PENDING);
+    verify(orderRepository).findUserStopLimitsAwaitingActivation();
+    verify(orderRepository, never()).findByStatus(OrderStatus.PENDING_ACTIVATION);
+    verify(pendingOrderExecutionProcessor).process(eq(activation), any());
+  }
+
+  @Test
+  void activationWorkerFailurePreservesPendingActivationAsEventSource() {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity activation = p0StopLimitAwaitingActivation(accountId, "activation-failure");
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of());
+    when(orderRepository.findUserStopLimitsAwaitingActivation()).thenReturn(List.of(activation));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account(accountId)));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(spotBundle("99.5"));
+    when(pendingOrderExecutionProcessor.process(eq(activation), any()))
+        .thenThrow(new BusinessException("MARKET_DATA_STALE", "activation snapshot expired"));
+
+    PendingOrderExecutionService service = p0Service();
+    service.setPendingOrderExecutionProcessor(pendingOrderExecutionProcessor);
+
+    assertThat(service.executePendingOrders()).isZero();
+
+    verify(orderEventService).recordWorkerFailure(
+        eq(activation.getId()),
+        eq("ORDER_EXECUTION_FAILED"),
+        eq(OrderStatus.PENDING_ACTIVATION),
+        eq("MARKET_DATA_STALE"),
+        eq("Pending order execution deferred"),
+        any(PendingOrderExecutionFingerprint.class));
+  }
+
+  @ParameterizedTest(name = "BUY STOP_MARKET triggers when last={0}")
+  @ValueSource(strings = {"100", "100.01", "130"})
+  void spotBuyStopMarketDelegatesAtExactCrossAndGapTriggerPrices(String last) {
+    UUID accountId = UUID.randomUUID();
+    OrderEntity order = p0PendingOrder(accountId, "stop-market-" + last);
+    order.setOrderType(OrderType.STOP_MARKET);
+    order.setRequestedPrice(null);
+    order.setPrice(null);
+    order.setTriggerPrice(new BigDecimal("100"));
+    TradingAccountEntity account = account(accountId);
+    when(orderRepository.findByStatus(OrderStatus.PENDING)).thenReturn(List.of(order));
+    when(accountRepository.findById(accountId)).thenReturn(Optional.of(account));
+    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any()))
+        .thenReturn(spotBundle(last));
+    when(pendingOrderExecutionProcessor.process(eq(order), any())).thenReturn(true);
+
+    PendingOrderExecutionService service = p0Service();
+    service.setPendingOrderExecutionProcessor(pendingOrderExecutionProcessor);
+
+    assertThat(service.executePendingOrders()).isEqualTo(1);
+    ArgumentCaptor<ExecutableMarketSnapshot> snapshot =
+        ArgumentCaptor.forClass(ExecutableMarketSnapshot.class);
+    verify(pendingOrderExecutionProcessor).process(eq(order), snapshot.capture());
+    assertThat(snapshot.getValue().last()).isEqualByComparingTo(last);
+  }
+
+  @Test
   void compatibilityConstructorFailsClosedForP0PerpetualPendingOrder() {
     UUID accountId = UUID.randomUUID();
     OrderEntity order = p0PendingOrder(accountId, "perp-missing-authority");
@@ -169,6 +307,8 @@ class PendingOrderExecutionServiceTest {
     UUID secondAccountId = UUID.randomUUID();
     OrderEntity first = p0PendingOrder(firstAccountId, "first");
     OrderEntity second = p0PendingOrder(secondAccountId, "second");
+    first.setCreatedAt(Instant.parse("2026-07-18T00:00:00Z"));
+    second.setCreatedAt(Instant.parse("2026-07-18T00:00:01Z"));
     TradingAccountEntity firstAccount = account(firstAccountId);
     TradingAccountEntity secondAccount = account(secondAccountId);
     AtomicBoolean insideMutation = new AtomicBoolean();
@@ -205,11 +345,12 @@ class PendingOrderExecutionServiceTest {
     verify(transactionExecutor, org.mockito.Mockito.times(2)).execute(any());
     verify(tradeRepository, org.mockito.Mockito.times(1)).save(any(TradeEntity.class));
     verify(orderEventService).recordWorkerFailure(
-        first.getId(),
-        "ORDER_EXECUTION_FAILED",
-        OrderStatus.PENDING,
-        "EXECUTION_UNAVAILABLE",
-        "Pending order execution deferred");
+        eq(first.getId()),
+        eq("ORDER_EXECUTION_FAILED"),
+        eq(OrderStatus.PENDING),
+        eq("EXECUTION_UNAVAILABLE"),
+        eq("Pending order execution deferred"),
+        any(PendingOrderExecutionFingerprint.class));
   }
 
   @Test
@@ -228,11 +369,12 @@ class PendingOrderExecutionServiceTest {
     assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);
     assertThat(order.getHoldAmount()).isEqualByComparingTo("100");
     verify(orderEventService).recordWorkerFailure(
-        order.getId(),
-        "ORDER_EXECUTION_FAILED",
-        OrderStatus.PENDING,
-        "MARKET_DATA_STALE",
-        "Pending order execution deferred");
+        eq(order.getId()),
+        eq("ORDER_EXECUTION_FAILED"),
+        eq(OrderStatus.PENDING),
+        eq("MARKET_DATA_STALE"),
+        eq("Pending order execution deferred"),
+        any(PendingOrderExecutionFingerprint.class));
   }
 
   @Test
@@ -248,7 +390,8 @@ class PendingOrderExecutionServiceTest {
     assertThat(p0Service().executePendingOrders()).isZero();
 
     verify(orderEventService, never())
-        .recordWorkerFailure(any(), any(), any(), any(), any());
+        .recordWorkerFailure(
+            any(), any(), any(), any(), any(), any(PendingOrderExecutionFingerprint.class));
     verify(marketBundleResolver, never()).resolveSpot(any(), any());
   }
 
@@ -752,7 +895,27 @@ class PendingOrderExecutionServiceTest {
     return order;
   }
 
+  private static OrderEntity p0StopLimitAwaitingActivation(
+      UUID accountId,
+      String clientOrderId
+  ) {
+    OrderEntity order = p0PendingOrder(accountId, clientOrderId);
+    order.setOrderType(OrderType.STOP_LIMIT);
+    order.setOrderOrigin(OrderOrigin.USER);
+    order.setStatus(OrderStatus.PENDING_ACTIVATION);
+    order.setPrice(new BigDecimal("101"));
+    order.setRequestedPrice(new BigDecimal("101"));
+    order.setTriggerPrice(new BigDecimal("99.5"));
+    order.setTriggerPriceType(com.fxplatform.trading.enums.TriggerPriceType.LAST_PRICE);
+    order.setTriggerExecutionType(com.fxplatform.trading.enums.TriggerExecutionType.LIMIT);
+    return order;
+  }
+
   private static SpotMarketBundle spotBundle() {
+    return spotBundle("99.5");
+  }
+
+  private static SpotMarketBundle spotBundle(String last) {
     Instant now = Instant.now();
     return new SpotMarketBundle(
         "BTCUSDT",
@@ -761,7 +924,7 @@ class PendingOrderExecutionServiceTest {
         MarketSourceMode.PUBLIC_EXTERNAL,
         new BigDecimal("99"),
         new BigDecimal("100"),
-        new BigDecimal("99.5"),
+        new BigDecimal(last),
         null,
         List.of(),
         List.of(),
@@ -777,8 +940,8 @@ class PendingOrderExecutionServiceTest {
         new BigDecimal("0.01"),
         BigDecimal.ZERO,
         new BigDecimal("0.0002"),
-        new BigDecimal("0.000002"),
-        "BTC",
+        new BigDecimal("0.00020000"),
+        "USDT",
         com.fxplatform.trading.enums.LiquidityRole.MAKER,
         BigDecimal.ZERO,
         MarketSourceMode.PUBLIC_EXTERNAL,

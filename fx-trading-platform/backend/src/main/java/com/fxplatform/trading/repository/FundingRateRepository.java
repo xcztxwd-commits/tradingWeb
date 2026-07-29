@@ -55,6 +55,24 @@ public interface FundingRateRepository extends FxBaseMapper<FundingRateEntity> {
         .findFirst();
   }
 
+  default Optional<FundingRateEntity> findBySymbolAndFundingTime(
+      String symbol,
+      Instant fundingTime
+  ) {
+    return selectList(new LambdaQueryWrapper<FundingRateEntity>()
+        .eq(FundingRateEntity::getSymbol, normalize(symbol))
+        .eq(FundingRateEntity::getFundingTime, fundingTime)
+        .last("LIMIT 1"))
+        .stream()
+        .findFirst();
+  }
+
+  default List<FundingRateEntity> findByFundingTime(Instant fundingTime) {
+    return selectList(new LambdaQueryWrapper<FundingRateEntity>()
+        .eq(FundingRateEntity::getFundingTime, fundingTime)
+        .orderByAsc(FundingRateEntity::getSymbol));
+  }
+
   @Select("""
       SELECT
         fr.id,
@@ -85,7 +103,12 @@ public interface FundingRateRepository extends FxBaseMapper<FundingRateEntity> {
           WHERE p.symbol = fr.symbol
             AND p.status = 'OPEN'
             AND p.product_type = 'LINEAR_PERP'
-            AND p.opened_at <= fr.funding_time
+            AND CASE
+              WHEN fr.provider_code = 'VALIDATION'
+                AND fr.source_mode = 'DEMO'
+                THEN fr.funding_time = #{atOrBefore}
+              ELSE p.opened_at <= fr.funding_time
+            END
             AND NOT EXISTS (
               SELECT 1
               FROM trading.funding_settlements fs

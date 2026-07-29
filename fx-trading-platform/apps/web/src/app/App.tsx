@@ -6,6 +6,7 @@ import { AccountRoute } from '../routes/account/AccountRoutes'
 import { AuthRoute } from '../routes/auth/AuthRoute'
 import { HomeRoute } from '../routes/home/HomeRoute'
 import { MarketsRoute } from '../routes/markets/MarketsRoute'
+import { MessagesRoute } from '../routes/messages/MessagesRoute'
 import { OrdersRoute } from '../routes/orders/OrdersRoute'
 import { PositionsRoute } from '../routes/positions/PositionsRoute'
 import { WalletRoute } from '../routes/wallet/WalletRoute'
@@ -34,6 +35,7 @@ export function App() {
           <Route path="/two-factor-help" element={<AuthRoute mode="two-factor-help" />} />
           <Route path="/dashboard" element={<AccountRoute mode="dashboard" />} />
           <Route path="/markets" element={<MarketsRoute />} />
+          <Route path="/messages" element={<MessagesRoute />} />
           <Route path="/orders" element={<OrdersRoute />} />
           <Route path="/positions" element={<PositionsRoute />} />
           <Route path="/wallet" element={<WalletRoute />} />

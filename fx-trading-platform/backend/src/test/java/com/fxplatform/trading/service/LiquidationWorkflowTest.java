@@ -177,6 +177,102 @@ class LiquidationWorkflowTest {
   }
 
   @Test
+  void userCloseWinningRaceSettlesWhenLockedProjectionFindsCrossScopeEmpty() {
+    UUID accountId = uuid(112);
+    TradingAccountEntity account = account(accountId);
+    PositionEntity preflightCross = position(uuid(54), accountId, BTC, MarginMode.CROSS);
+    PreparedAccountRisk preparedAfterUserClose = prepared(
+        accountId, List.of(), "80", "80");
+    AccountRiskProjection flatProjection = projection(List.of(), false);
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of());
+    when(positionRepository.findOpenLinearPerpByAccountId(accountId))
+        .thenReturn(List.of(preflightCross));
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(positionRepository.findOpenLinearPerpByAccountIdForUpdate(accountId))
+        .thenReturn(List.of());
+    when(orderRepository.findActiveLinearPerpByAccountIdForUpdate(accountId))
+        .thenReturn(List.of());
+    when(accountRiskSnapshotService.prepare(eq(accountId), anyMap()))
+        .thenReturn(preparedAfterUserClose);
+    when(accountRiskSnapshotService.project(
+        eq(account), anyList(), anyList(), eq(preparedAfterUserClose)))
+        .thenReturn(flatProjection);
+    liquidationService.setLiquidationSettlementService(liquidationSettlementService);
+
+    assertThat(liquidationService.scanAccount(accountId)).isZero();
+
+    verify(liquidationSettlementService).settleIfReady(accountId);
+    verify(systemCloseOrderService, never()).closeWhole(
+        any(), any(), any(), anyString(), anyString());
+    verify(cancelAllOrderService, never()).cancelActivePerpetual(accountId);
+  }
+
+  @Test
+  void userCloseWinningRaceSettlesAfterStaleFingerprintConfirmsCrossScopeEmpty() {
+    UUID accountId = uuid(113);
+    TradingAccountEntity account = account(accountId);
+    PositionEntity preflightCross = position(uuid(55), accountId, BTC, MarginMode.CROSS);
+    PreparedAccountRisk stalePrepared = prepared(
+        accountId, List.of(preflightCross), "80", "80");
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of());
+    when(positionRepository.findOpenLinearPerpByAccountId(accountId))
+        .thenReturn(List.of(preflightCross), List.of());
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(positionRepository.findOpenLinearPerpByAccountIdForUpdate(accountId))
+        .thenReturn(List.of());
+    when(orderRepository.findActiveLinearPerpByAccountIdForUpdate(accountId))
+        .thenReturn(List.of());
+    when(accountRiskSnapshotService.prepare(eq(accountId), anyMap()))
+        .thenReturn(stalePrepared);
+    when(accountRiskSnapshotService.project(
+        eq(account), anyList(), anyList(), eq(stalePrepared)))
+        .thenThrow(new BusinessException(
+            "MARKET_DATA_STALE", "Position changed after the risk snapshot was prepared"));
+    liquidationService.setLiquidationSettlementService(liquidationSettlementService);
+
+    assertThat(liquidationService.scanAccount(accountId)).isZero();
+
+    verify(positionRepository, times(2)).findOpenLinearPerpByAccountId(accountId);
+    verify(liquidationSettlementService).settleIfReady(accountId);
+    verify(systemCloseOrderService, never()).closeWhole(
+        any(), any(), any(), anyString(), anyString());
+  }
+
+  @Test
+  void staleFingerprintWithCrossRiskStillOpenPropagatesWithoutSettlement() {
+    UUID accountId = uuid(114);
+    TradingAccountEntity account = account(accountId);
+    PositionEntity cross = position(uuid(56), accountId, BTC, MarginMode.CROSS);
+    PreparedAccountRisk stalePrepared = prepared(accountId, List.of(cross), "80", "80");
+    when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(
+        accountId, PositionStatus.OPEN)).thenReturn(List.of());
+    when(positionRepository.findOpenLinearPerpByAccountId(accountId))
+        .thenReturn(List.of(cross), List.of(cross));
+    when(accountRepository.findByIdForUpdate(accountId)).thenReturn(Optional.of(account));
+    when(positionRepository.findOpenLinearPerpByAccountIdForUpdate(accountId))
+        .thenReturn(List.of(cross));
+    when(orderRepository.findActiveLinearPerpByAccountIdForUpdate(accountId))
+        .thenReturn(List.of());
+    when(accountRiskSnapshotService.prepare(eq(accountId), anyMap()))
+        .thenReturn(stalePrepared);
+    when(accountRiskSnapshotService.project(
+        eq(account), anyList(), anyList(), eq(stalePrepared)))
+        .thenThrow(new BusinessException(
+            "MARKET_DATA_STALE", "Position changed after the risk snapshot was prepared"));
+    liquidationService.setLiquidationSettlementService(liquidationSettlementService);
+
+    assertThatThrownBy(() -> liquidationService.scanAccount(accountId))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("MARKET_DATA_STALE"));
+
+    verify(positionRepository, times(2)).findOpenLinearPerpByAccountId(accountId);
+    verify(liquidationSettlementService, never()).settleIfReady(accountId);
+  }
+
+  @Test
   void lockedProjectionStopsAnInFlightScanAfterAdminAcquiresTheGate() {
     UUID accountId = uuid(111);
     TradingAccountEntity account = account(accountId);
@@ -333,10 +429,14 @@ class LiquidationWorkflowTest {
   void crossLiquidationClosesEveryCrossSlotAndRestoresActiveAfterAllItemsSucceed() {
     UUID accountId = uuid(103);
     TradingAccountEntity account = account(accountId);
-    PositionEntity first = position(uuid(10), accountId, BTC, MarginMode.CROSS);
-    PositionEntity second = position(uuid(20), accountId, ETH, MarginMode.CROSS);
+    PositionEntity first = position(uuid(20), accountId, BTC, MarginMode.CROSS);
+    first.setPositionSide(PositionSide.LONG);
+    PositionEntity second = position(uuid(10), accountId, BTC, MarginMode.CROSS);
+    second.setPositionSide(PositionSide.SHORT);
+    PositionEntity third = position(uuid(5), accountId, ETH, MarginMode.CROSS);
+    third.setPositionSide(PositionSide.BOTH);
     PositionEntity isolated = position(uuid(30), accountId, SOL, MarginMode.ISOLATED);
-    List<PositionEntity> deliberatelyUnsorted = List.of(second, isolated, first);
+    List<PositionEntity> deliberatelyUnsorted = List.of(third, second, isolated, first);
     stubUnsafeCross(account, deliberatelyUnsorted);
     when(systemCloseOrderService.closeWhole(
         eq(accountId), eq(first.getId()), eq(OrderOrigin.LIQUIDATION), anyString(), anyString()))
@@ -344,10 +444,13 @@ class LiquidationWorkflowTest {
     when(systemCloseOrderService.closeWhole(
         eq(accountId), eq(second.getId()), eq(OrderOrigin.LIQUIDATION), anyString(), anyString()))
         .thenReturn(closeResult(account, second));
+    when(systemCloseOrderService.closeWhole(
+        eq(accountId), eq(third.getId()), eq(OrderOrigin.LIQUIDATION), anyString(), anyString()))
+        .thenReturn(closeResult(account, third));
 
     int closed = liquidationService.scanAccount(accountId);
 
-    assertThat(closed).isEqualTo(2);
+    assertThat(closed).isEqualTo(3);
     assertThat(account.getStatus().name()).isEqualTo("ACTIVE");
     verify(cancelAllOrderService).cancelActivePerpetual(accountId);
     InOrder closes = inOrder(systemCloseOrderService);
@@ -355,6 +458,8 @@ class LiquidationWorkflowTest {
         eq(accountId), eq(first.getId()), eq(OrderOrigin.LIQUIDATION), anyString(), anyString());
     closes.verify(systemCloseOrderService).closeWhole(
         eq(accountId), eq(second.getId()), eq(OrderOrigin.LIQUIDATION), anyString(), anyString());
+    closes.verify(systemCloseOrderService).closeWhole(
+        eq(accountId), eq(third.getId()), eq(OrderOrigin.LIQUIDATION), anyString(), anyString());
     verify(systemCloseOrderService, never()).closeWhole(
         eq(accountId), eq(isolated.getId()), any(), anyString(), anyString());
   }

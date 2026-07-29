@@ -746,7 +746,7 @@ public class PositionService {
         currentPrice,
         null,
         null,
-        averageCost,
+        spotBreakEvenPrice(position),
         null,
         null,
         floatingPnl,
@@ -766,6 +766,16 @@ public class PositionService {
     return orZero(position.getQuantity())
         .multiply(orZero(position.getAverageCost()))
         .setScale(8, RoundingMode.HALF_UP);
+  }
+
+  private BigDecimal spotBreakEvenPrice(SpotPositionEntity position) {
+    BigDecimal quantity = orZero(position.getQuantity());
+    if (quantity.signum() <= 0) {
+      return orZero(position.getAverageCost());
+    }
+    return spotCostBasis(position)
+        .add(orZero(position.getFeeCost()))
+        .divide(quantity, 8, RoundingMode.HALF_UP);
   }
 
   private String spotSymbol(SpotPositionEntity position) {

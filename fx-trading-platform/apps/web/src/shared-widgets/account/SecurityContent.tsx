@@ -2,6 +2,12 @@ import { CheckCircle2, Clock3, KeyRound, Laptop, LockKeyhole, ShieldAlert, Shiel
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 
+import { cssModuleClasses as css } from '../data/cssModuleClasses'
+import surfaceStyles from '../data/UserPageSurface.module.css'
+import accountStyles from './AccountPagesContent.module.css'
+
+const styles = { ...surfaceStyles, ...accountStyles }
+
 const securityItems = [
   {
     icon: LockKeyhole,
@@ -60,61 +66,61 @@ export function SecurityContent() {
   const { t } = useTranslation()
 
   return (
-    <section className="user-page" aria-labelledby="security-title">
-      <header className="user-page__header">
+    <section className={css(styles, "user-page")} aria-labelledby="security-title">
+      <header className={css(styles, "user-page__header")}>
         <div>
-          <span className="user-page__eyebrow">{t('security.eyebrow')}</span>
+          <span>{t('security.eyebrow')}</span>
           <h1 id="security-title">{t('security.title')}</h1>
           <p>{t('security.centerSummary')}</p>
         </div>
-        <Link className="table-action table-action--secondary" to="/settings">
+        <Link className={css(styles, "table-action", "table-action--secondary")} to="/settings">
           {t('security.backToSettings')}
         </Link>
       </header>
 
-      <div className="user-page__metrics">
-        <div className="metric">
+      <div className={css(styles, "user-page__metrics")}>
+        <div className={css(styles, "metric")}>
           <span>{t('security.level')}</span>
           <strong>{t('security.standardProtection')}</strong>
         </div>
-        <div className="metric">
+        <div className={css(styles, "metric")}>
           <span>{t('security.enabledItems')}</span>
           <strong>1 / 5</strong>
         </div>
-        <div className="metric">
+        <div className={css(styles, "metric")}>
           <span>{t('security.pendingItems')}</span>
           <strong>2FA, {t('security.deviceManagement')}, {t('security.whitelistShort')}</strong>
         </div>
       </div>
 
-      <div className="settings-grid settings-grid--security">
+      <div className={css(styles, "settings-grid", "settings-grid--security")}>
         {securityItems.map((item) => {
           const reasonId = `${item.titleKey.replaceAll('.', '-')}-disabled-reason`
           const disabledReason = item.disabledReasonKey ? t(item.disabledReasonKey) : undefined
 
           return (
-            <article className="settings-card" key={item.titleKey}>
-              <div className="settings-card__icon" aria-hidden="true">
+            <article className={css(styles, "settings-card")} key={item.titleKey}>
+              <div className={css(styles, "settings-card__icon")} aria-hidden="true">
                 <item.icon size={20} />
               </div>
-              <div className="settings-card__body">
-                <div className="settings-card__title-row">
+              <div className={css(styles, "settings-card__body")}>
+                <div className={css(styles, "settings-card__title-row")}>
                   <h2>{t(item.titleKey)}</h2>
                   <StatusBadge tone={item.tone}>{t(item.statusKey)}</StatusBadge>
                 </div>
                 <p>{t(item.descriptionKey)}</p>
                 {disabledReason ? (
-                  <p className="settings-card__note" id={reasonId}>
+                  <p className={css(styles, "settings-card__note")} id={reasonId}>
                     {disabledReason}
                   </p>
                 ) : null}
                 {item.href ? (
-                  <Link className="settings-card__link" to={item.href}>
+                  <Link className={css(styles, "settings-card__link")} to={item.href}>
                     {t(item.actionKey)}
                   </Link>
                 ) : (
                   <button
-                    className="settings-card__link"
+                    className={css(styles, "settings-card__link")}
                     type="button"
                     disabled
                     aria-describedby={reasonId}
@@ -129,17 +135,17 @@ export function SecurityContent() {
         })}
       </div>
 
-      <section className="user-page__events" id="security-login-history">
-        <div className="settings-section-head">
+      <section className={css(styles, "user-page__events")} id="security-login-history">
+        <div className={css(styles, "settings-section-head")}>
           <div>
             <h2>{t('security.loginHistory.title')}</h2>
             <p>{t('security.loginHistory.description')}</p>
           </div>
           <ShieldCheck size={20} aria-hidden="true" />
         </div>
-        <div className="security-timeline">
+        <div>
           {loginHistory.map((entry) => (
-            <div className="security-timeline__row" key={`${entry.time}-${entry.device}`}>
+            <div key={`${entry.time}-${entry.device}`}>
               <CheckCircle2 size={18} aria-hidden="true" />
               <div>
                 <strong>{entry.device}</strong>
@@ -151,16 +157,16 @@ export function SecurityContent() {
         </div>
       </section>
 
-      <section className="user-page__events" id="security-withdrawal-whitelist">
-        <div className="settings-section-head">
+      <section className={css(styles, "user-page__events")} id="security-withdrawal-whitelist">
+        <div className={css(styles, "settings-section-head")}>
           <div>
             <h2>{t('security.withdrawalWhitelist')}</h2>
             <p>{t('security.withdrawalWhitelistDescription')}</p>
           </div>
           <ShieldAlert size={20} aria-hidden="true" />
         </div>
-        <div className="wallet-action-grid">
-          <Link className="wallet-action-card" to="/wallet">
+        <div className={css(styles, "action-card-grid")}>
+          <Link className={css(styles, "action-card")} to="/wallet">
             <KeyRound size={20} aria-hidden="true" />
             <strong>{t('assets.addressBookEntry')}</strong>
             <span>{t('security.addressBookWalletHint')}</span>
@@ -172,5 +178,5 @@ export function SecurityContent() {
 }
 
 function StatusBadge({ children, tone }: { children: string; tone: string }) {
-  return <span className={`status-chip status-chip--${tone}`}>{children}</span>
+  return <span className={css(styles, 'status-chip', `status-chip--${tone}`)}>{children}</span>
 }

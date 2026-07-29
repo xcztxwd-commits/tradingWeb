@@ -57,7 +57,8 @@ class FullTradingRegressionAuditTest {
         10);
 
     AuditAssertions.assertAmountClose(new BigDecimal("-5000.00000000"), "-5000.00000000");
-    AuditAssertions.assertBtcClose(spotBuy.netBase(), "0.09990000");
+    AuditAssertions.assertBtcClose(spotBuy.baseQuantity(), "0.09990009");
+    AuditAssertions.assertAmountClose(spotBuy.feeQuote(), "4.99500450");
     AuditAssertions.assertBtcClose(new BigDecimal("-0.10000000"), "-0.10000000");
     AuditAssertions.assertAmountClose(spotSell.netQuote(), "5494.50000000");
     AuditAssertions.assertAmountClose(eurUsdFee, "11.00000000");

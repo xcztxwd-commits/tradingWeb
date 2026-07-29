@@ -171,6 +171,68 @@ class PostgresDatabaseIT {
         .containsIgnoringCase("CREATE UNIQUE INDEX")
         .containsIgnoringCase("ON trading.trades USING btree (order_id)")
         .containsIgnoringCase("WHERE (canonical_full_fill = true)");
+
+    String clientOrderGuardDefinition = jdbcTemplate.queryForObject("""
+        select pg_get_indexdef(index_relation.oid)
+        from pg_class index_relation
+        join pg_namespace namespace on namespace.oid = index_relation.relnamespace
+        join pg_index index_metadata on index_metadata.indexrelid = index_relation.oid
+        where namespace.nspname = 'trading'
+          and index_relation.relname = 'ux_orders_user_account_client_order_id'
+          and index_metadata.indisunique = true
+        """, String.class);
+    assertThat(clientOrderGuardDefinition)
+        .containsIgnoringCase("CREATE UNIQUE INDEX")
+        .containsIgnoringCase("ON trading.orders USING btree (user_id, account_id, client_order_id)")
+        .containsIgnoringCase("status")
+        .containsIgnoringCase("RECEIVED")
+        .containsIgnoringCase("PENDING_ACTIVATION")
+        .containsIgnoringCase("PARTIALLY_FILLED")
+        .containsIgnoringCase("CANCEL_PENDING")
+        .doesNotContain(
+            "'FILLED'", "'CANCELED'", "'REJECTED'", "'EXPIRED'", "'FAILED'");
+  }
+
+  @Test
+  void clientOrderIdCanBeReusedAfterTerminalButNotWhileActive() {
+    UUID accountId = jdbcTemplate.queryForObject(
+        "select id from core.trading_accounts order by id limit 1",
+        UUID.class);
+    UUID userId = jdbcTemplate.queryForObject(
+        "select user_id from core.trading_accounts where id = ?",
+        UUID.class,
+        accountId);
+    String suffix = UUID.randomUUID().toString();
+    String clientOrderId = "client-reuse-" + suffix;
+    String terminalIdempotency = "idem-terminal-" + suffix;
+
+    jdbcTemplate.update("""
+        insert into trading.orders (
+          user_id, account_id, symbol, side, order_type, status, lots,
+          idempotency_key, client_order_id
+        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'FILLED', 0.1, ?, ?)
+        """, userId, accountId, terminalIdempotency, clientOrderId);
+    jdbcTemplate.update("""
+        insert into trading.orders (
+          user_id, account_id, symbol, side, order_type, status, lots,
+          idempotency_key, client_order_id
+        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'PENDING', 0.1, ?, ?)
+        """, userId, accountId, "idem-active-" + suffix, clientOrderId);
+
+    assertThatThrownBy(() -> jdbcTemplate.update("""
+        insert into trading.orders (
+          user_id, account_id, symbol, side, order_type, status, lots,
+          idempotency_key, client_order_id
+        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'WORKING', 0.1, ?, ?)
+        """, userId, accountId, "idem-second-active-" + suffix, clientOrderId))
+        .hasMessageContaining("ux_orders_user_account_client_order_id");
+    assertThatThrownBy(() -> jdbcTemplate.update("""
+        insert into trading.orders (
+          user_id, account_id, symbol, side, order_type, status, lots,
+          idempotency_key, client_order_id
+        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'CANCELED', 0.1, ?, ?)
+        """, userId, accountId, terminalIdempotency, "another-client-" + suffix))
+        .hasMessageContaining("idempotency");
   }
 
   @Test

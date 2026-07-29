@@ -6,6 +6,7 @@ package com.fxplatform.ledger.enums;
 public enum LedgerEntryType {
   DEMO_INIT,
   DEMO_RESET,
+  VALIDATION_SEED,
   TRANSFER_IN,
   TRANSFER_OUT,
   DEMO_DEPOSIT,

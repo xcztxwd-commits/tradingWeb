@@ -3,10 +3,19 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { describe, it } from 'node:test'
+import { afterEach, describe, it } from 'node:test'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const tokenSource = readFileSync(join(currentDir, 'adminToken.ts'), 'utf8')
+const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+
+afterEach(() => {
+  if (originalLocalStorage) {
+    Object.defineProperty(globalThis, 'localStorage', originalLocalStorage)
+  } else {
+    Reflect.deleteProperty(globalThis, 'localStorage')
+  }
+})
 
 describe('admin token storage', () => {
   it('clears expired or malformed stored tokens before protected routes render', () => {
@@ -28,4 +37,42 @@ describe('admin token storage', () => {
     assert.match(tokenSource, /localStorage\.removeItem\(authorityStorageKey\)/)
     assert.match(tokenSource, /localStorage\.removeItem\(refreshTokenStorageKey\)/)
   })
+
+  it('checks Trading Lab authorities as exact independent memberships', async () => {
+    const storage = createStorage()
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: storage
+    })
+    const moduleUrl = new URL('./adminToken.ts', import.meta.url)
+    moduleUrl.search = `authority=${Date.now()}`
+    const { authorityStorageKey, hasAdminAuthority } = await import(moduleUrl.href)
+    const authorities = ['TRADING_LAB_VIEW', 'TRADING_LAB_EXECUTE', 'SUPER_ADMIN']
+
+    for (const granted of authorities) {
+      storage.setItem(authorityStorageKey, JSON.stringify([granted]))
+      for (const checked of authorities) {
+        assert.equal(
+          hasAdminAuthority(checked),
+          checked === granted,
+          `${granted} must not imply ${checked}`
+        )
+      }
+    }
+  })
 })
+
+function createStorage() {
+  const values = new Map()
+  return {
+    getItem(key) {
+      return values.get(key) ?? null
+    },
+    setItem(key, value) {
+      values.set(key, value)
+    },
+    removeItem(key) {
+      values.delete(key)
+    }
+  }
+}

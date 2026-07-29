@@ -169,6 +169,7 @@ public class PerpetualAccountRiskSnapshotService {
     List<PositionProjection> positionProjections = new ArrayList<>();
     List<PoolPosition> poolPositions = new ArrayList<>();
     BigDecimal allUnrealizedPnl = moneyZero();
+    BigDecimal isolatedFundingPnl = moneyZero();
     BigDecimal positionMargin = moneyZero();
     for (PositionEntity position : positions) {
       requireLockedPosition(account.getId(), position);
@@ -184,12 +185,16 @@ public class PerpetualAccountRiskSnapshotService {
           risk));
       poolPositions.add(new PoolPosition(position.getMarginMode(), risk));
       allUnrealizedPnl = allUnrealizedPnl.add(risk.unrealizedPnl());
+      if (position.getMarginMode() == MarginMode.ISOLATED) {
+        isolatedFundingPnl = isolatedFundingPnl.add(orZero(position.getFundingPnl()));
+      }
       positionMargin = positionMargin.add(risk.marginHeld());
     }
 
     OrderHolds holds = orderHolds(account.getId(), positions, lockedActiveOrders);
     BigDecimal displayEquity = orZero(account.getBalance())
         .add(allUnrealizedPnl)
+        .add(isolatedFundingPnl)
         .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
     BigDecimal usedMargin = positionMargin
         .add(holds.total())

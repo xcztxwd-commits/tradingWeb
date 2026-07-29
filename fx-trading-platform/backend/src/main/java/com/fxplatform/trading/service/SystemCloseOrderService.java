@@ -160,7 +160,7 @@ public class SystemCloseOrderService {
         key,
         false,
         true,
-        null));
+        null), false);
   }
 
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -186,7 +186,7 @@ public class SystemCloseOrderService {
         key,
         true,
         true,
-        null));
+        null), false);
   }
 
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -211,6 +211,44 @@ public class SystemCloseOrderService {
       String idempotencyKey,
       Runnable lockedMutationGuard
   ) {
+    return closeWhole(
+        accountId,
+        positionId,
+        origin,
+        systemReason,
+        idempotencyKey,
+        lockedMutationGuard,
+        false);
+  }
+
+  /** Validation-only close that joins the owning system-step transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public CloseResult closeWholeStrict(
+      UUID accountId,
+      UUID positionId,
+      OrderOrigin origin,
+      String systemReason,
+      String idempotencyKey
+  ) {
+    return closeWhole(
+        accountId,
+        positionId,
+        origin,
+        systemReason,
+        idempotencyKey,
+        null,
+        true);
+  }
+
+  private CloseResult closeWhole(
+      UUID accountId,
+      UUID positionId,
+      OrderOrigin origin,
+      String systemReason,
+      String idempotencyKey,
+      Runnable lockedMutationGuard,
+      boolean joinCallerTransaction
+  ) {
     requireId(accountId, "Account id is required");
     requireId(positionId, "Position id is required");
     if (origin == null || origin == OrderOrigin.USER) {
@@ -234,13 +272,30 @@ public class SystemCloseOrderService {
         key,
         true,
         false,
-        lockedMutationGuard));
+        lockedMutationGuard), joinCallerTransaction);
   }
 
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public CloseResult executeProtection(
       UUID protectionOrderId,
       ExecutableMarketSnapshot snapshot
+  ) {
+    return executeProtection(protectionOrderId, snapshot, false);
+  }
+
+  /** Validation-only protection execution that joins the owning system-step transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public CloseResult executeProtectionStrict(
+      UUID protectionOrderId,
+      ExecutableMarketSnapshot snapshot
+  ) {
+    return executeProtection(protectionOrderId, snapshot, true);
+  }
+
+  private CloseResult executeProtection(
+      UUID protectionOrderId,
+      ExecutableMarketSnapshot snapshot,
+      boolean joinCallerTransaction
   ) {
     requireId(protectionOrderId, "Protection order id is required");
     OrderEntity carrier = orderRepository.selectById(protectionOrderId);
@@ -280,10 +335,13 @@ public class SystemCloseOrderService {
         baseQuantity,
         executionType == OrderType.LIMIT ? carrier.getPrice() : snapshot.mark());
     fullFillCoordinator.requireFresh(snapshot);
-    return transactionExecutor.execute(() -> persistProtection(new PreparedProtectionExecution(
+    PreparedProtectionExecution prepared = new PreparedProtectionExecution(
         carrier,
         snapshot,
-        symbol.getMaintenanceMarginRate())));
+        symbol.getMaintenanceMarginRate());
+    return joinCallerTransaction
+        ? transactionExecutor.executeJoined(() -> persistProtection(prepared))
+        : transactionExecutor.execute(() -> persistProtection(prepared));
   }
 
   private CloseResult persistProtection(PreparedProtectionExecution prepared) {
@@ -429,7 +487,7 @@ public class SystemCloseOrderService {
         false);
   }
 
-  private CloseResult execute(CloseIntent intent) {
+  private CloseResult execute(CloseIntent intent, boolean joinCallerTransaction) {
     BusinessException lastStale = null;
     for (int attempt = 0; attempt < MAX_MARKET_ATTEMPTS; attempt++) {
       try {
@@ -479,8 +537,13 @@ public class SystemCloseOrderService {
             symbol.getMaintenanceMarginRate(),
             symbol.getLiquidationFeeRate());
         try {
-          return transactionExecutor.execute(() -> persist(intent, prepared));
+          return joinCallerTransaction
+              ? transactionExecutor.executeJoined(() -> persist(intent, prepared))
+              : transactionExecutor.execute(() -> persist(intent, prepared));
         } catch (DataIntegrityViolationException exception) {
+          if (joinCallerTransaction) {
+            throw exception;
+          }
           Optional<CloseResult> committed = findReplay(intent, readContext(intent));
           if (committed.isPresent()) {
             return committed.get();
@@ -488,7 +551,8 @@ public class SystemCloseOrderService {
           throw exception;
         }
       } catch (BusinessException exception) {
-        if (!ErrorCode.MARKET_DATA_STALE.equals(exception.getCode())
+        if (joinCallerTransaction
+            || !ErrorCode.MARKET_DATA_STALE.equals(exception.getCode())
             || attempt + 1 >= MAX_MARKET_ATTEMPTS) {
           throw exception;
         }
@@ -632,6 +696,13 @@ public class SystemCloseOrderService {
           isolatedMarginBeforeFill,
           contractualLiquidationFee);
     }
+    if (intent.origin() == OrderOrigin.LIQUIDATION
+        || intent.origin() == OrderOrigin.ADMIN_FORCE_CLOSE) {
+      ledgerService.recordForcedClose(
+          account,
+          target.getId(),
+          persistedSystemReason(intent));
+    }
     orderEventService.record(
         order.getId(),
         "ORDER_FILLED",
@@ -687,12 +758,14 @@ public class SystemCloseOrderService {
       throw new BusinessException("ORDER_NOT_FOUND", "Bound protection carrier not found");
     }
     if (carrier.getStatus() == OrderStatus.PENDING_ACTIVATION
-        && carrier.getOrderType() != OrderType.STOP_MARKET) {
+        && carrier.getOrderType() != OrderType.STOP_MARKET
+        && carrier.getOrderType() != OrderType.TRAILING_STOP_MARKET) {
       throw protectionNotExecutable("Untriggered protection must use the carrier order type");
     }
     if (carrier.getTriggerExecutionType() == TriggerExecutionType.MARKET) {
       if (carrier.getPrice() != null
           || (carrier.getOrderType() != OrderType.STOP_MARKET
+          && carrier.getOrderType() != OrderType.TRAILING_STOP_MARKET
           && carrier.getOrderType() != OrderType.MARKET)) {
         throw protectionNotExecutable("MARKET protection carrier fields are inconsistent");
       }

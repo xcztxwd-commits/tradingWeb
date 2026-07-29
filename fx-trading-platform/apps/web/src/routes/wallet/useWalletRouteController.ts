@@ -10,7 +10,7 @@ import {
   type FundOrder
 } from '@fx-platform/frontend-core'
 
-import { formatApiError, type ApiErrorView } from '../../components/user-page/userPageModels'
+import { formatApiError, type ApiErrorView } from '../../shared-widgets/data/userPageModels'
 import { translateCoreMessage } from '../shared/translateCoreMessage'
 import { createPendingOperationGuard } from '../shared/pendingOperationGuard'
 import { getAssetRows, getUniqueValues, matchesWalletDateRange } from './walletRouteModel'

@@ -56,8 +56,23 @@ public class OrderEventService {
       String errorCode,
       String message
   ) {
+    recordWorkerFailure(orderId, eventType, pendingStatus, errorCode, message, null);
+  }
+
+  /** Persists a failure only while the locked order still matches the scanned execution contract. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void recordWorkerFailure(
+      UUID orderId,
+      String eventType,
+      OrderStatus pendingStatus,
+      String errorCode,
+      String message,
+      PendingOrderExecutionFingerprint expectedFingerprint
+  ) {
     OrderEntity persisted = orderRepository.findByIdForUpdate(orderId).orElse(null);
-    if (persisted == null || persisted.getStatus() != pendingStatus) {
+    if (persisted == null
+        || persisted.getStatus() != pendingStatus
+        || (expectedFingerprint != null && !expectedFingerprint.matches(persisted))) {
       return;
     }
     record(

@@ -133,7 +133,7 @@ class PerpetualAccountRiskSnapshotServiceTest {
         List.of(isolatedInternalHold, crossHold, isolatedOpeningHold),
         prepared);
 
-    assertThat(projection.displayEquity()).isEqualByComparingTo("1000.00000000");
+    assertThat(projection.displayEquity()).isEqualByComparingTo("1007.00000000");
     assertThat(projection.usedMargin()).isEqualByComparingTo("55.00000000");
     assertThat(projection.totalOrderHolds()).isEqualByComparingTo("15.00000000");
     assertThat(projection.externalOrderHolds()).isEqualByComparingTo("12.00000000");
@@ -265,7 +265,7 @@ class PerpetualAccountRiskSnapshotServiceTest {
 
     service.applyRevaluation(account, List.of(cross, isolated), projection);
 
-    assertThat(account.getEquity()).isEqualByComparingTo("1000.00000000");
+    assertThat(account.getEquity()).isEqualByComparingTo("1004.00000000");
     assertThat(account.getUsedMargin()).isEqualByComparingTo("40.00000000");
     assertThat(account.getFreeMargin()).isEqualByComparingTo("970.00000000");
     assertThat(cross.getMarkPrice()).isEqualByComparingTo("110.00000000");

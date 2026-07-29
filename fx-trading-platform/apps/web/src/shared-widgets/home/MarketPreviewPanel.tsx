@@ -7,7 +7,7 @@ import styles from './HomeContent.module.css'
 
 export function MarketPreviewPanel({ markets }: { markets: readonly HomeViewMarketPreview[] }) {
   return (
-    <section className={`${styles.panelCard} ${styles.marketPanel}`} aria-labelledby="home-market-title">
+    <section className={styles.panelCard} aria-labelledby="home-market-title">
       <div className={styles.marketTabs} aria-label="行情分类">
         <span className={styles.activeTab}>热门</span>
         <span>新币</span>

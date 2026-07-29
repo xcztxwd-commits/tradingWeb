@@ -1,0 +1,54 @@
+scenario:
+  database:
+    name: ${SCENARIO_DATABASE_NAME}
+
+spring:
+  datasource:
+    url: ${SCENARIO_DATABASE_URL}
+    username: ${SCENARIO_DATABASE_USERNAME:postgres}
+    password: ${SCENARIO_DATABASE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    clean-disabled: true
+  task:
+    scheduling:
+      enabled: false
+
+admin:
+  bootstrap:
+    enabled: false
+
+security:
+  jwt:
+    secret: scenario-it-jwt-secret-value-at-least-32-characters
+  config:
+    encryption-key: scenario-it-config-encryption-key-32-characters
+
+market:
+  demo-quotes:
+    enabled: false
+  realtime:
+    enabled: false
+  provider-instrument-sync:
+    enabled: false
+  quote-broadcast-enabled: false
+  test-data:
+    enabled: false
+  test-control:
+    enabled: false
+
+execution:
+  mode: demo
+
+trading:
+  pending-order-execution-enabled: false
+  protective-order-execution-enabled: false
+  funding:
+    enabled: false
+  fx-financing:
+    enabled: false
+  liquidation:
+    enabled: false

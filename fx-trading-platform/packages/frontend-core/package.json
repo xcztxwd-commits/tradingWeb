@@ -9,6 +9,38 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./api": {
+      "types": "./src/api/index.ts",
+      "import": "./src/api/index.ts"
+    },
+    "./auth": {
+      "types": "./src/auth/index.ts",
+      "import": "./src/auth/index.ts"
+    },
+    "./storage": {
+      "types": "./src/storage/index.ts",
+      "import": "./src/storage/index.ts"
+    },
+    "./models": {
+      "types": "./src/models/index.ts",
+      "import": "./src/models/index.ts"
+    },
+    "./market": {
+      "types": "./src/market/index.ts",
+      "import": "./src/market/index.ts"
+    },
+    "./engagement": {
+      "types": "./src/engagement/index.ts",
+      "import": "./src/engagement/index.ts"
+    },
+    "./account": {
+      "types": "./src/account/index.ts",
+      "import": "./src/account/index.ts"
+    },
+    "./trading": {
+      "types": "./src/trading/index.ts",
+      "import": "./src/trading/index.ts"
     }
   },
   "scripts": {

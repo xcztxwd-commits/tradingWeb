@@ -65,7 +65,7 @@ describe('ThemeProvider package contract', () => {
     assert.match(mainSource, /import '\.\/styles\.css'/u)
     assert.ok(mainSource.indexOf("@fx-platform/ui/theme.css") < mainSource.indexOf("./styles.css"))
     assert.match(mainSource, /<ThemeProvider>[\s\S]*<App \/>[\s\S]*<\/ThemeProvider>/u)
-    assert.match(appShellSource, /import \{ useTheme \} from '@fx-platform\/ui'/u)
+    assert.match(appShellSource, /import\s*\{[^}]*\buseTheme\b[^}]*\}\s*from '@fx-platform\/ui'/u)
     assert.match(tradingRouteControllerSource, /import \{ useTheme \} from '@fx-platform\/ui'/u)
     assert.doesNotMatch(`${mainSource}\n${appShellSource}\n${tradingRouteControllerSource}`, /design-system\/theme/u)
   })

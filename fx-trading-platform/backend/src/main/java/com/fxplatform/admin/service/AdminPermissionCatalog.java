@@ -3,6 +3,7 @@ package com.fxplatform.admin.service;
 import com.fxplatform.auth.enums.UserStatus;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 public final class AdminPermissionCatalog {
 
@@ -23,10 +24,28 @@ public final class AdminPermissionCatalog {
   public static final String TRADING_ACCOUNT_FORCE_CLEANUP = "trading:account:force-cleanup";
   public static final String TRADING_ACCOUNT_DEMO_RESET = "trading:account:demo-reset";
 
+  public static final String TRADING_LAB_VIEW = "TRADING_LAB_VIEW";
+  public static final String TRADING_LAB_EXECUTE = "TRADING_LAB_EXECUTE";
+  public static final String SUPER_ADMIN = "SUPER_ADMIN";
+  public static final UUID SUPER_ADMIN_ROLE_ID =
+      UUID.fromString("00000000-0000-0000-0000-000000000061");
+
   public static final String USER_READ = "user:read";
   public static final String USER_UPDATE = "user:update";
   public static final String USER_DISABLE = "user:disable";
   public static final String USER_FORCE_LOGOUT = "user:force-logout";
+
+  public static final String CONTENT_CAMPAIGN_READ = "content:campaign:read";
+  public static final String CONTENT_CAMPAIGN_EDIT = "content:campaign:edit";
+  public static final String CONTENT_CAMPAIGN_PUBLISH = "content:campaign:publish";
+  public static final String CONTENT_CAMPAIGN_DELETE = "content:campaign:delete";
+  public static final String CONTENT_CAMPAIGN_STATS = "content:campaign:stats";
+  public static final String CONTENT_CAMPAIGN_USER_DETAIL = "content:campaign:user-detail";
+  public static final String CONTENT_POPUP_POLICY_UPDATE = "content:popup-policy:update";
+  public static final String CONTENT_MESSAGE_READ = "content:message:read";
+  public static final String CONTENT_MESSAGE_EDIT = "content:message:edit";
+  public static final String CONTENT_MESSAGE_SEND = "content:message:send";
+  public static final String CONTENT_MESSAGE_DELETE = "content:message:delete";
 
   private AdminPermissionCatalog() {
   }

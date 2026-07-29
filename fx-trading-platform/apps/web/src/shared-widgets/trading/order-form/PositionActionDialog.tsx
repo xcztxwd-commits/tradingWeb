@@ -1,4 +1,5 @@
 import type { FormEvent } from 'react'
+import { Dialog } from '@fx-platform/ui'
 import type { QuantityUnit } from '@fx-platform/shared-types'
 
 import { MultiLevelProtectionEditor } from './MultiLevelProtectionEditor'
@@ -101,9 +102,17 @@ export function PositionActionDialog({
   }
 
   return (
-    <div className={styles.dialogLayer} role="presentation">
-      <button type="button" className={styles.dialogBackdrop} aria-label="Close position action dialog" disabled={pending} onClick={onClose} />
-      <section className={styles.dialog} role="dialog" aria-modal="true" aria-label="Position action" aria-busy={pending}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      ariaLabel="Position action"
+      closeLabel="Close position action dialog"
+      pending={pending}
+      priority="critical"
+      className={styles.dialogLayer}
+      backdropClassName={styles.dialogBackdrop}
+      panelClassName={styles.dialog}
+    >
         <header className={styles.dialogHeader}>
           <strong>Position action</strong>
           <button type="button" aria-label="Close" disabled={pending} onClick={onClose}>
@@ -243,7 +252,6 @@ export function PositionActionDialog({
             </button>
           </footer>
         </form>
-      </section>
-    </div>
+    </Dialog>
   )
 }

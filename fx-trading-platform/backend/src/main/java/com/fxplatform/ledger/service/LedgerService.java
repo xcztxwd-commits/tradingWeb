@@ -13,12 +13,14 @@ import com.fxplatform.wallet.repository.AssetLedgerEntryRepository;
 import com.fxplatform.account.dto.AccountTransferRequest.Direction;
 import java.time.Instant;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * LedgerService 是资金流水模块的业务服务。
@@ -154,6 +156,48 @@ public class LedgerService {
         "DEMO_RESET",
         requestId,
         "Reset Demo perpetual balance");
+  }
+
+  /** Records the exact delta applied by a validation-only perpetual balance seed. */
+  @Transactional
+  public LedgerEntryEntity recordValidationSeed(
+      TradingAccountEntity account,
+      BigDecimal delta,
+      UUID seedId
+  ) {
+    if (account == null
+        || account.getId() == null
+        || seedId == null
+        || !"USDT".equals(account.getBaseCurrency())) {
+      throw new BusinessException(
+          "VALIDATION_SEED_INVALID",
+          "Validation seed ledger requires a USDT account and seed id");
+    }
+    BigDecimal normalizedDelta = exactValidationMoney(delta, true);
+    BigDecimal balanceAfter = exactValidationMoney(account.getBalance(), false);
+    LedgerEntryEntity entry = saveIdempotent(
+        account,
+        LedgerEntryType.VALIDATION_SEED,
+        normalizedDelta,
+        balanceAfter,
+        "VALIDATION_SEED",
+        seedId,
+        "Set validation initial perpetual balance");
+    if (entry == null
+        || entry.getEntryType() != LedgerEntryType.VALIDATION_SEED
+        || !LedgerEntryType.VALIDATION_SEED.name().equals(entry.getOperationType())
+        || entry.getAmount() == null
+        || entry.getBalanceAfter() == null
+        || entry.getAmount().compareTo(normalizedDelta) != 0
+        || entry.getBalanceAfter().compareTo(balanceAfter) != 0
+        || !"USDT".equals(entry.getCurrency())
+        || !"VALIDATION_SEED".equals(entry.getReferenceType())
+        || !seedId.equals(entry.getReferenceId())) {
+      throw new BusinessException(
+          "VALIDATION_SEED_CONFLICT",
+          "Existing validation seed cash operation does not match the requested target");
+    }
+    return entry;
   }
 
   private static BusinessException transferConflict() {
@@ -414,19 +458,46 @@ public class LedgerService {
   public List<LedgerEntryResponse> visibleEntries(UUID userId, UUID accountId) {
     accountRepository.findByIdAndUserId(accountId, userId)
         .orElseThrow(() -> new AuthorizationException("ACCOUNT_NOT_FOUND", "Account not found"));
-    List<LedgerEntryResponse> combined = new ArrayList<>();
+    List<SequencedLedgerEntry> combined = new ArrayList<>();
     ledgerEntryRepository.findByAccountIdOrderByCreatedAtDesc(accountId).stream()
-        .map(LedgerEntryResponse::fromCashLedger)
+        .map(entry -> new SequencedLedgerEntry(
+            entry.getSequenceNo(), LedgerEntryResponse.fromCashLedger(entry)))
         .forEach(combined::add);
     if (assetLedgerEntryRepository != null) {
       assetLedgerEntryRepository.findByAccountIdOrderByCreatedAtDesc(accountId).stream()
-          .map(LedgerEntryResponse::fromAssetLedger)
+          .map(entry -> new SequencedLedgerEntry(
+              entry.getSequenceNo(), LedgerEntryResponse.fromAssetLedger(entry)))
           .forEach(combined::add);
     }
     combined.sort(Comparator
-        .comparing(LedgerEntryResponse::createdAt, Comparator.nullsFirst(Comparator.naturalOrder()))
+        .comparing(SequencedLedgerEntry::sequenceNo, Comparator.nullsFirst(Comparator.naturalOrder()))
         .reversed());
-    return combined;
+    return combined.stream().map(SequencedLedgerEntry::response).toList();
+  }
+
+  private record SequencedLedgerEntry(Long sequenceNo, LedgerEntryResponse response) {
+  }
+
+  private static BigDecimal exactValidationMoney(BigDecimal value, boolean signed) {
+    if (value == null || (!signed && value.signum() < 0) || value.scale() > 8) {
+      throw new BusinessException(
+          "VALIDATION_SEED_INVALID",
+          "Validation seed amount is invalid");
+    }
+    try {
+      BigDecimal normalized = value.setScale(8, RoundingMode.UNNECESSARY);
+      if (normalized.precision() > 24) {
+        throw new BusinessException(
+            "VALIDATION_SEED_INVALID",
+            "Validation seed amount exceeds NUMERIC(24,8)");
+      }
+      return normalized;
+    } catch (ArithmeticException ex) {
+      throw new BusinessException(
+          "VALIDATION_SEED_INVALID",
+          "Validation seed amount precision is invalid",
+          ex);
+    }
   }
 
   private LedgerEntryEntity save(

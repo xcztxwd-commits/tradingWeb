@@ -132,8 +132,6 @@ export type OrderPayload = Omit<
     | 'triggerPrice'
     | 'triggerPriceType'
     | 'reduceOnly'
-    | 'timeInForce'
-    | 'postOnly'
     | 'attachedProtections'
   >,
   'idempotencyKey' | 'clientOrderId' | 'quantity'
@@ -141,6 +139,8 @@ export type OrderPayload = Omit<
   idempotencyKey: string
   clientOrderId: string
   quantity: number
+  timeInForce: 'GTC'
+  postOnly: false
 }
 
 export type OcoOrderPayload = CreateOcoOrderRequest

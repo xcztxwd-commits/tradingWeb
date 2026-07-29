@@ -1,12 +1,16 @@
 package com.fxplatform.common.security;
 
 import com.fxplatform.auth.repository.UserRepository;
+import com.fxplatform.validation.security.ValidationLoopbackRequestActivityFilter;
 import java.util.Arrays;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -44,8 +48,12 @@ public class SecurityConfig {
    * 处理 securityFilterChain 安全认证逻辑。
    */
   @Bean
-  public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-    return http
+  @Order(2)
+  public SecurityFilterChain securityFilterChain(
+      HttpSecurity http,
+      ObjectProvider<ValidationLoopbackRequestActivityFilter> activityFilterProvider
+  ) throws Exception {
+    http
         .csrf(csrf -> csrf.disable())
         .cors(cors -> cors.configurationSource(corsConfigurationSource()))
         .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -63,8 +71,21 @@ public class SecurityConfig {
             .requestMatchers(HttpMethod.GET, "/api/market/**", "/api/chart/**", "/api/public/**").permitAll()
             .requestMatchers("/api/admin/**").hasRole("ADMIN")
             .anyRequest().authenticated())
-        .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-        .build();
+        .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+    activityFilterProvider.ifAvailable(activityFilter ->
+        http.addFilterBefore(activityFilter, JwtAuthenticationFilter.class));
+    return http.build();
+  }
+
+  /**
+   * JwtAuthenticationFilter 只由 Spring Security 链调度，禁止 Servlet 容器再次全局注册。
+   */
+  @Bean
+  public FilterRegistrationBean<JwtAuthenticationFilter> jwtAuthenticationFilterRegistration() {
+    FilterRegistrationBean<JwtAuthenticationFilter> registration =
+        new FilterRegistrationBean<>(jwtAuthenticationFilter);
+    registration.setEnabled(false);
+    return registration;
   }
 
   /**
@@ -95,7 +116,13 @@ public class SecurityConfig {
     configuration.setAllowedOrigins(csvValues(allowedOrigins));
     configuration.setAllowedOriginPatterns(csvValues(allowedOriginPatterns));
     configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-    configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Request-Id"));
+    configuration.setAllowedHeaders(List.of(
+        "Authorization",
+        "Content-Type",
+        "X-Request-Id",
+        "Last-Event-ID",
+        "X-Trading-Lab-Print-Confirmation"));
+    configuration.setExposedHeaders(List.of("X-Request-Id"));
     configuration.setAllowCredentials(true);
     UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
     source.registerCorsConfiguration("/**", configuration);

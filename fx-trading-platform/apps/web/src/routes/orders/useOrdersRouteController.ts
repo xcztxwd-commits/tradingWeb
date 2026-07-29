@@ -12,7 +12,7 @@ import {
   type OrderResponse
 } from '@fx-platform/frontend-core'
 
-import { formatApiError, type ApiErrorView } from '../../components/user-page/userPageModels'
+import { formatApiError, type ApiErrorView } from '../../shared-widgets/data/userPageModels'
 import { useTranslatedAccountData } from '../shared/useTranslatedAccountData'
 import { createPendingOperationGuard } from '../shared/pendingOperationGuard'
 import { buildNormalOrderUpdatePayload, buildProtectionUpdatePayload } from './orderActionPayloads'

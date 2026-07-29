@@ -33,6 +33,10 @@ export function getAdminAuthorities() {
   }
 }
 
+export function hasAdminAuthority(authority: string) {
+  return getAdminAuthorities().includes(authority)
+}
+
 export function setAdminToken(token: string) {
   localStorage.setItem(tokenStorageKey, token)
   localStorage.removeItem(refreshTokenStorageKey)

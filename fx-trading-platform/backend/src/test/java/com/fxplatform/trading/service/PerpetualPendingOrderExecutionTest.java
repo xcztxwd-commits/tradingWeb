@@ -37,6 +37,7 @@ import com.fxplatform.trading.entity.AccountSymbolSettingEntity;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.LiquidityRole;
 import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
@@ -44,6 +45,8 @@ import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.ProtectionType;
 import com.fxplatform.trading.enums.QuantityUnit;
+import com.fxplatform.trading.enums.TimeInForce;
+import com.fxplatform.trading.enums.TriggerExecutionType;
 import com.fxplatform.trading.enums.TriggerPriceType;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
@@ -56,6 +59,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -112,6 +116,416 @@ class PerpetualPendingOrderExecutionTest {
         new BigDecimal("110"),
         10,
         "Pending Perpetual order hold");
+  }
+
+  @Test
+  void buyStopLimitActivatesToPendingWhenMarkTriggersButAskIsAboveLimit() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.BUY,
+        "100",
+        "100",
+        bundle("99", "101", "130", "100"),
+        "10.15151505");
+    when(orderRepository.activateStopLimitPending(fixture.order().getId())).thenReturn(1);
+
+    int filled = service().executePendingOrders();
+
+    assertAll(
+        () -> assertThat(filled).isZero(),
+        () -> assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING),
+        () -> assertThat(fixture.order().getHoldAmount()).isEqualByComparingTo("10.15151505"));
+    verify(orderRepository).activateStopLimitPending(fixture.order().getId());
+    verify(orderEventService).record(
+        fixture.order().getId(),
+        "ORDER_TRIGGERED",
+        OrderStatus.PENDING_ACTIVATION,
+        OrderStatus.PENDING,
+        null,
+        "Perpetual STOP_LIMIT activated and resting");
+    verify(perpetualOrderRiskService, never()).evaluate(
+        any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), any(), any());
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(accountRepository, never()).save(any());
+    verify(positionRepository, never()).save(any());
+    verify(orderFillService, never()).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
+  }
+
+  @Test
+  void userIsolatedCloseStopLimitWithParentPositionCanActivateAndRest() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.BUY,
+        "100",
+        "100",
+        bundle("99", "101", "130", "100"),
+        "10.15151505");
+    fixture.order().setMarginMode(MarginMode.ISOLATED);
+    fixture.order().setReduceOnly(true);
+    fixture.order().setParentPositionId(UUID.randomUUID());
+    fixture.setting().setMarginMode(MarginMode.ISOLATED);
+    when(orderRepository.activateStopLimitPending(fixture.order().getId())).thenReturn(1);
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(fixture.order().getParentPositionId()).isNotNull();
+    verify(orderRepository).activateStopLimitPending(fixture.order().getId());
+    verify(orderEventService).record(
+        fixture.order().getId(),
+        "ORDER_TRIGGERED",
+        OrderStatus.PENDING_ACTIVATION,
+        OrderStatus.PENDING,
+        null,
+        "Perpetual STOP_LIMIT activated and resting");
+    verify(fullFillCoordinator, never()).execute(any(), any());
+  }
+
+  @Test
+  void scanActivationStatusDriftCannotExecuteLockedRestingPerpetualStopLimit() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.BUY,
+        "100",
+        "100",
+        bundle("99", "100", "130", "100"),
+        "10.15151505");
+    OrderEntity locked = pendingStop(
+        fixture.account().getId(), fixture.account().getUserId(), "10.15151505");
+    locked.setId(fixture.order().getId());
+    locked.setOrderType(OrderType.STOP_LIMIT);
+    locked.setOrderOrigin(OrderOrigin.USER);
+    locked.setStatus(OrderStatus.PENDING);
+    locked.setPrice(new BigDecimal("100"));
+    locked.setRequestedPrice(new BigDecimal("100"));
+    locked.setTriggerPrice(new BigDecimal("100"));
+    locked.setTriggerPriceType(TriggerPriceType.MARK_PRICE);
+    locked.setTriggerExecutionType(TriggerExecutionType.LIMIT);
+    locked.setTimeInForce(TimeInForce.GTC);
+    locked.setPostOnly(false);
+    when(orderRepository.findByIdForUpdate(locked.getId())).thenReturn(Optional.of(locked));
+    when(orderRepository.findActiveLinearPerpByAccountIdForUpdate(locked.getAccountId()))
+        .thenReturn(List.of(locked));
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderRepository, never()).claimPending(any());
+    verify(orderRepository, never()).activateStopLimitPending(any());
+    verify(orderRepository, never()).activateStopLimitWorking(any());
+    verify(orderFillService, never()).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
+    verify(orderEventService, never()).record(
+        any(), anyString(), any(), any(), any(), anyString());
+  }
+
+  @Test
+  void sameStatusPerpetualStopLimitModificationCannotUseScannedSnapshot() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.BUY,
+        "99",
+        "100",
+        bundle("99", "100", "130", "100"),
+        "10.15151505");
+    OrderEntity locked = pendingStop(
+        fixture.account().getId(), fixture.account().getUserId(), "10.15151505");
+    locked.setId(fixture.order().getId());
+    locked.setOrderType(OrderType.STOP_LIMIT);
+    locked.setOrderOrigin(OrderOrigin.USER);
+    locked.setStatus(OrderStatus.PENDING_ACTIVATION);
+    locked.setPrice(new BigDecimal("100"));
+    locked.setRequestedPrice(new BigDecimal("100"));
+    locked.setTriggerPrice(new BigDecimal("100"));
+    locked.setTriggerPriceType(TriggerPriceType.MARK_PRICE);
+    locked.setTriggerExecutionType(TriggerExecutionType.LIMIT);
+    locked.setTimeInForce(TimeInForce.GTC);
+    locked.setPostOnly(false);
+    when(orderRepository.findByIdForUpdate(locked.getId())).thenReturn(Optional.of(locked));
+    when(orderRepository.findActiveLinearPerpByAccountIdForUpdate(locked.getAccountId()))
+        .thenReturn(List.of(locked));
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderRepository, never()).claimPending(any());
+    verify(orderRepository, never()).activateStopLimitPending(any());
+    verify(orderRepository, never()).activateStopLimitWorking(any());
+    verify(orderFillService, never()).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
+    verify(orderEventService, never()).record(
+        any(), anyString(), any(), any(), any(), anyString());
+  }
+
+  @Test
+  void staleNegativePerpetualTriggerSnapshotRetriesAndUsesFreshTriggeredBundle() {
+    PerpetualMarketBundle staleNegative = bundle("99", "101", "130", "99");
+    PerpetualMarketBundle freshTriggered = bundle("99", "101", "130", "100");
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.BUY,
+        "100",
+        "100",
+        freshTriggered,
+        "10.15151505");
+    when(marketBundleResolver.resolvePerp(eq(SYMBOL), any()))
+        .thenReturn(staleNegative, freshTriggered);
+    org.mockito.Mockito.doAnswer(invocation -> {
+      ExecutableMarketSnapshot snapshot = invocation.getArgument(0);
+      if (snapshot.mark().compareTo(new BigDecimal("99")) == 0) {
+        throw new BusinessException(
+            ErrorCode.MARKET_DATA_STALE,
+            "negative trigger snapshot expired");
+      }
+      return null;
+    }).when(fullFillCoordinator).requireFresh(any(ExecutableMarketSnapshot.class));
+    when(orderRepository.activateStopLimitPending(fixture.order().getId())).thenReturn(1);
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING);
+    verify(marketBundleResolver, times(2)).resolvePerp(eq(SYMBOL), any());
+    verify(orderRepository).activateStopLimitPending(fixture.order().getId());
+    verify(orderEventService).record(
+        fixture.order().getId(),
+        "ORDER_TRIGGERED",
+        OrderStatus.PENDING_ACTIVATION,
+        OrderStatus.PENDING,
+        null,
+        "Perpetual STOP_LIMIT activated and resting");
+  }
+
+  @Test
+  void untriggeredPerpetualStopLimitUsesMarkAndHasNoClaimPricingOrFinancialMutation() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.BUY,
+        "100",
+        "100",
+        bundle("99", "101", "130", "99"),
+        "10.15151505");
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    assertThat(fixture.order().getHoldAmount()).isEqualByComparingTo("10.15151505");
+    verify(orderRepository, never()).activateStopLimitPending(any());
+    verify(orderRepository, never()).activateStopLimitWorking(any());
+    verify(perpetualOrderRiskService, never()).evaluate(
+        any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), any(), any());
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderEventService, never()).record(any(), anyString(), any(), any(), any(), anyString());
+    verify(accountRepository, never()).save(any());
+    verify(positionRepository, never()).save(any());
+  }
+
+  @Test
+  void sellStopLimitUsesMarkAndBidEqualityForImmediateLimitFill() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.SELL,
+        "99",
+        "100",
+        bundle("99", "101", "130", "100"),
+        "10.15151505");
+    when(orderRepository.activateStopLimitWorking(fixture.order().getId())).thenReturn(1);
+
+    int filled = service().executePendingOrders();
+
+    assertThat(filled).isEqualTo(1);
+    ArgumentCaptor<FullFillRequest> request = ArgumentCaptor.forClass(FullFillRequest.class);
+    verify(fullFillCoordinator).execute(
+        request.capture(),
+        eq(ExecutableMarketSnapshot.from(fixture.bundle())));
+    assertAll(
+        () -> assertThat(request.getValue().executionPath())
+            .isEqualTo(FullFillExecutionPath.IMMEDIATE_LIMIT),
+        () -> assertThat(request.getValue().executionIntent().orderType())
+            .isEqualTo(OrderType.LIMIT),
+        () -> assertThat(request.getValue().limitPrice()).isEqualByComparingTo("99"),
+        () -> assertThat(fixture.order().getOrderType()).isEqualTo(OrderType.STOP_LIMIT));
+    verify(perpetualOrderRiskService).evaluate(
+        any(), any(), any(), eq(OrderSide.SELL), any(), anyBoolean(), eq(OrderType.LIMIT),
+        any(), eq(new BigDecimal("99")), any(), any());
+    verify(orderRepository).activateStopLimitWorking(fixture.order().getId());
+    verify(orderEventService).record(
+        fixture.order().getId(),
+        "ORDER_TRIGGERED",
+        OrderStatus.PENDING_ACTIVATION,
+        OrderStatus.WORKING,
+        null,
+        "Perpetual STOP_LIMIT activated for immediate execution");
+  }
+
+  @Test
+  void activatedBuyStopLimitLaterFillsThroughRestingLimitIntentWithoutSecondTriggerEvent() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING,
+        OrderSide.BUY,
+        "101",
+        "100",
+        bundle("99", "101", "90", "90"),
+        "10.15151505");
+    when(orderRepository.claimPending(fixture.order().getId())).thenReturn(1);
+
+    int filled = service().executePendingOrders();
+
+    assertThat(filled).isEqualTo(1);
+    ArgumentCaptor<FullFillRequest> request = ArgumentCaptor.forClass(FullFillRequest.class);
+    verify(fullFillCoordinator).execute(
+        request.capture(),
+        eq(ExecutableMarketSnapshot.from(fixture.bundle())));
+    assertAll(
+        () -> assertThat(request.getValue().executionPath())
+            .isEqualTo(FullFillExecutionPath.RESTING_LIMIT),
+        () -> assertThat(request.getValue().executionIntent().orderType())
+            .isEqualTo(OrderType.LIMIT),
+        () -> assertThat(request.getValue().limitPrice()).isEqualByComparingTo("101"));
+    verify(perpetualOrderRiskService).evaluate(
+        any(), any(), any(), eq(OrderSide.BUY), any(), anyBoolean(), eq(OrderType.LIMIT),
+        any(), eq(new BigDecimal("101")), any(), any());
+    verify(orderRepository).claimPending(fixture.order().getId());
+    verify(orderEventService, never()).record(
+        eq(fixture.order().getId()), eq("ORDER_TRIGGERED"), any(), any(), any(), anyString());
+  }
+
+  @Test
+  void restingPerpetualStopLimitActivationCasLossHasNoEventOrFinancialMutation() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.BUY,
+        "100",
+        "100",
+        bundle("99", "101", "130", "100"),
+        "10.15151505");
+    when(orderRepository.activateStopLimitPending(fixture.order().getId())).thenReturn(0);
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    assertThat(fixture.order().getHoldAmount()).isEqualByComparingTo("10.15151505");
+    verify(orderRepository).activateStopLimitPending(fixture.order().getId());
+    verify(orderEventService, never()).record(any(), anyString(), any(), any(), any(), anyString());
+    verify(accountRepository, never()).save(any());
+    verify(positionRepository, never()).save(any());
+    verify(orderFillService, never()).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
+  }
+
+  @Test
+  void immediatePerpetualStopLimitActivationCasLossNeverFillsLosingWorker() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.SELL,
+        "99",
+        "100",
+        bundle("99", "101", "130", "100"),
+        "10.15151505");
+    when(orderRepository.activateStopLimitWorking(fixture.order().getId())).thenReturn(0);
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    verify(orderRepository).activateStopLimitWorking(fixture.order().getId());
+    verify(orderEventService, never()).record(any(), anyString(), any(), any(), any(), anyString());
+    verify(orderFillService, never()).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
+  }
+
+  @Test
+  void activatedPerpetualStopLimitFillClaimLossNeverFillsLosingWorker() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING,
+        OrderSide.BUY,
+        "101",
+        "100",
+        bundle("99", "101", "90", "90"),
+        "10.15151505");
+    when(orderRepository.claimPending(fixture.order().getId())).thenReturn(0);
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING);
+    verify(orderRepository).claimPending(fixture.order().getId());
+    verify(orderFillService, never()).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
+  }
+
+  @Test
+  void stalePerpetualActivationRollsBackToActualSourceAndRecordsThatSource() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.BUY,
+        "100",
+        "100",
+        bundle("99", "101", "130", "100"),
+        "10.15151505");
+    org.mockito.Mockito.doThrow(new BusinessException(
+            ErrorCode.MARKET_DATA_STALE,
+            "activation snapshot expired"))
+        .when(fullFillCoordinator).requireFresh(any(ExecutableMarketSnapshot.class));
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    assertThat(fixture.order().getHoldAmount()).isEqualByComparingTo("10.15151505");
+    verify(orderRepository, never()).activateStopLimitPending(any());
+    verify(orderRepository, never()).activateStopLimitWorking(any());
+    verify(orderEventService).recordWorkerFailure(
+        eq(fixture.order().getId()), eq("ORDER_EXECUTION_FAILED"),
+        eq(OrderStatus.PENDING_ACTIVATION), eq(ErrorCode.MARKET_DATA_STALE),
+        eq("Pending order execution deferred"),
+        any(PendingOrderExecutionFingerprint.class));
+    verify(accountRepository, never()).save(any());
+    verify(positionRepository, never()).save(any());
+  }
+
+  @Test
+  void failedImmediateActivationRestoresSourceStatusForWorkerFailureRollback() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.SELL,
+        "99",
+        "100",
+        bundle("99", "101", "130", "100"),
+        "10.15151505");
+    when(orderRepository.activateStopLimitWorking(fixture.order().getId())).thenReturn(1);
+    org.mockito.Mockito.doThrow(new IllegalStateException("fill persistence failed"))
+        .when(orderFillService).fillPerpetual(
+            eq(fixture.order()), eq(fixture.account()), eq(fixture.fill()),
+            eq(new BigDecimal("100")), eq(10), eq("Pending Perpetual order hold"));
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING_ACTIVATION);
+    verify(orderEventService).recordWorkerFailure(
+        eq(fixture.order().getId()), eq("ORDER_EXECUTION_FAILED"),
+        eq(OrderStatus.PENDING_ACTIVATION), eq(ErrorCode.EXECUTION_UNAVAILABLE),
+        eq("Pending order execution deferred"),
+        any(PendingOrderExecutionFingerprint.class));
+  }
+
+  @Test
+  void protectivePerpetualStopLimitCannotEnterUserActivationStateMachine() {
+    Fixture fixture = stubStopLimitCandidate(
+        OrderStatus.PENDING_ACTIVATION,
+        OrderSide.BUY,
+        "100",
+        "100",
+        bundle("99", "101", "130", "100"),
+        "10.15151505");
+    fixture.order().setOrderOrigin(com.fxplatform.trading.enums.OrderOrigin.PROTECTIVE);
+    fixture.order().setProtectionType(ProtectionType.STOP_LOSS);
+    fixture.order().setParentPositionId(UUID.randomUUID());
+
+    assertThat(service().executePendingOrders()).isZero();
+
+    verify(orderRepository, never()).activateStopLimitPending(any());
+    verify(orderRepository, never()).activateStopLimitWorking(any());
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(orderFillService, never()).fillPerpetual(
+        any(), any(), any(), any(), anyInt(), anyString());
   }
 
   @Test
@@ -246,8 +660,43 @@ class PerpetualPendingOrderExecutionTest {
   }
 
   @Test
-  void priceGapBeyondStoredHoldRollsBackClaimAndLeavesOrderPending() {
+  void priceGapBeyondStoredHoldTopsUpMarginAndFills() {
     Fixture fixture = stubCandidate(bundle("99", "150", "110", "110"), "10.15151505");
+    AtomicReference<BigDecimal> holdAtFill = new AtomicReference<>();
+    org.mockito.Mockito.doReturn(risk("15.07500000"))
+        .when(perpetualOrderRiskService)
+        .evaluate(any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), any(), any());
+    org.mockito.Mockito.doAnswer(invocation -> {
+      holdAtFill.set(fixture.order().getHoldAmount());
+      return filled(fixture.order());
+    }).when(orderFillService).fillPerpetual(
+        eq(fixture.order()),
+        eq(fixture.account()),
+        eq(fixture.fill()),
+        eq(new BigDecimal("110")),
+        eq(10),
+        eq("Pending Perpetual order hold"));
+
+    int filled = service().executePendingOrders();
+
+    assertAll(
+        () -> assertThat(filled).isEqualTo(1),
+        () -> assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.FILLED),
+        () -> assertThat(holdAtFill.get()).isEqualByComparingTo("15.07500000"),
+        () -> assertThat(fixture.account().getUsedMargin()).isEqualByComparingTo("15.07500000"),
+        () -> assertThat(fixture.account().getFreeMargin()).isEqualByComparingTo("49984.92500000"));
+    verify(orderRepository).claimPending(fixture.order().getId());
+    verify(orderFillService).recordPerpetualOrderHoldIncrease(
+        fixture.account(),
+        new BigDecimal("4.92348495"),
+        fixture.order().getId());
+  }
+
+  @Test
+  void insufficientPriceGapTopUpUsesStableMarginErrorAndLeavesOrderPending() {
+    Fixture fixture = stubCandidate(bundle("99", "150", "110", "110"), "10.15151505");
+    fixture.account().setBalance(new BigDecimal("11.15151505"));
+    fixture.account().setEquity(new BigDecimal("11.15151505"));
     org.mockito.Mockito.doReturn(risk("15.07500000"))
         .when(perpetualOrderRiskService)
         .evaluate(any(), any(), any(), any(), any(), anyBoolean(), any(), any(), any(), any(), any());
@@ -257,12 +706,18 @@ class PerpetualPendingOrderExecutionTest {
     assertAll(
         () -> assertThat(filled).isZero(),
         () -> assertThat(fixture.order().getStatus()).isEqualTo(OrderStatus.PENDING),
-        () -> assertThat(fixture.order().getHoldAmount()).isEqualByComparingTo("10.15151505"));
-    verify(orderRepository, never()).claimPending(any());
+        () -> assertThat(fixture.order().getHoldAmount()).isEqualByComparingTo("10.15151505"),
+        () -> assertThat(fixture.account().getUsedMargin()).isEqualByComparingTo("10.15151505"),
+        () -> assertThat(fixture.account().getFreeMargin()).isEqualByComparingTo("1.00000000"));
     verify(orderFillService, never()).fillPerpetual(
         any(), any(), any(), any(), anyInt(), anyString());
-    verify(orderEventService, never()).record(
-        any(), anyString(), any(), any(), any(), anyString());
+    verify(orderEventService).recordWorkerFailure(
+        eq(fixture.order().getId()),
+        eq("ORDER_EXECUTION_FAILED"),
+        eq(OrderStatus.PENDING),
+        eq(ErrorCode.INSUFFICIENT_MARGIN),
+        eq("Pending order execution deferred"),
+        any(PendingOrderExecutionFingerprint.class));
   }
 
   @Test
@@ -577,6 +1032,42 @@ class PerpetualPendingOrderExecutionTest {
         anyInt(),
         anyString())).thenAnswer(invocation -> filled(order));
     return new Fixture(order, account, setting, bundle, fill);
+  }
+
+  private Fixture stubStopLimitCandidate(
+      OrderStatus status,
+      OrderSide side,
+      String price,
+      String trigger,
+      PerpetualMarketBundle bundle,
+      String hold
+  ) {
+    Fixture base = stubCandidate(bundle, hold);
+    OrderEntity order = base.order();
+    order.setOrderType(OrderType.STOP_LIMIT);
+    order.setOrderOrigin(OrderOrigin.USER);
+    order.setStatus(status);
+    order.setSide(side);
+    order.setPrice(new BigDecimal(price));
+    order.setRequestedPrice(new BigDecimal(price));
+    order.setTriggerPrice(new BigDecimal(trigger));
+    order.setTriggerPriceType(TriggerPriceType.MARK_PRICE);
+    order.setTriggerExecutionType(TriggerExecutionType.LIMIT);
+    order.setTimeInForce(TimeInForce.GTC);
+    order.setPostOnly(false);
+    when(orderRepository.findByStatus(OrderStatus.PENDING))
+        .thenReturn(status == OrderStatus.PENDING ? List.of(order) : List.of());
+    when(orderRepository.findUserStopLimitsAwaitingActivation())
+        .thenReturn(status == OrderStatus.PENDING_ACTIVATION ? List.of(order) : List.of());
+    FullFillResult fill = fill(
+        side == OrderSide.BUY ? bundle.ask() : bundle.bid(),
+        order.getBaseQuantity());
+    org.mockito.Mockito.lenient().when(fullFillCoordinator.execute(
+        any(FullFillRequest.class), any(ExecutableMarketSnapshot.class))).thenReturn(fill);
+    org.mockito.Mockito.lenient().when(orderFillService.fillPerpetual(
+        eq(order), eq(base.account()), eq(fill), any(BigDecimal.class), anyInt(), anyString()))
+        .thenAnswer(invocation -> filled(order));
+    return new Fixture(order, base.account(), base.setting(), bundle, fill);
   }
 
   private PendingOrderExecutionService service() {

@@ -14,10 +14,11 @@ const routeStyles = readFileSync(join(webSrc, 'routes', 'trading', 'TradingRoute
 const pcSource = readFileSync(join(webSrc, 'pc', 'pages', 'trading', 'PcTradingTerminal.tsx'), 'utf8')
 const pcStyles = readFileSync(join(webSrc, 'pc', 'pages', 'trading', 'PcTradingTerminal.module.css'), 'utf8')
 const mobileSource = readFileSync(join(webSrc, 'mobile', 'pages', 'trading', 'MobileTradingTerminal.tsx'), 'utf8')
+const mobileShellSource = readFileSync(join(webSrc, 'mobile', 'pages', 'trading', 'shell', 'MobileTradingTerminal.tsx'), 'utf8')
 const orderSheetSource = readFileSync(join(webSrc, 'mobile', 'pages', 'trading', 'TradingOrderSheet.tsx'), 'utf8')
 const tradePanelControllerSource = readFileSync(join(currentDir, 'order-form', 'useTradePanelController.ts'), 'utf8')
 const marketSidebarSource = readFileSync(join(currentDir, 'components', 'MarketSidebar.tsx'), 'utf8')
-const marketSelectionSource = readFileSync(join(currentDir, 'tradingPageMarketSelection.ts'), 'utf8')
+const marketSidebarStyles = readFileSync(join(currentDir, 'components', 'MarketSidebar.module.css'), 'utf8')
 const marketStatusSource = readFileSync(join(currentDir, 'tradingPageMarketDataStatus.ts'), 'utf8')
 const marketStatusHookSource = readFileSync(join(currentDir, 'useTradingMarketDataStatus.ts'), 'utf8')
 const sessionStatusSource = readFileSync(join(currentDir, 'tradingPageSessionStatus.ts'), 'utf8')
@@ -48,10 +49,11 @@ describe('trading terminal route and business continuity', () => {
     assert.doesNotMatch(mobileSource, /TradingWorkspace|useResizableLayout|layoutStore/)
   })
 
-  it('passes the canonical chart title and theme to both active platform views', () => {
-    assert.match(controllerSource, /chartTitle:\s*formatTradingChartTitle\(selectedMarketWithRules,\s*t\)/)
-    assert.match(pcSource, /chartTitle=\{model\.chartTitle\}/)
-    assert.match(marketSelectionSource, /\$\{market\.base\}\/\$\{market\.quote\} \$\{t\('chart\.titleSuffix'\)\}/)
+  it('keeps chart labels platform-owned while sharing the canonical chart theme', () => {
+    assert.doesNotMatch(controllerSource, /chartTitle|formatTradingChartTitle/)
+    assert.doesNotMatch(routeTypesSource, /chartTitle/)
+    assert.doesNotMatch(pcSource, /chartTitle/)
+    assert.match(mobileShellSource, /t\('trading\.chartTitle',\s*\{ symbol: market\.symbol \}\)/)
     assert.match(controllerSource, /useTheme/)
     assert.match(controllerSource, /useTradingChartSettings\(\s*selectedSymbol,\s*currentTheme\.colorScheme\s*\)/)
     assert.match(chartSettingsSource, /chartThemeMode:\s*colorScheme === 'light' \? 'light' : 'dark'/)
@@ -109,6 +111,10 @@ describe('trading terminal route and business continuity', () => {
     assert.match(controllerSource, /const terminalLoading = sessionMode === 'loading'/)
     assert.match(pcSource, /loading=\{model\.terminalLoading\}/)
     assert.match(mobileSource, /loading=\{model\.terminalLoading\}/)
+  })
+
+  it('keeps the mobile market search input touch- and zoom-safe', () => {
+    assert.match(marketSidebarStyles, /\[data-platform-view='mobile'\]\s+\.search input\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px/)
   })
 
   it('keeps guest watch mode non-blocking until a trade action asks for login', () => {

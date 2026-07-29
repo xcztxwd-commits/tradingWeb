@@ -12,27 +12,29 @@ class TradingAlgorithmEngineTest {
   private final TradingAlgorithmEngine engine = new TradingAlgorithmEngine();
 
   @Test
-  void spotBuyAndSellMatchReceivedAssetFeeExample() {
+  void spotBuyAndSellChargeNotionalFeesInQuoteAsset() {
     TradingAlgorithmEngine.SpotBuyResult buy = engine.spotBuyWithQuoteBudget(
         new BigDecimal("10000"),
         new BigDecimal("50000"),
         new BigDecimal("0.001"));
 
-    assertThat(buy.grossBase()).isEqualByComparingTo("0.2");
-    assertThat(buy.feeBase()).isEqualByComparingTo("0.0002");
-    assertThat(buy.netBase()).isEqualByComparingTo("0.1998");
-    assertThat(buy.averageCost()).isEqualByComparingTo("50050.05005005");
+    assertThat(buy.baseQuantity()).isEqualByComparingTo("0.19980019");
+    assertThat(buy.grossQuote()).isEqualByComparingTo("9990.00950000");
+    assertThat(buy.feeQuote()).isEqualByComparingTo("9.99000950");
+    assertThat(buy.grossQuote().add(buy.feeQuote()))
+        .isLessThanOrEqualTo(new BigDecimal("10000"));
+    assertThat(buy.averageCost()).isEqualByComparingTo("50000.00000000");
 
     TradingAlgorithmEngine.SpotSellResult sell = engine.spotSell(
-        buy.netBase(),
+        buy.baseQuantity(),
         new BigDecimal("55000"),
         new BigDecimal("0.001"),
         new BigDecimal("10000"));
 
-    assertThat(sell.grossQuote()).isEqualByComparingTo("10989");
-    assertThat(sell.feeQuote()).isEqualByComparingTo("10.989");
-    assertThat(sell.netQuote()).isEqualByComparingTo("10978.011");
-    assertThat(sell.netPnl()).isEqualByComparingTo("978.011");
+    assertThat(sell.grossQuote()).isEqualByComparingTo("10989.01045000");
+    assertThat(sell.feeQuote()).isEqualByComparingTo("10.98901045");
+    assertThat(sell.netQuote()).isEqualByComparingTo("10978.02143955");
+    assertThat(sell.netPnl()).isEqualByComparingTo("978.02143955");
   }
 
   @Test

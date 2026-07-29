@@ -1,0 +1,432 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fx-platform.local/schemas/trading-lab-report-v1.json",
+  "title": "Trading Lab evidence report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metadata",
+    "actor",
+    "environment",
+    "scenario",
+    "modelVersion",
+    "configSnapshot",
+    "localCalculation",
+    "lifecycle",
+    "apiTrace",
+    "marketTicks",
+    "checkpoints",
+    "actualState",
+    "errors",
+    "cleanup"
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "scenario": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "modelVersion": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "configSnapshot": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "localCalculation": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "lifecycle": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "apiTrace": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/apiTrace"
+      }
+    },
+    "marketTicks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "actualState": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/reportError"
+      }
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    }
+  },
+  "$defs": {
+    "jsonValue": {
+      "oneOf": [
+        {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        }
+      ]
+    },
+    "reportError": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/runExecutionFailure"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/jsonValue"
+            },
+            {
+              "not": {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "const": "RUN_EXECUTION_FAILED"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "runExecutionFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runId",
+        "sequence",
+        "durableKey",
+        "fingerprint",
+        "type",
+        "virtualTime",
+        "correlationId",
+        "payload"
+      ],
+      "properties": {
+        "runId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "durableKey": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fingerprint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "RUN_EXECUTION_FAILED"
+        },
+        "virtualTime": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "correlationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failurePoint",
+            "unexecuted"
+          ],
+          "properties": {
+            "failurePoint": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "operation",
+                "actionId",
+                "tickSequence",
+                "actionSequence",
+                "status",
+                "code"
+              ],
+              "properties": {
+                "operation": {
+                  "const": "PUBLIC_ACTION"
+                },
+                "actionId": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "tickSequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "actionSequence": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "status": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 599
+                },
+                "code": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "unexecuted": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "actionId",
+                  "tickSequence",
+                  "actionSequence",
+                  "type"
+                ],
+                "properties": {
+                  "actionId": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "tickSequence": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "actionSequence": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "type": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "apiTrace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "queryParameters",
+        "requestHeaders",
+        "requestContentType",
+        "requestBody",
+        "responseHeaders",
+        "responseContentType",
+        "responseBody",
+        "exception",
+        "authentication"
+      ],
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "queryParameters": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        "requestHeaders": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        "requestContentType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestBody": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sequence",
+            "environment",
+            "method",
+            "url",
+            "virtualTime",
+            "realTime",
+            "sanitizedRequest"
+          ],
+          "properties": {
+            "sequence": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "environment": {
+              "enum": [
+                "main-admin",
+                "validation"
+              ]
+            },
+            "method": {
+              "enum": [
+                "GET",
+                "POST",
+                "PATCH",
+                "DELETE"
+              ]
+            },
+            "url": {
+              "type": "string"
+            },
+            "virtualTime": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "realTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "sanitizedRequest": {
+              "$ref": "#/$defs/jsonValue"
+            }
+          }
+        },
+        "responseHeaders": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        "responseContentType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "responseBody": {
+          "type": "object",
+          "required": [
+            "status",
+            "duration",
+            "traceId",
+            "correlationId",
+            "recordedException"
+          ],
+          "properties": {
+            "status": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 599
+            },
+            "duration": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "traceId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "correlationId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "recordedException": {
+              "$ref": "#/$defs/jsonValue"
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/jsonValue"
+          }
+        },
+        "exception": {
+          "$ref": "#/$defs/jsonValue"
+        },
+        "authentication": {
+          "$ref": "#/$defs/jsonValue"
+        }
+      }
+    }
+  }
+}

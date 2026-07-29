@@ -1,6 +1,8 @@
 import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
+import styles from './TradePanel.module.css'
+
 export type TradePanelSessionMode = 'loading' | 'ready' | 'login-required' | 'error'
 
 type SessionStatusArgs = {
@@ -56,13 +58,13 @@ export function TradePanelSessionStatus({ onRetrySession, state }: Props) {
 
   return (
     <>
-      <div className="trade-panel__session-status" aria-live="polite">
+      <div className={styles['trade-panel__session-status']} aria-live="polite">
         <span>{state.sessionBadge}</span>
         <small>{state.accountStatus}</small>
       </div>
 
       {state.sessionHasError ? (
-        <div className="trade-panel__session-error" role="alert">
+        <div className={styles['trade-panel__session-error']} role="alert">
           <span>{state.sessionErrorText}</span>
           {onRetrySession ? (
             <button type="button" onClick={() => void onRetrySession()}>

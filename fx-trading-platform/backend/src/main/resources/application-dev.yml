@@ -7,6 +7,17 @@ admin:
 app:
   cors:
     allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*}
+  engagement:
+    assets:
+      storage: ${ENGAGEMENT_ASSET_STORAGE:local}
+      local-root: ${ENGAGEMENT_ASSET_LOCAL_ROOT:./var/engagement-assets}
+      max-bytes: ${ENGAGEMENT_ASSET_MAX_BYTES:5242880}
+    scheduler:
+      enabled: ${ENGAGEMENT_SCHEDULER_ENABLED:false}
+    retention:
+      enabled: ${ENGAGEMENT_RETENTION_ENABLED:false}
+    outbox:
+      enabled: false
 
 security:
   jwt:

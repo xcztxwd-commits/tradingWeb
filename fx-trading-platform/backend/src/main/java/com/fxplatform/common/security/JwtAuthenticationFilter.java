@@ -32,6 +32,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
   private final AuthSessionService authSessionService;
   private final AdminAuthorityService adminAuthorityService;
 
+  @Override
+  protected boolean shouldNotFilter(HttpServletRequest request) {
+    String method = request.getMethod();
+    return "/actuator/health".equals(request.getRequestURI())
+        && ("GET".equals(method) || "HEAD".equals(method));
+  }
+
+  @Override
+  protected boolean shouldNotFilterAsyncDispatch() {
+    return false;
+  }
+
+  @Override
+  protected boolean shouldNotFilterErrorDispatch() {
+    return false;
+  }
+
   /**
 //   * 处理 doFilterInternal 安全认证逻辑。
    */

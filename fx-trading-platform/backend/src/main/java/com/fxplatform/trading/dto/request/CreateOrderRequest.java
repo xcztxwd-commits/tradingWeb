@@ -7,6 +7,7 @@ import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.ProtectionType;
 import com.fxplatform.trading.enums.QuantityUnit;
+import com.fxplatform.trading.enums.TimeInForce;
 import com.fxplatform.trading.enums.TriggerExecutionType;
 import com.fxplatform.trading.enums.TriggerPriceType;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -27,7 +28,13 @@ public record CreateOrderRequest(
     @NotNull UUID accountId,
     @Schema(example = "BTCUSDT-PERP") @NotBlank String symbol,
     @NotNull OrderSide side,
-    @Schema(allowableValues = {"MARKET", "LIMIT", "STOP_MARKET"}) @NotNull OrderType orderType,
+    @Schema(allowableValues = {
+        "MARKET",
+        "LIMIT",
+        "STOP_MARKET",
+        "STOP_LIMIT",
+        "TRAILING_STOP_MARKET"
+    }) @NotNull OrderType orderType,
     @DecimalMin(value = "0", inclusive = false) BigDecimal lots,
     BigDecimal requestedPrice,
     BigDecimal stopLoss,
@@ -43,7 +50,12 @@ public record CreateOrderRequest(
     BigDecimal triggerPrice,
     TriggerPriceType triggerPriceType,
     @NotNull Boolean reduceOnly,
-    @Valid List<AttachedProtectionRequest> attachedProtections
+    @Valid List<AttachedProtectionRequest> attachedProtections,
+    @NotNull TimeInForce timeInForce,
+    @NotNull Boolean postOnly,
+    BigDecimal activationPrice,
+    BigDecimal trailingDelta,
+    BigDecimal trailingRate
 ) {
   public CreateOrderRequest {
     positionSide = positionSide == null ? PositionSide.BOTH : positionSide;
@@ -53,6 +65,58 @@ public record CreateOrderRequest(
     attachedProtections = attachedProtections == null
         ? List.of()
         : List.copyOf(attachedProtections);
+    timeInForce = timeInForce == null ? TimeInForce.GTC : timeInForce;
+    postOnly = postOnly == null ? Boolean.FALSE : postOnly;
+  }
+
+  public CreateOrderRequest(
+      UUID accountId,
+      String symbol,
+      OrderSide side,
+      OrderType orderType,
+      BigDecimal lots,
+      BigDecimal requestedPrice,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit,
+      String idempotencyKey,
+      String clientOrderId,
+      BigDecimal quantity,
+      BigDecimal price,
+      Integer leverage,
+      PositionSide positionSide,
+      QuantityUnit quantityUnit,
+      MarginMode marginMode,
+      BigDecimal triggerPrice,
+      TriggerPriceType triggerPriceType,
+      Boolean reduceOnly,
+      List<AttachedProtectionRequest> attachedProtections
+  ) {
+    this(
+        accountId,
+        symbol,
+        side,
+        orderType,
+        lots,
+        requestedPrice,
+        stopLoss,
+        takeProfit,
+        idempotencyKey,
+        clientOrderId,
+        quantity,
+        price,
+        leverage,
+        positionSide,
+        quantityUnit,
+        marginMode,
+        triggerPrice,
+        triggerPriceType,
+        reduceOnly,
+        attachedProtections,
+        null,
+        null,
+        null,
+        null,
+        null);
   }
 
   public CreateOrderRequest(
@@ -161,6 +225,25 @@ public record CreateOrderRequest(
   @AssertTrue(message = "quantity or lots is required")
   public boolean hasQuantity() {
     return quantity() != null;
+  }
+
+  @AssertTrue(message = "STOP_LIMIT requires triggerPrice and price")
+  public boolean hasValidStopLimitContract() {
+    return orderType != OrderType.STOP_LIMIT || (triggerPrice != null && price() != null);
+  }
+
+  @AssertTrue(message = "trailingDelta or trailingRate is required, but not both")
+  public boolean hasValidTrailingContract() {
+    if (orderType != OrderType.TRAILING_STOP_MARKET) {
+      return true;
+    }
+    return (trailingDelta != null) ^ (trailingRate != null);
+  }
+
+  @AssertTrue(message = "postOnly requires LIMIT and GTC")
+  public boolean hasValidPostOnlyContract() {
+    return !Boolean.TRUE.equals(postOnly)
+        || (orderType == OrderType.LIMIT && timeInForce == TimeInForce.GTC);
   }
 
   /**

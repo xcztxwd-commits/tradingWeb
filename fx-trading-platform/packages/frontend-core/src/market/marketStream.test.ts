@@ -173,18 +173,25 @@ describe('market stream shared client', () => {
     assert.equal(client.deactivated, true)
   })
 
-  it('deactivates the previous session and creates a new client when the token changes', async () => {
+  it('isolates authenticated sessions when the token changes', async () => {
     const { subscribeQuote } = await importMarketStream()
 
-    subscribeQuote('EURUSD', 'token-a', () => {})
+    const unsubscribeFirst = subscribeQuote('EURUSD', 'token-a', () => {})
     const firstClient = globalThis.__marketStreamFakeClients[0]
 
-    subscribeQuote('EURUSD', 'token-b', () => {})
+    const unsubscribeSecond = subscribeQuote('EURUSD', 'token-b', () => {})
     const secondClient = globalThis.__marketStreamFakeClients[1]
 
     assert.equal(globalThis.__marketStreamFakeClients.length, 2)
+    assert.equal(firstClient.deactivated, false)
+    assert.equal(secondClient.deactivated, false)
+
+    unsubscribeFirst()
     assert.equal(firstClient.deactivated, true)
     assert.equal(secondClient.deactivated, false)
+
+    unsubscribeSecond()
+    assert.equal(secondClient.deactivated, true)
   })
 
   it('subscribes to account trading-session events with the authenticated stream token', async () => {

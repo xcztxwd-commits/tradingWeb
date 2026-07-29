@@ -8,23 +8,29 @@ import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.execution.DemoExecutionGuard;
+import com.fxplatform.execution.DemoExecutionPolicy;
 import com.fxplatform.execution.ExecutableMarketSnapshot;
 import com.fxplatform.execution.FullFillCoordinator;
 import com.fxplatform.execution.FullFillExecutionPath;
 import com.fxplatform.execution.FullFillRequest;
 import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.model.CandleRequest;
 import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.provider.MarketBundleResolver;
 import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.market.service.QuoteService;
+import com.fxplatform.risk.model.InstrumentRules;
+import com.fxplatform.risk.service.InstrumentRulesEngine;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.entity.AccountSymbolSettingEntity;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
+import com.fxplatform.trading.enums.LiquidityRole;
 import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
@@ -37,20 +43,23 @@ import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Scans pending orders and executes each candidate in its own local transaction. */
 @Service
-@ConditionalOnProperty(prefix = "trading", name = "pending-order-execution-enabled", havingValue = "true")
 public class PendingOrderExecutionService {
 
   private static final Logger log = LoggerFactory.getLogger(PendingOrderExecutionService.class);
@@ -87,6 +96,8 @@ public class PendingOrderExecutionService {
   private final SymbolRepository symbolRepository;
   private final PerpetualAccountRiskSnapshotService perpetualAccountRiskSnapshotService;
   private PendingOrderExecutionProcessor pendingOrderExecutionProcessor;
+  private DepthOrderExecutionService depthOrderExecutionService;
+  private InstrumentRulesEngine instrumentRulesEngine;
 
   @Autowired
   public PendingOrderExecutionService(
@@ -284,23 +295,78 @@ public class PendingOrderExecutionService {
         null);
   }
 
-  @Scheduled(fixedDelayString = "${trading.pending-order-scan-ms:1000}")
   public int executePendingOrders() {
+    return executeCandidates(
+        order -> isRestingCandidate(order) || isConditionalCandidate(order),
+        false);
+  }
+
+  /** Executes ordinary resting/depth orders before conditional protection work. */
+  public int executeRestingOrders() {
+    return executeCandidates(this::isRestingCandidate, false);
+  }
+
+  /** Validation-only strict scan that joins the owning system-step transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public int executeRestingOrdersStrict() {
+    return executeCandidates(this::isRestingCandidate, true);
+  }
+
+  /** Activates or executes user conditional orders after ordinary resting matching. */
+  public int executeConditionalOrders() {
+    return executeCandidates(this::isConditionalCandidate, false);
+  }
+
+  /** Validation-only strict scan that joins the owning system-step transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public int executeConditionalOrdersStrict() {
+    return executeCandidates(this::isConditionalCandidate, true);
+  }
+
+  private int executeCandidates(Predicate<OrderEntity> selector, boolean failClosed) {
     int filled = 0;
-    for (OrderEntity order : orderRepository.findByStatus(OrderStatus.PENDING)) {
+    List<OrderEntity> pending = orderRepository.findByStatus(OrderStatus.PENDING);
+    List<OrderEntity> partiallyFilled = orderRepository.findByStatus(OrderStatus.PARTIALLY_FILLED);
+    List<OrderEntity> awaitingActivation = orderRepository.findUserStopLimitsAwaitingActivation();
+    Map<UUID, OrderEntity> uniqueCandidates = new HashMap<>();
+    Stream.of(pending, partiallyFilled, awaitingActivation)
+        .flatMap(orders -> orders == null ? Stream.empty() : orders.stream())
+        .filter(java.util.Objects::nonNull)
+        .forEach(order -> uniqueCandidates.put(order.getId(), order));
+    List<OrderEntity> candidates = uniqueCandidates.values().stream()
+        .sorted(Comparator
+            .comparing(
+                OrderEntity::getCreatedAt,
+                Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(
+                OrderEntity::getId,
+                Comparator.nullsLast(Comparator.naturalOrder())))
+        .toList();
+    for (OrderEntity order : candidates) {
+      if (!selector.test(order)) {
+        continue;
+      }
+      OrderStatus sourceStatus = order.getStatus();
+      PendingOrderExecutionFingerprint fingerprint =
+          PendingOrderExecutionFingerprint.capture(order);
       boolean demoAuthorized = false;
+      if (failClosed) {
+        TradingAccountEntity accountSnapshot = requireDemoCandidate(order);
+        if (executeCandidate(order, accountSnapshot, true)) {
+          filled++;
+        }
+        continue;
+      }
       try {
         TradingAccountEntity accountSnapshot = requireDemoCandidate(order);
         demoAuthorized = true;
-        boolean executed = isP0Order(order)
-            ? prepareAndExecuteP0(order, accountSnapshot)
-            : prepareAndExecuteLegacy(order, accountSnapshot);
+        boolean executed = executeCandidate(order, accountSnapshot, false);
         if (executed) {
           filled++;
         }
       } catch (BusinessException exception) {
         if (demoAuthorized && !DEMO_GUARD_REJECTION_CODES.contains(exception.getCode())) {
-          recordWorkerFailure(order, exception.getCode());
+          recordWorkerFailure(order, sourceStatus, fingerprint, exception.getCode());
         }
         log.debug(
             "Pending order {} remains pending after business rejection {}: {}",
@@ -309,7 +375,8 @@ public class PendingOrderExecutionService {
             exception.getMessage());
       } catch (RuntimeException exception) {
         if (demoAuthorized) {
-          recordWorkerFailure(order, ErrorCode.EXECUTION_UNAVAILABLE);
+          recordWorkerFailure(
+              order, sourceStatus, fingerprint, ErrorCode.EXECUTION_UNAVAILABLE);
         }
         log.warn(
             "Pending order {} failed without aborting later candidates: {}: {}",
@@ -321,6 +388,29 @@ public class PendingOrderExecutionService {
     return filled;
   }
 
+  private boolean executeCandidate(
+      OrderEntity order,
+      TradingAccountEntity accountSnapshot,
+      boolean joinCallerTransaction
+  ) {
+    return isP0Order(order)
+        ? prepareAndExecuteP0(order, accountSnapshot, joinCallerTransaction)
+        : prepareAndExecuteLegacy(order, accountSnapshot, joinCallerTransaction);
+  }
+
+  private boolean isRestingCandidate(OrderEntity order) {
+    return order.getOrderType() == OrderType.LIMIT
+        || (order.getOrderType() == OrderType.STOP_LIMIT
+            && (order.getStatus() == OrderStatus.PENDING
+                || order.getStatus() == OrderStatus.PARTIALLY_FILLED));
+  }
+
+  private boolean isConditionalCandidate(OrderEntity order) {
+    return order.getOrderType() == OrderType.STOP_MARKET
+        || (order.getOrderType() == OrderType.STOP_LIMIT
+            && order.getStatus() == OrderStatus.PENDING_ACTIVATION);
+  }
+
   private TradingAccountEntity requireDemoCandidate(OrderEntity order) {
     ProductType productType = requestedProduct(order.getSymbol());
     TradingAccountEntity account = accountRepository.findById(order.getAccountId())
@@ -329,14 +419,20 @@ public class PendingOrderExecutionService {
     return account;
   }
 
-  private void recordWorkerFailure(OrderEntity order, String errorCode) {
+  private void recordWorkerFailure(
+      OrderEntity order,
+      OrderStatus sourceStatus,
+      PendingOrderExecutionFingerprint fingerprint,
+      String errorCode
+  ) {
     try {
       orderEventService.recordWorkerFailure(
           order.getId(),
           EXECUTION_FAILURE_EVENT,
-          OrderStatus.PENDING,
+          sourceStatus,
           errorCode,
-          EXECUTION_FAILURE_MESSAGE);
+          EXECUTION_FAILURE_MESSAGE,
+          fingerprint);
     } catch (RuntimeException eventFailure) {
       log.warn(
           "Pending order {} failure event could not be persisted: {}: {}",
@@ -353,14 +449,27 @@ public class PendingOrderExecutionService {
     this.pendingOrderExecutionProcessor = pendingOrderExecutionProcessor;
   }
 
+  @Autowired
+  void setDepthOrderExecutionService(
+      DepthOrderExecutionService depthOrderExecutionService
+  ) {
+    this.depthOrderExecutionService = depthOrderExecutionService;
+  }
+
+  @Autowired
+  void setInstrumentRulesEngine(InstrumentRulesEngine instrumentRulesEngine) {
+    this.instrumentRulesEngine = instrumentRulesEngine;
+  }
+
   private boolean prepareAndExecuteP0(
       OrderEntity order,
-      TradingAccountEntity accountSnapshot
+      TradingAccountEntity accountSnapshot,
+      boolean joinCallerTransaction
   ) {
     ProductType productType = requestedProduct(order.getSymbol());
 
     if (productType == ProductType.CRYPTO_SPOT && pendingOrderExecutionProcessor != null) {
-      return prepareAndExecuteSpot(order);
+      return prepareAndExecuteSpot(order, joinCallerTransaction);
     }
 
     if (productType == ProductType.LINEAR_PERP) {
@@ -374,7 +483,7 @@ public class PendingOrderExecutionService {
             ErrorCode.EXECUTION_UNAVAILABLE,
             "P0 Linear Perpetual pending execution authority is unavailable");
       }
-      return prepareAndExecutePerpetual(order);
+      return prepareAndExecutePerpetual(order, joinCallerTransaction);
     }
 
     ExecutableMarketSnapshot snapshot = resolveExecutableSnapshot(order.getSymbol(), productType);
@@ -391,21 +500,34 @@ public class PendingOrderExecutionService {
         productType,
         requiredMargin,
         snapshot,
-        null);
-    return transactionExecutor.execute(() -> tryExecuteP0(candidate));
+        null,
+        PendingOrderExecutionFingerprint.capture(order));
+    return joinCallerTransaction
+        ? transactionExecutor.executeJoined(() -> tryExecuteP0(candidate))
+        : transactionExecutor.execute(() -> tryExecuteP0(candidate));
   }
 
-  private boolean prepareAndExecuteSpot(OrderEntity order) {
+  private boolean prepareAndExecuteSpot(
+      OrderEntity order,
+      boolean joinCallerTransaction
+  ) {
+    PendingOrderExecutionFingerprint fingerprint =
+        PendingOrderExecutionFingerprint.capture(order);
     for (int attempt = 0; attempt < 2; attempt++) {
       try {
         ExecutableMarketSnapshot snapshot = resolveExecutableSnapshot(
             order.getSymbol(), ProductType.CRYPTO_SPOT);
-        if (!isTriggered(order, snapshot)) {
+        fullFillCoordinator.requireFresh(snapshot);
+        if (!fingerprint.matches(order)) {
           return false;
         }
-        return pendingOrderExecutionProcessor.process(order, snapshot);
+        return joinCallerTransaction
+            ? pendingOrderExecutionProcessor.processStrict(order, snapshot)
+            : pendingOrderExecutionProcessor.process(order, snapshot);
       } catch (BusinessException exception) {
-        if (attempt == 0 && "MARKET_DATA_STALE".equals(exception.getCode())) {
+        if (!joinCallerTransaction
+            && attempt == 0
+            && "MARKET_DATA_STALE".equals(exception.getCode())) {
           continue;
         }
         throw exception;
@@ -414,13 +536,31 @@ public class PendingOrderExecutionService {
     return false;
   }
 
-  private boolean prepareAndExecutePerpetual(OrderEntity order) {
+  private boolean prepareAndExecutePerpetual(
+      OrderEntity order,
+      boolean joinCallerTransaction
+  ) {
     BusinessException lastStale = null;
+    PendingOrderExecutionFingerprint fingerprint =
+        PendingOrderExecutionFingerprint.capture(order);
     for (int attempt = 0; attempt < 2; attempt++) {
+      DemoExecutionPolicy policy = depthOrderExecutionService == null
+          ? null
+          : depthOrderExecutionService.currentPolicy();
       try {
+        boolean depth = depthOrderExecutionService != null
+            && depthOrderExecutionService.isDepth(policy);
         ExecutableMarketSnapshot snapshot = resolveExecutableSnapshot(
             order.getSymbol(), ProductType.LINEAR_PERP);
-        if (!isPerpetualTriggered(order, snapshot)) {
+        fullFillCoordinator.requireFresh(snapshot);
+        if (depth && instrumentRulesEngine == null) {
+          throw new BusinessException(
+              ErrorCode.EXECUTION_UNAVAILABLE,
+              "P0 Linear Perpetual DEPTH instrument authority is unavailable");
+        }
+        if (depth
+            ? !isPerpetualDepthExecutableState(order, snapshot)
+            : !isPerpetualTriggered(order, snapshot)) {
           return false;
         }
         PendingCandidate candidate = new PendingCandidate(
@@ -432,10 +572,33 @@ public class PendingOrderExecutionService {
             snapshot,
             perpetualAccountRiskSnapshotService.prepare(
                 order.getAccountId(),
-                Map.of(order.getSymbol(), snapshot)));
-        return transactionExecutor.execute(() -> tryExecutePerpetual(candidate));
+                Map.of(order.getSymbol(), snapshot)),
+            fingerprint);
+        if (depth) {
+          return joinCallerTransaction
+              ? transactionExecutor.executeJoined(
+                  () -> tryExecutePerpetualDepth(candidate, policy))
+              : transactionExecutor.execute(
+                  () -> tryExecutePerpetualDepth(candidate, policy));
+        }
+        return joinCallerTransaction
+            ? transactionExecutor.executeJoined(() -> tryExecutePerpetual(candidate, policy))
+            : transactionExecutor.execute(() -> tryExecutePerpetual(candidate, policy));
+      } catch (DepthOrderExecutionService.StalePolicyException exception) {
+        BusinessException stale = new BusinessException(
+            ErrorCode.MARKET_DATA_STALE,
+            "DEPTH execution policy changed during pending Perpetual planning",
+            exception);
+        if (joinCallerTransaction
+            || (depthOrderExecutionService != null
+                && !depthOrderExecutionService.isDepth(policy))) {
+          throw stale;
+        }
+        lastStale = stale;
       } catch (BusinessException exception) {
-        if (!ErrorCode.MARKET_DATA_STALE.equals(exception.getCode()) || attempt > 0) {
+        if (joinCallerTransaction
+            || !ErrorCode.MARKET_DATA_STALE.equals(exception.getCode())
+            || attempt > 0) {
           throw exception;
         }
         lastStale = exception;
@@ -446,7 +609,10 @@ public class PendingOrderExecutionService {
         lastStale == null ? "No fresh executable Perpetual snapshot" : lastStale.getMessage());
   }
 
-  private boolean tryExecutePerpetual(PendingCandidate candidate) {
+  private boolean tryExecutePerpetualDepth(
+      PendingCandidate candidate,
+      DemoExecutionPolicy policy
+  ) {
     TradingAccountEntity account = accountRepository.findByIdForUpdate(candidate.accountId())
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
     demoExecutionGuard.requireDemo(account, ProductType.LINEAR_PERP, candidate.symbol());
@@ -463,8 +629,259 @@ public class PendingOrderExecutionService {
     OrderEntity lockedOrder = orderRepository.findByIdForUpdate(candidate.orderId())
         .orElseThrow(() -> new BusinessException("ORDER_NOT_FOUND", "Order not found"));
     requirePerpetualCandidate(candidate, account, lockedSetting, lockedOrder);
-    if (lockedOrder.getStatus() != OrderStatus.PENDING
+    if (!candidate.fingerprint().matches(lockedOrder)) {
+      return false;
+    }
+    if (depthOrderExecutionService.tickAlreadyApplied(lockedOrder, candidate.snapshot())) {
+      return false;
+    }
+    if (!isPerpetualDepthExecutableState(lockedOrder, candidate.snapshot())) {
+      return false;
+    }
+
+    SymbolEntity symbol = symbolRepository.findBySymbol(candidate.symbol())
+        .orElseThrow(() -> new BusinessException("SYMBOL_NOT_FOUND", "Symbol not found"));
+    InstrumentRules rules = instrumentRulesEngine.rules(symbol);
+    if (rules == null || rules.productType() != ProductType.LINEAR_PERP) {
+      throw new BusinessException(
+          "INVALID_INSTRUMENT_RULES",
+          "Pending Perpetual DEPTH instrument rules are unavailable");
+    }
+    instrumentRulesEngine.validateDepthExecutionAuthority(symbol, rules);
+    BigDecimal remaining = depthRemainingQuantity(lockedOrder);
+    boolean activatingStopLimit = isAwaitingStopLimitActivation(lockedOrder);
+    OrderType executableType = lockedOrder.getOrderType() == OrderType.STOP_MARKET
+        ? OrderType.MARKET
+        : OrderType.LIMIT;
+    LiquidityRole role = activatingStopLimit
+        || lockedOrder.getOrderType() == OrderType.STOP_MARKET
+        ? LiquidityRole.TAKER
+        : LiquidityRole.MAKER;
+    DepthOrderExecutionService.DepthMatchPlan match = depthOrderExecutionService.prepare(
+        policy,
+        lockedOrder.getSymbol(),
+        ProductType.LINEAR_PERP,
+        lockedOrder.getSide(),
+        lockedOrder.getOrderType(),
+        executableType,
+        lockedOrder.getTimeInForce(),
+        remaining,
+        executableType == OrderType.LIMIT ? currentPrice(lockedOrder) : null,
+        false,
+        role,
+        candidate.snapshot());
+    depthOrderExecutionService.requireQuantityStep(
+        match,
+        QuantityConversionService.storageCompatibleStep(rules.stepSize()));
+    instrumentRulesEngine.validateCanonicalDepthFills(
+        symbol,
+        rules,
+        match.matchingResult().fills());
+
+    if (match.matchingResult().fills().isEmpty()) {
+      depthOrderExecutionService.requireApplicable(match);
+      if (!activatingStopLimit) {
+        return false;
+      }
+      if (orderRepository.activateStopLimitPending(lockedOrder.getId()) != 1) {
+        return false;
+      }
+      lockedOrder.setStatus(OrderStatus.PENDING);
+      orderEventService.record(
+          lockedOrder.getId(),
+          "ORDER_TRIGGERED",
+          OrderStatus.PENDING_ACTIVATION,
+          OrderStatus.PENDING,
+          null,
+          "Perpetual STOP_LIMIT activated and resting in DEPTH mode");
+      return false;
+    }
+
+    PerpetualAccountRiskSnapshotService.AccountRiskProjection accountRisk =
+        perpetualAccountRiskSnapshotService.project(
+            account,
+            accountPositions,
+            accountActiveOrders,
+            candidate.preparedAccountRisk());
+    List<PositionEntity> lockedPositions = accountPositions.stream()
+        .filter(position -> candidate.symbol().equals(position.getSymbol()))
+        .toList();
+    List<OrderEntity> activeOrders = accountActiveOrders.stream()
+        .filter(order -> candidate.symbol().equals(order.getSymbol()))
+        .toList();
+    PerpetualAccountRiskSnapshotService.PreparedSymbolRisk targetRisk =
+        candidate.preparedAccountRisk().symbols().get(candidate.symbol());
+    if (targetRisk == null) {
+      throw new BusinessException(
+          ErrorCode.MARKET_DATA_UNAVAILABLE,
+          "Target Perpetual risk snapshot was not prepared");
+    }
+    PerpetualRiskPricing pricing = depthOrderExecutionService.perpetualRiskPricing(match);
+    PerpetualOrderRiskService.OrderRisk risk = perpetualOrderRiskService.evaluateDepth(
+        account.getPositionMode(),
+        lockedSetting,
+        lockedPositions,
+        lockedOrder.getSide(),
+        lockedOrder.getPositionSide(),
+        Boolean.TRUE.equals(lockedOrder.getReduceOnly()),
+        lockedOrder.getOrderType(),
+        remaining,
+        executableType == OrderType.LIMIT ? currentPrice(lockedOrder) : null,
+        candidate.snapshot(),
+        targetRisk.maintenanceMarginRate(),
+        pricing);
+    requireFreshInternalIsolatedClose(
+        lockedOrder,
+        lockedPositions,
+        activeOrders,
+        risk);
+    PerpetualOrderRiskService.DepthPlanningAuthority planningAuthority =
+        new PerpetualOrderRiskService.DepthPlanningAuthority(
+            account.getId(),
+            account.getPositionMode(),
+            risk.positionSide(),
+            risk.marginMode(),
+            risk.leverage(),
+            Boolean.TRUE.equals(lockedOrder.getReduceOnly()),
+            targetRisk.maintenanceMarginRate());
+    BigDecimal currentHold = orZero(lockedOrder.getHoldAmount());
+    DepthOrderExecutionService.DepthHoldPlan holds = depthOrderExecutionService.planPerpetual(
+        planningAuthority,
+        risk,
+        currentHold,
+        match);
+    if (risk.openingBase().signum() > 0 && accountRisk.crossAvailable().signum() < 0) {
+      throw new BusinessException(
+          ErrorCode.INSUFFICIENT_MARGIN,
+          "Fresh Cross available margin cannot support the pending opening fill");
+    }
+    BigDecimal holdIncrease = depthPerpetualHoldIncrease(
+        lockedOrder,
+        risk,
+        holds,
+        accountRisk.crossAvailable());
+    depthOrderExecutionService.requireApplicable(match);
+
+    OrderStatus sourceStatus = lockedOrder.getStatus();
+    try {
+      if (activatingStopLimit) {
+        if (orderRepository.activateStopLimitWorking(lockedOrder.getId()) != 1) {
+          return false;
+        }
+        lockedOrder.setStatus(OrderStatus.WORKING);
+        orderEventService.record(
+            lockedOrder.getId(),
+            "ORDER_TRIGGERED",
+            OrderStatus.PENDING_ACTIVATION,
+            OrderStatus.WORKING,
+            null,
+            "Perpetual STOP_LIMIT activated for DEPTH execution");
+      }
+      perpetualAccountRiskSnapshotService.applyRevaluation(
+          account,
+          accountPositions,
+          accountRisk);
+      increasePerpetualOrderHold(
+          lockedOrder,
+          account,
+          risk,
+          holdIncrease);
+      for (PositionEntity position : accountPositions) {
+        positionRepository.save(position);
+      }
+      accountRepository.save(account);
+      DepthOrderExecutionService.DepthExecutionOutcome outcome =
+          depthOrderExecutionService.applyLocked(
+              lockedOrder,
+              lockedOrder,
+              account,
+              match,
+              holds,
+              false);
+      return outcome.newlyAppliedFillCount() > 0;
+    } catch (RuntimeException exception) {
+      lockedOrder.setStatus(sourceStatus);
+      throw exception;
+    }
+  }
+
+  private BigDecimal depthPerpetualHoldIncrease(
+      OrderEntity order,
+      PerpetualOrderRiskService.OrderRisk risk,
+      DepthOrderExecutionService.DepthHoldPlan holds,
+      BigDecimal crossAvailable
+  ) {
+    BigDecimal current = orZero(order.getHoldAmount());
+    BigDecimal required = holds.initialHold();
+    if (required == null
+        || required.signum() <= 0
+        || order.getHoldCurrency() == null
+        || risk.holdCurrency() == null
+        || !order.getHoldCurrency().equalsIgnoreCase(risk.holdCurrency())) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Stored Perpetual order hold is inconsistent with the DEPTH remainder");
+    }
+    BigDecimal increase = required.subtract(current).max(BigDecimal.ZERO);
+    if (increase.signum() > 0
+        && !isInternalIsolatedClose(order, risk)
+        && orZero(crossAvailable).compareTo(increase) < 0) {
+      throw new BusinessException(
+          ErrorCode.INSUFFICIENT_MARGIN,
+          "Fresh available margin cannot cover the pending DEPTH hold increase");
+    }
+    return increase;
+  }
+
+  private boolean tryExecutePerpetual(
+      PendingCandidate candidate,
+      DemoExecutionPolicy policy
+  ) {
+    TradingAccountEntity account = accountRepository.findByIdForUpdate(candidate.accountId())
+        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+    demoExecutionGuard.requireDemo(account, ProductType.LINEAR_PERP, candidate.symbol());
+    AccountSymbolSettingEntity lockedSetting = accountSymbolSettingRepository
+        .findByAccountIdAndSymbolForUpdate(account.getId(), candidate.symbol())
+        .orElseThrow(() -> new BusinessException(
+            "INVALID_INSTRUMENT_RULES",
+            "Locked Perpetual symbol setting is required"));
+    perpetualAccountRiskSnapshotService.requireCurrentLeverageWithinLimit(lockedSetting);
+    List<PositionEntity> accountPositions = positionRepository
+        .findOpenLinearPerpByAccountIdForUpdate(account.getId());
+    List<OrderEntity> accountActiveOrders = orderRepository
+        .findActiveLinearPerpByAccountIdForUpdate(account.getId());
+    OrderEntity lockedOrder = orderRepository.findByIdForUpdate(candidate.orderId())
+        .orElseThrow(() -> new BusinessException("ORDER_NOT_FOUND", "Order not found"));
+    requirePerpetualCandidate(candidate, account, lockedSetting, lockedOrder);
+    if (!candidate.fingerprint().matches(lockedOrder)) {
+      return false;
+    }
+    if (depthOrderExecutionService != null) {
+      depthOrderExecutionService.requireCurrentSimplePolicy(policy);
+    }
+    fullFillCoordinator.requireFresh(candidate.snapshot());
+    OrderStatus sourceStatus = lockedOrder.getStatus();
+    boolean awaitingStopLimitActivation = isAwaitingStopLimitActivation(lockedOrder);
+    if ((lockedOrder.getOrderType() == OrderType.STOP_LIMIT
+            && !isStandaloneUserStopLimit(lockedOrder))
         || !isPerpetualTriggered(lockedOrder, candidate.snapshot())) {
+      return false;
+    }
+    if (awaitingStopLimitActivation
+        && !perpetualLimitMarketable(lockedOrder, candidate.snapshot())) {
+      fullFillCoordinator.requireFresh(candidate.snapshot());
+      requirePreparedAccountRiskFresh(candidate.preparedAccountRisk());
+      if (orderRepository.activateStopLimitPending(lockedOrder.getId()) != 1) {
+        return false;
+      }
+      orderEventService.record(
+          lockedOrder.getId(),
+          "ORDER_TRIGGERED",
+          OrderStatus.PENDING_ACTIVATION,
+          OrderStatus.PENDING,
+          null,
+          "Perpetual STOP_LIMIT activated and resting");
+      lockedOrder.setStatus(OrderStatus.PENDING);
       return false;
     }
 
@@ -492,6 +909,7 @@ public class PendingOrderExecutionService {
           "Target Perpetual risk snapshot was not prepared");
     }
     BigDecimal quantity = canonicalQuantity(lockedOrder);
+    OrderType executionType = canonicalPendingExecutionType(lockedOrder);
     PerpetualOrderRiskService.OrderRisk fillRisk = perpetualOrderRiskService.evaluate(
         account.getPositionMode(),
         lockedSetting,
@@ -499,7 +917,7 @@ public class PendingOrderExecutionService {
         lockedOrder.getSide(),
         lockedOrder.getPositionSide(),
         Boolean.TRUE.equals(lockedOrder.getReduceOnly()),
-        lockedOrder.getOrderType(),
+        executionType,
         quantity,
         currentPrice(lockedOrder),
         candidate.snapshot(),
@@ -515,9 +933,11 @@ public class PendingOrderExecutionService {
           ErrorCode.INSUFFICIENT_MARGIN,
           "Fresh Cross available margin cannot support the pending opening fill");
     }
-    FullFillExecutionPath path = lockedOrder.getOrderType() == OrderType.LIMIT
-        ? FullFillExecutionPath.RESTING_LIMIT
-        : FullFillExecutionPath.TRIGGERED_STOP_MARKET;
+    FullFillExecutionPath path = awaitingStopLimitActivation
+        ? FullFillExecutionPath.IMMEDIATE_LIMIT
+        : executionType == OrderType.LIMIT
+            ? FullFillExecutionPath.RESTING_LIMIT
+            : FullFillExecutionPath.TRIGGERED_STOP_MARKET;
     FullFillResult fullFill = fullFillCoordinator.execute(
         new FullFillRequest(
             perpetualExecutionIntent(lockedOrder, quantity),
@@ -526,21 +946,38 @@ public class PendingOrderExecutionService {
             lockedOrder.getSide(),
             path,
             quantity,
-            path == FullFillExecutionPath.RESTING_LIMIT ? currentPrice(lockedOrder) : null),
+            path == FullFillExecutionPath.TRIGGERED_STOP_MARKET
+                ? null
+                : currentPrice(lockedOrder)),
         candidate.snapshot());
-    if (orZero(lockedOrder.getHoldAmount()).compareTo(fillRisk.holdAmount()) < 0) {
-      throw new BusinessException(
-          ErrorCode.ORDER_HOLD_INVALID,
-          "Stored Perpetual order hold does not cover the canonical fill");
-    }
-
     fullFillCoordinator.requireFresh(fullFill);
     requirePreparedAccountRiskFresh(candidate.preparedAccountRisk());
-    if (orderRepository.claimPending(lockedOrder.getId()) != 1) {
+    BigDecimal holdIncrease = requiredPerpetualHoldIncrease(
+        lockedOrder,
+        fillRisk,
+        accountRisk.crossAvailable());
+    int claimed = awaitingStopLimitActivation
+        ? orderRepository.activateStopLimitWorking(lockedOrder.getId())
+        : orderRepository.claimPending(lockedOrder.getId());
+    if (claimed != 1) {
       return false;
     }
-    lockedOrder.setStatus(OrderStatus.WORKING);
     try {
+      if (awaitingStopLimitActivation) {
+        orderEventService.record(
+            lockedOrder.getId(),
+            "ORDER_TRIGGERED",
+            OrderStatus.PENDING_ACTIVATION,
+            OrderStatus.WORKING,
+            null,
+            "Perpetual STOP_LIMIT activated for immediate execution");
+      }
+      lockedOrder.setStatus(OrderStatus.WORKING);
+      increasePerpetualOrderHold(
+          lockedOrder,
+          account,
+          fillRisk,
+          holdIncrease);
       for (PositionEntity position : accountPositions) {
         positionRepository.save(position);
       }
@@ -554,11 +991,70 @@ public class PendingOrderExecutionService {
           "Pending Perpetual order hold");
     } catch (RuntimeException exception) {
       // The transaction rolls the claim back; keep the in-memory candidate consistent as well.
-      lockedOrder.setStatus(OrderStatus.PENDING);
+      lockedOrder.setStatus(sourceStatus);
       throw exception;
     }
     recordFill(lockedOrder);
     return true;
+  }
+
+  private BigDecimal requiredPerpetualHoldIncrease(
+      OrderEntity order,
+      PerpetualOrderRiskService.OrderRisk fillRisk,
+      BigDecimal crossAvailable
+  ) {
+    BigDecimal stored = orZero(order.getHoldAmount());
+    BigDecimal required = orZero(fillRisk.holdAmount());
+    if (stored.compareTo(BigDecimal.ZERO) <= 0
+        || required.compareTo(BigDecimal.ZERO) <= 0
+        || order.getHoldCurrency() == null
+        || fillRisk.holdCurrency() == null
+        || !order.getHoldCurrency().equalsIgnoreCase(fillRisk.holdCurrency())) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Stored Perpetual order hold is inconsistent with the canonical fill");
+    }
+    BigDecimal increase = required.subtract(stored).max(BigDecimal.ZERO);
+    if (increase.signum() == 0 || isInternalIsolatedClose(order, fillRisk)) {
+      return increase;
+    }
+    if (orZero(crossAvailable).compareTo(increase) < 0) {
+      throw new BusinessException(
+          ErrorCode.INSUFFICIENT_MARGIN,
+          "Fresh available margin cannot cover the pending trigger hold increase");
+    }
+    return increase;
+  }
+
+  private void increasePerpetualOrderHold(
+      OrderEntity order,
+      TradingAccountEntity account,
+      PerpetualOrderRiskService.OrderRisk fillRisk,
+      BigDecimal increase
+  ) {
+    if (increase.signum() == 0) {
+      return;
+    }
+    account.setUsedMargin(orZero(account.getUsedMargin()).add(increase));
+    if (!isInternalIsolatedClose(order, fillRisk)) {
+      account.setFreeMargin(orZero(account.getFreeMargin()).subtract(increase));
+    }
+    order.setHoldAmount(orZero(order.getHoldAmount()).add(increase));
+    orderFillService.recordPerpetualOrderHoldIncrease(
+        account,
+        increase,
+        order.getId());
+  }
+
+  private static boolean isInternalIsolatedClose(
+      OrderEntity order,
+      PerpetualOrderRiskService.OrderRisk fillRisk
+  ) {
+    return order.getParentPositionId() != null
+        && order.getMarginMode() == MarginMode.ISOLATED
+        && fillRisk.marginMode() == MarginMode.ISOLATED
+        && fillRisk.openingBase().signum() == 0
+        && fillRisk.closingBase().signum() > 0;
   }
 
   private void requirePreparedAccountRiskFresh(
@@ -630,12 +1126,15 @@ public class PendingOrderExecutionService {
       aggregateClosing = aggregateClosing.add(activeRemainingBase(active));
       aggregateHolds = aggregateHolds.add(orZero(active.getHoldAmount()));
     }
+    BigDecimal freshIncrease = orZero(fillRisk.holdAmount())
+        .subtract(orZero(order.getHoldAmount()))
+        .max(BigDecimal.ZERO);
     if (aggregateClosing.compareTo(abs(parent.getLots())) > 0) {
       throw new BusinessException(
           ErrorCode.REDUCE_ONLY_EXCEEDS_POSITION,
           "Aggregate Isolated close orders exceed the current position slot");
     }
-    if (aggregateHolds.compareTo(fillRisk.isolatedHoldCapacity()) >= 0) {
+    if (aggregateHolds.add(freshIncrease).compareTo(fillRisk.isolatedHoldCapacity()) >= 0) {
       throw new BusinessException(
           ErrorCode.MARGIN_REDUCTION_UNSAFE,
           "Aggregate Isolated close holds exceed the current position risk buffer");
@@ -658,11 +1157,12 @@ public class PendingOrderExecutionService {
       OrderEntity order,
       BigDecimal baseQuantity
   ) {
+    OrderType executionType = canonicalPendingExecutionType(order);
     return new CreateOrderRequest(
         order.getAccountId(),
         order.getSymbol(),
         order.getSide(),
-        order.getOrderType(),
+        executionType,
         baseQuantity,
         currentPrice(order),
         null,
@@ -675,24 +1175,56 @@ public class PendingOrderExecutionService {
         order.getPositionSide(),
         com.fxplatform.trading.enums.QuantityUnit.BASE,
         order.getMarginMode(),
-        order.getTriggerPrice(),
-        order.getOrderType() == OrderType.STOP_MARKET
+        executionType == OrderType.STOP_MARKET ? order.getTriggerPrice() : null,
+        executionType == OrderType.STOP_MARKET
             ? com.fxplatform.trading.enums.TriggerPriceType.MARK_PRICE
             : null,
         order.getReduceOnly(),
-        List.of());
+        List.of(),
+        order.getTimeInForce(),
+        Boolean.TRUE.equals(order.getPostOnly()),
+        null,
+        null,
+        null);
+  }
+
+  private OrderType canonicalPendingExecutionType(OrderEntity order) {
+    return order.getOrderType() == OrderType.STOP_LIMIT
+        ? OrderType.LIMIT
+        : order.getOrderType();
+  }
+
+  private boolean isAwaitingStopLimitActivation(OrderEntity order) {
+    return order.getOrderType() == OrderType.STOP_LIMIT
+        && order.getStatus() == OrderStatus.PENDING_ACTIVATION;
+  }
+
+  private boolean isStandaloneUserStopLimit(OrderEntity order) {
+    return order.getOrderOrigin() == OrderOrigin.USER
+        && order.getProtectionType() == null
+        && order.getContingencyGroupId() == null
+        && order.getParentOrderId() == null;
+  }
+
+  private boolean perpetualLimitMarketable(
+      OrderEntity order,
+      ExecutableMarketSnapshot snapshot
+  ) {
+    BigDecimal price = currentPrice(order);
+    BigDecimal executable = order.getSide() == OrderSide.BUY ? snapshot.ask() : snapshot.bid();
+    return price != null && executable != null && (order.getSide() == OrderSide.BUY
+        ? executable.compareTo(price) <= 0
+        : executable.compareTo(price) >= 0);
   }
 
   private boolean isPerpetualTriggered(
       OrderEntity order,
       ExecutableMarketSnapshot snapshot
   ) {
-    if (order.getOrderType() == OrderType.LIMIT) {
-      BigDecimal price = currentPrice(order);
-      BigDecimal executable = order.getSide() == OrderSide.BUY ? snapshot.ask() : snapshot.bid();
-      return price != null && executable != null && (order.getSide() == OrderSide.BUY
-          ? executable.compareTo(price) <= 0
-          : executable.compareTo(price) >= 0);
+    if (order.getOrderType() == OrderType.LIMIT
+        || (order.getOrderType() == OrderType.STOP_LIMIT
+            && order.getStatus() == OrderStatus.PENDING)) {
+      return perpetualLimitMarketable(order, snapshot);
     }
     if (order.getOrderType() == OrderType.STOP_MARKET) {
       BigDecimal trigger = order.getTriggerPrice();
@@ -700,7 +1232,52 @@ public class PendingOrderExecutionService {
           ? snapshot.mark().compareTo(trigger) >= 0
           : snapshot.mark().compareTo(trigger) <= 0);
     }
+    if (order.getOrderType() == OrderType.STOP_LIMIT
+        && order.getStatus() == OrderStatus.PENDING_ACTIVATION) {
+      BigDecimal trigger = order.getTriggerPrice();
+      return trigger != null && snapshot.mark() != null && (order.getSide() == OrderSide.BUY
+          ? snapshot.mark().compareTo(trigger) >= 0
+          : snapshot.mark().compareTo(trigger) <= 0);
+    }
     return false;
+  }
+
+  private boolean isPerpetualDepthExecutableState(
+      OrderEntity order,
+      ExecutableMarketSnapshot snapshot
+  ) {
+    if (order.getOrderType() == OrderType.LIMIT) {
+      return order.getStatus() == OrderStatus.PENDING
+          || order.getStatus() == OrderStatus.PARTIALLY_FILLED;
+    }
+    if (order.getOrderType() == OrderType.STOP_LIMIT) {
+      if (!isStandaloneUserStopLimit(order)) {
+        return false;
+      }
+      if (order.getStatus() == OrderStatus.PENDING_ACTIVATION) {
+        return isPerpetualTriggered(order, snapshot);
+      }
+      return order.getStatus() == OrderStatus.PENDING
+          || order.getStatus() == OrderStatus.PARTIALLY_FILLED;
+    }
+    if (order.getOrderType() == OrderType.STOP_MARKET) {
+      if (order.getStatus() == OrderStatus.PARTIALLY_FILLED) {
+        return true;
+      }
+      return order.getStatus() == OrderStatus.PENDING
+          && isPerpetualTriggered(order, snapshot);
+    }
+    return false;
+  }
+
+  private BigDecimal depthRemainingQuantity(OrderEntity order) {
+    BigDecimal remaining = order.getRemainingQuantity();
+    if (remaining == null || remaining.signum() <= 0) {
+      throw new BusinessException(
+          "BAD_QUANTITY",
+          "Pending Perpetual DEPTH order requires a positive remaining quantity");
+    }
+    return remaining;
   }
 
   private boolean tryExecuteP0(PendingCandidate candidate) {
@@ -752,7 +1329,8 @@ public class PendingOrderExecutionService {
 
   private boolean prepareAndExecuteLegacy(
       OrderEntity order,
-      TradingAccountEntity accountSnapshot
+      TradingAccountEntity accountSnapshot,
+      boolean joinCallerTransaction
   ) {
     if (order.getRequestedPrice() == null) {
       return false;
@@ -771,7 +1349,9 @@ public class PendingOrderExecutionService {
         productType,
         requiredMargin,
         executablePrice(order, quote));
-    return transactionExecutor.execute(() -> tryExecuteLegacy(candidate));
+    return joinCallerTransaction
+        ? transactionExecutor.executeJoined(() -> tryExecuteLegacy(candidate))
+        : transactionExecutor.execute(() -> tryExecuteLegacy(candidate));
   }
 
   private boolean tryExecuteLegacy(LegacyPendingCandidate candidate) {
@@ -811,17 +1391,26 @@ public class PendingOrderExecutionService {
   }
 
   private boolean isTriggered(OrderEntity order, ExecutableMarketSnapshot snapshot) {
-    BigDecimal requested = triggerOrRequestedPrice(order);
+    boolean limitLike = order.getOrderType() == OrderType.LIMIT
+        || (order.getOrderType() == OrderType.STOP_LIMIT
+            && order.getStatus() == OrderStatus.PENDING);
+    BigDecimal requested = limitLike ? currentPrice(order) : triggerOrRequestedPrice(order);
     if (requested == null) {
       return false;
     }
-    if (order.getOrderType() == OrderType.LIMIT) {
+    if (limitLike) {
       BigDecimal executable = order.getSide() == OrderSide.BUY ? snapshot.ask() : snapshot.bid();
       return executable != null && (order.getSide() == OrderSide.BUY
           ? executable.compareTo(requested) <= 0
           : executable.compareTo(requested) >= 0);
     }
     if (order.getOrderType() == OrderType.STOP || order.getOrderType() == OrderType.STOP_MARKET) {
+      return snapshot.last() != null && (order.getSide() == OrderSide.BUY
+          ? snapshot.last().compareTo(requested) >= 0
+          : snapshot.last().compareTo(requested) <= 0);
+    }
+    if (order.getOrderType() == OrderType.STOP_LIMIT
+        && order.getStatus() == OrderStatus.PENDING_ACTIVATION) {
       return snapshot.last() != null && (order.getSide() == OrderSide.BUY
           ? snapshot.last().compareTo(requested) >= 0
           : snapshot.last().compareTo(requested) <= 0);
@@ -961,7 +1550,8 @@ public class PendingOrderExecutionService {
       ProductType productType,
       BigDecimal requiredMargin,
       ExecutableMarketSnapshot snapshot,
-      PerpetualAccountRiskSnapshotService.PreparedAccountRisk preparedAccountRisk
+      PerpetualAccountRiskSnapshotService.PreparedAccountRisk preparedAccountRisk,
+      PendingOrderExecutionFingerprint fingerprint
   ) {
   }
 

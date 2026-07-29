@@ -50,7 +50,6 @@ const jaJP = {
     loadingData: 'データを読み込み中。',
     loadFailed: '読み込みに失敗しました',
     empty: 'データがありません',
-    placeholderPageMessage: 'このページの業務入口は予約済みです。今後、対応データと表を追加します。',
     loginRequired: 'ログインが必要です',
     goLogin: 'ログインへ',
     previousPage: '前へ',

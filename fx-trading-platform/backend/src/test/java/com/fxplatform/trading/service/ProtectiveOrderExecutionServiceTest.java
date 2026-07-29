@@ -1,6 +1,7 @@
 package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -24,6 +25,7 @@ import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderOrigin;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
+import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.enums.ProtectionType;
 import com.fxplatform.trading.enums.TriggerExecutionType;
 import com.fxplatform.trading.enums.TriggerPriceType;
@@ -190,6 +192,33 @@ class ProtectiveOrderExecutionServiceTest {
   }
 
   @Test
+  void ordinaryProtectionWorkerNeverEvaluatesOrExecutesTrailingCarrier() {
+    OrderEntity trailing = protection(
+        OrderSide.SELL,
+        ProtectionType.STOP_LOSS,
+        TriggerExecutionType.MARKET);
+    trailing.setOrderType(OrderType.TRAILING_STOP_MARKET);
+    OrderEntity ordinary = protection(
+        OrderSide.SELL,
+        ProtectionType.TAKE_PROFIT,
+        TriggerExecutionType.MARKET);
+    ordinary.setOrderType(OrderType.STOP_MARKET);
+    BigDecimal mark = new BigDecimal("51000");
+    when(orderRepository.findBoundProtectionsByStatus(OrderStatus.PENDING_ACTIVATION))
+        .thenReturn(List.of(trailing, ordinary));
+    when(marketBundleResolver.resolvePerp(eq(SYMBOL), any(CandleRequest.class)))
+        .thenReturn(bundle(SYMBOL, mark, mark));
+    when(protectionOrderService.isTriggered(any(OrderEntity.class), eq(mark))).thenReturn(true);
+
+    assertThat(service.executeProtectiveOrders()).isEqualTo(1);
+
+    verify(protectionOrderService, never()).isTriggered(eq(trailing), any());
+    verify(systemCloseOrderService, never()).executeProtection(eq(trailing.getId()), any());
+    verify(systemCloseOrderService).executeProtection(eq(ordinary.getId()), any());
+    verify(accountRepository, never()).findById(trailing.getAccountId());
+  }
+
+  @Test
   void delegatesMarketAndLimitCarriersWithoutMutatingTheirState() {
     OrderEntity market = protection(
         OrderSide.SELL,
@@ -334,6 +363,35 @@ class ProtectiveOrderExecutionServiceTest {
         .resolvePerp(eq(SYMBOL), any(CandleRequest.class));
     verify(systemCloseOrderService, times(2))
         .executeProtection(eq(protection.getId()), any(ExecutableMarketSnapshot.class));
+  }
+
+  @Test
+  void strictScanPropagatesTheFirstFailureWithoutRetryOrWorkerEvent() {
+    OrderEntity protection = protection(
+        OrderSide.SELL,
+        ProtectionType.TAKE_PROFIT,
+        TriggerExecutionType.MARKET);
+    BigDecimal mark = new BigDecimal("51000");
+    when(orderRepository.findBoundProtectionsByStatus(OrderStatus.PENDING_ACTIVATION))
+        .thenReturn(List.of(protection));
+    when(marketBundleResolver.resolvePerp(eq(SYMBOL), any(CandleRequest.class)))
+        .thenReturn(bundle(SYMBOL, mark, mark), bundle(SYMBOL, mark, mark));
+    when(protectionOrderService.isTriggered(protection, mark)).thenReturn(true);
+    when(systemCloseOrderService.executeProtectionStrict(eq(protection.getId()), any()))
+        .thenThrow(new BusinessException(
+            com.fxplatform.common.exception.ErrorCode.MARKET_DATA_STALE,
+            "strict validation snapshot expired"));
+
+    assertThatThrownBy(service::executeProtectiveOrdersStrict)
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(com.fxplatform.common.exception.ErrorCode.MARKET_DATA_STALE));
+
+    verify(marketBundleResolver).resolvePerp(eq(SYMBOL), any(CandleRequest.class));
+    verify(systemCloseOrderService).executeProtectionStrict(eq(protection.getId()), any());
+    verify(systemCloseOrderService, never()).executeProtection(eq(protection.getId()), any());
+    verifyNoInteractions(orderEventService);
   }
 
   @Test

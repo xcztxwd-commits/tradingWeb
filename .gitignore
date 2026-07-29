@@ -7,18 +7,27 @@
 /docs/node_modules
 
 /fx-trading-platform/.env
+/fx-trading-platform/.env.*
+!/fx-trading-platform/.env.example
+!/fx-trading-platform/.env.*.example
+/fx-trading-platform/infra/.env*
+!/fx-trading-platform/infra/.env*.example
 /fx-trading-platform/node_modules
 /fx-trading-platform/apps/*/node_modules
 /fx-trading-platform/apps/*/dist
 /fx-trading-platform/apps/*/*.tsbuildinfo
+/fx-trading-platform/packages/*/dist
+/fx-trading-platform/coverage
 /fx-trading-platform/backend/target
 /fx-trading-platform/backend/.idea
 /fx-trading-platform/runtime
 
 /.codex-artifacts
+/.tmp-chart-diagnostic
 /.superpowers
 /fx-trading-platform/.codex-artifacts
 /fx-trading-platform/.codex-runlogs
+/fx-trading-platform/.run-logs
 /fx-trading-platform/artifacts
 /fx-trading-platform/test-results
 /fx-trading-platform/*.log
@@ -36,5 +45,12 @@
 /fx-trading-platform/backend/*.pid
 
 .npmrc
+
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
 
 .DS_Store

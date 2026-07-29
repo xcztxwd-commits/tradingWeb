@@ -433,6 +433,7 @@ class PositionServiceTest {
     SpotPositionEntity spotPosition = spotPosition(accountId, "BTC", "USDT");
     spotPosition.setQuantity(new BigDecimal("0.19980000"));
     spotPosition.setAverageCost(new BigDecimal("50050.05005000"));
+    spotPosition.setFeeCost(new BigDecimal("9.99000000"));
 
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account(userId, accountId)));
     when(positionRepository.findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN))
@@ -471,6 +472,7 @@ class PositionServiceTest {
     assertThat(response.positionUnit()).isEqualTo("BTC");
     assertThat(response.lots()).isEqualByComparingTo("0.19980000");
     assertThat(response.openPrice()).isEqualByComparingTo("50050.05005000");
+    assertThat(response.breakEvenPrice()).isEqualByComparingTo("50100.05005000");
     assertThat(response.markPrice()).isEqualByComparingTo("55000.10000000");
     assertThat(response.currentPrice()).isEqualByComparingTo("55000.00000000");
     assertThat(response.floatingPnl()).isEqualByComparingTo("989.00000000");

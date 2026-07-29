@@ -3,11 +3,16 @@ import { useTranslation } from 'react-i18next'
 import { Dialog, type DataViewColumn } from '@fx-platform/ui'
 import type { OrderEventResponse, OrderResponse } from '@fx-platform/frontend-core'
 
-import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
+import { ApiErrorState, LoadingState, LoginRequiredState } from '../data/PageState'
 import type { OrdersRouteModel, OrderView } from '../../routes/orders/ordersRoute.types'
 import { formatOrderActionReason, getOrderActionPolicy } from '../../routes/orders/orderActionPolicy'
 import { AssetMark } from '../asset/AssetMark'
+import { cssModuleClasses as css } from '../data/cssModuleClasses'
 import type { RouteDataCollectionRenderer } from '../data/RouteDataCollection'
+import surfaceStyles from '../data/UserPageSurface.module.css'
+import routeStyles from './OrdersRouteContent.module.css'
+
+const styles = { ...surfaceStyles, ...routeStyles }
 
 const viewOptions: Array<{ value: OrderView; labelKey: string }> = [
   { value: 'CURRENT', labelKey: 'orders.current' },
@@ -31,7 +36,7 @@ export function OrdersRouteContent({
 
   if (model.loginRequired) {
     return (
-      <section className="user-page">
+      <section className={css(styles, "user-page")}>
         <LoginRequiredState message={t('orders.loginMessage')} onLogin={model.openLogin} />
       </section>
     )
@@ -42,23 +47,23 @@ export function OrdersRouteContent({
     : { label: t('markets.goTrading'), href: '/trading' }
 
   return (
-    <section className="user-page orders-page">
-      <header className="user-page__header">
+    <section className={css(styles, "user-page", "orders-page")}>
+      <header className={css(styles, "user-page__header")}>
         <div>
           <h1>{t('orders.center')}</h1>
           <p>{t('orders.centerSummary')}</p>
         </div>
-        <button type="button" className="table-action table-action--secondary" onClick={() => void model.refresh()}>
+        <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => void model.refresh()}>
           {t('common.refresh')}
         </button>
       </header>
 
-      <div className="user-page__tabs" role="tablist" aria-label={t('orders.viewAria')}>
+      <div className={css(styles, "user-page__tabs")} role="tablist" aria-label={t('orders.viewAria')}>
         {viewOptions.map((option) => (
           <button
             key={option.value}
             type="button"
-            className={model.view === option.value ? 'active' : ''}
+            className={model.view === option.value ? styles.active : undefined}
             onClick={() => model.setView(option.value)}
           >
             {t(option.labelKey)}
@@ -66,7 +71,7 @@ export function OrdersRouteContent({
         ))}
       </div>
 
-      <div className="user-page__toolbar" aria-label={t('orders.filterAria')}>
+      <div className={css(styles, "user-page__toolbar")} aria-label={t('orders.filterAria')}>
         <label>
           <span>{t('common.status')}</span>
           <select value={model.status} onChange={(event) => model.setStatus(event.target.value)}>
@@ -85,7 +90,7 @@ export function OrdersRouteContent({
           <span>{t('assets.endTime')}</span>
           <input type="date" value={model.toDate} onChange={(event) => model.setToDate(event.target.value)} />
         </label>
-        <button type="button" className="table-action table-action--secondary" onClick={model.clearFilters} disabled={!model.hasActiveFilters}>
+        <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={model.clearFilters} disabled={!model.hasActiveFilters}>
           {t('common.clearFilters')}
         </button>
       </div>
@@ -98,7 +103,7 @@ export function OrdersRouteContent({
         />
       ) : null}
       {model.apiError ? <ApiErrorState error={model.apiError} onAction={() => void model.refresh()} /> : null}
-      {model.notice ? <div className="user-page__notice">{model.notice}</div> : null}
+      {model.notice ? <div className={css(styles, "user-page__notice")}>{model.notice}</div> : null}
 
       {model.view === 'EVENTS'
         ? renderDataCollection<OrderEventResponse>({
@@ -123,14 +128,15 @@ export function OrdersRouteContent({
         labelledBy="order-cancel-title"
         closeLabel={t('common.cancel')}
         pending={Boolean(model.pendingCancelOrder && model.busyOrderId === model.pendingCancelOrder.id)}
-        panelClassName="confirm-dialog"
+        priority="critical"
+        panelClassName={css(styles, "confirm-dialog__panel")}
       >
-        <div className="confirm-dialog__panel">
+        <div>
           <h2 id="order-cancel-title">{t('orders.cancelConfirm')}</h2>
           <p>{t('orders.cancelConfirmBody', { symbol: model.pendingCancelOrder?.symbol ?? '' })}</p>
-          <div className="user-page__actions">
-            <button type="button" className="table-action table-action--danger" onClick={() => void model.confirmCancel()} disabled={Boolean(model.pendingCancelOrder && model.busyOrderId === model.pendingCancelOrder.id)}>{t('orders.cancel')}</button>
-            <button type="button" className="table-action table-action--secondary" onClick={model.dismissCancel} disabled={Boolean(model.pendingCancelOrder && model.busyOrderId === model.pendingCancelOrder.id)}>{t('common.cancel')}</button>
+          <div className={css(styles, "user-page__actions")}>
+            <button type="button" className={css(styles, "table-action", "table-action--danger")} onClick={() => void model.confirmCancel()} disabled={Boolean(model.pendingCancelOrder && model.busyOrderId === model.pendingCancelOrder.id)}>{t('orders.cancel')}</button>
+            <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={model.dismissCancel} disabled={Boolean(model.pendingCancelOrder && model.busyOrderId === model.pendingCancelOrder.id)}>{t('common.cancel')}</button>
           </div>
         </div>
       </Dialog>
@@ -143,9 +149,9 @@ function OrderModifyForm({ model }: { model: OrdersRouteModel }) {
   const order = model.editingOrder
   if (!order) return null
   return (
-    <section className="user-page__events" aria-label={t('orders.modifyOrder')}>
+    <section className={css(styles, "user-page__events")} aria-label={t('orders.modifyOrder')}>
       <h2>{t('orders.modifyOrder')}</h2>
-      <form className="user-page__form" onSubmit={(event) => { event.preventDefault(); void model.submitModify() }}>
+      <form className={css(styles, "user-page__form")} onSubmit={(event) => { event.preventDefault(); void model.submitModify() }}>
         <label>
           <span>{t('common.quantity')}</span>
           <input value={model.modifyFields.quantity} onChange={(event) => model.setModifyField('quantity', event.target.value)} />
@@ -169,10 +175,10 @@ function OrderModifyForm({ model }: { model: OrdersRouteModel }) {
             </label>
           </>
         ) : null}
-        <button type="submit" className="table-action table-action--primary" disabled={model.busyOrderId === order.id}>
+        <button type="submit" className={css(styles, "table-action", "table-action--primary")} disabled={model.busyOrderId === order.id}>
           {t('common.save')}
         </button>
-        <button type="button" className="table-action table-action--secondary" onClick={model.dismissModify}>
+        <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={model.dismissModify}>
           {t('common.cancel')}
         </button>
       </form>
@@ -186,7 +192,7 @@ function orderColumns(model: OrdersRouteModel, t: TFunction): Array<DataViewColu
       key: 'symbol',
       label: 'Symbol',
       sortable: true,
-      render: (order) => <span className="asset-symbol-cell"><AssetMark symbol={order.symbol} size="sm" /><strong>{order.symbol}</strong></span>
+      render: (order) => <span className={css(styles, "asset-symbol-cell")}><AssetMark symbol={order.symbol} size="sm" /><strong>{order.symbol}</strong></span>
     },
     { key: 'side', label: 'Side', sortable: true },
     { key: 'orderType', label: t('common.type'), sortable: true },
@@ -211,12 +217,12 @@ function orderColumns(model: OrdersRouteModel, t: TFunction): Array<DataViewColu
       const modifyReason = formatOrderActionReason(policy, 'modify', t)
       const cancelReason = formatOrderActionReason(policy, 'cancel', t)
       return (
-        <div className="user-page__actions" data-order-id={order.id} data-order-status={order.status}>
-          <button type="button" className="table-action table-action--secondary" onClick={() => void model.showEvents(order)} disabled={model.busyOrderId === order.id}>{t('orders.events')}</button>
-          <button type="button" className="table-action table-action--secondary" onClick={() => model.startModify(order)} disabled={!policy.canModify || model.busyOrderId === order.id} title={modifyReason}>{t('orders.modify')}</button>
-          <button type="button" className="table-action table-action--danger" onClick={() => model.requestCancel(order)} disabled={!policy.canCancel || model.busyOrderId === order.id} title={cancelReason}>{t('orders.cancel')}</button>
-          {modifyReason ? <small className="user-page__action-reason">{modifyReason}</small> : null}
-          {cancelReason ? <small className="user-page__action-reason">{cancelReason}</small> : null}
+        <div className={css(styles, "user-page__actions")} data-order-id={order.id} data-order-status={order.status}>
+          <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => void model.showEvents(order)} disabled={model.busyOrderId === order.id}>{t('orders.events')}</button>
+          <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => model.startModify(order)} disabled={!policy.canModify || model.busyOrderId === order.id} title={modifyReason}>{t('orders.modify')}</button>
+          <button type="button" className={css(styles, "table-action", "table-action--danger")} onClick={() => model.requestCancel(order)} disabled={!policy.canCancel || model.busyOrderId === order.id} title={cancelReason}>{t('orders.cancel')}</button>
+          {modifyReason ? <small className={css(styles, "user-page__action-reason")}>{modifyReason}</small> : null}
+          {cancelReason ? <small className={css(styles, "user-page__action-reason")}>{cancelReason}</small> : null}
         </div>
       )
     }
@@ -236,7 +242,7 @@ function orderEventColumns(t: TFunction): Array<DataViewColumn<OrderEventRespons
 
 function StatusChip({ status }: { status: string }) {
   const tone = status === 'FILLED' ? 'positive' : status === 'PENDING' ? 'warning' : status === 'REJECTED' || status === 'CANCELED' ? 'negative' : ''
-  return <span className={`status-chip${tone ? ` status-chip--${tone}` : ''}`}>{status}</span>
+  return <span className={css(styles, 'status-chip', tone && `status-chip--${tone}`)}>{status}</span>
 }
 
 function formatTime(value: string | null | undefined) { return value ? new Date(value).toLocaleString() : '-' }

@@ -13,4 +13,12 @@ public class TradingTransactionExecutor {
   public <T> T execute(Supplier<T> mutation) {
     return mutation.get();
   }
+
+  /**
+   * Executes a validation-owned mutation inside the already-active system-step transaction.
+   */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public <T> T executeJoined(Supplier<T> mutation) {
+    return mutation.get();
+  }
 }

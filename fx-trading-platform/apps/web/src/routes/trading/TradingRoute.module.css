@@ -45,34 +45,6 @@
   --trading-accent-text: var(--theme-background);
 }
 
-.page :global(.trade-panel) {
-  --tp-bg: var(--trading-surface);
-  --tp-surface: var(--trading-surface);
-  --tp-surface-2: var(--trading-field-bg);
-  --tp-surface-3: var(--trading-surface-2);
-  --tp-border: var(--trading-border);
-  --tp-border-strong: var(--trading-border-strong);
-  --tp-text: var(--trading-text-strong);
-  --tp-muted: var(--trading-muted);
-  --tp-subtle: var(--trading-subtle);
-  --tp-buy: var(--trading-buy);
-  --tp-buy-hover: var(--trading-buy-strong);
-  --tp-sell: var(--trading-sell);
-  --tp-sell-hover: var(--trading-sell-strong);
-  --tp-focus: var(--trading-accent);
-  --tp-warning: var(--trading-accent);
-  border: 1px solid var(--trading-border);
-  background: var(--trading-surface);
-  color: var(--trading-text-strong);
-}
-
-.page :global(.trade-panel__session-error),
-.page :global(.trade-panel__notice) {
-  border-color: color-mix(in srgb, var(--trading-sell) 34%, transparent);
-  background: color-mix(in srgb, var(--trading-sell) 10%, transparent);
-  color: var(--trading-sell);
-}
-
 @media (max-width: 900px) {
   .page {
     min-height: 100dvh;

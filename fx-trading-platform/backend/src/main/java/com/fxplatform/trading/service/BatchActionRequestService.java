@@ -15,10 +15,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.TreeSet;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -362,14 +362,14 @@ public class BatchActionRequestService {
     if (scopeIds == null) {
       throw conflict("Batch scope is required");
     }
-    TreeSet<UUID> sorted = new TreeSet<>();
+    LinkedHashSet<UUID> ordered = new LinkedHashSet<>();
     for (UUID scopeId : scopeIds) {
       if (scopeId == null) {
         throw conflict("Batch scope contains a missing id");
       }
-      sorted.add(scopeId);
+      ordered.add(scopeId);
     }
-    return List.copyOf(sorted);
+    return List.copyOf(ordered);
   }
 
   private static String fingerprint(String actionType, String material) {

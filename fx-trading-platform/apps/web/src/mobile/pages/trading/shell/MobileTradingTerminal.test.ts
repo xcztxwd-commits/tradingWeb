@@ -54,6 +54,11 @@ describe('mobile trading terminal redesign', () => {
     assert.match(terminalSource, /aria-label=\{t\('trading\.mobileTerminal'\)\}/)
   })
 
+  it('keeps drawers and order sheets interactive across the full Mobile platform range', () => {
+    assert.match(mobilePanelsStyles, /@media \(max-width:\s*900px\)\s*\{[\s\S]*?\.drawerViewport,[\s\S]*?\.sheetLayer\s*\{[\s\S]*?display:\s*block/)
+    assert.doesNotMatch(mobilePanelsStyles, /max-width:\s*760px/)
+  })
+
   it('renders the product label from the selected market without inventing a contract state', () => {
     const terminalSource = readFileSync(terminalSourcePath, 'utf8')
     const terminalStyles = readFileSync(terminalStylesPath, 'utf8')
@@ -78,15 +83,12 @@ describe('mobile trading terminal redesign', () => {
     assert.match(themeCss, /--z-bottom-nav:\s*300/)
   })
 
-  it('keeps the mobile sample styles tokenized and free of decorative effects outside reference colors', () => {
+  it('keeps the mobile sample styles on semantic tokens and free of decorative effects', () => {
     const terminalStyles = readFileSync(terminalStylesPath, 'utf8')
     const sampleStyles = `${terminalStyles}\n${mobilePanelsStyles}`
-    const withoutReferenceColors = sampleStyles.replace(
-      /#(?:0b0e11|181a20|1e2329|2b3139|2ebd85|333b47|434c5a|848e9c|eaecef|f0b90b|f6465d|fcd535|ffffff)/gi,
-      ''
-    )
 
-    assert.doesNotMatch(withoutReferenceColors, /#[0-9a-fA-F]{3,8}/)
+    assert.doesNotMatch(sampleStyles, /#[0-9a-fA-F]{3,8}/)
+    assert.doesNotMatch(sampleStyles, /--theme-reference-/)
     assert.doesNotMatch(sampleStyles, /rgba\(|backdrop-filter|radial-gradient/)
     assert.match(terminalStyles, /var\(--space-2\)/)
     assert.match(terminalStyles, /var\(--radius-4\)/)
@@ -106,5 +108,12 @@ describe('mobile trading terminal redesign', () => {
   it('keeps the account section clear of the fixed mobile action bar on first paint', () => {
     const terminalStyles = readFileSync(terminalStylesPath, 'utf8')
     assert.match(terminalStyles, /\.accountSection\s*\{[\s\S]*margin-top:\s*var\(--space-8\)/)
+  })
+
+  it('keeps every fixed mobile trading action at least 44px tall', () => {
+    const terminalStyles = readFileSync(terminalStylesPath, 'utf8')
+
+    assert.match(terminalStyles, /\.actionBar button\s*\{[\s\S]*min-height:\s*44px/)
+    assert.doesNotMatch(terminalStyles, /\.actionBar button\s*\{[\s\S]*min-height:\s*40px/)
   })
 })

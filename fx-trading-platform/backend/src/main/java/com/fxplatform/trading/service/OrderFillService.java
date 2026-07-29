@@ -8,12 +8,19 @@ import com.fxplatform.account.enums.AccountType;
 import com.fxplatform.account.repository.TradingAccountRepository;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.exception.ErrorCode;
+import com.fxplatform.execution.DemoExecutionPolicy;
+import com.fxplatform.execution.DemoFillIdentity;
+import com.fxplatform.execution.DemoMatchFill;
+import com.fxplatform.execution.DemoMatchingMode;
+import com.fxplatform.execution.ExecutableMarketSnapshot;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.model.ProductType;
+import com.fxplatform.market.model.SymbolAssets;
 import com.fxplatform.market.repository.SymbolRepository;
+import com.fxplatform.market.service.SymbolAssetResolver;
 import com.fxplatform.risk.model.InstrumentProfile;
 import com.fxplatform.risk.model.InstrumentKind;
 import com.fxplatform.risk.service.MarginCalculator;
@@ -23,7 +30,12 @@ import com.fxplatform.risk.service.TradingInstrumentClassifier;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.entity.TradeEntity;
+import com.fxplatform.trading.enums.LiquidityRole;
+import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
+import com.fxplatform.trading.enums.PositionMode;
+import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
@@ -38,11 +50,20 @@ import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class OrderFillService {
 
   private static final int MONEY_SCALE = 8;
+  private static final int MONEY_PRECISION = 24;
+  private static final int FILL_IDENTITY_MAX_LENGTH = 64;
+  private static final int PROVIDER_CODE_MAX_LENGTH = 32;
+  private static final int TRADE_QUANTITY_PRECISION = 12;
+  private static final int TRADE_QUANTITY_SCALE = 4;
+  private static final int TRADE_PRICE_PRECISION = 24;
+  private static final int TRADE_PRICE_SCALE = 10;
   private final OrderRepository orderRepository;
   private final TradeRepository tradeRepository;
   private final PositionRepository positionRepository;
@@ -59,6 +80,18 @@ public class OrderFillService {
   private final TradingInstrumentClassifier instrumentClassifier = new TradingInstrumentClassifier();
   private static final Set<String> CRYPTO_BASES = Set.of(
       "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "OKB", "BCH", "LTC");
+
+  void recordPerpetualOrderHoldIncrease(
+      TradingAccountEntity account,
+      BigDecimal amount,
+      UUID orderId
+  ) {
+    ledgerService.recordOrderHold(
+        account,
+        amount,
+        orderId,
+        "Pending Perpetual trigger margin increased");
+  }
 
   @Autowired
   public OrderFillService(
@@ -193,6 +226,351 @@ public class OrderFillService {
       LedgerService ledgerService
   ) {
     this(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService, null);
+  }
+
+  @Transactional(propagation = Propagation.MANDATORY)
+  public OrderEntity applyFill(
+      OrderEntity lockedOrder,
+      OrderEntity lockedHoldOwner,
+      TradingAccountEntity lockedAccount,
+      DemoMatchFill fill,
+      String fillIdentity,
+      ExecutableMarketSnapshot snapshot,
+      DemoExecutionPolicy policy,
+      BigDecimal holdAfterFill
+  ) {
+    return applyFill(
+        lockedOrder,
+        lockedHoldOwner,
+        lockedAccount,
+        fill,
+        fillIdentity,
+        snapshot,
+        policy,
+        holdAfterFill,
+        false);
+  }
+
+  @Transactional(propagation = Propagation.MANDATORY)
+  public OrderEntity applyFill(
+      OrderEntity lockedOrder,
+      OrderEntity lockedHoldOwner,
+      TradingAccountEntity lockedAccount,
+      DemoMatchFill fill,
+      String fillIdentity,
+      ExecutableMarketSnapshot snapshot,
+      DemoExecutionPolicy policy,
+      BigDecimal holdAfterFill,
+      boolean parentTerminalAfterBatch
+  ) {
+    if (lockedOrder != null && lockedOrder.getProductType() == ProductType.LINEAR_PERP) {
+      return applyPerpetualDepthFill(
+          lockedOrder,
+          lockedHoldOwner,
+          lockedAccount,
+          fill,
+          fillIdentity,
+          snapshot,
+          policy,
+          holdAfterFill,
+          parentTerminalAfterBatch);
+    }
+    validateDepthFillInputs(
+        lockedOrder, lockedHoldOwner, lockedAccount, fill, fillIdentity, snapshot, policy);
+    BigDecimal quantity = money(fill.quantity());
+    BigDecimal price = fill.price();
+    BigDecimal grossQuote = money(quantity.multiply(price));
+    BigDecimal perFillFee = money(quantity.multiply(price).multiply(fill.feeRate()));
+    requireDepthNumeric(
+        grossQuote, MONEY_PRECISION, MONEY_SCALE,
+        "Fill gross quote is not representable by wallet money columns");
+    requireDepthNumeric(
+        perFillFee, MONEY_PRECISION, MONEY_SCALE,
+        "Fill fee is not representable by wallet money columns");
+
+    java.util.Optional<TradeEntity> existing = tradeRepository.findByOrderIdAndFillIdentity(
+        lockedOrder.getId(), fillIdentity);
+    if (existing.isPresent()) {
+      if (sameFillPayload(
+          existing.get(), lockedOrder, lockedAccount, fillIdentity,
+          quantity, price, perFillFee, fill.liquidityRole())) {
+        return lockedOrder;
+      }
+      throw new BusinessException(
+          ErrorCode.FILL_IDENTITY_CONFLICT,
+          "Fill identity is already associated with a different payload");
+    }
+
+    validateNewDepthFillState(lockedOrder, fill);
+    if (lockedHoldOwner.getHoldAmount() == null || holdAfterFill == null) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Spot DEPTH fill requires current and future hold amounts");
+    }
+    BigDecimal oldFilled = money(orZero(lockedOrder.getFilledQuantity()));
+    BigDecimal oldAverage = money(orZero(lockedOrder.getAvgFillPrice()));
+    BigDecimal oldRemaining = money(lockedOrder.getRemainingQuantity());
+    BigDecimal newFilled = money(oldFilled.add(quantity));
+    BigDecimal newRemaining = money(oldRemaining.subtract(quantity));
+    BigDecimal holdBeforeFill = money(lockedHoldOwner.getHoldAmount());
+    BigDecimal nextHold = money(holdAfterFill);
+    BigDecimal lockedSpend = lockedOrder.getSide() == OrderSide.BUY
+        ? money(grossQuote.add(perFillFee))
+        : quantity;
+    BigDecimal release = money(holdBeforeFill.subtract(lockedSpend).subtract(nextHold));
+    BigDecimal average = newFilled.signum() == 0
+        ? BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.HALF_UP)
+        : oldFilled.multiply(oldAverage)
+            .add(quantity.multiply(price))
+            .divide(newFilled, MONEY_SCALE, RoundingMode.HALF_UP);
+    BigDecimal feeTotal = money(orZero(lockedOrder.getFee()).add(perFillFee));
+    requireDepthNumeric(
+        newFilled, TRADE_QUANTITY_PRECISION, TRADE_QUANTITY_SCALE,
+        "Cumulative fill quantity is not representable by trading.orders.filled_quantity");
+    requireDepthNumeric(
+        newRemaining, TRADE_QUANTITY_PRECISION, TRADE_QUANTITY_SCALE,
+        "Remaining quantity is not representable by trading.orders.remaining_quantity");
+    requireDepthNumeric(
+        average, TRADE_PRICE_PRECISION, TRADE_PRICE_SCALE,
+        "Average fill price is not representable by trading.orders.avg_fill_price");
+    requireDepthNumeric(
+        feeTotal, MONEY_PRECISION, MONEY_SCALE,
+        "Cumulative fee is not representable by trading.orders.fee");
+    requireDepthNumeric(
+        holdBeforeFill, MONEY_PRECISION, MONEY_SCALE,
+        "Current order hold is not representable by wallet money columns");
+    requireDepthNumeric(
+        nextHold, MONEY_PRECISION, MONEY_SCALE,
+        "Future order hold is not representable by wallet money columns");
+    requireDepthNumeric(
+        lockedSpend, MONEY_PRECISION, MONEY_SCALE,
+        "Locked spend is not representable by wallet money columns");
+    requireDepthNumeric(
+        release, MONEY_PRECISION, MONEY_SCALE,
+        "Released hold is not representable by wallet money columns");
+
+    validateDepthSnapshot(lockedOrder, snapshot);
+    SymbolEntity symbol = strictDepthSymbol(lockedOrder);
+    SymbolAssets assets = SymbolAssetResolver.resolve(symbol);
+    String expectedHoldCurrency = lockedOrder.getSide() == OrderSide.BUY
+        ? assets.quoteAsset()
+        : assets.baseAsset();
+    validateDepthHold(
+        lockedHoldOwner,
+        expectedHoldCurrency,
+        holdBeforeFill,
+        nextHold,
+        newRemaining,
+        lockedSpend);
+    if (spotSettlementService == null || walletService == null) {
+      throw invalidDepthFill("Spot DEPTH settlement services are unavailable");
+    }
+    UUID tradeId = DemoFillIdentity.tradeId(lockedOrder.getId(), fillIdentity);
+    TradeEntity trade = depthTrade(
+        lockedOrder, lockedAccount, fill, fillIdentity, snapshot,
+        quantity, price, perFillFee, tradeId);
+
+    tradeRepository.save(trade);
+    ExecutionResult execution = new ExecutionResult(
+        price,
+        snapshot.asOf(),
+        quantity,
+        newRemaining,
+        perFillFee,
+        "USDT",
+        BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.HALF_UP),
+        null,
+        null);
+    if (lockedOrder.getSide() == OrderSide.BUY) {
+      spotSettlementService.settleBuyPartialFill(
+          lockedOrder, lockedHoldOwner, execution, symbol, lockedAccount, tradeId);
+    } else {
+      spotSettlementService.settleSellPartialFill(
+          lockedOrder, lockedHoldOwner, execution, symbol, lockedAccount, tradeId);
+    }
+    if (release.signum() > 0) {
+      walletService.releaseLockedWithEntryType(
+          lockedAccount.getId(),
+          expectedHoldCurrency,
+          release,
+          "TRADE",
+          tradeId,
+          "Spot order hold released after DEPTH fill",
+          "SPOT_ORDER_RELEASE");
+    }
+
+    lockedOrder.setStatus(newRemaining.signum() == 0
+        ? OrderStatus.FILLED
+        : OrderStatus.PARTIALLY_FILLED);
+    lockedOrder.setExecutionPrice(price);
+    lockedOrder.setAvgFillPrice(average);
+    lockedOrder.setFilledQuantity(newFilled);
+    lockedOrder.setRemainingQuantity(newRemaining);
+    lockedOrder.setFee(feeTotal);
+    lockedOrder.setFeeAsset("USDT");
+    lockedOrder.setLiquidityRole(fill.liquidityRole());
+    if (newRemaining.signum() == 0) {
+      lockedOrder.setFilledAt(snapshot.asOf());
+    }
+    lockedHoldOwner.setHoldAmount(nextHold);
+    if (lockedHoldOwner != lockedOrder) {
+      orderRepository.save(lockedHoldOwner);
+    }
+    orderRepository.save(lockedOrder);
+    publishFillEvents(lockedOrder, lockedAccount, trade, null);
+    return lockedOrder;
+  }
+
+  private OrderEntity applyPerpetualDepthFill(
+      OrderEntity lockedOrder,
+      OrderEntity lockedHoldOwner,
+      TradingAccountEntity lockedAccount,
+      DemoMatchFill fill,
+      String fillIdentity,
+      ExecutableMarketSnapshot snapshot,
+      DemoExecutionPolicy policy,
+      BigDecimal holdAfterFill,
+      boolean parentTerminalAfterBatch
+  ) {
+    validatePerpetualDepthFillInputs(
+        lockedOrder, lockedHoldOwner, lockedAccount, fill, fillIdentity, snapshot, policy);
+    BigDecimal quantity = money(fill.quantity());
+    BigDecimal price = fill.price();
+    BigDecimal grossQuote = money(quantity.multiply(price));
+    BigDecimal perFillFee = money(quantity.multiply(price).multiply(fill.feeRate()));
+    requireDepthNumeric(
+        grossQuote, MONEY_PRECISION, MONEY_SCALE,
+        "Perpetual fill gross notional is not representable by account money columns");
+    requireDepthNumeric(
+        perFillFee, MONEY_PRECISION, MONEY_SCALE,
+        "Perpetual fill fee is not representable by account money columns");
+
+    java.util.Optional<TradeEntity> existing = tradeRepository.findByOrderIdAndFillIdentity(
+        lockedOrder.getId(), fillIdentity);
+    if (existing.isPresent()) {
+      if (sameFillPayload(
+          existing.get(), lockedOrder, lockedAccount, fillIdentity,
+          quantity, price, perFillFee, fill.liquidityRole())) {
+        return lockedOrder;
+      }
+      throw new BusinessException(
+          ErrorCode.FILL_IDENTITY_CONFLICT,
+          "Fill identity is already associated with a different payload");
+    }
+
+    validateNewDepthFillState(lockedOrder, fill);
+    if (lockedOrder.getHoldAmount() == null || holdAfterFill == null) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Perpetual DEPTH fill requires current and future hold amounts");
+    }
+    requireDepthNumeric(
+        holdAfterFill, MONEY_PRECISION, MONEY_SCALE,
+        "Future Perpetual order hold is not exactly representable by account money columns");
+    BigDecimal oldFilled = money(orZero(lockedOrder.getFilledQuantity()));
+    BigDecimal oldAverage = money(orZero(lockedOrder.getAvgFillPrice()));
+    BigDecimal oldRemaining = money(lockedOrder.getRemainingQuantity());
+    BigDecimal newFilled = money(oldFilled.add(quantity));
+    BigDecimal newRemaining = money(oldRemaining.subtract(quantity));
+    BigDecimal holdBeforeFill = money(lockedOrder.getHoldAmount());
+    BigDecimal nextHold = money(holdAfterFill);
+    BigDecimal consumedHold = money(holdBeforeFill.subtract(nextHold));
+    BigDecimal average = oldFilled.multiply(oldAverage)
+        .add(quantity.multiply(price))
+        .divide(newFilled, MONEY_SCALE, RoundingMode.HALF_UP);
+    BigDecimal feeTotal = money(orZero(lockedOrder.getFee()).add(perFillFee));
+
+    requireDepthNumeric(
+        newFilled, TRADE_QUANTITY_PRECISION, TRADE_QUANTITY_SCALE,
+        "Cumulative fill quantity is not representable by trading.orders.filled_quantity");
+    requireDepthNumeric(
+        newRemaining, TRADE_QUANTITY_PRECISION, TRADE_QUANTITY_SCALE,
+        "Remaining quantity is not representable by trading.orders.remaining_quantity");
+    requireDepthNumeric(
+        average, TRADE_PRICE_PRECISION, TRADE_PRICE_SCALE,
+        "Average fill price is not representable by trading.orders.avg_fill_price");
+    requireDepthNumeric(
+        feeTotal, MONEY_PRECISION, MONEY_SCALE,
+        "Cumulative fee is not representable by trading.orders.fee");
+    requireDepthNumeric(
+        holdBeforeFill, MONEY_PRECISION, MONEY_SCALE,
+        "Current Perpetual order hold is not representable by account money columns");
+    requireDepthNumeric(
+        nextHold, MONEY_PRECISION, MONEY_SCALE,
+        "Future Perpetual order hold is not representable by account money columns");
+    requireDepthNumeric(
+        consumedHold, MONEY_PRECISION, MONEY_SCALE,
+        "Consumed Perpetual order hold is not representable by account money columns");
+    requireDepthNumeric(
+        snapshot.mark(), TRADE_PRICE_PRECISION, TRADE_PRICE_SCALE,
+        "Perpetual authority mark is not representable by position price columns");
+    validatePerpetualDepthHold(
+        lockedOrder, holdBeforeFill, nextHold, consumedHold, newRemaining);
+    SymbolEntity symbol = strictPerpetualDepthSymbol(lockedOrder);
+    InstrumentProfile profile = instrumentClassifier.profile(symbol);
+    if (profile.kind() != InstrumentKind.LINEAR_PERPETUAL) {
+      throw symbolNotTradable(
+          "Perpetual DEPTH symbol does not resolve to a Linear Perpetual profile");
+    }
+    if (positionEngine == null) {
+      throw invalidDepthFill("Perpetual DEPTH position service is unavailable");
+    }
+
+    ExecutionResult execution = new ExecutionResult(
+        price,
+        snapshot.asOf(),
+        quantity,
+        newRemaining,
+        perFillFee,
+        "USDT",
+        BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.HALF_UP),
+        null,
+        null);
+    PositionEngine.PositionUpdateResult positionUpdate = positionEngine.applyPerpetualFill(
+        lockedAccount,
+        lockedOrder,
+        execution,
+        profile,
+        snapshot.mark(),
+        lockedOrder.getLeverage(),
+        consumedHold,
+        "Perpetual DEPTH fill");
+
+    UUID tradeId = DemoFillIdentity.tradeId(lockedOrder.getId(), fillIdentity);
+    TradeEntity trade = depthTrade(
+        lockedOrder, lockedAccount, fill, fillIdentity, snapshot,
+        quantity, price, perFillFee, tradeId);
+    trade.setRealizedPnl(money(orZero(positionUpdate.realizedPnlDelta())));
+    tradeRepository.save(trade);
+
+    lockedOrder.setStatus(newRemaining.signum() == 0
+        ? OrderStatus.FILLED
+        : OrderStatus.PARTIALLY_FILLED);
+    lockedOrder.setExecutionPrice(price);
+    lockedOrder.setAvgFillPrice(average);
+    lockedOrder.setFilledQuantity(newFilled);
+    lockedOrder.setRemainingQuantity(newRemaining);
+    lockedOrder.setFee(feeTotal);
+    lockedOrder.setFeeAsset("USDT");
+    lockedOrder.setLiquidityRole(fill.liquidityRole());
+    lockedOrder.setHoldAmount(nextHold);
+    if (newRemaining.signum() == 0) {
+      lockedOrder.setFilledAt(snapshot.asOf());
+    }
+    orderRepository.save(lockedOrder);
+
+    applyCanonicalPerpetualTradeFee(lockedAccount, perFillFee);
+    positionEngine.recordPerpetualFillLedger(lockedAccount, positionUpdate);
+    recordCanonicalPerpetualTradeFee(lockedAccount, perFillFee, tradeId);
+    if (protectionOrderService != null) {
+      protectionOrderService.afterPerpetualFillLocked(
+          lockedOrder,
+          positionUpdate,
+          snapshot.mark(),
+          newRemaining.signum() == 0 || parentTerminalAfterBatch);
+    }
+    publishFillEvents(lockedOrder, lockedAccount, trade, positionUpdate);
+    return lockedOrder;
   }
 
   public OrderEntity fill(
@@ -456,6 +834,365 @@ public class OrderFillService {
         new PositionEngine.PositionUpdateResult(savedPosition));
 
     return order;
+  }
+
+  private void validateDepthFillInputs(
+      OrderEntity order,
+      OrderEntity holdOwner,
+      TradingAccountEntity account,
+      DemoMatchFill fill,
+      String fillIdentity,
+      ExecutableMarketSnapshot snapshot,
+      DemoExecutionPolicy policy
+  ) {
+    if (order == null || holdOwner == null || account == null || fill == null
+        || snapshot == null || policy == null) {
+      throw invalidDepthFill("Spot DEPTH fill inputs are required");
+    }
+    if (order.getId() == null || holdOwner.getId() == null || account.getId() == null
+        || order.getAccountId() == null || holdOwner.getAccountId() == null) {
+      throw invalidDepthFill("Spot DEPTH fill identities are required");
+    }
+    if (!account.getId().equals(order.getAccountId())
+        || !account.getId().equals(holdOwner.getAccountId())) {
+      throw invalidDepthFill("Order, hold owner, and account ownership must match");
+    }
+    if ((account.getUserId() != null && order.getUserId() != null
+        && !account.getUserId().equals(order.getUserId()))
+        || (account.getUserId() != null && holdOwner.getUserId() != null
+        && !account.getUserId().equals(holdOwner.getUserId()))
+        || (order.getUserId() != null && holdOwner.getUserId() != null
+        && !order.getUserId().equals(holdOwner.getUserId()))) {
+      throw invalidDepthFill("Order, hold owner, and account users must match");
+    }
+    if (account.getAccountType() != AccountType.DEMO) {
+      throw invalidDepthFill("Spot DEPTH fills are available only for Demo accounts");
+    }
+    if (holdOwner == order) {
+      if (!holdOwner.getId().equals(order.getId())) {
+        throw invalidDepthFill("Ordinary order hold owner is invalid");
+      }
+    } else if (order.getHoldOwnerOrderId() == null
+        || !order.getHoldOwnerOrderId().equals(holdOwner.getId())) {
+      throw invalidDepthFill("Shared order hold owner is invalid");
+    }
+    if (fillIdentity == null || fillIdentity.isBlank()) {
+      throw invalidDepthFill("Fill identity is required");
+    }
+    if (fillIdentity.length() > FILL_IDENTITY_MAX_LENGTH) {
+      throw invalidDepthFill("Fill identity must not exceed 64 characters");
+    }
+    if (fill.quantity() == null || fill.quantity().signum() <= 0
+        || fill.price() == null || fill.price().signum() <= 0
+        || fill.feeRate() == null || fill.feeRate().signum() < 0
+        || fill.liquidityRole() == null) {
+      throw invalidDepthFill("Fill quantity, price, role, and fee rate are invalid");
+    }
+    if (!isExactlyRepresentableAsNumeric(
+        fill.quantity(), TRADE_QUANTITY_PRECISION, TRADE_QUANTITY_SCALE)) {
+      throw invalidDepthFill("Fill quantity is not exactly representable by trading.trades.lots");
+    }
+    if (!isExactlyRepresentableAsNumeric(
+        fill.price(), TRADE_PRICE_PRECISION, TRADE_PRICE_SCALE)) {
+      throw invalidDepthFill("Fill price is not exactly representable by trading.trades.price");
+    }
+    BigDecimal walletQuantity = money(fill.quantity());
+    if (walletQuantity.signum() <= 0 || walletQuantity.compareTo(fill.quantity()) != 0) {
+      throw invalidDepthFill("Fill quantity must be exactly representable at money scale");
+    }
+    if (money(walletQuantity.multiply(fill.price())).signum() <= 0) {
+      throw invalidDepthFill("Fill gross quote amount must remain positive at money scale");
+    }
+    if (order.getProductType() != ProductType.CRYPTO_SPOT
+        || snapshot.productType() != ProductType.CRYPTO_SPOT) {
+      throw invalidDepthFill("Spot DEPTH fill requires CRYPTO_SPOT order and snapshot");
+    }
+    if (order.getSide() == null || order.getSymbol() == null || order.getSymbol().isBlank()) {
+      throw invalidDepthFill("Spot DEPTH order side and symbol are required");
+    }
+    if (policy.matchingMode() != DemoMatchingMode.DEPTH) {
+      throw invalidDepthFill("Spot partial fill requires DEPTH matching mode");
+    }
+    BigDecimal expectedFeeRate = fill.liquidityRole() == LiquidityRole.MAKER
+        ? policy.makerFeeRate()
+        : policy.takerFeeRate();
+    if (expectedFeeRate == null || fill.feeRate().compareTo(expectedFeeRate) != 0) {
+      throw invalidDepthFill("Fill fee rate does not match the DEPTH execution policy");
+    }
+  }
+
+  private void validatePerpetualDepthFillInputs(
+      OrderEntity order,
+      OrderEntity holdOwner,
+      TradingAccountEntity account,
+      DemoMatchFill fill,
+      String fillIdentity,
+      ExecutableMarketSnapshot snapshot,
+      DemoExecutionPolicy policy
+  ) {
+    if (order == null || holdOwner == null || account == null || fill == null
+        || snapshot == null || policy == null) {
+      throw invalidDepthFill("Perpetual DEPTH fill inputs are required");
+    }
+    if (order != holdOwner) {
+      throw invalidDepthFill("Perpetual DEPTH order must own its hold");
+    }
+    if (order.getId() == null || account.getId() == null || order.getAccountId() == null) {
+      throw invalidDepthFill("Perpetual DEPTH fill identities are required");
+    }
+    if (!account.getId().equals(order.getAccountId())) {
+      throw invalidDepthFill("Perpetual order and account ownership must match");
+    }
+    if (account.getUserId() != null && order.getUserId() != null
+        && !account.getUserId().equals(order.getUserId())) {
+      throw invalidDepthFill("Perpetual order and account users must match");
+    }
+    if (account.getAccountType() != AccountType.DEMO) {
+      throw invalidDepthFill("Perpetual DEPTH fills are available only for Demo accounts");
+    }
+    if (fillIdentity == null || fillIdentity.isBlank()) {
+      throw invalidDepthFill("Fill identity is required");
+    }
+    if (fillIdentity.length() > FILL_IDENTITY_MAX_LENGTH) {
+      throw invalidDepthFill("Fill identity must not exceed 64 characters");
+    }
+    if (fill.quantity() == null || fill.quantity().signum() <= 0
+        || fill.price() == null || fill.price().signum() <= 0
+        || fill.feeRate() == null || fill.feeRate().signum() < 0
+        || fill.liquidityRole() == null) {
+      throw invalidDepthFill("Fill quantity, price, role, and fee rate are invalid");
+    }
+    if (!isExactlyRepresentableAsNumeric(
+        fill.quantity(), TRADE_QUANTITY_PRECISION, TRADE_QUANTITY_SCALE)) {
+      throw invalidDepthFill("Fill quantity is not exactly representable by trading.trades.lots");
+    }
+    if (!isExactlyRepresentableAsNumeric(
+        fill.price(), TRADE_PRICE_PRECISION, TRADE_PRICE_SCALE)) {
+      throw invalidDepthFill("Fill price is not exactly representable by trading.trades.price");
+    }
+    BigDecimal accountQuantity = money(fill.quantity());
+    if (accountQuantity.signum() <= 0 || accountQuantity.compareTo(fill.quantity()) != 0) {
+      throw invalidDepthFill("Fill quantity must be exactly representable at money scale");
+    }
+    if (money(accountQuantity.multiply(fill.price())).signum() <= 0) {
+      throw invalidDepthFill("Fill gross notional must remain positive at money scale");
+    }
+    if (order.getProductType() != ProductType.LINEAR_PERP
+        || snapshot.productType() != ProductType.LINEAR_PERP) {
+      throw invalidDepthFill("Perpetual DEPTH fill requires LINEAR_PERP order and snapshot");
+    }
+    if (order.getSide() == null || order.getSymbol() == null || order.getSymbol().isBlank()) {
+      throw invalidDepthFill("Perpetual DEPTH order side and symbol are required");
+    }
+    validateDepthSnapshot(order, snapshot);
+    if (order.getPositionMode() == null
+        || order.getPositionSide() == null
+        || order.getMarginMode() == null
+        || account.getPositionMode() != order.getPositionMode()) {
+      throw invalidDepthFill("Perpetual DEPTH position and margin snapshots are invalid");
+    }
+    if ((order.getPositionMode() == PositionMode.ONE_WAY
+        && order.getPositionSide() != PositionSide.BOTH)
+        || (order.getPositionMode() == PositionMode.HEDGE
+        && order.getPositionSide() == PositionSide.BOTH)
+        || (order.getMarginMode() != MarginMode.CROSS
+        && order.getMarginMode() != MarginMode.ISOLATED)) {
+      throw invalidDepthFill("Perpetual DEPTH position slot is invalid");
+    }
+    if (order.getLeverage() == null || order.getLeverage() <= 0) {
+      throw invalidDepthFill("Perpetual DEPTH execution leverage must be positive");
+    }
+    if (snapshot.mark() == null || snapshot.mark().signum() <= 0) {
+      throw invalidDepthFill("Perpetual DEPTH authority mark must be positive");
+    }
+    if (policy.matchingMode() != DemoMatchingMode.DEPTH) {
+      throw invalidDepthFill("Perpetual partial fill requires DEPTH matching mode");
+    }
+    BigDecimal expectedFeeRate = fill.liquidityRole() == LiquidityRole.MAKER
+        ? policy.makerFeeRate()
+        : policy.takerFeeRate();
+    if (expectedFeeRate == null || fill.feeRate().compareTo(expectedFeeRate) != 0) {
+      throw invalidDepthFill("Fill fee rate does not match the DEPTH execution policy");
+    }
+  }
+
+  private void validateNewDepthFillState(OrderEntity order, DemoMatchFill fill) {
+    if (order.getRemainingQuantity() == null
+        || order.getRemainingQuantity().signum() <= 0
+        || fill.quantity().compareTo(order.getRemainingQuantity()) > 0) {
+      throw invalidDepthFill("Fill quantity exceeds the order remaining quantity");
+    }
+  }
+
+  private void validateDepthSnapshot(
+      OrderEntity order,
+      ExecutableMarketSnapshot snapshot
+  ) {
+    if (snapshot.platformSymbol() == null || snapshot.platformSymbol().isBlank()
+        || !snapshot.platformSymbol().trim().equalsIgnoreCase(order.getSymbol().trim())
+        || snapshot.productType() != order.getProductType()
+        || snapshot.providerCode() == null || snapshot.providerCode().isBlank()
+        || snapshot.providerCode().length() > PROVIDER_CODE_MAX_LENGTH
+        || snapshot.providerSymbol() == null || snapshot.providerSymbol().isBlank()
+        || snapshot.sourceMode() == null
+        || snapshot.asOf() == null
+        || snapshot.expiresAt() == null
+        || !snapshot.asOf().isBefore(snapshot.expiresAt())) {
+      throw invalidDepthFill("Executable market snapshot is incoherent");
+    }
+  }
+
+  private void validateDepthHold(
+      OrderEntity holdOwner,
+      String expectedCurrency,
+      BigDecimal holdBeforeFill,
+      BigDecimal holdAfterFill,
+      BigDecimal newRemaining,
+      BigDecimal lockedSpend
+  ) {
+    if (holdBeforeFill.signum() <= 0
+        || holdAfterFill.signum() < 0
+        || holdOwner.getHoldCurrency() == null
+        || !holdOwner.getHoldCurrency().equalsIgnoreCase(expectedCurrency)) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Spot DEPTH fill requires a positive hold in the spent asset");
+    }
+    BigDecimal release = money(
+        holdBeforeFill.subtract(money(lockedSpend)).subtract(holdAfterFill));
+    if (release.signum() < 0) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Spot DEPTH fill hold is underfunded");
+    }
+    if (newRemaining.signum() == 0 && holdAfterFill.signum() != 0) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Final Spot DEPTH fill must leave zero hold");
+    }
+    if (newRemaining.signum() > 0 && holdAfterFill.signum() <= 0) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Partial Spot DEPTH fill must preserve a positive future hold");
+    }
+  }
+
+  private void validatePerpetualDepthHold(
+      OrderEntity order,
+      BigDecimal holdBeforeFill,
+      BigDecimal holdAfterFill,
+      BigDecimal consumedHold,
+      BigDecimal newRemaining
+  ) {
+    if (holdBeforeFill.signum() <= 0
+        || holdAfterFill.signum() < 0
+        || consumedHold.signum() <= 0
+        || order.getHoldCurrency() == null
+        || !"USDT".equalsIgnoreCase(order.getHoldCurrency())) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Perpetual DEPTH fill requires a positive USDT order hold slice");
+    }
+    if (newRemaining.signum() == 0 && holdAfterFill.signum() != 0) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Final Perpetual DEPTH fill must leave zero hold");
+    }
+    if (newRemaining.signum() > 0 && holdAfterFill.signum() <= 0) {
+      throw new BusinessException(
+          ErrorCode.ORDER_HOLD_INVALID,
+          "Partial Perpetual DEPTH fill must preserve a positive future hold");
+    }
+  }
+
+  private boolean sameFillPayload(
+      TradeEntity existing,
+      OrderEntity order,
+      TradingAccountEntity account,
+      String fillIdentity,
+      BigDecimal quantity,
+      BigDecimal price,
+      BigDecimal fee,
+      LiquidityRole liquidityRole
+  ) {
+    return order.getId().equals(existing.getOrderId())
+        && account.getId().equals(existing.getAccountId())
+        && order.getProductType() == existing.getProductType()
+        && decimalEquals(existing.getLots(), quantity)
+        && decimalEquals(existing.getPrice(), price)
+        && decimalEquals(existing.getFee(), fee)
+        && "USDT".equals(existing.getFeeAsset())
+        && liquidityRole == existing.getLiquidityRole()
+        && fillIdentity.equals(existing.getFillIdentity());
+  }
+
+  private TradeEntity depthTrade(
+      OrderEntity order,
+      TradingAccountEntity account,
+      DemoMatchFill fill,
+      String fillIdentity,
+      ExecutableMarketSnapshot snapshot,
+      BigDecimal quantity,
+      BigDecimal price,
+      BigDecimal fee,
+      UUID tradeId
+  ) {
+    TradeEntity trade = new TradeEntity();
+    trade.setId(tradeId);
+    trade.setFillIdentity(fillIdentity);
+    trade.setCanonicalFullFill(false);
+    trade.setOrderId(order.getId());
+    trade.setAccountId(account.getId());
+    trade.setSymbol(order.getSymbol());
+    trade.setProductType(order.getProductType());
+    trade.setPositionSide(order.getPositionSide());
+    trade.setMarginMode(order.getMarginMode());
+    trade.setSide(order.getSide());
+    trade.setLots(quantity);
+    trade.setPrice(price);
+    trade.setFee(fee);
+    trade.setFeeAsset("USDT");
+    trade.setLiquidityRole(fill.liquidityRole());
+    trade.setSystemReason(OrderSystemReasonPolicy.external(order));
+    trade.setSourceMode(snapshot.sourceMode().name());
+    trade.setProviderCode(snapshot.providerCode());
+    trade.setExecutedAt(snapshot.asOf());
+    return trade;
+  }
+
+  private static boolean decimalEquals(BigDecimal left, BigDecimal right) {
+    return left != null && right != null && left.compareTo(right) == 0;
+  }
+
+  private static BigDecimal money(BigDecimal value) {
+    return value.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+  }
+
+  private static boolean isExactlyRepresentableAsNumeric(
+      BigDecimal value,
+      int precision,
+      int scale
+  ) {
+    try {
+      return value.setScale(scale, RoundingMode.UNNECESSARY).precision() <= precision;
+    } catch (ArithmeticException exception) {
+      return false;
+    }
+  }
+
+  private static void requireDepthNumeric(
+      BigDecimal value,
+      int precision,
+      int scale,
+      String message
+  ) {
+    if (!isExactlyRepresentableAsNumeric(value, precision, scale)) {
+      throw invalidDepthFill(message);
+    }
+  }
+
+  private static BusinessException invalidDepthFill(String message) {
+    return new BusinessException("INVALID_DEPTH_FILL", message);
   }
 
   private static boolean isCanonicalDemoFullFill(
@@ -738,6 +1475,62 @@ public class OrderFillService {
       return order.getLeverage();
     }
     return account.getLeverage();
+  }
+
+  private SymbolEntity strictDepthSymbol(OrderEntity order) {
+    String orderSymbol = order.getSymbol();
+    String normalized = orderSymbol == null ? "" : orderSymbol.trim().toUpperCase(Locale.ROOT);
+    if (symbolRepository == null || normalized.isBlank()) {
+      throw symbolNotTradable("Spot DEPTH fill requires a configured symbol");
+    }
+    SymbolEntity symbol = symbolRepository.findBySymbol(normalized)
+        .orElseThrow(() -> symbolNotTradable("Spot DEPTH symbol is not configured"));
+    String configuredCode = symbol.getSymbol() == null
+        ? ""
+        : symbol.getSymbol().trim().toUpperCase(Locale.ROOT);
+    if (!normalized.equals(configuredCode)
+        || symbol.getProductType() != ProductType.CRYPTO_SPOT
+        || !Boolean.TRUE.equals(symbol.getEnabled())
+        || !Boolean.TRUE.equals(symbol.getTradable())
+        || symbol.getBaseCurrency() == null
+        || symbol.getBaseCurrency().isBlank()
+        || symbol.getQuoteCurrency() == null
+        || symbol.getQuoteCurrency().isBlank()
+        || !"USDT".equalsIgnoreCase(symbol.getQuoteCurrency().trim())) {
+      throw symbolNotTradable("Spot DEPTH symbol is not an enabled tradable USDT Spot market");
+    }
+    return symbol;
+  }
+
+  private SymbolEntity strictPerpetualDepthSymbol(OrderEntity order) {
+    String orderSymbol = order.getSymbol();
+    String normalized = orderSymbol == null ? "" : orderSymbol.trim().toUpperCase(Locale.ROOT);
+    if (symbolRepository == null || normalized.isBlank()) {
+      throw symbolNotTradable("Perpetual DEPTH fill requires a configured symbol");
+    }
+    SymbolEntity symbol = symbolRepository.findBySymbol(normalized)
+        .orElseThrow(() -> symbolNotTradable("Perpetual DEPTH symbol is not configured"));
+    String configuredCode = symbol.getSymbol() == null
+        ? ""
+        : symbol.getSymbol().trim().toUpperCase(Locale.ROOT);
+    if (!normalized.equals(configuredCode)
+        || symbol.getProductType() != ProductType.LINEAR_PERP
+        || !Boolean.TRUE.equals(symbol.getEnabled())
+        || !Boolean.TRUE.equals(symbol.getTradable())
+        || symbol.getQuoteCurrency() == null
+        || !"USDT".equalsIgnoreCase(symbol.getQuoteCurrency().trim())
+        || symbol.getSettlementAsset() == null
+        || !"USDT".equalsIgnoreCase(symbol.getSettlementAsset().trim())
+        || symbol.getMarginAsset() == null
+        || !"USDT".equalsIgnoreCase(symbol.getMarginAsset().trim())) {
+      throw symbolNotTradable(
+          "Perpetual DEPTH symbol is not an enabled tradable USDT Linear Perpetual market");
+    }
+    return symbol;
+  }
+
+  private BusinessException symbolNotTradable(String message) {
+    return new BusinessException(ErrorCode.SYMBOL_NOT_TRADABLE, message);
   }
 
   private SymbolEntity symbolFor(OrderEntity order) {

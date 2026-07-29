@@ -90,7 +90,7 @@ describe('bottom account panel tabs', () => {
   })
 
   it('uses the existing table skeleton while account data is still loading', () => {
-    assert.match(source, /import \{ TableSkeleton \} from '\.\/TerminalSkeleton'/)
+    assert.match(source, /import \{ TableSkeleton \} from '\.\.\/\.\.\/\.\.\/components\/loading\/TerminalSkeleton'/)
     assert.match(source, /loading\?: boolean/)
     assert.match(source, /loading = false/)
     assert.match(source, /aria-busy=\{loading\}/)
@@ -185,6 +185,9 @@ describe('bottom account panel tabs', () => {
     assert.doesNotMatch(positionsGridSource, /positionVersions/)
     assert.doesNotMatch(source, /positionVersions/)
     assert.match(actionDialogSource, /MultiLevelProtectionEditor/)
+    assert.match(actionDialogSource, /import \{ Dialog \} from '@fx-platform\/ui'/)
+    assert.match(actionDialogSource, /<Dialog[\s\S]*priority="critical"/)
+    assert.doesNotMatch(actionDialogSource, /role="dialog"/)
     assert.match(actionDialogSource, /marginAdjustmentSupported/)
     assert.match(actionDialogSource, /Position version is unavailable from the current positions contract\./)
   })

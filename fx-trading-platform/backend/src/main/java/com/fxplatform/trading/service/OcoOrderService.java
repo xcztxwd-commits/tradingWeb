@@ -42,8 +42,10 @@ import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -189,7 +191,7 @@ public class OcoOrderService {
         owner.getId(),
         "OCO shared Spot hold locked",
         "SPOT_ORDER_LOCK");
-    for (OrderEntity leg : prepared.orderedLegs()) {
+    for (OrderEntity leg : eventLegs(prepared.orderedLegs())) {
       orderEventService.record(
           leg.getId(), "ORDER_PENDING", OrderStatus.ACCEPTED, OrderStatus.PENDING,
           null, "OCO leg accepted and waiting");
@@ -228,6 +230,7 @@ public class OcoOrderService {
           "SPOT_ORDER_RELEASE");
       owner.setHoldAmount(BigDecimal.ZERO);
     }
+    Map<UUID, OrderStatus> canceledFrom = new HashMap<>();
     for (OrderEntity leg : legs.stream().sorted(Comparator.comparing(OrderEntity::getId)).toList()) {
       if (!terminal(leg)) {
         OrderStatus from = leg.getStatus();
@@ -235,8 +238,13 @@ public class OcoOrderService {
         leg.setCanceledAt(Instant.now());
         leg.setRemainingQuantity(BigDecimal.ZERO);
         orderRepository.save(leg);
+        canceledFrom.put(leg.getId(), from);
+      }
+    }
+    for (OrderEntity leg : eventLegs(legs)) {
+      if (canceledFrom.containsKey(leg.getId())) {
         orderEventService.record(
-            leg.getId(), "ORDER_CANCELED", from, OrderStatus.CANCELED,
+            leg.getId(), "ORDER_CANCELED", canceledFrom.get(leg.getId()), OrderStatus.CANCELED,
             null, "OCO group canceled");
       }
     }
@@ -262,7 +270,7 @@ public class OcoOrderService {
         keys.stopClientKey(), keys.stopIdempotencyKey());
     List<OrderEntity> ordered = List.of(limit, stop).stream()
         .sorted(Comparator.comparing(OrderEntity::getId)).toList();
-    OrderEntity owner = ordered.getFirst();
+    OrderEntity owner = limit;
     for (OrderEntity leg : ordered) {
       leg.setHoldOwnerOrderId(owner.getId());
       leg.setHoldCurrency(hold.currency());
@@ -344,15 +352,7 @@ public class OcoOrderService {
         userId, accountId, keys.limitClientKey());
     Optional<OrderEntity> byIdempotency = orderRepository.findByUserIdAndIdempotencyKey(
         userId, keys.limitIdempotencyKey());
-    if (byClient.isPresent() && byIdempotency.isPresent()
-        && !java.util.Objects.equals(
-            byClient.get().getContingencyGroupId(),
-            byIdempotency.get().getContingencyGroupId())) {
-      throw new BusinessException(
-          ErrorCode.DUPLICATE_CLIENT_ORDER_ID,
-          "OCO client and idempotency keys resolve to different groups");
-    }
-    return byClient.or(() -> byIdempotency)
+    return byIdempotency.or(() -> byClient)
         .filter(order -> userId.equals(order.getUserId()) && accountId.equals(order.getAccountId()))
         .map(OrderEntity::getContingencyGroupId)
         .map(orderRepository::findByContingencyGroupId)
@@ -369,6 +369,18 @@ public class OcoOrderService {
         limit.getContingencyGroupId(),
         orderResponseMapper.toResponse(limit),
         orderResponseMapper.toResponse(stop));
+  }
+
+  private List<OrderEntity> eventLegs(List<OrderEntity> legs) {
+    OrderEntity limit = legs.stream()
+        .filter(leg -> leg.getOrderType() == OrderType.LIMIT)
+        .findFirst()
+        .orElseThrow();
+    OrderEntity stop = legs.stream()
+        .filter(leg -> leg.getOrderType() == OrderType.STOP_MARKET)
+        .findFirst()
+        .orElseThrow();
+    return List.of(limit, stop);
   }
 
   private List<OrderEntity> requireGroup(List<OrderEntity> legs) {
@@ -410,7 +422,7 @@ public class OcoOrderService {
     String clientRoot = request.clientOrderId();
     String idempotencyRoot = request.idempotencyKey() == null
         || request.idempotencyKey().isBlank()
-        ? clientRoot
+        ? UUID.randomUUID().toString()
         : request.idempotencyKey();
     OrderIdempotencyKeyPolicy.requireUserControlled(clientRoot, idempotencyRoot);
     return new LegKeys(

@@ -1,0 +1,337 @@
+{
+  "modelVersion": "trading-lab-v1",
+  "scenarios": [
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000001",
+      "category": "spot-repeated-buy-partial-sell-buy-final-sell",
+      "requiredCapabilities": ["PARTIAL_SELL", "REPEATED_BUY", "SPOT"],
+      "seed": "phase4-fixed-01-spot-cycle",
+      "initialBalances": {"BTC": "2", "USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 1},
+      "timeline": [
+        {"id": "buy-1", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1"}},
+        {"id": "partial-sell", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "0.4"}},
+        {"id": "buy-2", "sequence": 3, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 3}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "0.5"}},
+        {"id": "final-sell", "sequence": 4, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 4}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "1.1"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000002",
+      "category": "spot-weighted-cost-break-even",
+      "requiredCapabilities": ["BREAK_EVEN", "SPOT", "WEIGHTED_COST"],
+      "seed": "phase4-fixed-02-spot-weighted-cost",
+      "initialBalances": {"BTC": "1", "USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 1},
+      "timeline": [
+        {"id": "weighted-buy-1", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "LIMIT", "price": "100", "quantity": "1"}},
+        {"id": "weighted-buy-2", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "BUY", "orderType": "LIMIT", "price": "120", "quantity": "2"}},
+        {"id": "break-even-sell", "sequence": 3, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 3}, "parameters": {"side": "SELL", "orderType": "LIMIT", "price": "113.33333333", "quantity": "3"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000003",
+      "category": "perp-long-repeated-add-partial-close",
+      "requiredCapabilities": ["LINEAR_PERP", "LONG", "PARTIAL_CLOSE", "REPEATED_ADD"],
+      "seed": "phase4-fixed-03-perp-long-add-close",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 10},
+      "timeline": [
+        {"id": "long-open", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "2"}},
+        {"id": "long-add", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1"}},
+        {"id": "long-partial-close", "sequence": 3, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 3}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "1.5", "reduceOnly": true}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000004",
+      "category": "perp-short-repeated-add-partial-close",
+      "requiredCapabilities": ["LINEAR_PERP", "PARTIAL_CLOSE", "REPEATED_ADD", "SHORT"],
+      "seed": "phase4-fixed-04-perp-short-add-close",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 10},
+      "timeline": [
+        {"id": "short-open", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "2"}},
+        {"id": "short-add", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "1"}},
+        {"id": "short-partial-close", "sequence": 3, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 3}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1.5", "reduceOnly": true}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000005",
+      "category": "perp-add-close-add-close",
+      "requiredCapabilities": ["ADD_CLOSE_CYCLE", "LINEAR_PERP", "REALIZED_PNL"],
+      "seed": "phase4-fixed-05-perp-add-close-cycle",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 5},
+      "timeline": [
+        {"id": "cycle-add-1", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1"}},
+        {"id": "cycle-close-1", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "1", "reduceOnly": true}},
+        {"id": "cycle-add-2", "sequence": 3, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 3}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "2"}},
+        {"id": "cycle-close-2", "sequence": 4, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 4}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "2", "reduceOnly": true}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000006",
+      "category": "one-way-reversal",
+      "requiredCapabilities": ["LINEAR_PERP", "ONE_WAY", "REVERSAL"],
+      "seed": "phase4-fixed-06-one-way-reversal",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 10},
+      "timeline": [
+        {"id": "reversal-long", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1"}},
+        {"id": "reversal-short", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "2"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000007",
+      "category": "hedge-long-short-slots",
+      "requiredCapabilities": ["HEDGE", "LINEAR_PERP", "LONG_SLOT", "SHORT_SLOT"],
+      "seed": "phase4-fixed-07-hedge-slots",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "HEDGE", "marginMode": "CROSS", "leverage": 10},
+      "timeline": [
+        {"id": "set-hedge", "sequence": 1, "type": "SET_POSITION_MODE", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 0}, "parameters": {"positionMode": "HEDGE"}},
+        {"id": "hedge-long", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "positionSide": "LONG", "orderType": "MARKET", "quantity": "1"}},
+        {"id": "hedge-short", "sequence": 3, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "SELL", "positionSide": "SHORT", "orderType": "MARKET", "quantity": "1"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000008",
+      "category": "isolated-margin-leverage-adjustment",
+      "requiredCapabilities": ["ISOLATED", "LEVERAGE_CHANGE", "MARGIN_ADD", "MARGIN_REMOVE"],
+      "seed": "phase4-fixed-08-isolated-margin",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "ISOLATED", "leverage": 5},
+      "timeline": [
+        {"id": "set-isolated", "sequence": 1, "type": "SET_MARGIN_MODE", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 0}, "parameters": {"marginMode": "ISOLATED"}},
+        {"id": "isolated-open", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "2"}},
+        {"id": "isolated-add-margin", "sequence": 3, "type": "ADD_MARGIN", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"amount": "50"}},
+        {"id": "isolated-remove-margin", "sequence": 4, "type": "REMOVE_MARGIN", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 3}, "parameters": {"amount": "10"}},
+        {"id": "isolated-leverage", "sequence": 5, "type": "SET_LEVERAGE", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 4}, "parameters": {"leverage": 10}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000009",
+      "category": "cross-multi-symbol-shared-usdt",
+      "requiredCapabilities": ["CROSS", "LINEAR_PERP", "MULTI_SYMBOL", "SHARED_USDT"],
+      "seed": "phase4-fixed-09-cross-multi-symbol",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [
+        {"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"},
+        {"symbol": "ETH-USDT-PERP", "productType": "LINEAR_PERP"}
+      ],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 10},
+      "timeline": [
+        {"id": "cross-btc", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1"}},
+        {"id": "cross-eth", "sequence": 2, "type": "PLACE_ORDER", "symbol": "ETH-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "2"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000010",
+      "category": "advanced-order-types",
+      "requiredCapabilities": ["LIMIT", "MARKET", "OCO", "STOP_LIMIT", "TRAILING"],
+      "seed": "phase4-fixed-10-advanced-orders",
+      "initialBalances": {"BTC": "5", "USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 1},
+      "timeline": [
+        {"id": "market-order", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1"}},
+        {"id": "limit-order", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "BUY", "orderType": "LIMIT", "price": "99", "quantity": "1"}},
+        {"id": "stop-limit-order", "sequence": 3, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 3}, "parameters": {"side": "SELL", "orderType": "STOP_LIMIT", "triggerPrice": "98", "price": "97", "quantity": "1"}},
+        {"id": "oco-order", "sequence": 4, "type": "PLACE_OCO", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 4}, "parameters": {"side": "SELL", "quantity": "1", "takeProfitPrice": "120", "stopPrice": "90", "stopLimitPrice": "89"}},
+        {"id": "trailing-order", "sequence": 5, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 5}, "parameters": {"side": "SELL", "orderType": "TRAILING_STOP_MARKET", "callbackRate": "0.01", "quantity": "1"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000011",
+      "category": "time-in-force-reduce-only",
+      "requiredCapabilities": ["FOK", "IOC", "POST_ONLY", "REDUCE_ONLY"],
+      "seed": "phase4-fixed-11-time-in-force",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 10},
+      "timeline": [
+        {"id": "tif-open", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "3"}},
+        {"id": "post-only", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "BUY", "orderType": "LIMIT", "price": "95", "quantity": "1", "timeInForce": "GTC", "postOnly": true}},
+        {"id": "ioc", "sequence": 3, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 3}, "parameters": {"side": "SELL", "orderType": "LIMIT", "price": "105", "quantity": "1", "timeInForce": "IOC"}},
+        {"id": "fok", "sequence": 4, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 4}, "parameters": {"side": "SELL", "orderType": "LIMIT", "price": "106", "quantity": "1", "timeInForce": "FOK"}},
+        {"id": "reduce-only", "sequence": 5, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 5}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "1", "reduceOnly": true}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000012",
+      "category": "batch-tp-sl",
+      "requiredCapabilities": ["BATCH_PROTECTION", "STOP_LOSS", "TAKE_PROFIT"],
+      "seed": "phase4-fixed-12-batch-protection",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 10},
+      "timeline": [
+        {"id": "batch-open", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "4", "batchProtection": [{"type": "TAKE_PROFIT", "price": "110", "quantity": "2"}, {"type": "STOP_LOSS", "price": "90", "quantity": "2"}]}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000013",
+      "category": "manual-automatic-funding",
+      "requiredCapabilities": ["AUTOMATIC_FUNDING", "FUNDING", "MANUAL_FUNDING"],
+      "seed": "phase4-fixed-13-funding",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 10},
+      "timeline": [
+        {"id": "funding-open", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "2"}},
+        {"id": "manual-funding", "sequence": 2, "type": "APPLY_FUNDING", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"mode": "MANUAL", "rate": "0.0001"}},
+        {"id": "automatic-funding", "sequence": 3, "type": "APPLY_FUNDING", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 3}, "parameters": {"mode": "AUTOMATIC", "rate": "-0.0002"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000014",
+      "category": "simple-depth-partial-fill",
+      "requiredCapabilities": ["DEPTH_MATCHING", "PARTIAL_FILL", "SIMPLE_MATCHING"],
+      "seed": "phase4-fixed-14-matching",
+      "initialBalances": {"BTC": "1", "USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 1},
+      "timeline": [
+        {"id": "simple-fill", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "LIMIT", "price": "101", "quantity": "2"}, "expectedError": {"status": 409, "code": "PARTIAL_FILL_REMAINS"}},
+        {"id": "depth-fill", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "BUY", "orderType": "LIMIT", "price": "102", "quantity": "3", "matchingMode": "DEPTH"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000015",
+      "category": "monotonic-single-target-path",
+      "requiredCapabilities": ["DETERMINISTIC_PATH", "MONOTONIC_PATH", "SINGLE_TARGET"],
+      "seed": "phase4-fixed-15-monotonic-path",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 5},
+      "timeline": [
+        {"id": "monotonic-open", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1", "path": {"start": "100", "target": "120", "durationSeconds": 20}}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000016",
+      "category": "realistic-multi-waypoint-path",
+      "requiredCapabilities": ["DETERMINISTIC_PATH", "MULTI_WAYPOINT", "REALISTIC_PATH"],
+      "seed": "phase4-fixed-16-realistic-path",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 5},
+      "timeline": [
+        {"id": "realistic-open", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1", "path": {"start": "100", "targets": ["108", "96", "115", "105"], "durationSeconds": 40, "realistic": true}}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000017",
+      "category": "isolated-liquidation",
+      "requiredCapabilities": ["ISOLATED", "LIQUIDATION", "LIQUIDATION_EVIDENCE"],
+      "seed": "phase4-fixed-17-isolated-liquidation",
+      "initialBalances": {"USDT": "1000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "ISOLATED", "leverage": 20},
+      "timeline": [
+        {"id": "isolated-liquidation-open", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "10", "pathTarget": "80"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000018",
+      "category": "cross-full-liquidation",
+      "requiredCapabilities": ["CROSS", "FULL_LIQUIDATION", "MULTI_SYMBOL"],
+      "seed": "phase4-fixed-18-cross-liquidation",
+      "initialBalances": {"USDT": "1000"},
+      "symbols": [
+        {"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"},
+        {"symbol": "ETH-USDT-PERP", "productType": "LINEAR_PERP"}
+      ],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 20},
+      "timeline": [
+        {"id": "cross-liquidation-btc", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "5", "pathTarget": "70"}},
+        {"id": "cross-liquidation-eth", "sequence": 2, "type": "PLACE_ORDER", "symbol": "ETH-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "10", "pathTarget": "60"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000019",
+      "category": "negative-balance-margin-precision-notional",
+      "requiredCapabilities": ["NEGATIVE_MODE", "PRECISION", "REJECT_BALANCE", "REJECT_MARGIN", "REJECT_NOTIONAL"],
+      "seed": "phase4-fixed-19-negative-requests",
+      "initialBalances": {"BTC": "0", "USDT": "100"},
+      "symbols": [
+        {"symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT"},
+        {"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}
+      ],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 10},
+      "timeline": [
+        {"id": "insufficient-balance", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "100"}, "expectedError": {"status": 409, "code": "INSUFFICIENT_BALANCE"}},
+        {"id": "insufficient-margin", "sequence": 2, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 2}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "100"}, "expectedError": {"status": 409, "code": "INSUFFICIENT_MARGIN"}},
+        {"id": "invalid-precision", "sequence": 3, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 3}, "parameters": {"side": "BUY", "orderType": "LIMIT", "price": "100.001", "quantity": "0.0001"}, "expectedError": {"status": 400, "code": "INVALID_PRECISION"}},
+        {"id": "below-min-notional", "sequence": 4, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 4}, "parameters": {"side": "BUY", "orderType": "LIMIT", "price": "1", "quantity": "0.1"}, "expectedError": {"status": 400, "code": "MIN_NOTIONAL"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000020",
+      "category": "pause-resume-cancel",
+      "requiredCapabilities": ["CANCEL", "PAUSE", "RESUME", "SSE"],
+      "seed": "phase4-fixed-20-lifecycle-controls",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 5},
+      "timeline": [
+        {"id": "lifecycle-open", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 20}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1", "controlSchedule": [{"atSecond": 2, "action": "PAUSE"}, {"atSecond": 4, "action": "RESUME"}, {"atSecond": 8, "action": "CANCEL"}]}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000021",
+      "category": "failure-report-cleanup",
+      "requiredCapabilities": ["CLEANUP", "FAILURE_REPORT", "RETAINED_REPORT"],
+      "seed": "phase4-fixed-21-failure-cleanup",
+      "initialBalances": {"BTC": "0", "USDT": "100"},
+      "symbols": [{"symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 1},
+      "timeline": [
+        {"id": "failure-trigger", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-LAB", "productType": "CRYPTO_SPOT", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "SELL", "orderType": "MARKET", "quantity": "1"}, "expectedError": {"status": 409, "code": "INSUFFICIENT_BALANCE"}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000022",
+      "category": "two-run-contamination",
+      "requiredCapabilities": ["CLEAN_RESET", "ISOLATION", "TWO_RUN"],
+      "seed": "phase4-fixed-22-two-run-isolation",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 5},
+      "timeline": [
+        {"id": "isolation-run-action", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1", "repeatRuns": 2}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000023",
+      "category": "permission-supervisor-injection",
+      "requiredCapabilities": ["PERMISSION", "SUPERVISOR", "SUPERVISOR_INJECTION"],
+      "seed": "phase4-fixed-23-permission-supervisor",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 5},
+      "timeline": [
+        {"id": "permission-probe", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1", "permissionMatrix": ["VIEW", "EXECUTE", "SUPER_ADMIN"], "supervisorInjectionProbe": true}}
+      ]
+    },
+    {
+      "scenarioId": "60000000-0000-4000-8000-000000000024",
+      "category": "large-report-chunk-print-confirmation",
+      "requiredCapabilities": ["LARGE_REPORT", "MULTI_CHUNK", "PRINT_CONFIRMATION"],
+      "seed": "phase4-fixed-24-large-report",
+      "initialBalances": {"USDT": "100000"},
+      "symbols": [{"symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP"}],
+      "defaults": {"positionMode": "ONE_WAY", "marginMode": "CROSS", "leverage": 5},
+      "timeline": [
+        {"id": "large-report-open", "sequence": 1, "type": "PLACE_ORDER", "symbol": "BTC-USDT-PERP", "productType": "LINEAR_PERP", "trigger": {"type": "VIRTUAL_TIME", "atSecond": 1}, "parameters": {"side": "BUY", "orderType": "MARKET", "quantity": "1", "tickCount": 200000, "apiTracePayloadBytes": 4096, "printThresholdBytes": 52428800}}
+      ]
+    }
+  ]
+}

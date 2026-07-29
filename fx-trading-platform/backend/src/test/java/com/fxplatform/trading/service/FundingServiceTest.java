@@ -3,7 +3,9 @@ package com.fxplatform.trading.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -33,6 +35,7 @@ import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.FundingRateRepository;
 import com.fxplatform.trading.repository.FundingSettlementRepository;
 import com.fxplatform.trading.repository.PositionRepository;
+import java.lang.reflect.InvocationTargetException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.HashMap;
@@ -117,6 +120,49 @@ class FundingServiceTest {
 
     assertThat(current).isSameAs(rate);
     verify(fundingRateRepository).findLatestBySymbol("BTCUSDT");
+  }
+
+  @Test
+  void processorCarriesAuthorityTimeIntoRealFundingSettlementInsteadOfWallClock() {
+    Instant fundingTime = Instant.parse("2099-01-01T00:00:00Z");
+    Instant authorityTime = fundingTime.plusSeconds(1);
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "10000.00000000");
+    PositionEntity position = position(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1.00", "50000.00000000");
+    FundingRateEntity rate = fundingRate(
+        "BTCUSDT-PERP", "0.0000", "50000.00000000");
+    rate.setFundingTime(fundingTime);
+    rate.setNextFundingTime(fundingTime.plusSeconds(8 * 60 * 60));
+
+    stubLinearPerpetual(account, position);
+    when(fundingRateRepository.findDueRates(null, authorityTime)).thenReturn(List.of(rate));
+    when(positionRepository.findBySymbolAndStatusOrderByOpenedAtAsc(
+        "BTCUSDT-PERP", PositionStatus.OPEN)).thenReturn(List.of(position));
+    when(fundingSettlementRepository.insertIfAbsent(any(FundingSettlementEntity.class)))
+        .thenReturn(true);
+
+    FundingService realFundingService = service();
+    FundingService authorityCheckingService = mock(FundingService.class, invocation -> {
+      if (!invocation.getMethod().getName().equals("settleFundingForPositionOutcome")) {
+        return null;
+      }
+      assertThat(invocation.getArguments())
+          .as("FundingSettlementProcessor must pass authorityTime into FundingService")
+          .containsExactly(position, rate, authorityTime);
+      try {
+        return invocation.getMethod().invoke(realFundingService, invocation.getArguments());
+      } catch (InvocationTargetException exception) {
+        throw exception.getCause();
+      }
+    });
+    FundingSettlementProcessor processor = new FundingSettlementProcessor(
+        fundingRateRepository,
+        positionRepository,
+        authorityCheckingService);
+
+    assertThat(processor.settlePersistedDueRates(authorityTime)).isEqualTo(1);
+    verify(fundingSettlementRepository).insertIfAbsent(any(FundingSettlementEntity.class));
   }
 
   @ParameterizedTest
@@ -309,8 +355,11 @@ class FundingServiceTest {
 
     assertThat(cashflow).isEqualByComparingTo("-1.00000000");
     assertThat(account.getBalance()).isEqualByComparingTo("100.00000000");
+    assertThat(account.getEquity()).isEqualByComparingTo("99.00000000");
+    assertThat(account.getFreeMargin()).isEqualByComparingTo("-900.00000000");
     assertThat(position.getMarginHeld()).isEqualByComparingTo("1.00000000");
     assertThat(position.getFundingPnl()).isEqualByComparingTo("-1.00000000");
+    verify(accountRepository).save(account);
 
     ArgumentCaptor<FundingSettlementEntity> settlementCaptor =
         ArgumentCaptor.forClass(FundingSettlementEntity.class);
@@ -320,7 +369,7 @@ class FundingServiceTest {
     assertThat(settlement.getIsolatedMarginAfter()).isEqualByComparingTo("0.00000000");
     assertThat(settlement.getShortfall()).isEqualByComparingTo("1.00000000");
     verify(ledgerService).recordFundingFeeSettlement(
-        account, new BigDecimal("-1.00000000"), settlement.getId(), "Perpetual funding fee");
+        account, new BigDecimal("-2.00000000"), settlement.getId(), "Perpetual funding fee");
     verify(ledgerService).recordFundingBankruptcyShortfall(
         account, new BigDecimal("1.00000000"), settlement.getId(), "Funding bankruptcy shortfall");
     verify(auditLogService).record(
@@ -376,7 +425,7 @@ class FundingServiceTest {
     assertThat(first).isEqualByComparingTo("-5.00000000");
     assertThat(duplicate).isEqualByComparingTo("0.00000000");
     assertThat(account.getBalance()).isEqualByComparingTo("10000.00000000");
-    assertThat(account.getEquity()).isEqualByComparingTo("10050.00000000");
+    assertThat(account.getEquity()).isEqualByComparingTo("10045.00000000");
     assertThat(account.getUsedMargin()).isEqualByComparingTo("1250.00000000");
     assertThat(account.getFreeMargin()).isEqualByComparingTo("7600.00000000");
     assertThat(position.getMarginHeld()).isEqualByComparingTo("1000.00000000");
@@ -384,9 +433,8 @@ class FundingServiceTest {
     assertThat(position.getMarginHeld().add(position.getFundingPnl()))
         .isEqualByComparingTo("985.00000000");
     assertThat(position.getVersion()).isEqualTo(5L);
-    verify(accountRepository, never()).save(account);
+    verify(accountRepository).save(account);
     verify(positionRepository).save(position);
-    verifyNoInteractions(ledgerService);
 
     ArgumentCaptor<FundingSettlementEntity> captor =
         ArgumentCaptor.forClass(FundingSettlementEntity.class);
@@ -396,6 +444,13 @@ class FundingServiceTest {
     assertThat(firstAttempt.getIsolatedMarginAfter()).isEqualByComparingTo("985.00000000");
     assertThat(firstAttempt.getAmount()).isEqualByComparingTo("-5.00000000");
     assertThat(firstAttempt.getMarginMode()).isEqualTo(MarginMode.ISOLATED);
+    verify(ledgerService).recordFundingFeeSettlement(
+        account,
+        new BigDecimal("-5.00000000"),
+        firstAttempt.getId(),
+        "Perpetual funding fee");
+    verify(ledgerService, never()).recordFundingBankruptcyShortfall(
+        any(), any(), any(), anyString());
 
     ArgumentCaptor<TradingAccountMutationEvent> eventCaptor =
         ArgumentCaptor.forClass(TradingAccountMutationEvent.class);
@@ -502,6 +557,94 @@ class FundingServiceTest {
     verify(accountRepository, never()).save(any(TradingAccountEntity.class));
     verify(positionRepository, never()).save(any(PositionEntity.class));
     verifyNoInteractions(ledgerService);
+  }
+
+  @Test
+  void currentValidationTickUsesVirtualAuthorityInsteadOfWallClockOpenedAt() {
+    Instant virtualTime = Instant.parse("2020-01-01T00:00:01Z");
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "10000.00000000");
+    PositionEntity position = position(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "50000.00000000");
+    position.setOpenedAt(Instant.parse("2026-07-25T00:00:00Z"));
+    FundingRateEntity rate = fundingRate(
+        "BTCUSDT-PERP", "0.0001", "50000.00000000");
+    rate.setFundingTime(virtualTime);
+    rate.setNextFundingTime(virtualTime.plusSeconds(8 * 60 * 60));
+    rate.setAsOf(virtualTime);
+    rate.setProviderCode("VALIDATION");
+    rate.setSourceMode("DEMO");
+
+    stubLinearPerpetual(account, position);
+    when(fundingSettlementRepository.insertIfAbsent(any(FundingSettlementEntity.class)))
+        .thenReturn(true);
+
+    FundingService.FundingSettlementOutcome outcome =
+        service().settleFundingForPositionOutcome(position, rate, virtualTime);
+
+    assertThat(outcome.inserted()).isTrue();
+    assertThat(outcome.cashflow()).isEqualByComparingTo("-5.00000000");
+    verify(fundingSettlementRepository).insertIfAbsent(any(FundingSettlementEntity.class));
+  }
+
+  @Test
+  void olderValidationTickDoesNotBackChargeAPositionOpenedAfterItsVirtualCycle() {
+    Instant virtualTime = Instant.parse("2020-01-01T00:00:01Z");
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "10000.00000000");
+    PositionEntity position = position(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "50000.00000000");
+    position.setOpenedAt(virtualTime.plusSeconds(1));
+    FundingRateEntity rate = fundingRate(
+        "BTCUSDT-PERP", "0.0001", "50000.00000000");
+    rate.setFundingTime(virtualTime);
+    rate.setNextFundingTime(virtualTime.plusSeconds(8 * 60 * 60));
+    rate.setAsOf(virtualTime);
+    rate.setProviderCode("VALIDATION");
+    rate.setSourceMode("DEMO");
+
+    stubLinearPerpetual(account, position);
+
+    FundingService.FundingSettlementOutcome outcome =
+        service().settleFundingForPositionOutcome(
+            position,
+            rate,
+            virtualTime.plusSeconds(2));
+
+    assertThat(outcome.inserted()).isFalse();
+    assertThat(outcome.cashflow()).isZero();
+    verify(fundingSettlementRepository, never())
+        .insertIfAbsent(any(FundingSettlementEntity.class));
+  }
+
+  @Test
+  void futureVirtualTimelineDoesNotBackChargeAnEarlierValidationTick() {
+    Instant fundingTime = Instant.parse("2030-01-01T00:00:01Z");
+    UUID accountId = UUID.randomUUID();
+    TradingAccountEntity account = account(accountId, "10000.00000000");
+    PositionEntity position = position(
+        accountId, "BTCUSDT-PERP", OrderSide.BUY, "1", "50000.00000000");
+    position.setOpenedAt(Instant.parse("2026-07-25T00:00:00Z"));
+    FundingRateEntity rate = fundingRate(
+        "BTCUSDT-PERP", "0.0001", "50000.00000000");
+    rate.setFundingTime(fundingTime);
+    rate.setNextFundingTime(fundingTime.plusSeconds(8 * 60 * 60));
+    rate.setAsOf(fundingTime);
+    rate.setProviderCode("VALIDATION");
+    rate.setSourceMode("DEMO");
+
+    stubLinearPerpetual(account, position);
+
+    FundingService.FundingSettlementOutcome outcome =
+        service().settleFundingForPositionOutcome(
+            position,
+            rate,
+            fundingTime.plusSeconds(1));
+
+    assertThat(outcome.inserted()).isFalse();
+    assertThat(outcome.cashflow()).isZero();
+    verify(fundingSettlementRepository, never())
+        .insertIfAbsent(any(FundingSettlementEntity.class));
   }
 
   @Test

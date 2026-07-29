@@ -8,6 +8,7 @@ import searchIcon from '../assets/topbar-c-icons/search.svg'
 import supportIcon from '../assets/topbar-c-icons/support.svg'
 import userIcon from '../assets/topbar-c-icons/user.svg'
 import walletIcon from '../assets/topbar-c-icons/wallet.svg'
+import styles from './TopbarToolIcon.module.css'
 
 export type TopbarToolIconName =
   | 'search'
@@ -40,7 +41,7 @@ export function TopbarToolIcon({ className, name, size = 30, ...props }: TopbarT
     <img
       alt=""
       aria-hidden="true"
-      className={['topbar-tool-icon-image', className].filter(Boolean).join(' ')}
+      className={[styles.image, className].filter(Boolean).join(' ')}
       draggable={false}
       height={size}
       src={iconSources[name]}

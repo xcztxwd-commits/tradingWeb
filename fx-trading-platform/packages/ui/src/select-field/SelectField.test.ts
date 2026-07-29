@@ -123,10 +123,15 @@ describe('SelectField component contract', () => {
 
   it('exports from the package and leaves app consumers on root-only layout hooks', () => {
     assert.match(packageIndexSource, /export \* from '\.\/select-field\/SelectField'/u)
+    assert.match(componentSource, /const rootClassName = \[styles\.root, className\]\.filter\(Boolean\)\.join\(' '\)/u)
+    assert.match(componentSource, /<div ref=\{rootRef\} className=\{rootClassName\}/u)
     assert.match(languageSwitcherSource, /from '@fx-platform\/ui'/u)
-    assert.match(languageSwitcherSource, /className=\{`language-switcher__select/u)
+    assert.match(languageSwitcherSource, /import styles from '\.\/LanguageSwitcher\.module\.css'/u)
+    assert.match(languageSwitcherSource, /className=\{\[styles\.select, compact && styles\.selectCompact\]/u)
     assert.match(marketsSource, /from '@fx-platform\/ui'/u)
-    assert.match(marketsSource, /className="market-sort-field__select"/u)
+    assert.match(marketsSource, /import styles from '\.\/MarketsContent\.module\.css'/u)
+    assert.match(marketsSource, /className=\{styles\['market-sort-field__select'\]\}/u)
+    assert.doesNotMatch(`${languageSwitcherSource}\n${marketsSource}`, /language-switcher__select|className="market-sort-field__select"/u)
     assert.doesNotMatch(`${languageSwitcherSource}\n${marketsSource}`, /components\/SelectField/u)
     assert.doesNotMatch(webStyles, /\.select-field(?:__|\s|\[|\{|\.)/u)
   })

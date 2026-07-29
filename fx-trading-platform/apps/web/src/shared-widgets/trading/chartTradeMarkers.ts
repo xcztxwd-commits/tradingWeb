@@ -1,6 +1,8 @@
 import type { OrderResponse, PositionResponse } from '@fx-platform/frontend-core'
 import type { TradingPeriod } from '@fx-platform/frontend-core'
 
+import { chartTheme } from './chartTheme.ts'
+
 export type ChartTradeMarkerKind = 'positionEntry' | 'takeProfit' | 'stopLoss' | 'liquidation' | 'order'
 export type ChartTradeMarkerTone = 'buy' | 'sell' | 'profit' | 'loss' | 'risk' | 'neutral'
 
@@ -178,7 +180,7 @@ function createTradeMarkerStyle(tone: ChartTradeMarkerTone) {
       style: tone === 'risk' ? 'dashed' : 'solid'
     },
     text: {
-      color: '#050505',
+      color: chartTheme.palette.ink,
       backgroundColor: color,
       borderColor: color
     }
@@ -186,7 +188,7 @@ function createTradeMarkerStyle(tone: ChartTradeMarkerTone) {
 }
 
 function markerColor(tone: ChartTradeMarkerTone) {
-  if (tone === 'sell' || tone === 'loss' || tone === 'risk') return '#f6465d'
-  if (tone === 'profit' || tone === 'buy') return '#2ebd85'
-  return '#fcd535'
+  if (tone === 'sell' || tone === 'loss' || tone === 'risk') return chartTheme.palette.sell
+  if (tone === 'profit' || tone === 'buy') return chartTheme.palette.buy
+  return chartTheme.palette.accent
 }

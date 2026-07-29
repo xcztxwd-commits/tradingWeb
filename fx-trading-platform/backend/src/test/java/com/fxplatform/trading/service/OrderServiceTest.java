@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fxplatform.account.entity.TradingAccountEntity;
@@ -38,13 +39,18 @@ import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.ProtectionType;
+import com.fxplatform.trading.enums.QuantityUnit;
+import com.fxplatform.trading.enums.TimeInForce;
+import com.fxplatform.trading.enums.TriggerPriceType;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.trading.repository.TradeRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -59,6 +65,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.UncategorizedSQLException;
 
 @ExtendWith(MockitoExtension.class)
 class OrderServiceTest {
@@ -141,6 +148,82 @@ class OrderServiceTest {
     verify(marketBundleResolver, never()).resolveSpot(any(), any());
     verify(fullFillCoordinator, never()).execute(any(), any());
     verify(transactionExecutor, never()).execute(any());
+  }
+
+  @Test
+  void nonP0AdvancedContractsRejectAfterReplayLookupWithoutLegacyMutation() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    List<CreateOrderRequest> unsupported = List.of(
+        advancedOrder(
+            accountId, "EURUSD", OrderType.STOP_LIMIT, TimeInForce.GTC, false,
+            "non-p0-stop-limit"),
+        advancedOrder(
+            accountId, "EURUSD", OrderType.LIMIT, TimeInForce.IOC, false,
+            "non-p0-ioc"),
+        advancedOrder(
+            accountId, "EURUSD", OrderType.LIMIT, TimeInForce.FOK, false,
+            "non-p0-fok"),
+        advancedOrder(
+            accountId, "EURUSD", OrderType.LIMIT, TimeInForce.GTC, true,
+            "non-p0-post-only"));
+    OrderService service = orderService(org.mockito.Mockito.mock(OrderEventService.class));
+
+    for (CreateOrderRequest request : unsupported) {
+      assertThatThrownBy(() -> service.createOrder(principal, request))
+          .isInstanceOfSatisfying(
+              BusinessException.class,
+              exception -> assertThat(exception.getCode()).isEqualTo("INVALID_ORDER_TYPE"));
+    }
+
+    verify(accountRepository, never()).findByIdAndUserId(any(), any());
+    verify(riskCheckService, never()).checkOrder(any(), any());
+    verify(executionAdapter, never()).execute(any());
+    verify(orderRepository, never()).save(any());
+    verify(tradeRepository, never()).save(any());
+    verify(positionRepository, never()).save(any());
+    verifyNoInteractions(ledgerService, walletService);
+  }
+
+  @Test
+  void p0SpotAdvancedContractFailsClosedWhenSimpleAuthorityIsUnavailable() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = advancedOrder(
+        accountId, "BTCUSDT", OrderType.STOP_LIMIT, TimeInForce.GTC, false,
+        "p0-authority-unavailable");
+
+    assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, request))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("EXECUTION_UNAVAILABLE"));
+
+    verify(accountRepository, never()).findByIdAndUserId(any(), any());
+    verify(riskCheckService, never()).checkOrder(any(), any());
+    verify(orderRepository, never()).save(any());
+    verifyNoInteractions(ledgerService, walletService);
+  }
+
+  @Test
+  void createOrderTranslatesStorageFailuresToTheCanonicalExecutionError() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = p0MarketOrder(accountId, "storage-failure");
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(
+        userId, accountId, "storage-failure"))
+        .thenThrow(new UncategorizedSQLException(
+            "create order", "INSERT INTO trading.orders", new SQLException("injected")));
+
+    assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, request))
+        .isInstanceOfSatisfying(BusinessException.class, exception -> {
+          assertThat(exception.getCode()).isEqualTo("EXECUTION_UNAVAILABLE");
+          assertThat(exception.getMessage()).doesNotContain("trading.orders", "injected");
+        });
   }
 
   @Test
@@ -264,7 +347,7 @@ class OrderServiceTest {
     UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
     CreateOrderRequest request = p0MarketOrder(accountId, "existing-p0");
     OrderEntity existing = pendingOrderEntity(userId, accountId, UUID.randomUUID());
-    existing.setSymbol("BTCUSDT");
+    alignExistingWithRequest(existing, request);
 
     when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "existing-p0"))
         .thenReturn(Optional.of(existing));
@@ -894,6 +977,7 @@ class OrderServiceTest {
     CreateOrderRequest request = marketOrder(accountId, "idem-race");
     TradingAccountEntity account = demoAccount(userId, accountId);
     OrderEntity existing = pendingOrderEntity(userId, accountId, existingOrderId);
+    alignExistingWithRequest(existing, request);
     existing.setStatus(OrderStatus.PENDING);
 
     when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "idem-race"))
@@ -928,7 +1012,8 @@ class OrderServiceTest {
 
     when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(userId, accountId, "idem-replay"))
         .thenAnswer(invocation -> Optional.ofNullable(storedOrder.get()));
-    when(orderRepository.findByUserIdAndIdempotencyKey(userId, "idem-replay")).thenReturn(Optional.empty());
+    when(orderRepository.findByUserIdAndIdempotencyKey(userId, "idem-replay"))
+        .thenAnswer(invocation -> Optional.ofNullable(storedOrder.get()));
     when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
     when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class))).thenReturn(requiredMargin);
     when(accountRepository.reserveMarginIfAvailable(accountId, requiredMargin)).thenReturn(1);
@@ -949,17 +1034,265 @@ class OrderServiceTest {
       return position;
     });
 
-    OrderService service = orderService(org.mockito.Mockito.mock(OrderEventService.class));
+    OrderEventService replayEvents = org.mockito.Mockito.mock(OrderEventService.class);
+    OrderService service = orderService(replayEvents);
 
     OrderResponse first = service.createOrder(principal, request);
     OrderResponse replay = service.createOrder(principal, request);
 
     assertThat(replay.id()).isEqualTo(first.id());
     assertThat(replay.status()).isEqualTo(OrderStatus.FILLED.name());
+    assertThat(org.springframework.test.util.ReflectionTestUtils.getField(
+        storedOrder.get(), "requestFingerprint"))
+        .as("new orders persist the original request fingerprint")
+        .isNotNull();
     verify(executionAdapter).execute(any(CreateOrderRequest.class));
     verify(tradeRepository).save(any(TradeEntity.class));
     verify(positionRepository).save(any(PositionEntity.class));
     verify(ledgerService).recordMarginHold(eq(account), eq(requiredMargin), any(UUID.class), eq("Market order margin hold"));
+    verify(replayEvents, org.mockito.Mockito.times(1)).record(
+        any(), any(), any(), any(), any(), any());
+  }
+
+  @Test
+  void createOrderAllowsTerminalClientOrderIdReuseWithNewIdempotencyKey() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID completedOrderId = UUID.randomUUID();
+    UUID newOrderId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest completedRequest = limitOrderWithKeys(
+        accountId, "idem-completed", "client-reusable");
+    CreateOrderRequest newRequest = limitOrderWithKeys(
+        accountId, "idem-new", "client-reusable");
+    OrderEntity completed = pendingOrderEntity(userId, accountId, completedOrderId);
+    alignExistingWithRequest(completed, completedRequest);
+    completed.setStatus(OrderStatus.FILLED);
+    completed.setFilledQuantity(completedRequest.quantity());
+    completed.setRemainingQuantity(BigDecimal.ZERO);
+    completed.setRequestFingerprint(OrderRequestFingerprint.calculate(completedRequest));
+    TradingAccountEntity account = demoAccount(userId, accountId);
+    BigDecimal holdAmount = new BigDecimal("10.80000000");
+
+    when(orderRepository.findByUserIdAndIdempotencyKey(userId, "idem-new"))
+        .thenReturn(Optional.empty());
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(
+        userId, accountId, "client-reusable")).thenReturn(Optional.of(completed));
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(riskCheckService.checkOrder(eq(account), any(CreateOrderRequest.class)))
+        .thenReturn(holdAmount);
+    when(accountRepository.reserveMarginIfAvailable(accountId, holdAmount)).thenReturn(1);
+    when(orderRepository.save(any(OrderEntity.class))).thenAnswer(invocation -> {
+      OrderEntity order = invocation.getArgument(0);
+      order.setId(newOrderId);
+      return order;
+    });
+
+    OrderResponse response = orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, newRequest);
+
+    assertThat(response.id()).isEqualTo(newOrderId);
+    assertThat(response.status()).isEqualTo(OrderStatus.PENDING.name());
+    ArgumentCaptor<OrderEntity> saved = ArgumentCaptor.forClass(OrderEntity.class);
+    verify(orderRepository).save(saved.capture());
+    assertThat(saved.getValue().getClientOrderId()).isEqualTo("client-reusable");
+    assertThat(saved.getValue().getIdempotencyKey()).isEqualTo("idem-new");
+  }
+
+  @Test
+  void createOrderReplaysTerminalOrderByIdempotencyWithoutClientOrderLookup() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID replayOrderId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest replayRequest = limitOrderWithKeys(
+        accountId, "idem-original", "client-reused-after-fill");
+    OrderEntity terminalReplay = pendingOrderEntity(userId, accountId, replayOrderId);
+    alignExistingWithRequest(terminalReplay, replayRequest);
+    terminalReplay.setStatus(OrderStatus.FILLED);
+    terminalReplay.setFilledQuantity(replayRequest.quantity());
+    terminalReplay.setRemainingQuantity(BigDecimal.ZERO);
+    terminalReplay.setRequestFingerprint(OrderRequestFingerprint.calculate(replayRequest));
+
+    when(orderRepository.findByUserIdAndIdempotencyKey(userId, "idem-original"))
+        .thenReturn(Optional.of(terminalReplay));
+
+    OrderResponse response = orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, replayRequest);
+
+    assertThat(response.id()).isEqualTo(replayOrderId);
+    assertThat(response.status()).isEqualTo(OrderStatus.FILLED.name());
+    verify(accountRepository, never()).findByIdAndUserId(any(), any());
+    verify(orderRepository, never()).findByUserIdAndAccountIdAndClientOrderId(
+        any(), any(), any());
+    verify(orderRepository, never()).save(any());
+  }
+
+  @Test
+  void createOrderRejectsDifferentPayloadForTerminalIdempotencyReplay() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest original = limitOrderWithKeys(
+        accountId, "idem-terminal", "client-terminal");
+    CreateOrderRequest conflict = new CreateOrderRequest(
+        accountId,
+        "EURUSD",
+        OrderSide.BUY,
+        OrderType.LIMIT,
+        null,
+        null,
+        null,
+        null,
+        "idem-terminal",
+        "client-terminal",
+        new BigDecimal("0.20"),
+        new BigDecimal("1.08000"));
+    OrderEntity terminal = pendingOrderEntity(userId, accountId, UUID.randomUUID());
+    alignExistingWithRequest(terminal, original);
+    terminal.setStatus(OrderStatus.CANCELED);
+    terminal.setRequestFingerprint(OrderRequestFingerprint.calculate(original));
+
+    when(orderRepository.findByUserIdAndIdempotencyKey(userId, "idem-terminal"))
+        .thenReturn(Optional.of(terminal));
+
+    assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, conflict))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(com.fxplatform.common.exception.ErrorCode.DUPLICATE_CLIENT_ORDER_ID));
+
+    verify(accountRepository, never()).findByIdAndUserId(any(), any());
+    verify(orderRepository, never()).save(any());
+  }
+
+  @Test
+  void createOrderRejectsClientOrderIdReplayWhenRequestFingerprintDiffers() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID orderId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = marketOrder(accountId, "idem-conflict");
+    OrderEntity existing = pendingOrderEntity(userId, accountId, orderId);
+    alignExistingWithRequest(existing, request);
+    existing.setQuantity(new BigDecimal("0.20"));
+    existing.setOriginalQuantity(new BigDecimal("0.20"));
+    existing.setBaseQuantity(new BigDecimal("0.20"));
+    existing.setLots(new BigDecimal("0.20"));
+    existing.setRemainingQuantity(new BigDecimal("0.20"));
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(
+        userId, accountId, "idem-conflict")).thenReturn(Optional.of(existing));
+
+    OrderEventService orderEventService = org.mockito.Mockito.mock(OrderEventService.class);
+    OrderService service = orderService(orderEventService);
+
+    assertThatThrownBy(() -> service.createOrder(principal, request))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(com.fxplatform.common.exception.ErrorCode.DUPLICATE_CLIENT_ORDER_ID));
+
+    assertThat(existing.getId()).isEqualTo(orderId);
+    assertThat(existing.getStatus()).isEqualTo(OrderStatus.PENDING);
+    assertThat(existing.getOriginalQuantity()).isEqualByComparingTo("0.20");
+    assertThat(existing.getBaseQuantity()).isEqualByComparingTo("0.20");
+    assertThat(existing.getFilledQuantity()).isEqualByComparingTo("0");
+    assertThat(existing.getRemainingQuantity()).isEqualByComparingTo("0.20");
+    verify(accountRepository, never()).findByIdAndUserId(any(), any());
+    verify(riskCheckService, never()).checkOrder(any(), any());
+    verify(executionAdapter, never()).execute(any());
+    verify(orderRepository, never()).save(any());
+    verify(tradeRepository, never()).save(any());
+    verify(positionRepository, never()).save(any());
+    verifyNoInteractions(ledgerService);
+    verifyNoInteractions(orderEventService);
+  }
+
+  @Test
+  void createOrderRejectsMalformedTrailingReplayBeforeExistingOrderLookup() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = new CreateOrderRequest(
+        accountId,
+        "EURUSD",
+        OrderSide.BUY,
+        OrderType.TRAILING_STOP_MARKET,
+        new BigDecimal("0.10"),
+        new BigDecimal("1.08000"),
+        null,
+        null,
+        "advanced-replay",
+        null,
+        null,
+        null,
+        null,
+        PositionSide.BOTH,
+        QuantityUnit.BASE,
+        MarginMode.CROSS,
+        new BigDecimal("1.07000"),
+        null,
+        false,
+        List.of(),
+        TimeInForce.GTC,
+        false,
+        null,
+        new BigDecimal("0.00100"),
+        null);
+    OrderEntity existing = pendingOrderEntity(userId, accountId, UUID.randomUUID());
+    alignExistingWithRequest(existing, request);
+    existing.setRequestFingerprint(OrderRequestFingerprint.calculate(request));
+
+    org.mockito.Mockito.lenient()
+        .when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(
+            userId, accountId, "advanced-replay"))
+        .thenReturn(Optional.of(existing));
+
+    assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .createOrder(principal, request))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("INVALID_PERPETUAL_ORDER_FIELDS"));
+
+    verify(orderRepository, never()).findByUserIdAndAccountIdAndClientOrderId(
+        any(), any(), any());
+    verify(orderRepository, never()).findByUserIdAndIdempotencyKey(any(), any());
+  }
+
+  @Test
+  void createOrderRejectsReplayWhenExplicitIdempotencyKeyDiffers() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID orderId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest original = marketOrderWithKeys(
+        accountId, "idem-original", "client-shared");
+    CreateOrderRequest conflict = marketOrderWithKeys(
+        accountId, "idem-conflict", "client-shared");
+    OrderEntity existing = pendingOrderEntity(userId, accountId, orderId);
+    alignExistingWithRequest(existing, original);
+    existing.setRequestFingerprint(OrderRequestFingerprint.calculate(original));
+
+    when(orderRepository.findByUserIdAndAccountIdAndClientOrderId(
+        userId, accountId, "client-shared")).thenReturn(Optional.of(existing));
+    OrderEventService orderEventService = org.mockito.Mockito.mock(OrderEventService.class);
+    OrderService service = orderService(orderEventService);
+
+    assertThatThrownBy(() -> service.createOrder(principal, conflict))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(com.fxplatform.common.exception.ErrorCode.DUPLICATE_CLIENT_ORDER_ID));
+
+    assertThat(existing.getId()).isEqualTo(orderId);
+    assertThat(existing.getIdempotencyKey()).isEqualTo("idem-original");
+    verify(accountRepository, never()).findByIdAndUserId(any(), any());
+    verify(executionAdapter, never()).execute(any());
+    verify(orderRepository, never()).save(any());
+    verifyNoInteractions(ledgerService);
+    verifyNoInteractions(orderEventService);
   }
 
   @Test
@@ -1094,7 +1427,7 @@ class OrderServiceTest {
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.cancelOrder(principal, orderId))
         .isInstanceOf(BusinessException.class)
-        .hasMessageContaining("Only pending orders can be canceled");
+        .hasMessageContaining("Only pending, partially filled, or awaiting-activation orders can be canceled");
 
     verify(accountRepository, never()).save(any());
     verify(ledgerService, never()).recordOrderRelease(any(), any(), any(), any());
@@ -1125,7 +1458,7 @@ class OrderServiceTest {
     assertThat(first.status()).isEqualTo(OrderStatus.CANCELED.name());
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.cancelOrder(principal, orderId))
         .isInstanceOf(BusinessException.class)
-        .hasMessageContaining("Only pending orders can be canceled");
+        .hasMessageContaining("Only pending, partially filled, or awaiting-activation orders can be canceled");
     verify(ledgerService).recordOrderRelease(eq(account), eq(new BigDecimal("10.80000000")), eq(orderId), eq("Pending order canceled"));
     verify(orderEventService).record(
         eq(orderId),
@@ -1216,6 +1549,47 @@ class OrderServiceTest {
         leverage);
   }
 
+  private static CreateOrderRequest marketOrderWithKeys(
+      UUID accountId,
+      String idempotencyKey,
+      String clientOrderId
+  ) {
+    return new CreateOrderRequest(
+        accountId,
+        "EURUSD",
+        OrderSide.BUY,
+        OrderType.MARKET,
+        new BigDecimal("0.10"),
+        null,
+        null,
+        null,
+        idempotencyKey,
+        clientOrderId,
+        null,
+        null,
+        null);
+  }
+
+  private static CreateOrderRequest limitOrderWithKeys(
+      UUID accountId,
+      String idempotencyKey,
+      String clientOrderId
+  ) {
+    return new CreateOrderRequest(
+        accountId,
+        "EURUSD",
+        OrderSide.BUY,
+        OrderType.LIMIT,
+        null,
+        null,
+        null,
+        null,
+        idempotencyKey,
+        clientOrderId,
+        new BigDecimal("0.10"),
+        new BigDecimal("1.08000"));
+  }
+
   private static TradingAccountEntity demoAccount(UUID userId, UUID accountId) {
     TradingAccountEntity account = new TradingAccountEntity();
     account.setId(accountId);
@@ -1246,6 +1620,36 @@ class OrderServiceTest {
     order.setClientOrderId("client-pending-1");
     order.setIdempotencyKey("client-pending-1");
     return order;
+  }
+
+  private static void alignExistingWithRequest(
+      OrderEntity existing,
+      CreateOrderRequest request
+  ) {
+    existing.setAccountId(request.accountId());
+    existing.setSymbol(com.fxplatform.common.market.SymbolNormalizer.normalize(request.symbol()));
+    existing.setSide(request.side());
+    existing.setOrderType(request.orderType());
+    existing.setLots(request.quantity());
+    existing.setQuantity(request.quantity());
+    existing.setOriginalQuantity(request.quantity());
+    existing.setBaseQuantity(request.quantity());
+    existing.setQuantityUnit(request.quantityUnit());
+    existing.setRequestedPrice(request.price());
+    existing.setPrice(request.price());
+    existing.setStopLoss(request.stopLoss());
+    existing.setTakeProfit(request.takeProfit());
+    existing.setTriggerPrice(request.triggerPrice());
+    existing.setTriggerPriceType(request.triggerPriceType());
+    existing.setPositionSide(request.positionSide());
+    existing.setMarginMode(request.marginMode());
+    existing.setReduceOnly(request.reduceOnly());
+    existing.setLeverage(request.leverage());
+    existing.setClientOrderId(request.clientOrderId());
+    existing.setIdempotencyKey(request.idempotencyKey() == null
+        ? request.clientOrderId()
+        : request.idempotencyKey());
+    existing.setRemainingQuantity(request.quantity());
   }
 
   private OrderService orderService(OrderEventService orderEventService) {
@@ -1303,7 +1707,7 @@ class OrderServiceTest {
   }
 
   @Test
-  void compatibilityConstructorStillRejectsP0PerpetualModification() {
+  void compatibilityConstructorFailsClosedWhenPerpetualModifyAuthorityIsUnavailable() {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
     UUID orderId = UUID.randomUUID();
@@ -1322,7 +1726,42 @@ class OrderServiceTest {
             null,
             null)))
         .isInstanceOfSatisfying(BusinessException.class,
-            exception -> assertThat(exception.getCode()).isEqualTo("ORDER_NOT_MODIFIABLE"));
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(com.fxplatform.common.exception.ErrorCode.EXECUTION_UNAVAILABLE));
+
+    verify(orderRepository, never()).findByIdForUpdate(orderId);
+    verify(accountRepository, never()).findByIdAndUserIdForUpdate(any(), any());
+    verify(riskCheckService, never()).checkOrder(any(), any());
+    verify(orderRepository, never()).save(any(OrderEntity.class));
+  }
+
+  @Test
+  void compatibilityConstructorFailsClosedWhenSpotModifyAuthorityIsUnavailable() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UUID orderId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    OrderEntity order = pendingOrderEntity(userId, accountId, orderId);
+    order.setSymbol("BTCUSDT");
+    order.setProductType(ProductType.CRYPTO_SPOT);
+    order.setMarginMode(MarginMode.CASH);
+    order.setOrderType(OrderType.STOP_LIMIT);
+    order.setStatus(OrderStatus.PENDING_ACTIVATION);
+    order.setRequestedPrice(new BigDecimal("100"));
+    order.setPrice(new BigDecimal("100"));
+    order.setTriggerPrice(new BigDecimal("110"));
+    order.setTriggerPriceType(TriggerPriceType.LAST_PRICE);
+    when(orderRepository.findByUserIdAndId(userId, orderId)).thenReturn(Optional.of(order));
+
+    assertThatThrownBy(() -> orderService(org.mockito.Mockito.mock(OrderEventService.class))
+        .modifyOrder(principal, orderId, new UpdateOrderRequest(
+            new BigDecimal("0.20"),
+            new BigDecimal("99"),
+            null,
+            null)))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(com.fxplatform.common.exception.ErrorCode.EXECUTION_UNAVAILABLE));
 
     verify(orderRepository, never()).findByIdForUpdate(orderId);
     verify(accountRepository, never()).findByIdAndUserIdForUpdate(any(), any());
@@ -1347,6 +1786,43 @@ class OrderServiceTest {
         1);
   }
 
+  private static CreateOrderRequest advancedOrder(
+      UUID accountId,
+      String symbol,
+      OrderType orderType,
+      TimeInForce timeInForce,
+      boolean postOnly,
+      String key
+  ) {
+    boolean stopLimit = orderType == OrderType.STOP_LIMIT;
+    return new CreateOrderRequest(
+        accountId,
+        symbol,
+        OrderSide.BUY,
+        orderType,
+        null,
+        null,
+        null,
+        null,
+        key,
+        key,
+        new BigDecimal("0.10"),
+        new BigDecimal("1.08000"),
+        1,
+        PositionSide.BOTH,
+        QuantityUnit.BASE,
+        symbol.equals("BTCUSDT") ? MarginMode.CASH : MarginMode.CROSS,
+        stopLimit ? new BigDecimal("1.07000") : null,
+        stopLimit ? TriggerPriceType.LAST_PRICE : null,
+        false,
+        List.of(),
+        timeInForce,
+        postOnly,
+        null,
+        null,
+        null);
+  }
+
   private static SpotMarketBundle spotBundle(String providerCode, Instant expiresAt) {
     return new SpotMarketBundle(
         "BTCUSDT",
@@ -1365,13 +1841,16 @@ class OrderServiceTest {
 
   private static FullFillResult fullFill(String quantity, String price) {
     Instant now = Instant.now();
+    BigDecimal baseQuantity = new BigDecimal(quantity);
+    BigDecimal filledPrice = new BigDecimal(price);
     return new FullFillResult(
-        new BigDecimal(price),
+        filledPrice,
         now,
-        new BigDecimal(quantity),
+        baseQuantity,
         BigDecimal.ZERO,
         new BigDecimal("0.0005"),
-        new BigDecimal(quantity).multiply(new BigDecimal("0.0005")),
+        baseQuantity.multiply(new BigDecimal("0.0005"))
+            .setScale(8, java.math.RoundingMode.HALF_UP),
         "BTC",
         com.fxplatform.trading.enums.LiquidityRole.TAKER,
         new BigDecimal("0.0100"),

@@ -3814,8 +3814,10 @@ const P0_DATABASE_IT_CLASSES = [
   'DemoTradingConcurrencyIT',
   'PerpetualPositionConcurrencyIT',
   'ProtectionOrderConcurrencyIT',
-  'FundingLiquidationConcurrencyIT'
+  'FundingLiquidationConcurrencyIT',
+  'DepthPendingExecutionPostgresIT'
 ]
+const P0_TESTCONTAINERS_DOCKER_API_VERSION = '1.44'
 
 export async function runP0Preflight({
   projectRoot: p0ProjectRoot,
@@ -3878,8 +3880,13 @@ export async function runP0Preflight({
   const itCommand = {
     id: 'database-concurrency-it',
     command: maven,
-    args: [`-Dtest=${P0_DATABASE_IT_CLASSES.join(',')}`, 'test'],
-    cwd: backendDirectory
+    args: [
+      `-Dapi.version=${P0_TESTCONTAINERS_DOCKER_API_VERSION}`,
+      `-Dtest=${P0_DATABASE_IT_CLASSES.join(',')}`,
+      'test'
+    ],
+    cwd: backendDirectory,
+    env: { DATABASE_PASSWORD: 'database-it-non-secret-password' }
   }
   await runGate(itCommand)
   const surefireCommand = {
@@ -6906,7 +6913,21 @@ export function normalizeLocalCommandDescriptor(
     env: scrubLocalLauncherEnvironment(descriptor.env),
     shell: false
   }
-  if (platform !== 'win32') return normalized
+  if (platform !== 'win32') {
+    const trustedPath = [
+      dirname(realpathSync(process.execPath)),
+      '/usr/local/sbin',
+      '/usr/local/bin',
+      '/usr/sbin',
+      '/usr/bin',
+      '/sbin',
+      '/bin'
+    ].filter((path, index, paths) => paths.indexOf(path) === index).join(delimiter)
+    return {
+      ...normalized,
+      env: { ...normalized.env, PATH: trustedPath }
+    }
+  }
   const command = descriptor.command.toLowerCase()
   if (!WINDOWS_COMMAND_SHIMS.has(command)) return normalized
   for (const argument of args) assertSafeWindowsCommandArgument(argument)

@@ -284,11 +284,13 @@ MARKET SELL fill = bid × (1 - slippageRate)
 
 ```text
 effectiveStep      = storageCompatibleStep(symbolQuantityStep)
-Spot BUY grossBase = floorToStep(quoteBudget / fillPrice, effectiveStep)
-Spot BUY quoteSpent = grossBase × fillPrice <= quoteBudget
-Spot BUY baseFee   = grossBase × feeRate
-Spot BUY netBase   = grossBase - baseFee
-Spot averageCost   = cumulativeGrossQuoteCost / currentNetBase
+Spot BUY grossBase = floorToStep(quoteBudget / (fillPrice × (1 + feeRate)), effectiveStep)
+Spot BUY quoteSpent = grossBase × fillPrice
+Spot BUY quoteFee  = quoteSpent × feeRate
+Spot BUY totalSpent = quoteSpent + quoteFee <= quoteBudget
+Spot BUY creditedBase = grossBase
+Spot averageCost   = cumulativeGrossQuoteCost / currentBase
+Spot breakEvenPrice = (outstandingRawCost + recordedFeeCost) / currentBase
 
 Spot SELL grossQuote = soldBase × fillPrice
 Spot SELL quoteFee   = grossQuote × feeRate
@@ -297,7 +299,7 @@ Spot SELL netQuote   = grossQuote - quoteFee
 Spot realizedPnl = grossQuote - soldBase × averageCost - quoteFee
 ```
 
-Spot BUY feeAsset 必须是 base；base fee 通过净入账数量进入 average cost。Spot SELL feeAsset 必须是 USDT，sell fee 已包含在 Spot position 的 realizedPnl 中。当前 P0 的 Spot Trade 不是 realized PnL 真值，必须用 Trade price/fee 重算并与 `spot_positions.realized_pnl` 比较。任意钱包都满足：
+Spot BUY 和 SELL 的 feeAsset 都必须是 USDT。BUY 全额入账 base，average cost 保持原始成交成本，USDT fee 通过 feeCost 进入 break-even；SELL fee 已包含在 Spot position 的 realizedPnl 中。当前 P0 的 Spot Trade 不是 realized PnL 真值，必须用 Trade price/fee 重算并与 `spot_positions.realized_pnl` 比较。任意钱包都满足：
 
 ```text
 total = available + locked
@@ -587,15 +589,15 @@ artifacts/p0-user-trading/${RUN_ID}/${CASE_ID}/
 
 1. 采集提交前权威 market evidence 和 `before`：USDT/BTC wallet、Spot position、订单、成交和 ledger；gate 失败时不使用 UI override 价格充当 execution reference。
 2. 打开 `/trade/spot/BTCUSDT`，选择 MARKET，在 Buy 表单输入 1000 USDT，确认订单。
-3. 等待订单 `FILLED`，采集成交价、gross base、base fee、net base、average cost 和钱包。
-4. 计算可卖净 BTC 的 30%，按 quantity step 向下对齐；在 Sell MARKET 输入该数量并确认。
+3. 等待订单 `FILLED`，采集成交价、gross base、USDT fee、credited base、average cost、break-even 和钱包。
+4. 计算可卖 BTC 的 30%，按 quantity step 向下对齐；在 Sell MARKET 输入该数量并确认。
 5. 核对部分卖出后的 BTC 剩余、USDT 增量；使用该 Trade 的 price/fee 独立重算，并与 Spot position 累计 realizedPnl 比较。
 6. 卖出剩余全部可卖 BTC；若 UI 百分比按钮存在，使用 100%，否则输入精确 available。
 7. 打开历史订单、成交、资产和 ledger，采集 `fully-sold` 快照。
 
 **预期：**
 
-- BUY 的 `fill=executionReference+slippage` 且 `slippage=executionReference×0.0001`；gate PASS 时 executionReference 必须等于 fixture ask。feeAsset=BTC，BTC available 增加 net base。
+- BUY 的 `fill=executionReference+slippage` 且 `slippage=executionReference×0.0001`；gate PASS 时 executionReference 必须等于 fixture ask。feeAsset=USDT，BTC available 增加完整 gross base，USDT 总扣款为 gross quote 加 fee 且不超过原始 quote budget。
 - 30% SELL 的 `fill=executionReference-slippage` 且 `slippage=executionReference×0.0001`；gate PASS 时 executionReference 必须等于 fixture bid。feeAsset=USDT；Spot position realizedPnl=`gross proceeds-cost basis-sell fee`。
 - 部分卖出不重置剩余平均成本。
 - 全卖后 BTC available/locked 为 0 或只剩小于 min quantity 的舍入尘埃；若有尘埃必须精确解释来源。Spot position quantity 归零时 averageCost/UPL 归零，但累计 realizedPnl 和 feeCost 保留。
@@ -689,7 +691,7 @@ artifacts/p0-user-trading/${RUN_ID}/${CASE_ID}/
 
 - trigger 使用 `LAST_PRICE`。
 - 触发前无 Trade；触发后恰好一笔 taker full fill。
-- 未使用 hold 被释放，BUY feeAsset 为 BTC。
+- gross quote 与 BUY USDT fee 从同一 owner hold 扣除，未使用 hold 仅在两次扣款后释放一次。
 
 ### SPOT-07 STOP_MARKET SELL
 
@@ -749,7 +751,7 @@ artifacts/p0-user-trading/${RUN_ID}/${CASE_ID}/
 1. BUY OCO 使用 `limitPrice<last<stopTrigger`，两腿 quantity 相同。
 2. 子运行 A：下移行情到 limitPrice，验证 LIMIT BUY 胜出、STOP peer 取消。
 3. 子运行 B：上移行情到 stopTrigger，验证 STOP BUY 胜出、LIMIT peer 取消。
-4. 两个子运行分别核对 USDT shared hold、BTC base fee 和最终释放。
+4. 两个子运行分别核对 USDT shared hold、USDT fee、完整 BTC 入账和最终释放。
 
 **预期：**
 
