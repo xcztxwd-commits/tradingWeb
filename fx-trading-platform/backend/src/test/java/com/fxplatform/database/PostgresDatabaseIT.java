@@ -195,13 +195,19 @@ class PostgresDatabaseIT {
 
   @Test
   void clientOrderIdCanBeReusedAfterTerminalButNotWhileActive() {
-    UUID accountId = jdbcTemplate.queryForObject(
-        "select id from core.trading_accounts order by id limit 1",
-        UUID.class);
-    UUID userId = jdbcTemplate.queryForObject(
-        "select user_id from core.trading_accounts where id = ?",
-        UUID.class,
-        accountId);
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    jdbcTemplate.update(
+        "insert into auth.users (id, email, password_hash) values (?, ?, ?)",
+        userId,
+        "client-order-" + userId + "@example.test",
+        "not-a-real-password");
+    jdbcTemplate.update("""
+        insert into core.trading_accounts (
+          id, user_id, account_type, base_currency, balance, equity,
+          used_margin, free_margin, leverage, status
+        ) values (?, ?, 'DEMO', 'USDT', 10000, 10000, 0, 10000, 10, 'ACTIVE')
+        """, accountId, userId);
     String suffix = UUID.randomUUID().toString();
     String clientOrderId = "client-reuse-" + suffix;
     String terminalIdempotency = "idem-terminal-" + suffix;
@@ -209,28 +215,28 @@ class PostgresDatabaseIT {
     jdbcTemplate.update("""
         insert into trading.orders (
           user_id, account_id, symbol, side, order_type, status, lots,
-          idempotency_key, client_order_id
-        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'FILLED', 0.1, ?, ?)
+          leverage, idempotency_key, client_order_id
+        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'FILLED', 0.1, 10, ?, ?)
         """, userId, accountId, terminalIdempotency, clientOrderId);
     jdbcTemplate.update("""
         insert into trading.orders (
           user_id, account_id, symbol, side, order_type, status, lots,
-          idempotency_key, client_order_id
-        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'PENDING', 0.1, ?, ?)
+          leverage, idempotency_key, client_order_id
+        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'PENDING', 0.1, 10, ?, ?)
         """, userId, accountId, "idem-active-" + suffix, clientOrderId);
 
     assertThatThrownBy(() -> jdbcTemplate.update("""
         insert into trading.orders (
           user_id, account_id, symbol, side, order_type, status, lots,
-          idempotency_key, client_order_id
-        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'WORKING', 0.1, ?, ?)
+          leverage, idempotency_key, client_order_id
+        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'WORKING', 0.1, 10, ?, ?)
         """, userId, accountId, "idem-second-active-" + suffix, clientOrderId))
         .hasMessageContaining("ux_orders_user_account_client_order_id");
     assertThatThrownBy(() -> jdbcTemplate.update("""
         insert into trading.orders (
           user_id, account_id, symbol, side, order_type, status, lots,
-          idempotency_key, client_order_id
-        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'CANCELED', 0.1, ?, ?)
+          leverage, idempotency_key, client_order_id
+        ) values (?, ?, 'EURUSD', 'BUY', 'LIMIT', 'CANCELED', 0.1, 10, ?, ?)
         """, userId, accountId, terminalIdempotency, "another-client-" + suffix))
         .hasMessageContaining("idempotency");
   }
