@@ -26,6 +26,8 @@ import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.QuantityUnit;
+import com.fxplatform.trading.enums.TimeInForce;
+import com.fxplatform.trading.enums.TriggerPriceType;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
@@ -57,6 +59,7 @@ class InstrumentRulesEngineTest {
   @Test
   void rulesMergeSymbolProviderMetadataAndRiskLimits() {
     SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setContractMultiplier(new BigDecimal("10"));
     SymbolProviderBindingEntity binding = binding(symbol.getId(), UUID.randomUUID(), UUID.randomUUID(), "BTCUSDT");
     ProviderInstrumentEntity instrument = providerInstrument(
         binding.getProviderInstrumentId(),
@@ -97,6 +100,7 @@ class InstrumentRulesEngineTest {
     assertThat(rules.marginAsset()).isEqualTo("USDT");
     assertThat(rules.settlementAsset()).isEqualTo("USDT");
     assertThat(rules.contractSize()).isEqualByComparingTo("1");
+    assertThat(rules.contractMultiplier()).isEqualByComparingTo("10");
     assertThat(rules.riskTier()).isEqualTo("DEFAULT");
     assertThat(rules.tradingSession()).isEqualTo("ALWAYS");
     assertThat(rules.kycRequirement()).isEqualTo("NONE");
@@ -182,6 +186,22 @@ class InstrumentRulesEngineTest {
     assertThat(rules.exists()).isFalse();
     assertThat(rules.enabled()).isFalse();
     assertThat(rules.orderEnabled()).isFalse();
+  }
+
+  @Test
+  void readRulesPreserveCanonicalPerpetualSuffix() {
+    SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setSymbol("BTCUSDT-PERP");
+    symbol.setProductType(ProductType.LINEAR_PERP);
+    symbol.setAssetClass("LINEAR_PERP");
+    when(symbolRepository.findBySymbol("BTCUSDT-PERP")).thenReturn(Optional.of(symbol));
+
+    InstrumentRules rules = engine().rules("btcusdt-perp");
+
+    assertThat(rules.symbol()).isEqualTo("BTCUSDT-PERP");
+    assertThat(rules.exists()).isTrue();
+    assertThat(rules.orderEnabled()).isTrue();
+    assertThat(rules.productType()).isEqualTo(ProductType.LINEAR_PERP);
   }
 
   @Test
@@ -305,6 +325,29 @@ class InstrumentRulesEngineTest {
         new BigDecimal("100.01")))
         .isInstanceOfSatisfying(BusinessException.class,
             exception -> assertThat(exception.getCode()).isEqualTo("ORDER_NOTIONAL_TOO_SMALL"));
+  }
+
+  @Test
+  void stopLimitValidatesLimitAndTriggerPricesAgainstTickSizeSeparately() {
+    SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setTickSize(new BigDecimal("0.10"));
+    symbol.setLotSize(new BigDecimal("0.001"));
+    symbol.setMinLot(new BigDecimal("0.001"));
+
+    assertThatThrownBy(() -> engine().validateOrderRules(
+        stopLimitOrder("BTCUSDT", "0.100", "100.05", "99.90"),
+        symbol))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("PRICE_TICK_MISMATCH"));
+    assertThatThrownBy(() -> engine().validateOrderRules(
+        stopLimitOrder("BTCUSDT", "0.100", "100.00", "99.95"),
+        symbol))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("PRICE_TICK_MISMATCH"));
+    assertThatCode(() -> engine().validateOrderRules(
+        stopLimitOrder("BTCUSDT", "0.100", "100.00", "99.90"),
+        symbol))
+        .doesNotThrowAnyException();
   }
 
   @Test
@@ -438,5 +481,20 @@ class InstrumentRulesEngineTest {
         null, null, null, null, "idem-stop-" + symbol, "client-stop-" + symbol,
         new BigDecimal(quantity), null, 1, PositionSide.BOTH, QuantityUnit.BASE,
         MarginMode.CASH, new BigDecimal(triggerPrice), null, false, List.of());
+  }
+
+  private CreateOrderRequest stopLimitOrder(
+      String symbol,
+      String quantity,
+      String price,
+      String triggerPrice
+  ) {
+    return new CreateOrderRequest(
+        UUID.randomUUID(), symbol, OrderSide.BUY, OrderType.STOP_LIMIT,
+        null, null, null, null, "idem-stop-limit-" + symbol,
+        "client-stop-limit-" + symbol, new BigDecimal(quantity),
+        new BigDecimal(price), 1, PositionSide.BOTH, QuantityUnit.BASE,
+        MarginMode.CASH, new BigDecimal(triggerPrice), TriggerPriceType.LAST_PRICE,
+        false, List.of(), TimeInForce.GTC, false, null, null, null);
   }
 }

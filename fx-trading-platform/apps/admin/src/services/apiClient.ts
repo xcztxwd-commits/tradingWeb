@@ -1,9 +1,16 @@
 import type { ApiResponse } from '../types'
 import { friendlyApiErrorMessage } from '@fx-platform/shared-types'
-import { clearAdminToken, getAdminRefreshToken, setAdminAuthTokens } from './adminToken.ts'
+import {
+  clearAdminToken,
+  getAdminRefreshToken,
+  getAdminToken,
+  getValidAdminToken,
+  setAdminAuthTokens
+} from './adminToken.ts'
 
 const API_BASE =
   (import.meta as ImportMeta & { env?: { VITE_API_BASE_URL?: string } }).env?.VITE_API_BASE_URL ?? ''
+const REQUEST_ID_HEADER = 'X-Request-Id'
 
 export type ApiClientErrorInit = {
   status: number
@@ -33,11 +40,24 @@ type AuthRefreshResponse = {
   authorities?: string[]
 }
 
+type AdminSessionSnapshot = Readonly<{
+  accessToken: string | null
+  refreshToken: string
+}>
+
+let refreshInFlight: Promise<string | null> | null = null
+let refreshSessionInFlight: AdminSessionSnapshot | null = null
+
 export function apiGet<T>(path: string, token?: string) {
   return request<T>(path, { method: 'GET' }, token)
 }
 
-export function apiPost<T>(path: string, body: unknown, token?: string) {
+export function apiPost<T>(
+  path: string,
+  body: unknown,
+  token?: string,
+  options: RequestOptions = {}
+) {
   return request<T>(
     path,
     {
@@ -45,8 +65,13 @@ export function apiPost<T>(path: string, body: unknown, token?: string) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     },
-    token
+    token,
+    options
   )
+}
+
+export function apiPostMultipart<T>(path: string, body: FormData, token: string) {
+  return request<T>(path, { method: 'POST', body }, token)
 }
 
 export function apiPut<T>(path: string, body: unknown, token: string) {
@@ -85,18 +110,27 @@ export function apiDelete<T>(path: string, body: unknown, token: string) {
   )
 }
 
-async function request<T>(path: string, init: RequestInit, token?: string, options: RequestOptions = {}): Promise<T> {
-  const headers = new Headers(init.headers)
-  if (token) {
-    headers.set('Authorization', `Bearer ${token}`)
-  }
+export function apiRaw(
+  path: string,
+  init: RequestInit & { signal?: AbortSignal } = {}
+): Promise<Response> {
+  return requestRaw(path, init, getValidAdminToken())
+}
 
+async function request<T>(
+  path: string,
+  init: RequestInit,
+  token?: string,
+  options: RequestOptions = {},
+  session: AdminSessionSnapshot | null = requestSessionForToken(token)
+): Promise<T> {
+  const headers = withBearer(init.headers, token)
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers })
   const payload = await readApiPayload<T>(response)
   if (response.status === 401 && options.retryOnAuthFailure !== false) {
-    const refreshedToken = await refreshAdminAuthSession()
+    const refreshedToken = await refreshAccessTokenOnce(session)
     if (refreshedToken) {
-      return request<T>(path, init, refreshedToken, { retryOnAuthFailure: false })
+      return request<T>(path, init, refreshedToken, { retryOnAuthFailure: false }, null)
     }
   }
   if (!response.ok || !payload?.success) {
@@ -105,26 +139,115 @@ async function request<T>(path: string, init: RequestInit, token?: string, optio
   return payload.data
 }
 
-async function refreshAdminAuthSession() {
-  const refreshToken = getAdminRefreshToken()
-  if (!refreshToken) return null
+async function requestRaw(
+  path: string,
+  init: RequestInit & { signal?: AbortSignal },
+  token?: string | null,
+  options: RequestOptions = {},
+  session: AdminSessionSnapshot | null = requestSessionForToken(token)
+): Promise<Response> {
+  const headers = withBearer(init.headers, token)
+  const response = await fetch(`${API_BASE}${path}`, { ...init, headers })
+  if (
+    response.status === 401
+    && options.retryOnAuthFailure !== false
+    && session !== null
+    && isCurrentAdminSession(session)
+  ) {
+    await cancelUnconsumedBody(response)
+    const refreshedToken = await refreshAccessTokenOnce(session)
+    if (refreshedToken) {
+      return requestRaw(path, init, refreshedToken, { retryOnAuthFailure: false }, null)
+    }
+  }
+  return response
+}
+
+async function cancelUnconsumedBody(response: Response) {
+  try {
+    await response.body?.cancel()
+  } catch {
+    // A failed best-effort cancel must not hide the authoritative 401.
+  }
+}
+
+function refreshAccessTokenOnce(session: AdminSessionSnapshot | null) {
+  if (!session || !isCurrentAdminSession(session)) return Promise.resolve(null)
+  if (refreshInFlight && sameAdminSession(refreshSessionInFlight, session)) {
+    return refreshInFlight
+  }
+
+  const refresh = refreshAdminAuthSession(session).finally(() => {
+    if (refreshInFlight !== refresh) return
+    refreshInFlight = null
+    refreshSessionInFlight = null
+  })
+  refreshSessionInFlight = session
+  refreshInFlight = refresh
+  return refresh
+}
+
+async function refreshAdminAuthSession(session: AdminSessionSnapshot) {
   try {
     const auth = await request<AuthRefreshResponse>(
       '/api/auth/refresh',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken })
+        body: JSON.stringify({ refreshToken: session.refreshToken })
       },
       undefined,
       { retryOnAuthFailure: false }
     )
+    if (!isCurrentAdminSession(session)) return null
     setAdminAuthTokens(auth.accessToken, auth.refreshToken, auth.authorities ?? [])
     return auth.accessToken
   } catch {
-    clearAdminToken()
+    if (isCurrentAdminSession(session)) {
+      clearAdminToken()
+    }
     return null
   }
+}
+
+function requestSessionForToken(token?: string | null): AdminSessionSnapshot | null {
+  if (!token) return null
+  try {
+    const accessToken = getAdminToken()
+    const refreshToken = getAdminRefreshToken()
+    if (accessToken !== token || !refreshToken) return null
+    return {
+      accessToken,
+      refreshToken
+    }
+  } catch {
+    return null
+  }
+}
+
+function isCurrentAdminSession(session: AdminSessionSnapshot) {
+  return getAdminToken() === session.accessToken
+    && getAdminRefreshToken() === session.refreshToken
+}
+
+function sameAdminSession(
+  left: AdminSessionSnapshot | null,
+  right: AdminSessionSnapshot
+) {
+  return left !== null
+    && left.accessToken === right.accessToken
+    && left.refreshToken === right.refreshToken
+}
+
+function withBearer(headersInit: HeadersInit | undefined, token?: string | null) {
+  const headers = new Headers(headersInit)
+  if (!headers.has(REQUEST_ID_HEADER)) {
+    headers.set(REQUEST_ID_HEADER, crypto.randomUUID())
+  }
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  return headers
 }
 
 async function readApiPayload<T>(response: Response): Promise<ApiResponse<T> | null> {

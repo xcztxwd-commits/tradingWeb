@@ -1,0 +1,209 @@
+{
+  "modelVersion": "trading-lab-v1",
+  "seeds": [
+    {
+      "name": "legal-01-spot-balanced",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-01-spot-balanced"
+    },
+    {
+      "name": "legal-02-spot-cost-basis",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-02-spot-cost-basis"
+    },
+    {
+      "name": "legal-03-perp-long",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-03-perp-long"
+    },
+    {
+      "name": "legal-04-perp-short",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-04-perp-short"
+    },
+    {
+      "name": "legal-05-one-way-reversal",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-05-one-way-reversal"
+    },
+    {
+      "name": "legal-06-hedge-slots",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-06-hedge-slots"
+    },
+    {
+      "name": "legal-07-cross-margin",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-07-cross-margin"
+    },
+    {
+      "name": "legal-08-isolated-margin",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-08-isolated-margin"
+    },
+    {
+      "name": "legal-09-order-types",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-09-order-types"
+    },
+    {
+      "name": "legal-10-partial-fill",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-10-partial-fill"
+    },
+    {
+      "name": "legal-11-funding",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-11-funding"
+    },
+    {
+      "name": "legal-12-mixed-realistic",
+      "negativeMode": false,
+      "requiredCapabilities": [
+        "RANDOM_LEGAL"
+      ],
+      "seed": "phase4-random-legal-12-mixed-realistic"
+    },
+    {
+      "name": "negative-01-spot-oversell",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-01-spot-oversell"
+    },
+    {
+      "name": "negative-02-insufficient-balance",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-02-insufficient-balance"
+    },
+    {
+      "name": "negative-03-insufficient-margin",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-03-insufficient-margin"
+    },
+    {
+      "name": "negative-04-price-precision",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-04-price-precision"
+    },
+    {
+      "name": "negative-05-quantity-precision",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-05-quantity-precision"
+    },
+    {
+      "name": "negative-06-min-notional",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-06-min-notional"
+    },
+    {
+      "name": "negative-07-post-only-cross",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-07-post-only-cross"
+    },
+    {
+      "name": "negative-08-fok-unfilled",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-08-fok-unfilled"
+    },
+    {
+      "name": "negative-09-reduce-only-overclose",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-09-reduce-only-overclose"
+    },
+    {
+      "name": "negative-10-margin-removal",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-10-margin-removal"
+    },
+    {
+      "name": "negative-11-liquidation-boundary",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-11-liquidation-boundary"
+    },
+    {
+      "name": "negative-12-mixed-boundary",
+      "negativeMode": true,
+      "requiredCapabilities": [
+        "NEGATIVE_MODE",
+        "RANDOM_NEGATIVE"
+      ],
+      "seed": "phase4-random-negative-12-mixed-boundary"
+    }
+  ]
+}

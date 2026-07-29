@@ -154,6 +154,14 @@ class SystemCloseOrderServiceTest {
         insideTransaction.set(false);
       }
     });
+    when(transactionExecutor.executeJoined(any())).thenAnswer(invocation -> {
+      insideTransaction.set(true);
+      try {
+        return ((Supplier<?>) invocation.getArgument(0)).get();
+      } finally {
+        insideTransaction.set(false);
+      }
+    });
     when(settingRepository.findByAccountIdAndSymbolForUpdate(accountId, SYMBOL))
         .thenReturn(Optional.of(setting));
     when(positionRepository.findOpenLinearPerpBySymbolForUpdate(accountId, SYMBOL))
@@ -617,6 +625,39 @@ class SystemCloseOrderServiceTest {
   }
 
   @Test
+  void strictWholeClosePropagatesTheFirstLockedFailureWithoutRetry() {
+    FullFillResult firstFill = fill(new FullFillRequest(
+        executionIntent(OrderSide.SELL, new BigDecimal("2.0000"), "strict-stale-close"),
+        SYMBOL,
+        ProductType.LINEAR_PERP,
+        OrderSide.SELL,
+        FullFillExecutionPath.MARKET,
+        new BigDecimal("2.0000"),
+        null));
+    when(fullFillCoordinator.execute(
+        any(FullFillRequest.class),
+        any(ExecutableMarketSnapshot.class))).thenReturn(firstFill);
+    doThrow(new BusinessException(ErrorCode.MARKET_DATA_STALE, "strict lock snapshot expired"))
+        .when(fullFillCoordinator)
+        .requireFresh(any(FullFillResult.class));
+
+    assertThatThrownBy(() -> service().closeWholeStrict(
+        accountId,
+        positionId,
+        OrderOrigin.LIQUIDATION,
+        "CROSS_MAINTENANCE_MARGIN",
+        "strict-stale-close"))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode())
+                .isEqualTo(ErrorCode.MARKET_DATA_STALE));
+
+    verify(marketBundleResolver).resolvePerp(eq(SYMBOL), any());
+    verify(transactionExecutor).executeJoined(any());
+    verify(transactionExecutor, never()).execute(any());
+  }
+
+  @Test
   void wholeUserCloseRetriesWithTheCurrentLockedQuantityInsteadOfOverClosing() {
     AtomicBoolean firstLock = new AtomicBoolean(true);
     when(positionRepository.findOpenLinearPerpBySymbolForUpdate(accountId, SYMBOL))
@@ -680,6 +721,8 @@ class SystemCloseOrderServiceTest {
         () -> assertThat(result.order().getBaseQuantity()).isEqualByComparingTo("2.0000"),
         () -> assertThat(lockedGuardRan).isTrue());
     verify(accountRepository, never()).findByIdAndUserIdForUpdate(any(), any());
+    verify(ledgerService, times(1)).recordForcedClose(
+        account, positionId, "risk operator cleanup");
   }
 
   @Test
@@ -756,6 +799,8 @@ class SystemCloseOrderServiceTest {
         "ORDER",
         result.order().getId().toString(),
         "{\"amount\":0.49000000,\"positionId\":\"" + positionId + "\"}");
+    verify(ledgerService, times(1)).recordForcedClose(
+        account, positionId, "CROSS_MAINTENANCE_MARGIN");
   }
 
   @Test
@@ -1122,6 +1167,37 @@ class SystemCloseOrderServiceTest {
     return service;
   }
 
+  @Test
+  void triggeredTrailingCarrierUsesCanonicalProtectionCloseInPlace() {
+    OrderEntity trailing = protection(TriggerExecutionType.MARKET, null);
+    trailing.setOrderType(OrderType.TRAILING_STOP_MARKET);
+    trailing.setProtectionType(ProtectionType.STOP_LOSS);
+    trailing.setTrailingDelta(new BigDecimal("5"));
+    trailing.setTrailingExtreme(new BigDecimal("105"));
+    trailing.setTriggerPrice(new BigDecimal("100"));
+    prepareProtection(trailing, trailing);
+
+    SystemCloseOrderService.CloseResult result = service().executeProtection(
+        trailing.getId(), ExecutableMarketSnapshot.from(bundle));
+
+    assertAll(
+        () -> assertThat(result.replayed()).isFalse(),
+        () -> assertThat(result.order()).isSameAs(trailing),
+        () -> assertThat(trailing.getOrderType()).isEqualTo(OrderType.MARKET),
+        () -> assertThat(trailing.getStatus()).isEqualTo(OrderStatus.FILLED),
+        () -> assertThat(trailing.getParentPositionId()).isEqualTo(positionId),
+        () -> assertThat(trailing.getOrderOrigin()).isEqualTo(OrderOrigin.PROTECTIVE),
+        () -> assertThat(trailing.getProtectionType()).isEqualTo(ProtectionType.STOP_LOSS));
+    verify(orderRepository).save(trailing);
+    verify(orderFillService).fillPerpetual(
+        eq(trailing),
+        eq(account),
+        any(FullFillResult.class),
+        eq(new BigDecimal("100")),
+        eq(10),
+        eq("Protection order margin"));
+  }
+
   private ClosePositionRequest request(String quantity, String clientOrderId) {
     return new ClosePositionRequest(
         new BigDecimal(quantity),
@@ -1398,6 +1474,7 @@ class SystemCloseOrderServiceTest {
         10,
         "USDT",
         "USDT",
+        BigDecimal.ONE,
         BigDecimal.ONE,
         "DEFAULT",
         "ALWAYS",

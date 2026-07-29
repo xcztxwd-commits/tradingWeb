@@ -26,12 +26,13 @@ public interface CrossLiquidationChargeRepository
   int insertOnConflictDoNothing(CrossLiquidationChargeEntity charge);
 
   @Select("""
-      SELECT *
-      FROM trading.cross_liquidation_charges
-      WHERE account_id = #{accountId}
-        AND status = 'PENDING'
-      ORDER BY order_id
-      FOR UPDATE
+      SELECT c.*
+      FROM trading.cross_liquidation_charges c
+      JOIN trading.positions p ON p.id = c.position_id
+      WHERE c.account_id = #{accountId}
+        AND c.status = 'PENDING'
+      ORDER BY p.symbol, p.position_side, c.position_id, c.order_id
+      FOR UPDATE OF c
       """)
   List<CrossLiquidationChargeEntity> findPendingByAccountIdForUpdate(
       @Param("accountId") UUID accountId);

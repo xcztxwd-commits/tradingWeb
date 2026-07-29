@@ -13,7 +13,10 @@ import static org.mockito.Mockito.when;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.enums.AccountStatus;
 import com.fxplatform.account.enums.AccountType;
+import com.fxplatform.account.dto.AccountResponse;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.account.service.AccountService;
+import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.ExecutableMarketSnapshot;
 import com.fxplatform.market.model.CandleRequest;
@@ -24,12 +27,17 @@ import com.fxplatform.market.provider.MarketBundleResolver;
 import com.fxplatform.risk.model.InstrumentRules;
 import com.fxplatform.risk.service.InstrumentRulesEngine;
 import com.fxplatform.trading.dto.request.CreateOcoOrderRequest;
+import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.response.OcoOrderGroupResponse;
+import com.fxplatform.trading.dto.response.OrderResponse;
 import com.fxplatform.trading.entity.OrderEntity;
+import com.fxplatform.trading.enums.MarginMode;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.enums.OrderType;
+import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.QuantityUnit;
+import com.fxplatform.trading.enums.TimeInForce;
 import com.fxplatform.trading.enums.TriggerPriceType;
 import com.fxplatform.trading.repository.OrderRepository;
 import com.fxplatform.trading.repository.TradeRepository;
@@ -39,6 +47,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
@@ -87,11 +96,14 @@ class Task6PostgresSpotIT {
 
   @Autowired private JdbcTemplate jdbcTemplate;
   @Autowired private PlatformTransactionManager transactionManager;
+  @Autowired private AccountService accountService;
   @Autowired private TradingAccountRepository accountRepository;
   @Autowired private OrderRepository orderRepository;
   @Autowired private TradeRepository tradeRepository;
   @Autowired private WalletBalanceRepository walletBalanceRepository;
+  @Autowired private OrderService orderService;
   @Autowired private OcoOrderService ocoOrderService;
+  @Autowired private PendingOrderExecutionService pendingOrderExecutionService;
   @Autowired private PendingOrderExecutionProcessor pendingOrderExecutionProcessor;
   @Autowired private InstrumentRulesEngine instrumentRulesEngine;
 
@@ -123,6 +135,130 @@ class Task6PostgresSpotIT {
       jdbcTemplate.update("DELETE FROM auth.users WHERE id = ?", fixture.userId());
     }
     fixtures.clear();
+  }
+
+  @Test
+  void simpleAdvancedOrdersPreserveCrossTableSnapshotsAndIocOnlyAddsTerminalLifecycle() {
+    Fixture fixture = createFixture(
+        new BigDecimal("1000.00000000"),
+        new BigDecimal("0.20000000"));
+    when(marketBundleResolver.resolveSpot(eq(SYMBOL), any(CandleRequest.class)))
+        .thenReturn(creationBundle(Instant.now().plusSeconds(30)));
+
+    DatabaseState beforePostOnly = databaseState(fixture.userId(), fixture.accountId());
+    assertThatThrownBy(() -> orderService.createOrder(
+        fixture.principal(),
+        advancedLimit(
+            fixture.accountId(),
+            "50010",
+            TimeInForce.GTC,
+            true,
+            uniqueKey("post-only-reject"))))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("POST_ONLY_WOULD_TAKE"));
+    assertThat(databaseState(fixture.userId(), fixture.accountId())).isEqualTo(beforePostOnly);
+
+    DatabaseState beforeFok = databaseState(fixture.userId(), fixture.accountId());
+    assertThatThrownBy(() -> orderService.createOrder(
+        fixture.principal(),
+        advancedLimit(
+            fixture.accountId(),
+            "49900",
+            TimeInForce.FOK,
+            false,
+            uniqueKey("fok-reject"))))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("FOK_NOT_FILLABLE"));
+    assertThat(databaseState(fixture.userId(), fixture.accountId())).isEqualTo(beforeFok);
+
+    DatabaseState beforeIoc = databaseState(fixture.userId(), fixture.accountId());
+    OrderResponse canceled = orderService.createOrder(
+        fixture.principal(),
+        advancedLimit(
+            fixture.accountId(),
+            "49900",
+            TimeInForce.IOC,
+            false,
+            uniqueKey("ioc-cancel")));
+    DatabaseState afterIoc = databaseState(fixture.userId(), fixture.accountId());
+
+    assertThat(canceled.status()).isEqualTo(OrderStatus.CANCELLED.name());
+    assertThat(canceled.filledQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(canceled.remainingQuantity()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(canceled.holdAmount()).isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(afterIoc.orders()).hasSize(beforeIoc.orders().size() + 1);
+    assertThat(afterIoc.events()).hasSize(beforeIoc.events().size() + 1);
+    assertThat(afterIoc.financial()).isEqualTo(beforeIoc.financial());
+    assertThat(string("SELECT status FROM trading.orders WHERE id = ?", canceled.id()))
+        .isEqualTo("CANCELLED");
+    assertThat(decimal(
+        "SELECT filled_quantity FROM trading.orders WHERE id = ?", canceled.id()))
+        .isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(decimal(
+        "SELECT remaining_quantity FROM trading.orders WHERE id = ?", canceled.id()))
+        .isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(decimal(
+        "SELECT hold_amount FROM trading.orders WHERE id = ?", canceled.id()))
+        .isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(count("""
+        SELECT count(*) FROM trading.orders
+        WHERE id = ? AND order_type = 'LIMIT' AND time_in_force = 'IOC'
+          AND post_only = false AND canceled_at IS NOT NULL
+        """, canceled.id())).isEqualTo(1);
+    assertThat(count("""
+        SELECT count(*) FROM trading.order_events
+        WHERE order_id = ? AND event_type = 'ORDER_CANCELED'
+          AND from_status = 'ACCEPTED' AND to_status = 'CANCELLED'
+          AND reason_code IS NULL
+        """, canceled.id())).isEqualTo(1);
+  }
+
+  @Test
+  void concurrentStopLimitActivationPersistsOneTriggerOneFillAndOneTrade() throws Exception {
+    Fixture fixture = createFixture(
+        new BigDecimal("1000.00000000"),
+        new BigDecimal("0.20000000"));
+    when(marketBundleResolver.resolveSpot(eq(SYMBOL), any(CandleRequest.class)))
+        .thenReturn(creationBundle(Instant.now().plusSeconds(30)));
+    OrderResponse activation = orderService.createOrder(
+        fixture.principal(),
+        stopLimit(fixture.accountId(), uniqueKey("activation-race")));
+    assertThat(activation.status()).isEqualTo(OrderStatus.PENDING_ACTIVATION.name());
+
+    reset(marketBundleResolver);
+    CyclicBarrier bothResolved = new CyclicBarrier(2);
+    when(marketBundleResolver.resolveSpot(eq(SYMBOL), any(CandleRequest.class)))
+        .thenAnswer(invocation -> {
+          bothResolved.await(5, SECONDS);
+          return creationBundle(Instant.now().plusSeconds(30));
+        });
+    ExecutorService workers = Executors.newFixedThreadPool(2);
+    Future<Integer> first = workers.submit(pendingOrderExecutionService::executePendingOrders);
+    Future<Integer> second = workers.submit(pendingOrderExecutionService::executePendingOrders);
+    int totalFills;
+    try {
+      totalFills = first.get(15, SECONDS) + second.get(15, SECONDS);
+    } finally {
+      workers.shutdownNow();
+    }
+
+    assertThat(totalFills).isEqualTo(1);
+    assertThat(string("SELECT status FROM trading.orders WHERE id = ?", activation.id()))
+        .isEqualTo("FILLED");
+    assertThat(decimal("SELECT hold_amount FROM trading.orders WHERE id = ?", activation.id()))
+        .isEqualByComparingTo(BigDecimal.ZERO);
+    assertThat(count("SELECT count(*) FROM trading.trades WHERE order_id = ?", activation.id()))
+        .isEqualTo(1);
+    assertThat(count("""
+        SELECT count(*) FROM trading.order_events
+        WHERE order_id = ? AND event_type = 'ORDER_TRIGGERED'
+        """, activation.id())).isEqualTo(1);
+    assertThat(count("""
+        SELECT count(*) FROM trading.order_events
+        WHERE order_id = ? AND event_type = 'ORDER_FILLED'
+        """, activation.id())).isEqualTo(1);
   }
 
   @Test
@@ -502,6 +638,70 @@ class Task6PostgresSpotIT {
         key, key);
   }
 
+  private CreateOrderRequest advancedLimit(
+      UUID accountId,
+      String price,
+      TimeInForce timeInForce,
+      boolean postOnly,
+      String key
+  ) {
+    return new CreateOrderRequest(
+        accountId,
+        SYMBOL,
+        OrderSide.BUY,
+        OrderType.LIMIT,
+        null,
+        null,
+        null,
+        null,
+        key,
+        key,
+        new BigDecimal("0.1000"),
+        new BigDecimal(price),
+        1,
+        PositionSide.BOTH,
+        QuantityUnit.BASE,
+        MarginMode.CASH,
+        null,
+        null,
+        false,
+        List.of(),
+        timeInForce,
+        postOnly,
+        null,
+        null,
+        null);
+  }
+
+  private CreateOrderRequest stopLimit(UUID accountId, String key) {
+    return new CreateOrderRequest(
+        accountId,
+        SYMBOL,
+        OrderSide.BUY,
+        OrderType.STOP_LIMIT,
+        null,
+        null,
+        null,
+        null,
+        key,
+        key,
+        new BigDecimal("0.0100"),
+        new BigDecimal("50010"),
+        1,
+        PositionSide.BOTH,
+        QuantityUnit.BASE,
+        MarginMode.CASH,
+        new BigDecimal("50000"),
+        TriggerPriceType.LAST_PRICE,
+        false,
+        List.of(),
+        TimeInForce.GTC,
+        false,
+        null,
+        null,
+        null);
+  }
+
   private SpotMarketBundle creationBundle(Instant expiresAt) {
     return new SpotMarketBundle(
         SYMBOL, SYMBOL, "binance", MarketSourceMode.PUBLIC_EXTERNAL,
@@ -529,6 +729,61 @@ class Task6PostgresSpotIT {
   private WalletBalanceEntity wallet(UUID accountId, String asset) {
     return walletBalanceRepository.findByAccountIdAndWalletTypeAndAsset(
         accountId, "SPOT", asset).orElseThrow();
+  }
+
+  private DatabaseState databaseState(UUID userId, UUID accountId) {
+    FinancialState financial = new FinancialState(
+        rows("SELECT * FROM trading.trades WHERE account_id = ? ORDER BY id", accountId),
+        rows("SELECT * FROM trading.spot_positions WHERE account_id = ? ORDER BY id", accountId),
+        rows("SELECT * FROM trading.positions WHERE account_id = ? ORDER BY id", accountId),
+        rows("SELECT * FROM ledger.asset_ledger_entries WHERE account_id = ? ORDER BY id", accountId),
+        rows("SELECT * FROM ledger.ledger_entries WHERE account_id = ? ORDER BY id", accountId),
+        jdbcTemplate.query("""
+            SELECT wallet_type, asset, total, available, locked
+            FROM core.wallet_balances
+            WHERE account_id = ?
+            ORDER BY wallet_type, asset
+            """, (rs, rowNum) -> new WalletState(
+                rs.getString("wallet_type"),
+                rs.getString("asset"),
+                canonical(rs.getBigDecimal("total")),
+                canonical(rs.getBigDecimal("available")),
+                canonical(rs.getBigDecimal("locked"))), accountId),
+        jdbcTemplate.queryForObject("""
+            SELECT balance, equity, used_margin, free_margin
+            FROM core.trading_accounts
+            WHERE id = ?
+            """, (rs, rowNum) -> new AccountState(
+                canonical(rs.getBigDecimal("balance")),
+                canonical(rs.getBigDecimal("equity")),
+                canonical(rs.getBigDecimal("used_margin")),
+                canonical(rs.getBigDecimal("free_margin"))), accountId),
+        accountSummaryState(accountService.summary(userId, accountId)));
+    return new DatabaseState(
+        rows("SELECT * FROM trading.orders WHERE account_id = ? ORDER BY id", accountId),
+        rows("""
+            SELECT * FROM trading.order_events
+            WHERE order_id IN (SELECT id FROM trading.orders WHERE account_id = ?)
+            ORDER BY id
+            """, accountId),
+        financial);
+  }
+
+  private List<Map<String, Object>> rows(String sql, Object... args) {
+    return jdbcTemplate.queryForList(sql, args);
+  }
+
+  private AccountSummaryState accountSummaryState(AccountResponse response) {
+    return new AccountSummaryState(
+        canonical(response.balance()),
+        canonical(response.equity()),
+        canonical(response.usedMargin()),
+        canonical(response.freeMargin()),
+        canonical(response.marginLevel()),
+        canonical(response.openFloatingPnl()),
+        canonical(response.maintenanceMargin()),
+        canonical(response.positionValue()),
+        canonical(response.marginAvailable()));
   }
 
   private void assertWalletInvariant(WalletBalanceEntity wallet) {
@@ -564,6 +819,18 @@ class Task6PostgresSpotIT {
     return jdbcTemplate.queryForObject(sql, Integer.class, args);
   }
 
+  private String string(String sql, Object... args) {
+    return jdbcTemplate.queryForObject(sql, String.class, args);
+  }
+
+  private BigDecimal decimal(String sql, Object... args) {
+    return jdbcTemplate.queryForObject(sql, BigDecimal.class, args);
+  }
+
+  private static BigDecimal canonical(BigDecimal value) {
+    return value == null ? null : value.stripTrailingZeros();
+  }
+
   private static BigDecimal orZero(BigDecimal value) {
     return value == null ? BigDecimal.ZERO : value;
   }
@@ -588,5 +855,54 @@ class Task6PostgresSpotIT {
   }
 
   private record Fixture(UUID userId, UUID accountId, UserPrincipal principal) {
+  }
+
+  private record DatabaseState(
+      List<Map<String, Object>> orders,
+      List<Map<String, Object>> events,
+      FinancialState financial
+  ) {
+  }
+
+  private record FinancialState(
+      List<Map<String, Object>> trades,
+      List<Map<String, Object>> spotPositions,
+      List<Map<String, Object>> perpetualPositions,
+      List<Map<String, Object>> assetLedger,
+      List<Map<String, Object>> cashLedger,
+      List<WalletState> wallets,
+      AccountState account,
+      AccountSummaryState accountSummary
+  ) {
+  }
+
+  private record WalletState(
+      String walletType,
+      String asset,
+      BigDecimal total,
+      BigDecimal available,
+      BigDecimal locked
+  ) {
+  }
+
+  private record AccountState(
+      BigDecimal balance,
+      BigDecimal equity,
+      BigDecimal usedMargin,
+      BigDecimal freeMargin
+  ) {
+  }
+
+  private record AccountSummaryState(
+      BigDecimal balance,
+      BigDecimal equity,
+      BigDecimal usedMargin,
+      BigDecimal freeMargin,
+      BigDecimal marginLevel,
+      BigDecimal openFloatingPnl,
+      BigDecimal maintenanceMargin,
+      BigDecimal positionValue,
+      BigDecimal marginAvailable
+  ) {
   }
 }

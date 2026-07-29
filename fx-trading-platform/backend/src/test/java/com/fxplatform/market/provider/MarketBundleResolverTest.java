@@ -2,11 +2,14 @@ package com.fxplatform.market.provider;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.same;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.mock;
-import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.when;
 
 import com.fxplatform.chart.dto.CandleResponse;
 import com.fxplatform.common.exception.BusinessException;
@@ -21,6 +24,7 @@ import com.fxplatform.market.model.MarketSourceMode;
 import com.fxplatform.market.model.PerpetualMarketBundle;
 import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.model.SpotMarketBundle;
+import com.fxplatform.market.realtime.MarketTestControlService;
 import com.fxplatform.market.service.MarketSourceSelectionTracker;
 import com.fxplatform.market.service.ProviderHealthRecorder;
 import java.math.BigDecimal;
@@ -39,8 +43,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class MarketBundleResolverTest {
@@ -71,6 +78,25 @@ class MarketBundleResolverTest {
     tracker = new MarketSourceSelectionTracker(event -> selectionEvents.incrementAndGet(), CLOCK);
     resolver = new MarketBundleResolver(
         providerResolver, new MarketBundleValidator(CLOCK), tracker, healthRecorder, CLOCK);
+  }
+
+  @Test
+  void springWiresTestControlIntoProductionConstructor() {
+    MarketTestControlService testControlService = mock(MarketTestControlService.class);
+
+    new ApplicationContextRunner()
+        .withBean(ProviderResolver.class, () -> mock(ProviderResolver.class))
+        .withBean(MarketBundleValidator.class, () -> mock(MarketBundleValidator.class))
+        .withBean(MarketSourceSelectionTracker.class, () -> mock(MarketSourceSelectionTracker.class))
+        .withBean(ProviderHealthRecorder.class, () -> mock(ProviderHealthRecorder.class))
+        .withBean(MarketTestControlService.class, () -> testControlService)
+        .withBean(MarketBundleResolver.class)
+        .run(context -> {
+          assertThat(context).hasSingleBean(MarketBundleResolver.class);
+          assertThat(ReflectionTestUtils.getField(
+              context.getBean(MarketBundleResolver.class),
+              "testControlService")).isSameAs(testControlService);
+        });
   }
 
   @ParameterizedTest
@@ -196,6 +222,83 @@ class MarketBundleResolverTest {
     assertThat(result.providerCode()).isEqualTo("okx");
     assertThat(okx.spotCalls).isEqualTo(1);
     assertThat(binance.spotCalls).isZero();
+  }
+
+  @Test
+  void validatesProviderThenSpotAuthorityAndRecordsOriginalProviderQuote() {
+    SpotMarketBundle providerBundle = completeSpot("binance", "BTCUSDT", NOW.minusSeconds(1));
+    SpotMarketBundle authorityBundle = withAuthorityPrices(providerBundle);
+    BundleAdapter binance = BundleAdapter.spot("binance", providerBundle);
+    ProviderResolution candidate =
+        candidate("BTCUSDT", ProductType.CRYPTO_SPOT, "BTCUSDT", binance);
+    MarketBundleValidator authorityValidator = mock(MarketBundleValidator.class);
+    MarketTestControlService testControlService = mock(MarketTestControlService.class);
+    when(providerResolver.resolveCandidates("BTCUSDT", BUNDLE_CAPABILITIES))
+        .thenReturn(List.of(candidate));
+    when(authorityValidator.valid(providerBundle)).thenReturn(true);
+    when(testControlService.applySpotOverride(providerBundle)).thenReturn(authorityBundle);
+    when(authorityValidator.valid(authorityBundle)).thenReturn(true);
+    MarketBundleResolver authorityResolver = new MarketBundleResolver(
+        providerResolver,
+        authorityValidator,
+        tracker,
+        healthRecorder,
+        testControlService,
+        CLOCK);
+
+    SpotMarketBundle result = authorityResolver.resolveSpot("BTCUSDT", CANDLES);
+
+    assertThat(result).isSameAs(authorityBundle);
+    InOrder validationOrder = inOrder(authorityValidator, testControlService);
+    validationOrder.verify(authorityValidator).valid(same(providerBundle));
+    validationOrder.verify(testControlService).applySpotOverride(same(providerBundle));
+    validationOrder.verify(authorityValidator).valid(same(authorityBundle));
+    verify(healthRecorder).recordQuoteSuccess(
+        same(candidate.provider()),
+        argThat(quote ->
+            quote.bid().compareTo(providerBundle.bid()) == 0
+                && quote.ask().compareTo(providerBundle.ask()) == 0
+                && providerBundle.providerCode().equals(quote.source())),
+        anyLong());
+  }
+
+  @Test
+  void validatesProviderThenPerpetualAuthorityAndRecordsOriginalProviderQuote() {
+    PerpetualMarketBundle providerBundle = completePerp(
+        "binance-usdm", "BTCUSDT", MarketSourceMode.PUBLIC_EXTERNAL, NOW.minusSeconds(1));
+    PerpetualMarketBundle authorityBundle = withAuthorityPrices(providerBundle);
+    BundleAdapter binance = BundleAdapter.perp("binance-usdm", providerBundle);
+    ProviderResolution candidate =
+        candidate("BTCUSDT-PERP", ProductType.LINEAR_PERP, "BTCUSDT", binance);
+    MarketBundleValidator authorityValidator = mock(MarketBundleValidator.class);
+    MarketTestControlService testControlService = mock(MarketTestControlService.class);
+    when(providerResolver.resolveCandidates("BTCUSDT-PERP", BUNDLE_CAPABILITIES))
+        .thenReturn(List.of(candidate));
+    when(authorityValidator.valid(providerBundle)).thenReturn(true);
+    when(testControlService.applyPerpetualOverride(providerBundle)).thenReturn(authorityBundle);
+    when(authorityValidator.valid(authorityBundle)).thenReturn(true);
+    MarketBundleResolver authorityResolver = new MarketBundleResolver(
+        providerResolver,
+        authorityValidator,
+        tracker,
+        healthRecorder,
+        testControlService,
+        CLOCK);
+
+    PerpetualMarketBundle result = authorityResolver.resolvePerp("BTCUSDT-PERP", CANDLES);
+
+    assertThat(result).isSameAs(authorityBundle);
+    InOrder validationOrder = inOrder(authorityValidator, testControlService);
+    validationOrder.verify(authorityValidator).valid(same(providerBundle));
+    validationOrder.verify(testControlService).applyPerpetualOverride(same(providerBundle));
+    validationOrder.verify(authorityValidator).valid(same(authorityBundle));
+    verify(healthRecorder).recordQuoteSuccess(
+        same(candidate.provider()),
+        argThat(quote ->
+            quote.bid().compareTo(providerBundle.bid()) == 0
+                && quote.markPrice().compareTo(providerBundle.mark()) == 0
+                && providerBundle.providerCode().equals(quote.source())),
+        anyLong());
   }
 
   @Test
@@ -465,6 +568,48 @@ class MarketBundleResolverTest {
         new BigDecimal("99"), new BigDecimal("101"), new BigDecimal("100"),
         new BigDecimal("100.2"), new BigDecimal("100.1"), depth,
         List.of(trade), List.of(candle), asOf, expiresAt);
+  }
+
+  private SpotMarketBundle withAuthorityPrices(SpotMarketBundle bundle) {
+    return new SpotMarketBundle(
+        bundle.platformSymbol(),
+        bundle.providerSymbol(),
+        bundle.providerCode(),
+        bundle.sourceMode(),
+        new BigDecimal("98"),
+        new BigDecimal("102"),
+        new BigDecimal("100"),
+        bundle.changePercent(),
+        bundle.high24h(),
+        bundle.low24h(),
+        bundle.volume24h(),
+        bundle.orderBook(),
+        bundle.recentTrades(),
+        bundle.candles(),
+        bundle.asOf(),
+        bundle.expiresAt());
+  }
+
+  private PerpetualMarketBundle withAuthorityPrices(PerpetualMarketBundle bundle) {
+    return new PerpetualMarketBundle(
+        bundle.platformSymbol(),
+        bundle.providerSymbol(),
+        bundle.providerCode(),
+        bundle.sourceMode(),
+        new BigDecimal("98"),
+        new BigDecimal("102"),
+        new BigDecimal("100"),
+        new BigDecimal("100"),
+        new BigDecimal("100"),
+        bundle.changePercent(),
+        bundle.high24h(),
+        bundle.low24h(),
+        bundle.volume24h(),
+        bundle.orderBook(),
+        bundle.recentTrades(),
+        bundle.candles(),
+        bundle.asOf(),
+        bundle.expiresAt());
   }
 
   private SpotMarketBundle withComponents(

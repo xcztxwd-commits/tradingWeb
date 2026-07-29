@@ -32,7 +32,10 @@ class FundingPersistenceContractTest {
 
     assertThat(select).isNotNull();
     String sql = String.join(" ", select.value()).replaceAll("\\s+", " ").toLowerCase();
-    assertThat(sql).contains("p.opened_at <= fr.funding_time");
+    assertThat(sql).contains(
+        "case when fr.provider_code = 'validation' and fr.source_mode = 'demo' "
+            + "then fr.funding_time = #{atorbefore} "
+            + "else p.opened_at <= fr.funding_time end");
     assertThat(sql).contains("p.product_type = 'linear_perp'");
     assertThat(sql).contains("not exists");
     assertThat(sql).contains("trading.funding_settlements");

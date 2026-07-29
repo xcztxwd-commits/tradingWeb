@@ -1,0 +1,115 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:postgresql://validation-postgres:5432/fx_validation_lab
+    username: fx_validation_app
+    password: ${VALIDATION_DATABASE_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: validation-redis
+      port: 6379
+      database: 0
+      password: ${VALIDATION_REDIS_PASSWORD}
+  task:
+    scheduling:
+      enabled: false
+
+security:
+  jwt:
+    secret: ${VALIDATION_JWT_SECRET}
+  config:
+    encryption-key: ${VALIDATION_CONFIG_ENCRYPTION_KEY}
+
+validation:
+  safety:
+    enabled: true
+  internal:
+    secret: ${VALIDATION_INTERNAL_SECRET}
+
+admin:
+  bootstrap:
+    enabled: false
+
+app:
+  engagement:
+    assets:
+      storage: disabled
+    scheduler:
+      enabled: false
+    retention:
+      enabled: false
+    outbox:
+      enabled: false
+
+massive:
+  api-key: ""
+  rest-base-url: http://127.0.0.1:9
+  websocket-forex-url: http://127.0.0.1:9
+  write-quotes-to-db: false
+  flat-files:
+    access-key-id: ""
+    secret-access-key: ""
+    endpoint: http://127.0.0.1:9
+
+binance:
+  rest-base-url: http://127.0.0.1:9
+  web-base-url: http://127.0.0.1:9
+  futures-base-url: http://127.0.0.1:9
+  websocket-base-url: http://127.0.0.1:9
+
+okx:
+  rest-base-url: http://127.0.0.1:9
+
+market:
+  fear-greed-url: http://127.0.0.1:9
+  demo-quotes:
+    enabled: false
+  realtime:
+    enabled: false
+    provider: local
+    websocket-base-url: http://127.0.0.1:9
+    backfill-enabled: false
+    order-book-fast: false
+    dynamic-symbols-enabled: false
+  provider-instrument-sync:
+    enabled: false
+  quote-broadcast-enabled: false
+  test-data:
+    enabled: false
+  test-control:
+    enabled: false
+
+execution:
+  mode: demo
+  broker:
+    endpoint: http://127.0.0.1:9
+    api-key: ""
+    account-id: ""
+  fix:
+    endpoint: http://127.0.0.1:9
+    api-key: ""
+    account-id: ""
+  lp:
+    endpoint: http://127.0.0.1:9
+    api-key: ""
+    account-id: ""
+
+trading:
+  pending-order-execution-enabled: false
+  protective-order-execution-enabled: false
+  funding:
+    enabled: false
+  fx-financing:
+    enabled: false
+  liquidation:
+    enabled: false
+
+trading-lab:
+  queue:
+    enabled: false
+  report:
+    cleanup:
+      enabled: false

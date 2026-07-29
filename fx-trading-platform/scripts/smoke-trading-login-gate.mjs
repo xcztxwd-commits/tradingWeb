@@ -11,7 +11,7 @@ const webBaseUrl = process.env.WEB_BASE_URL ?? 'http://localhost:5173'
 const webUrl = new URL(webBaseUrl)
 const webHost = webUrl.hostname || '127.0.0.1'
 const webPort = webUrl.port || '5173'
-const tradingUrl = `${webBaseUrl}/trading`
+const tradingUrl = `${webBaseUrl}/trade/spot/BTCUSDT`
 const projectRoot = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
 
 const processes = []
@@ -75,29 +75,14 @@ try {
 
   try {
     await page.waitForFunction(() => {
-      const dialogOpen = [...document.querySelectorAll('[role="dialog"]')]
-        .some((element) =>
-          element.textContent?.includes('登录后启用交易执行') ||
-          element.textContent?.includes('Log in to enable trading execution')
-      )
+      const dialogOpen = document.getElementById('trading-login-title') !== null
       const text = document.body.textContent ?? ''
       const hasTradingSymbol = text.includes('BTCUSDT') || text.includes('EURUSD')
       const canSeeTerminal = hasTradingSymbol &&
-        (text.includes('K线图') || text.includes('K线 chart') || text.includes('K绾?chart')) &&
-        (text.includes('订单表') || text.includes('Order book'))
-      const canSeeGuestStatus = text.includes('公开看盘模式') || text.includes('Public market mode') ||
-        text.includes('请先登录') || text.includes('Log in first') || text.includes('Login required')
-      const canSeeLoginOrderButton = [...document.querySelectorAll('button')]
-        .some((button) => button.classList.contains('trade-panel__submit--login') ||
-          button.textContent?.includes('登录账户') ||
-          button.textContent?.includes('登录后下单') ||
-          button.textContent?.trim() === '登录' ||
-          button.textContent?.includes('Log in') ||
-          button.textContent?.includes('Log in before placing an order') ||
-          button.getAttribute('aria-label') === '登录账户' ||
-          button.getAttribute('aria-label') === '登录后下单' ||
-          button.getAttribute('aria-label') === 'Log in')
-      return !dialogOpen && canSeeTerminal && canSeeGuestStatus && canSeeLoginOrderButton
+        document.querySelector('[data-platform-view="pc"] [data-panel-id="chart"]') !== null &&
+        document.querySelector('[data-platform-view="pc"] [data-panel-id="market"]') !== null
+      const canSeeLoginOrderButton = document.querySelector('[data-trading-action="login-required"]') !== null
+      return !dialogOpen && canSeeTerminal && canSeeLoginOrderButton
     }, 'guest terminal is usable before trade action')
   } catch (error) {
     const diagnostics = await page.evaluate(() => ({
@@ -117,16 +102,7 @@ try {
   assert(sessionProbeRequests > 0, 'Trading page must call /api/auth/session during boot')
 
   await page.evaluate(() => {
-    const loginButton = [...document.querySelectorAll('button')]
-      .find((button) => button.classList.contains('trade-panel__submit--login') ||
-        button.textContent?.includes('登录账户') ||
-        button.textContent?.includes('登录后下单') ||
-        button.textContent?.trim() === '登录' ||
-        button.textContent?.includes('Log in') ||
-        button.textContent?.includes('Log in before placing an order') ||
-        button.getAttribute('aria-label') === '登录账户' ||
-        button.getAttribute('aria-label') === '登录后下单' ||
-        button.getAttribute('aria-label') === 'Log in')
+    const loginButton = document.querySelector('[data-trading-action="login-required"]')
     if (!(loginButton instanceof HTMLButtonElement)) {
       throw new Error('Login-required order button not found')
     }
@@ -134,16 +110,11 @@ try {
   })
 
   await page.waitForFunction(() => {
-    return [...document.querySelectorAll('[role="dialog"]')]
-      .some((element) =>
-        element.textContent?.includes('登录后启用交易执行') ||
-        element.textContent?.includes('Log in to enable trading execution')
-      )
+    return document.getElementById('trading-login-title') !== null
   }, 'login prompt appears after trade action')
 
   await page.evaluate(() => {
-    const closeButton = document.querySelector('button[aria-label="关闭登录提示"]') ??
-      document.querySelector('button[aria-label="Close login prompt"]')
+    const closeButton = document.querySelector('[data-trading-action="close-login-prompt"]')
     if (!(closeButton instanceof HTMLButtonElement)) {
       throw new Error('Close login prompt button not found')
     }
@@ -151,42 +122,18 @@ try {
   })
 
   await page.waitForFunction(() => {
-    const dialogOpen = [...document.querySelectorAll('[role="dialog"]')]
-      .some((element) =>
-        element.textContent?.includes('登录后启用交易执行') ||
-        element.textContent?.includes('Log in to enable trading execution')
-    )
+    const dialogOpen = document.getElementById('trading-login-title') !== null
     const text = document.body.textContent ?? ''
     const hasTradingSymbol = text.includes('BTCUSDT') || text.includes('EURUSD')
     const canSeeTerminal = hasTradingSymbol &&
-      (text.includes('K线图') || text.includes('K线 chart') || text.includes('K绾?chart')) &&
-      (text.includes('订单表') || text.includes('Order book'))
-    const canSeeGuestStatus = text.includes('公开看盘模式') || text.includes('Public market mode') ||
-      text.includes('请先登录') || text.includes('Log in first') || text.includes('Login required')
-    const canSeeLoginOrderButton = [...document.querySelectorAll('button')]
-      .some((button) => button.classList.contains('trade-panel__submit--login') ||
-        button.textContent?.includes('登录账户') ||
-        button.textContent?.includes('登录后下单') ||
-        button.textContent?.trim() === '登录' ||
-        button.textContent?.includes('Log in') ||
-        button.textContent?.includes('Log in before placing an order') ||
-        button.getAttribute('aria-label') === '登录账户' ||
-        button.getAttribute('aria-label') === '登录后下单' ||
-        button.getAttribute('aria-label') === 'Log in')
-    return !dialogOpen && canSeeTerminal && canSeeGuestStatus && canSeeLoginOrderButton
+      document.querySelector('[data-platform-view="pc"] [data-panel-id="chart"]') !== null &&
+      document.querySelector('[data-platform-view="pc"] [data-panel-id="market"]') !== null
+    const canSeeLoginOrderButton = document.querySelector('[data-trading-action="login-required"]') !== null
+    return !dialogOpen && canSeeTerminal && canSeeLoginOrderButton
   }, 'terminal remains usable after prompt dismiss')
 
   await page.evaluate(() => {
-    const loginButton = [...document.querySelectorAll('button')]
-      .find((button) => button.classList.contains('trade-panel__submit--login') ||
-        button.textContent?.includes('登录账户') ||
-        button.textContent?.includes('登录后下单') ||
-        button.textContent?.trim() === '登录' ||
-        button.textContent?.includes('Log in') ||
-        button.textContent?.includes('Log in before placing an order') ||
-        button.getAttribute('aria-label') === '登录账户' ||
-        button.getAttribute('aria-label') === '登录后下单' ||
-        button.getAttribute('aria-label') === 'Log in')
+    const loginButton = document.querySelector('[data-trading-action="login-required"]')
     if (!(loginButton instanceof HTMLButtonElement)) {
       throw new Error('Login-required order button not found')
     }
@@ -194,16 +141,11 @@ try {
   })
 
   await page.waitForFunction(() => {
-    return [...document.querySelectorAll('[role="dialog"]')]
-      .some((element) =>
-        element.textContent?.includes('登录后启用交易执行') ||
-        element.textContent?.includes('Log in to enable trading execution')
-      )
+    return document.getElementById('trading-login-title') !== null
   }, 'login prompt reopens after second trade action')
 
   await page.evaluate(() => {
-    const loginButton = [...document.querySelectorAll('button')]
-      .find((button) => button.textContent?.includes('前往登录') || button.textContent?.includes('Go to login'))
+    const loginButton = document.querySelector('[data-trading-action="go-to-login"]')
     if (!(loginButton instanceof HTMLButtonElement)) {
       throw new Error('Login prompt CTA not found')
     }
@@ -213,39 +155,24 @@ try {
   await page.waitForFunction(() => {
     const redirect = new URLSearchParams(window.location.search).get('redirect')
     return window.location.pathname === '/login' &&
-      redirect === '/trading' &&
+      redirect === '/trade/spot/BTCUSDT' &&
       (document.body.textContent?.includes('专业交易终端登录') || document.body.textContent?.includes('Professional trading terminal login'))
   }, 'order button navigates to login page')
 
   await page.evaluateExpression("localStorage.setItem('fx-platform-auth-token', 'bad-token')")
   await page.navigate(`${tradingUrl}?case=invalid-token`)
   await page.waitForFunction(() => {
-    const text = document.body.textContent ?? ''
-    const hasLoginRequiredStatus = text.includes('请先登录') || text.includes('Log in first') || text.includes('Login required')
-    const hasLoginOrderButton = [...document.querySelectorAll('button')]
-      .some((button) => button.classList.contains('trade-panel__submit--login') ||
-        button.textContent?.includes('登录账户') ||
-        button.textContent?.includes('Log in') ||
-        button.getAttribute('aria-label') === '登录账户' ||
-        button.getAttribute('aria-label') === 'Log in')
+    const hasLoginOrderButton = document.querySelector('[data-trading-action="login-required"]') !== null
     const invalidTokenCleared = localStorage.getItem('fx-platform-auth-token') === null
-    return hasLoginRequiredStatus && hasLoginOrderButton && invalidTokenCleared
+    return hasLoginOrderButton && invalidTokenCleared
   }, 'invalid token falls back to login-required trading mode')
 
   await page.evaluateExpression(`localStorage.setItem('fx-platform-auth-token', ${JSON.stringify(validToken)})`)
   await page.navigate(`${tradingUrl}?case=valid-token`)
   await page.waitForFunction(() => {
-    const text = document.body.textContent ?? ''
-    const legacyStatus = text.includes('账户链路已连接') &&
-      text.includes('Token 有效，账户与交易链路已连接')
-    const desktopPanelReady = (text.includes('后端已连接') || text.includes('Backend connected')) &&
-      text.includes('Account ready') &&
-      [...document.querySelectorAll('button')]
-        .some((button) => (button.getAttribute('aria-label')?.includes('BTC') || button.getAttribute('aria-label')?.includes('EUR')) &&
-          !button.textContent?.includes('会话未就绪') &&
-          !button.textContent?.includes('Not ready') &&
-          !button.classList.contains('trade-panel__submit--login'))
-    return legacyStatus || desktopPanelReady
+    return document.querySelector(
+      '[data-platform-view="pc"] [data-panel-id="trade"] [data-trading-action="submit-order"]:not(:disabled)'
+    ) !== null
   }, 'valid token trading session becomes ready')
 
   await page.close()
@@ -259,7 +186,7 @@ try {
     validSessionStatus: validSession.data.status,
     sessionProbeRequests,
     tradingUrl,
-    finalPath: '/login?redirect=/trading',
+    finalPath: '/login?redirect=/trade/spot/BTCUSDT',
     invalidTokenUi: 'login-required fallback',
     validTokenUi: 'trading session ready'
   }, null, 2))
@@ -285,50 +212,38 @@ async function verifyMobileTradeAction({ validToken }) {
   await page.navigate(`${tradingUrl}?mobile=guest`)
   await page.waitForFunction(() => {
     return [...document.querySelectorAll('button')]
-      .some((button) => String(button.className).includes('tradeAction'))
+      .some((button) => button.matches('[data-testid="mobile-trade-action"]'))
   }, 'mobile Trade action is visible')
   await page.evaluate(() => {
-    const tradeButton = [...document.querySelectorAll('button')]
-      .find((button) => String(button.className).includes('tradeAction')) ??
-      [...document.querySelectorAll('button')]
-        .find((button) => button.textContent?.trim() === 'Trade' ||
-          button.textContent?.trim() === '交易')
+    const tradeButton = document.querySelector('[data-testid="mobile-trade-action"]')
     if (!(tradeButton instanceof HTMLButtonElement)) {
       throw new Error('Mobile Trade button not found')
     }
     tradeButton.click()
   })
   await page.waitForFunction(() => {
-    const text = document.body.textContent ?? ''
-    return document.querySelector('[role="dialog"]') !== null ||
-      text.includes('登录后启用交易执行') ||
-      text.includes('Log in to enable trading execution')
+    return document.getElementById('trading-login-title') !== null
   }, 'mobile Trade action opens login prompt')
 
   await page.evaluateExpression(`localStorage.setItem('fx-platform-auth-token', ${JSON.stringify(validToken)})`)
   await page.navigate(`${tradingUrl}?mobile=valid-token`)
   await page.waitForFunction(() => {
     return [...document.querySelectorAll('button')]
-      .some((button) => String(button.className).includes('tradeAction'))
+      .some((button) => button.matches('[data-testid="mobile-trade-action"]'))
   }, 'mobile Trade action is visible for valid session')
   await page.evaluate(() => {
-    const tradeButton = [...document.querySelectorAll('button')]
-      .find((button) => String(button.className).includes('tradeAction')) ??
-      [...document.querySelectorAll('button')]
-        .find((button) => button.textContent?.trim() === 'Trade' ||
-          button.textContent?.trim() === '交易')
+    const tradeButton = document.querySelector('[data-testid="mobile-trade-action"]')
     if (!(tradeButton instanceof HTMLButtonElement)) {
       throw new Error('Mobile Trade button not found')
     }
     tradeButton.click()
   })
   await page.waitForFunction(() => {
-    const loginPromptOpen = document.querySelector('[role="dialog"]') !== null
+    const loginPromptOpen = document.getElementById('trading-login-title') !== null
     const orderSheetOpen = [...document.querySelectorAll('[aria-hidden="false"]')]
       .some((element) => {
-        const hasTitle = [...element.querySelectorAll('h2')]
-          .some((heading) => heading.textContent?.trim() === 'Trade')
-        return hasTitle && element.querySelector('.trade-panel.trade-panel--compact')
+        const sheetTitle = element.querySelector('#mobile-order-sheet-title')
+        return sheetTitle !== null && element.querySelector('section[aria-label]') !== null
       })
     return orderSheetOpen && !loginPromptOpen
   }, 'mobile Trade action opens order sheet')

@@ -18,6 +18,7 @@ import { createConnection } from 'node:net'
 import { tmpdir } from 'node:os'
 import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { types as utilTypes } from 'node:util'
 
 import {
   aggregateReport,
@@ -33,8 +34,19 @@ import {
   planP0Execution,
   registryFingerprint as calculateRegistryFingerprint,
   resolveP0RunRoot,
+  createP0Context as buildP0Context,
   runCase
 } from './p0-user-trading-cases.mjs'
+import { CASE_HANDLERS } from './p0-user-trading-core-cases.mjs'
+import {
+  alignPriceToTick,
+  effectiveQuantityStep,
+  floorToStep,
+  marketFillOracle,
+  perpPositionOracle,
+  tolerancesFromRules,
+  withinTolerance
+} from './p0-user-trading-oracles.mjs'
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]$/, '')
 const P0_COMPOSE_PROJECT = 'infra'
@@ -125,6 +137,13 @@ const P0_DEFAULT_REDIS_KEYS = [...P0_SPOT_SYMBOLS, ...P0_PERP_SYMBOLS]
 const FORBIDDEN_PRODUCTS = ['FOREX', 'INVERSE_PERP', 'OPTION']
 const SOURCE_METADATA_FIELDS = ['providerCode', 'providerSymbol', 'sourceMode', 'asOf', 'expiresAt', 'stale']
 const TERMINAL_ORDER_STATUSES = new Set(['FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED'])
+const CANONICAL_ADMIN_AUTHORITIES = [
+  'market:symbol:update',
+  'trading:account:demo-reset',
+  'trading:account:force-cleanup'
+]
+const CANONICAL_PROCESS_LOG_TAIL_BYTES = 200_000
+const TRADE_PANEL_SELECTOR = '[data-platform-view="pc"] [data-panel-id="trade"]'
 
 // Human-readable bootstrap evidence retained in the report: docker compose, not an in-memory substitute.
 const STARTUP_COMMANDS = [
@@ -599,8 +618,8 @@ async function ensureBackendServer() {
     assertProcessRunning(child)
     const response = await rawJson('/actuator/health').catch(() => null)
     return response?.status === 'UP'
-  }, 'real backend /actuator/health', 120000)
-  await waitFor(() => number(runDbSql(`
+  }, 'real backend /actuator/health', 180000)
+  await waitFor(async () => number(await runDbSql(`
     SELECT count(*)
     FROM pg_stat_activity
     WHERE datname = current_database()
@@ -647,8 +666,8 @@ function startManagedProcess(label, command, args, cwd, extraEnv = {}, inherited
     output: ''
   }
   processLogs.push(log)
-  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
-  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
+  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
+  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
   managedProcesses.push(child)
   return child
 }
@@ -701,6 +720,9 @@ export function buildCanonicalBackendEnvironment({
     SPRING_DATASOURCE_PASSWORD: 'password',
     SPRING_PROFILES_ACTIVE: 'dev',
     EXECUTION_MODE: 'demo',
+    ADMIN_BOOTSTRAP_ENABLED: 'true',
+    ADMIN_BOOTSTRAP_EMAIL: environment.ADMIN_SMOKE_EMAIL ?? 'admin-smoke@example.com',
+    ADMIN_BOOTSTRAP_PASSWORD: environment.ADMIN_SMOKE_PASSWORD ?? 'Password123!',
     MARKET_TEST_CONTROL_ENABLED: 'true',
     MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED: 'false',
     TRADING_PENDING_ORDER_EXECUTION_ENABLED: 'true',
@@ -1978,7 +2000,7 @@ export async function dropOwnedDatabase({ segmentName, runToken, postgres, signa
   await requireOwnedDatabase({ segmentName, runToken, postgres, signal })
   throwIfP0Aborted(signal)
   await postgres.executeAdminSql(
-    `DROP DATABASE ${quotedDatabaseIdentifier(segmentName)}`,
+    `DROP DATABASE ${quotedDatabaseIdentifier(segmentName)} WITH (FORCE)`,
     { sensitive: false, ...(signal === undefined ? {} : { signal }) }
   )
   throwIfP0Aborted(signal)
@@ -3531,6 +3553,77 @@ const P0_CONTROL_PHASES = new Set([
   'report'
 ])
 
+export const AUTHORITY_BUNDLE_REQUIRED_CHECKS = Object.freeze([
+  'baseline-spot-ui-quote',
+  'baseline-spot-fill',
+  'baseline-perp-ui-quote',
+  'baseline-perp-fill',
+  'baseline-perp-mark',
+  'baseline-perp-risk',
+  'controlled-spot-target-distance',
+  'controlled-perp-target-distance',
+  'controlled-spot-override',
+  'controlled-perp-override',
+  'controlled-spot-ui-quote',
+  'controlled-perp-ui-quote',
+  'controlled-spot-fill',
+  'controlled-perp-fill',
+  'controlled-perp-mark',
+  'controlled-perp-risk',
+  'restored-spot-provider',
+  'restored-perp-provider'
+])
+
+export function evaluateAuthorityBundleEvidence({ checks, cleanup } = {}) {
+  if (!isPlainP0ControlOutcome(cleanup) || cleanup.status !== 'PASS') {
+    throw new Error('P0_AUTHORITY_CLEANUP_FAILED')
+  }
+  if (!Array.isArray(checks)
+    || checks.length !== AUTHORITY_BUNDLE_REQUIRED_CHECKS.length) {
+    throw new Error('P0_AUTHORITY_EVIDENCE_INCOMPLETE')
+  }
+  const byId = new Map()
+  for (const check of checks) {
+    if (!isPlainP0ControlOutcome(check)
+      || typeof check.id !== 'string'
+      || !['PASS', 'FAIL'].includes(check.status)
+      || byId.has(check.id)) {
+      throw new Error('P0_AUTHORITY_EVIDENCE_INCOMPLETE')
+    }
+    byId.set(check.id, check)
+  }
+  if (AUTHORITY_BUNDLE_REQUIRED_CHECKS.some((id) => !byId.has(id))
+    || [...byId.keys()].some((id) => !AUTHORITY_BUNDLE_REQUIRED_CHECKS.includes(id))) {
+    throw new Error('P0_AUTHORITY_EVIDENCE_INCOMPLETE')
+  }
+  return {
+    status: 'PASS',
+    authorityBundleFixture: checks.every(({ status }) => status === 'PASS')
+      ? 'PASS'
+      : 'BLOCKED',
+    checks,
+    cleanup
+  }
+}
+
+export function authorityBlockedSubruns(definition, selectedSubruns, authorityState) {
+  if (authorityState?.status !== 'COMPLETE') return []
+  if (authorityState.authorityBundleFixture === 'PASS') return []
+  if (authorityState.authorityBundleFixture !== 'BLOCKED') {
+    throw new Error('P0_AUTHORITY_STATE_INVALID')
+  }
+  if (!Array.isArray(selectedSubruns)
+    || !definition?.authority
+    || !['none', 'whole-case', 'subruns'].includes(definition.authority.mode)
+    || !Array.isArray(definition.authority.subruns)) {
+    throw new Error('P0_AUTHORITY_CASE_CONTRACT_INVALID')
+  }
+  if (definition.authority.mode === 'none') return []
+  if (definition.authority.mode === 'whole-case') return [...selectedSubruns]
+  const authorityIds = new Set(definition.authority.subruns)
+  return selectedSubruns.filter(({ id }) => authorityIds.has(id))
+}
+
 const P0_PROFILE_LIFECYCLE_OPERATIONS = [
   'stopProfileBackend',
   'assertProfilePortFree',
@@ -3539,6 +3632,7 @@ const P0_PROFILE_LIFECYCLE_OPERATIONS = [
   'waitForProfileBusinessEndpoint',
   'verifyProfileDatabaseIdentity'
 ]
+const p0AuthorityCredentials = new WeakMap()
 
 function supportsP0ProfileLifecycle(operations) {
   const available = P0_PROFILE_LIFECYCLE_OPERATIONS.filter(
@@ -3551,7 +3645,24 @@ function supportsP0ProfileLifecycle(operations) {
   return true
 }
 
+function p0AuthorityAdminCredentials(context) {
+  if (typeof context?.ownerId !== 'string' || !/^[a-f0-9]{64}$/.test(context.ownerId)) {
+    throw new Error('P0_AUTHORITY_OWNER_ID_REQUIRED')
+  }
+  let credentials = p0AuthorityCredentials.get(context)
+  if (credentials) return credentials
+  const identity = randomUUID().replaceAll('-', '')
+  credentials = Object.freeze({
+    email: `p0-authority-${identity.slice(0, 16)}@example.invalid`,
+    password: `P0!${randomUUID().replaceAll('-', '')}Aa9`
+  })
+  p0AuthorityCredentials.set(context, credentials)
+  return credentials
+}
+
 async function activateP0Profile({ phase, profile, attempt, context, operations, signal }) {
+  throwIfP0Aborted(signal)
+  await restoreP0CaseFixtures(context, { signal })
   throwIfP0Aborted(signal)
   await operations.stopProfileBackend(context, profile, { signal })
   throwIfP0Aborted(signal)
@@ -3568,10 +3679,17 @@ async function activateP0Profile({ phase, profile, attempt, context, operations,
   if (typeof databaseUrl !== 'string') throw new Error('P0_PROFILE_DATABASE_URL_REQUIRED')
   context.activeDatabaseSegment = phaseDatabase.segmentName
   context.activeDatabaseUrl = databaseUrl
+  const authorityCredentials = p0AuthorityAdminCredentials(context)
+  const authorityEnvironment = {
+    ADMIN_BOOTSTRAP_ENABLED: 'true',
+    ADMIN_BOOTSTRAP_EMAIL: authorityCredentials.email,
+    ADMIN_BOOTSTRAP_PASSWORD: authorityCredentials.password
+  }
   const environment = buildBackendEnvironment(profile, {
     DATABASE_URL: databaseUrl,
     SPRING_DATASOURCE_URL: databaseUrl,
-    SERVER_PORT: '18086'
+    SERVER_PORT: '18086',
+    ...authorityEnvironment
   }, context.inheritedEnv ?? {})
   const backend = await operations.startProfileBackend({
     phase,
@@ -3594,6 +3712,15 @@ async function activateP0Profile({ phase, profile, attempt, context, operations,
     { signal }
   )
   throwIfP0Aborted(signal)
+  context.activeProfileRuntime = {
+    phase,
+    profile,
+    attempt,
+    segmentName: phaseDatabase.segmentName,
+    databaseUrl,
+    environment: context.activeProfileEnvironment ?? environment,
+    restartCount: 0
+  }
   return backend
 }
 
@@ -3631,6 +3758,20 @@ function validateP0ControlOutcome(
     }
   }
   return outcome
+}
+
+function defaultP0ReportPhaseWriter(context, plan) {
+  return {
+    status: 'PASS',
+    kind: 'P0_REPORT_BOUNDARY',
+    scope: plan.scope,
+    finalWriter: 'PENDING',
+    identity: {
+      runId: context.options?.runId ?? context.runId,
+      ownerId: context.ownerId,
+      reportPath: resolve(context.runRoot, 'report.json')
+    }
+  }
 }
 
 export async function executeP0ReportPhaseBoundary({
@@ -3769,12 +3910,45 @@ export async function executeP0PlanPhases({
       continue
     }
     if (phase === 'authority') {
+      if (supportsP0ProfileLifecycle(operations)) {
+        await activateP0Profile({
+          phase,
+          profile: 'UI_CORE',
+          attempt: 1,
+          context,
+          operations,
+          signal
+        })
+      }
+      throwIfP0Aborted(signal)
+      await operations.ensureParentFrontends?.(context, { signal })
+      throwIfP0Aborted(signal)
       const evidence = await operations.runAuthority(context, plan, { signal })
       throwIfP0Aborted(signal)
+      if (['PASS', 'BLOCKED'].includes(evidence?.authorityBundleFixture)) {
+        context.authorityState ??= {
+          status: 'PENDING',
+          authorityBundleFixture: 'BLOCKED'
+        }
+        context.authorityState.status = 'COMPLETE'
+        context.authorityState.authorityBundleFixture = evidence.authorityBundleFixture
+        context.authorityState.evidence = evidence
+        context.authorityBundleFixture = evidence.authorityBundleFixture
+        context.authorityEvidence = evidence
+        const caseAuthority = context.p0Context?.authority
+        if (caseAuthority && typeof caseAuthority === 'object'
+          && !Object.isFrozen(caseAuthority)) {
+          caseAuthority.status = 'COMPLETE'
+          caseAuthority.authorityBundleFixture = evidence.authorityBundleFixture
+          caseAuthority.evidence = evidence
+        }
+      }
       recordControlResult(phase, evidence)
       continue
     }
     if (P0_MATRIX_PHASES.has(phase)) {
+      await operations.ensureParentFrontends?.(context, { signal })
+      throwIfP0Aborted(signal)
       await operations.runMatrixPhase(phase, context, plan, { signal })
       throwIfP0Aborted(signal)
       matrixPhases += 1
@@ -3814,8 +3988,10 @@ const P0_DATABASE_IT_CLASSES = [
   'DemoTradingConcurrencyIT',
   'PerpetualPositionConcurrencyIT',
   'ProtectionOrderConcurrencyIT',
-  'FundingLiquidationConcurrencyIT'
+  'FundingLiquidationConcurrencyIT',
+  'DepthPendingExecutionPostgresIT'
 ]
+const P0_TESTCONTAINERS_DOCKER_API_VERSION = '1.44'
 
 export async function runP0Preflight({
   projectRoot: p0ProjectRoot,
@@ -3838,7 +4014,8 @@ export async function runP0Preflight({
       args: [
         '--test',
         join(scriptsDirectory, 'smoke-usdt-demo-browser.test.mjs'),
-        join(scriptsDirectory, 'p0-user-trading-runner.test.mjs')
+        join(scriptsDirectory, 'p0-user-trading-runner.test.mjs'),
+        join(scriptsDirectory, 'p0-user-trading-artifacts.test.mjs')
       ],
       cwd: p0ProjectRoot
     },
@@ -3878,8 +4055,13 @@ export async function runP0Preflight({
   const itCommand = {
     id: 'database-concurrency-it',
     command: maven,
-    args: [`-Dtest=${P0_DATABASE_IT_CLASSES.join(',')}`, 'test'],
-    cwd: backendDirectory
+    args: [
+      `-Dapi.version=${P0_TESTCONTAINERS_DOCKER_API_VERSION}`,
+      `-Dtest=${P0_DATABASE_IT_CLASSES.join(',')}`,
+      'test'
+    ],
+    cwd: backendDirectory,
+    env: { DATABASE_PASSWORD: 'database-it-non-secret-password' }
   }
   await runGate(itCommand)
   const surefireCommand = {
@@ -3992,38 +4174,62 @@ export async function executeP0SuiteLifecycle({ options, operations }) {
       if (interruptionError) throw interruptionError
       execution = await operations.execute(prepared, { signal: controller.signal })
       if (interruptionError) throw interruptionError
-      report = await operations.writeReport(execution, prepared, { signal: controller.signal })
-      if (interruptionError) throw interruptionError
     }
   } catch (error) {
     failure = interruptionError ?? error
-  } finally {
+  }
+  try {
+    const cleanupSignal = AbortSignal.timeout(30000)
+    cleanup = await operations.cleanup(prepared, {
+      error: failure,
+      interrupted: Boolean(interruptionError),
+      signal: cleanupSignal
+    })
+  } catch (error) {
+    failure = failure
+      ? new AggregateError([failure, error], 'P0_RUN_AND_CLEANUP_FAILED')
+      : error
+  }
+  if (!failure && interruptionError) failure = interruptionError
+  if (!failure && options.phase !== 'cleanup') {
     try {
-      const cleanupSignal = AbortSignal.timeout(30000)
-      cleanup = await operations.cleanup(prepared, {
-        error: failure,
-        interrupted: Boolean(interruptionError),
-        signal: cleanupSignal
+      report = await operations.writeReport(execution, prepared, {
+        signal: controller.signal,
+        cleanup
       })
+      if (interruptionError) throw interruptionError
     } catch (error) {
-      failure = failure
-        ? new AggregateError([failure, error], 'P0_RUN_AND_CLEANUP_FAILED')
-        : error
-    }
-    try {
-      await removeSignalHandlers()
-    } catch (error) {
-      failure = failure
-        ? new AggregateError([failure, error], 'P0_RUN_AND_SIGNAL_CLEANUP_FAILED')
-        : error
+      failure = interruptionError ?? error
     }
   }
+  try {
+    await removeSignalHandlers()
+  } catch (error) {
+    failure = failure
+      ? new AggregateError([failure, error], 'P0_RUN_AND_SIGNAL_CLEANUP_FAILED')
+      : error
+  }
+  if (!failure && interruptionError) failure = interruptionError
   if (failure) throw failure
   return { execution, report, cleanup }
 }
 
 async function bootstrapIdentityAndAccount() {
+  await waitFor(
+    async () => (await runDbSql(`
+      SELECT count(*)
+      FROM auth.users
+      WHERE lower(email) = lower('${sqlLiteral(adminEmail)}')
+        AND role = 'ADMIN'
+        AND status = 'ACTIVE'
+    `)) === '1',
+    'canonical admin bootstrap user', 10000)
+  for (const authority of CANONICAL_ADMIN_AUTHORITIES) await grantCanonicalAdminAuthority(authority)
   adminToken = await login(adminEmail, adminPassword, true)
+  assert(
+    CANONICAL_ADMIN_AUTHORITIES.every((authority) => adminAuthorities.includes(authority)),
+    'canonical admin must receive every required journey authority'
+  )
   const registration = await api('/api/auth/register', {
     method: 'POST',
     body: { email: userEmail, phone: null, password: userPassword }
@@ -4034,7 +4240,7 @@ async function bootstrapIdentityAndAccount() {
   const demo = accounts.find((account) => account.accountType === 'DEMO' && account.status === 'ACTIVE')
   assert(demo, 'registration must create one ACTIVE DEMO account')
   accountId = demo.id
-  const databaseIdentity = runDbSql(`
+  const databaseIdentity = await runDbSql(`
     SELECT current_database() || '|' || (
       SELECT count(*)
       FROM core.trading_accounts
@@ -4054,6 +4260,39 @@ async function bootstrapIdentityAndAccount() {
   assertNear(number(summary.balance), INITIAL_PERP_USDT, 0.000001, 'initial Perpetual USDT')
   assert(assetLedger.some((entry) => entry.entryType === 'DEMO_INIT'), 'Spot asset ledger must contain DEMO_INIT')
   return { userId, accountId, spotUsdt: spotUsdt.total, perpUsdt: summary.balance }
+}
+
+async function grantCanonicalAdminAuthority(authority) {
+  assert(CANONICAL_ADMIN_AUTHORITIES.includes(authority), 'canonical admin authority must stay narrowly scoped')
+  const bound = await runDbSql(`
+    WITH admin_user AS (
+      SELECT id FROM auth.users WHERE lower(email) = lower('${sqlLiteral(adminEmail)}')
+    ), role_upsert AS (
+      INSERT INTO admin.roles (role_name, role_code, enabled, description)
+      VALUES ('P0 canonical funding admin', 'p0-canonical-funding-admin', true, 'Isolated canonical smoke authority')
+      ON CONFLICT (role_code) DO UPDATE SET enabled = true, updated_at = now()
+      RETURNING id
+    ), menu_upsert AS (
+      INSERT INTO admin.menus (menu_name, permission_key, menu_type, enabled)
+      VALUES ('P0 canonical funding configuration', '${sqlLiteral(authority)}', 'BUTTON', true)
+      ON CONFLICT (permission_key) DO UPDATE SET enabled = true, updated_at = now()
+      RETURNING id
+    ), permission_upsert AS (
+      INSERT INTO admin.role_menu_permissions (role_id, menu_id, buttons, enabled)
+      SELECT role_upsert.id, menu_upsert.id, '[]'::jsonb, true
+      FROM role_upsert CROSS JOIN menu_upsert
+      ON CONFLICT (role_id, menu_id) DO UPDATE SET enabled = true, updated_at = now()
+      RETURNING role_id
+    ), user_role_upsert AS (
+      INSERT INTO admin.user_roles (user_id, role_id)
+      SELECT admin_user.id, permission_upsert.role_id
+      FROM admin_user CROSS JOIN permission_upsert
+      ON CONFLICT (user_id, role_id) DO UPDATE SET user_id = excluded.user_id
+      RETURNING 1
+    )
+    SELECT count(*) FROM user_role_upsert
+  `)
+  assert(bound === '1', 'canonical admin authority binding must affect exactly one user')
 }
 
 async function login(email, password, admin = false) {
@@ -4079,7 +4318,7 @@ async function assertP0Catalog() {
       method: 'POST', token: userToken, body: orderBody({
         symbol: forbiddenSymbol(productType), side: 'BUY', orderType: 'MARKET', quantity: '1', quantityUnit: 'BASE'
       })
-    }, ['PRODUCT_NOT_ALLOWED', 'SYMBOL_NOT_FOUND', 'SYMBOL_NOT_TRADABLE'])
+    }, ['PRODUCT_NOT_ALLOWED', 'SYMBOL_NOT_ALLOWED', 'SYMBOL_NOT_FOUND', 'SYMBOL_NOT_TRADABLE'])
   }
   return { spot: spot.map((symbol) => symbol.symbol), perp: perp.map((symbol) => symbol.symbol), forbidden: FORBIDDEN_PRODUCTS }
 }
@@ -4173,25 +4412,40 @@ async function verifyProviderBindingsRestored() {
 async function assertBundleSources(modeId) {
   const mode = SOURCE_MODES.find((candidate) => candidate.id === modeId)
   const startedAt = new Date().toISOString()
-  const [spotQuote, spotDepth, spotTrades, perpQuote, perpDepth, perpTrades, perpReference] = await Promise.all([
-    api(`/api/market/quotes/${SPOT_SYMBOL}`),
-    api(`/api/market/order-book/${SPOT_SYMBOL}`),
-    api(`/api/market/trades/${SPOT_SYMBOL}`),
-    api(`/api/market/quotes/${PERP_SYMBOL}`),
-    api(`/api/market/order-book/${PERP_SYMBOL}`),
-    api(`/api/market/trades/${PERP_SYMBOL}`),
-    api(`/api/market/perpetuals/${PERP_SYMBOL}/reference`)
-  ])
-  const spotTradeSource = Array.isArray(spotTrades) ? spotTrades[0] : spotTrades
-  const perpTradeSource = Array.isArray(perpTrades) ? perpTrades[0] : perpTrades
-  for (const [label, payload] of [
-    ['spot quote', spotQuote], ['spot depth', spotDepth], ['spot trades', spotTradeSource],
-    ['perp quote', perpQuote], ['perp depth', perpDepth], ['perp trades', perpTradeSource], ['perp reference', perpReference]
-  ]) assertSourceMetadata(payload, label)
-  assert([spotQuote, spotDepth, spotTradeSource].every((payload) => payload.providerCode === spotQuote.providerCode), 'Spot bundle must not mix providers')
-  assert([perpQuote, perpDepth, perpTradeSource, perpReference].every((payload) => payload.providerCode === perpQuote.providerCode), 'Perp bundle must not mix providers')
-  assert(mode.expectedSpot.includes(spotQuote.providerCode), `${modeId} unexpected Spot provider ${spotQuote.providerCode}`)
-  assert(mode.expectedPerp.includes(perpQuote.providerCode), `${modeId} unexpected Perp provider ${perpQuote.providerCode}`)
+  const bundle = await waitFor(async () => {
+    const [spotQuote, spotDepth, spotTrades, perpQuote, perpDepth, perpTrades, perpReference] = await Promise.all([
+      api(`/api/market/quotes/${SPOT_SYMBOL}`),
+      api(`/api/market/order-book/${SPOT_SYMBOL}`),
+      api(`/api/market/trades/${SPOT_SYMBOL}`),
+      api(`/api/market/quotes/${PERP_SYMBOL}`),
+      api(`/api/market/order-book/${PERP_SYMBOL}`),
+      api(`/api/market/trades/${PERP_SYMBOL}`),
+      api(`/api/market/perpetuals/${PERP_SYMBOL}/reference`)
+    ])
+    const spotTradeSource = Array.isArray(spotTrades) ? spotTrades[0] : spotTrades
+    const perpTradeSource = Array.isArray(perpTrades) ? perpTrades[0] : perpTrades
+    for (const [label, payload] of [
+      ['spot quote', spotQuote], ['spot depth', spotDepth], ['spot trades', spotTradeSource],
+      ['perp quote', perpQuote], ['perp depth', perpDepth], ['perp trades', perpTradeSource], ['perp reference', perpReference]
+    ]) assertSourceMetadata(payload, label)
+    const spotProviders = {
+      quote: spotQuote.providerCode,
+      depth: spotDepth.providerCode,
+      trades: spotTradeSource.providerCode
+    }
+    const perpProviders = {
+      quote: perpQuote.providerCode,
+      depth: perpDepth.providerCode,
+      trades: perpTradeSource.providerCode,
+      reference: perpReference.providerCode
+    }
+    assert(new Set(Object.values(spotProviders)).size === 1, `Spot bundle must not mix providers: ${JSON.stringify(spotProviders)}`)
+    assert(new Set(Object.values(perpProviders)).size === 1, `Perp bundle must not mix providers: ${JSON.stringify(perpProviders)}`)
+    assert(mode.expectedSpot.includes(spotQuote.providerCode), `${modeId} unexpected Spot provider ${spotQuote.providerCode}`)
+    assert(mode.expectedPerp.includes(perpQuote.providerCode), `${modeId} unexpected Perp provider ${perpQuote.providerCode}`)
+    return { spotQuote, perpQuote }
+  }, `${modeId} source bundle consistency`, 30000)
+  const { spotQuote, perpQuote } = bundle
   const [spotHigherPriorityFailures, perpHigherPriorityFailures] = await Promise.all([
     assertHigherPriorityProvidersUnavailable(mode, 'spot', spotQuote, startedAt),
     assertHigherPriorityProvidersUnavailable(mode, 'perp', perpQuote, startedAt)
@@ -4229,32 +4483,34 @@ async function assertHigherPriorityProvidersUnavailable(mode, product, quote, st
   const higherPriorityCodes = priorities.slice(0, actualIndex)
   if (higherPriorityCodes.length === 0) return []
 
-  const providers = await adminApi('/api/admin/market/data-providers')
   const requestedAtMs = Date.parse(startedAt)
   const startedAtMs = sourceModeStartedAtMs > 0
     ? Math.min(requestedAtMs, sourceModeStartedAtMs)
     : requestedAtMs
-  const unavailable = higherPriorityCodes.map((code) => {
-    const provider = providers.find((candidate) => candidate.code === code)
-    assert(provider, `${mode.id} ${product} missing health evidence for higher-priority provider ${code}`)
-    const lastFailureAtMs = Date.parse(provider.lastFailureAt)
-    const lastSuccessAtMs = Date.parse(provider.lastSuccessAt)
-    assert(
-      String(provider.healthStatus).toUpperCase() === 'DOWN'
-        && number(provider.failureCount) > 0
-        && Number.isFinite(lastFailureAtMs)
-        && lastFailureAtMs >= startedAtMs - 1000
-        && (!Number.isFinite(lastSuccessAtMs) || lastSuccessAtMs <= lastFailureAtMs),
-      `${mode.id} ${product} selected ${quote.providerCode} without a current DOWN state and latest failure for higher-priority ${code}`
-    )
-    return {
-      code,
-      healthStatus: provider.healthStatus,
-      failureCount: provider.failureCount,
-      lastFailureAt: provider.lastFailureAt,
-      lastSuccessAt: provider.lastSuccessAt
-    }
-  })
+  const unavailable = await waitFor(async () => {
+    const providers = await adminApi('/api/admin/market/data-providers')
+    return higherPriorityCodes.map((code) => {
+      const provider = providers.find((candidate) => candidate.code === code)
+      assert(provider, `${mode.id} ${product} missing health evidence for higher-priority provider ${code}`)
+      const lastFailureAtMs = Date.parse(provider.lastFailureAt)
+      const lastSuccessAtMs = Date.parse(provider.lastSuccessAt)
+      assert(
+        String(provider.healthStatus).toUpperCase() === 'DOWN'
+          && number(provider.failureCount) > 0
+          && Number.isFinite(lastFailureAtMs)
+          && lastFailureAtMs >= startedAtMs - 1000
+          && (!Number.isFinite(lastSuccessAtMs) || lastSuccessAtMs <= lastFailureAtMs),
+        `${mode.id} ${product} selected ${quote.providerCode} without a current DOWN state and latest failure for higher-priority ${code}`
+      )
+      return {
+        code,
+        healthStatus: provider.healthStatus,
+        failureCount: provider.failureCount,
+        lastFailureAt: provider.lastFailureAt,
+        lastSuccessAt: provider.lastSuccessAt
+      }
+    })
+  }, `${mode.id} ${product} higher-priority provider health`, 5000)
   sourceEvidence.push({
     mode: mode.id,
     product,
@@ -4329,10 +4585,12 @@ async function runSpotJourney() {
   assert(triggeredStop.status === 'FILLED', `Spot STOP_MARKET must trigger and fill, got ${triggeredStop.status}`)
 
   const beforeBuyOcoWallets = await walletBalances()
+  const buyOcoQuote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
+  const buyOcoLast = number(buyOcoQuote.mid ?? buyOcoQuote.last ?? buyOcoQuote.ask)
   const buyOco = await createOco('BUY OCO', 'BUY', {
     quantity: '0.0001',
-    limitPrice: aligned(last * 0.9998, tick, 'floor'),
-    stopTriggerPrice: aligned(last * 1.0002, tick, 'ceil')
+    limitPrice: aligned(buyOcoLast * 0.9998, tick, 'floor'),
+    stopTriggerPrice: aligned(buyOcoLast * 1.0002, tick, 'ceil')
   })
   const buyOutcome = await waitOcoOutcome(buyOco.contingencyGroupId)
   assertOcoOutcome(buyOutcome, 'BUY OCO')
@@ -4343,10 +4601,12 @@ async function runSpotJourney() {
   )
 
   const beforeSellOcoWallets = afterBuyOcoWallets
+  const sellOcoQuote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
+  const sellOcoLast = number(sellOcoQuote.mid ?? sellOcoQuote.last ?? sellOcoQuote.ask)
   const sellOco = await createOco('SELL OCO', 'SELL', {
     quantity: '0.0001',
-    limitPrice: aligned(last * 1.0002, tick, 'ceil'),
-    stopTriggerPrice: aligned(last * 0.9998, tick, 'floor')
+    limitPrice: aligned(sellOcoLast * 1.0002, tick, 'ceil'),
+    stopTriggerPrice: aligned(sellOcoLast * 0.9998, tick, 'floor')
   })
   const sellOutcome = await waitOcoOutcome(sellOco.contingencyGroupId)
   assertOcoOutcome(sellOutcome, 'SELL OCO')
@@ -4399,6 +4659,34 @@ async function runTransferJourney() {
   return { spotToPerp: spotToPerp.transferId, perpToSpot: perpToSpot.transferId }
 }
 
+async function expectUnsafeMarginReduction(positionId) {
+  const acceptedCodes = ['MARGIN_REDUCTION_UNSAFE', 'INSUFFICIENT_MARGIN', 'POSITION_VERSION_CONFLICT']
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const current = (await openPositions(SETTINGS_SYMBOL)).find((position) => position.id === positionId)
+    assert(current, 'unsafe margin reduction requires the isolated position to remain open')
+    const error = await expectApiError(`/api/trading/positions/${positionId}/margin`, {
+      method: 'POST', token: userToken, body: { action: 'REDUCE', amount: '1000000', expectedVersion: current.version }
+    }, acceptedCodes)
+    if (error.code !== 'POSITION_VERSION_CONFLICT') return error
+  }
+  throw new Error('unsafe margin reduction safety could not be verified after 3 fresh position versions')
+}
+
+async function updatePositionMarginWithFreshVersion(positionId, action, amount) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const current = (await openPositions(SETTINGS_SYMBOL)).find((position) => position.id === positionId)
+    assert(current, 'position margin update requires the isolated position to remain open')
+    try {
+      return await api(`/api/trading/positions/${positionId}/margin`, {
+        method: 'POST', token: userToken, body: { action, amount, expectedVersion: current.version }
+      })
+    } catch (error) {
+      if (error.code !== 'POSITION_VERSION_CONFLICT') throw error
+    }
+  }
+  throw new Error(`${action} position margin update could not complete after 3 fresh position versions`)
+}
+
 async function runPerpetualJourney() {
   await cancelAndCloseAll('perp-journey-baseline')
   await updatePositionMode('ONE_WAY')
@@ -4435,8 +4723,8 @@ async function runPerpetualJourney() {
   assert(!TERMINAL_ORDER_STATUSES.has(pending.status), 'Perp pending order must retain its margin hold')
   const duringPending = await accountFundsSnapshot()
   assert(
-    number(duringPending.summary.freeMargin) < number(beforePending.summary.freeMargin),
-    'pending Perp order must reduce free margin while its hold is active'
+    number(duringPending.summary.usedMargin) > number(beforePending.summary.usedMargin),
+    'pending Perp order must increase used margin while its hold is active'
   )
   assert(
     duringPending.ledger.some((entry) => entry.entryType === 'ORDER_HOLD' && entry.referenceId === pending.id),
@@ -4444,7 +4732,7 @@ async function runPerpetualJourney() {
   )
   await api(`/api/trading/orders/${pending.id}/cancel`, { method: 'POST', token: userToken })
   const afterPending = await accountFundsSnapshot()
-  assert(number(afterPending.summary.freeMargin) >= number(beforePending.summary.freeMargin) - 0.01, 'cancel pending Perp order must release margin hold')
+  assert(number(afterPending.summary.usedMargin) <= number(beforePending.summary.usedMargin) + 0.01, 'cancel pending Perp order must restore used margin')
   assert(
     afterPending.ledger.some((entry) => entry.entryType === 'ORDER_RELEASE' && entry.referenceId === pending.id),
     'cancel pending Perp order must create its order-linked margin release ledger entry'
@@ -4479,15 +4767,11 @@ async function runPerpetualJourney() {
   })
   let isolated = (await openPositions(SETTINGS_SYMBOL))[0]
   const marginBefore = number(isolated.marginHeld)
-  const added = await api(`/api/trading/positions/${isolated.id}/margin`, {
-    method: 'POST', token: userToken, body: { action: 'ADD', amount: '10', expectedVersion: isolated.version }
-  })
+  const added = await updatePositionMarginWithFreshVersion(isolated.id, 'ADD', '10')
   assertNear(number(added.positionMargin), marginBefore + 10, 0.000001, 'Isolated margin after +10')
   isolated = (await openPositions(SETTINGS_SYMBOL))[0]
   assertNear(number(isolated.marginHeld), marginBefore + 10, 0.000001, 'persisted Isolated margin after +10')
-  const reduced = await api(`/api/trading/positions/${isolated.id}/margin`, {
-    method: 'POST', token: userToken, body: { action: 'REDUCE', amount: '1', expectedVersion: isolated.version }
-  })
+  const reduced = await updatePositionMarginWithFreshVersion(isolated.id, 'REDUCE', '1')
   assertNear(number(reduced.positionMargin), marginBefore + 9, 0.000001, 'Isolated margin after -1')
   isolated = (await openPositions(SETTINGS_SYMBOL))[0]
   assertNear(number(isolated.marginHeld), marginBefore + 9, 0.000001, 'persisted Isolated margin after -1')
@@ -4501,9 +4785,7 @@ async function runPerpetualJourney() {
     'Isolated margin reduce must create an exact +1 release position-linked ledger entry'
   )
   // unsafe reduction visibly rejects while the preceding safe reduction succeeds.
-  await expectApiError(`/api/trading/positions/${isolated.id}/margin`, {
-    method: 'POST', token: userToken, body: { action: 'REDUCE', amount: '1000000', expectedVersion: isolated.version }
-  }, ['MARGIN_REDUCTION_UNSAFE', 'INSUFFICIENT_MARGIN'])
+  await expectUnsafeMarginReduction(isolated.id)
 
   const originalQuantity = number(isolated.lots)
   await api(`/api/trading/positions/${isolated.id}/close?accountId=${accountId}`, {
@@ -4537,7 +4819,7 @@ async function runProtectionAndFundingJourney() {
   await updateSymbolSettings(PERP_SYMBOL, { leverage: 10, marginMode: 'CROSS', quantityUnit: 'BASE' })
   await assertNoForeignOpenPositions(PERP_SYMBOL, 'funding selected-source settlement')
   await createOrder('protection parent position', {
-    symbol: PERP_SYMBOL, side: 'BUY', orderType: 'MARKET', quantity: '0.05', quantityUnit: 'BASE', leverage: 10,
+    symbol: PERP_SYMBOL, side: 'BUY', orderType: 'MARKET', quantity: '0.02', quantityUnit: 'BASE', leverage: 10,
     positionSide: 'BOTH', marginMode: 'CROSS'
   })
   let position = (await openPositions(PERP_SYMBOL))[0]
@@ -4599,13 +4881,8 @@ async function runProtectionAndFundingJourney() {
   assert(position, 'a single protection trigger must not close the whole parent position')
   const beforeResize = await orders({ symbol: PERP_SYMBOL, size: 200 })
   const trackedBefore = beforeResize
-    .filter((order) => created.some((candidate) => candidate.id === order.id) && order.status === 'PENDING_ACTIVATION')
-    .toSorted((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))
-  const triggeredCommitment = beforeResize
     .filter((order) => created.some((candidate) => candidate.id === order.id)
-      && order.status !== 'PENDING_ACTIVATION'
       && !TERMINAL_ORDER_STATUSES.has(order.status))
-    .reduce((sum, order) => sum + number(order.quantity), 0)
   await api(`/api/trading/positions/${position.id}/close?accountId=${accountId}`, {
     method: 'POST', token: userToken,
     body: { quantity: String(Math.max(0.001, number(position.lots) * 0.5)), quantityUnit: 'BASE', clientOrderId: smokeKey('protection-partial-close') }
@@ -4616,7 +4893,7 @@ async function runProtectionAndFundingJourney() {
   assertNewestFirstProtectionResize(
     trackedBefore,
     afterResize,
-    Math.max(0, number(resizedPosition.lots) - triggeredCommitment)
+    number(resizedPosition.lots)
   )
 
   const protectionCancel = await api('/api/trading/orders/cancel-all', {
@@ -4640,7 +4917,8 @@ async function runProtectionAndFundingJourney() {
     fixedFundingIntervalMinutes: 1,
     reason: 'Task18 deterministic real FIXED fallback funding source'
   })
-  clearFundingRatesForSymbol(FALLBACK_FUNDING_SYMBOL)
+  await clearFundingRatesForSymbol(FALLBACK_FUNDING_SYMBOL)
+  const fallbackConfig = await waitForFundingConfigSource(FALLBACK_FUNDING_SYMBOL, 'FIXED', 'LOCAL_SIMULATED', fallbackFundingPhaseStartedAt, 75000)
   const fallbackRate = await waitForRealFundingRate(
     FALLBACK_FUNDING_SYMBOL,
     ['fixed'],
@@ -4649,9 +4927,8 @@ async function runProtectionAndFundingJourney() {
     fallbackFundingPhaseStartedAt,
     15000
   )
-  const fallbackConfig = await fundingConfig(FALLBACK_FUNDING_SYMBOL)
-  assert(fallbackConfig.actualSource === 'FIXED', `fallback funding config must expose actualSource=FIXED, got ${fallbackConfig.actualSource}`)
-  assert(fallbackConfig.sourceMode === 'LOCAL_SIMULATED', `fallback funding config must expose LOCAL_SIMULATED, got ${fallbackConfig.sourceMode}`)
+  assert(fallbackConfig.actualSource === 'FIXED', 'fallback funding config must expose actualSource=FIXED')
+  assert(fallbackConfig.sourceMode === 'LOCAL_SIMULATED', 'fallback funding config must expose LOCAL_SIMULATED')
   await isolatePreparedFundingRate(FALLBACK_FUNDING_SYMBOL, fallbackRate)
   await assertNoForeignOpenPositions(FALLBACK_FUNDING_SYMBOL, 'funding fallback-source settlement')
   await createOrder('funding fallback LONG position', {
@@ -4680,7 +4957,7 @@ async function runProtectionAndFundingJourney() {
   assert(Array.isArray(closeAll.items), 'close-all must return per-position outcomes')
   assertBatchItemsSucceeded(cancelAll.items, 'cancel-all')
   assertBatchItemsSucceeded(closeAll.items, 'close-all')
-  assert((await openPositions()).length === 0, 'close-all must leave no open position')
+  assert((await openPositions()).every((position) => position.productType !== 'LINEAR_PERP'), 'close-all must leave no open Perpetual position')
   assert((await orders({ size: 500 })).every((order) => TERMINAL_ORDER_STATUSES.has(order.status)), 'cancel-all/close-all must leave no active order')
   await restoreFundingConfig(FALLBACK_FUNDING_SYMBOL)
   if (selectedFundingSource.externalUnavailable) await restoreFundingConfig(PERP_SYMBOL)
@@ -4755,32 +5032,44 @@ async function createDirectionalNearProtection(positionId, direction, tick) {
   throw lastDirectionError
 }
 
-function assertNewestFirstProtectionResize(before, after, remainingProtectionCapacity) {
+export function assertNewestFirstProtectionResize(before, after, remainingPositionQuantity) {
   const byId = new Map(after.map((order) => [order.id, order]))
-  const changedFlags = before.map((order) => {
-    const current = byId.get(order.id)
-    return !current
-      || current.status !== order.status
-      || Math.abs(number(current.quantity) - number(order.quantity)) > 0.00000001
-  })
-  const firstChanged = changedFlags.indexOf(true)
-  assert(firstChanged >= 0, 'partial close must auto-resize or cancel protection levels')
-  assert(
-    changedFlags.slice(firstChanged).every(Boolean),
-    'protection newest-first auto-resize must change one contiguous newest-order suffix without gaps'
-  )
-  const beforeQuantity = before.reduce((sum, order) => sum + number(order.quantity), 0)
-  const afterQuantity = before.reduce((sum, order) => {
-    const current = byId.get(order.id)
-    return sum + (current && !TERMINAL_ORDER_STATUSES.has(current.status) ? number(current.quantity) : 0)
-  }, 0)
-  const expectedReduction = Math.max(0, beforeQuantity - remainingProtectionCapacity)
-  assertNear(beforeQuantity - afterQuantity, expectedReduction, 0.00000001, 'newest-first protection reduction amount')
-  assert(afterQuantity <= remainingProtectionCapacity + 0.00000001, 'active protection quantity must not exceed the remaining position capacity')
+  const protectionsByType = Map.groupBy(before, (order) => order.protectionType)
+  let resizingTypeCount = 0
+  for (const [protectionType, protections] of protectionsByType) {
+    assert(protectionType, 'tracked protection must declare its protection type')
+    const oldestFirst = protections.toSorted((left, right) =>
+      Date.parse(left.createdAt) - Date.parse(right.createdAt)
+        || String(left.id).localeCompare(String(right.id)))
+    const changedFlags = oldestFirst.map((order) => {
+      const current = byId.get(order.id)
+      return !current
+        || current.status !== order.status
+        || Math.abs(number(current.quantity) - number(order.quantity)) > 0.00000001
+    })
+    const beforeQuantity = oldestFirst.reduce((sum, order) => sum + number(order.quantity), 0)
+    const afterQuantity = oldestFirst.reduce((sum, order) => {
+      const current = byId.get(order.id)
+      return sum + (current && !TERMINAL_ORDER_STATUSES.has(current.status) ? number(current.quantity) : 0)
+    }, 0)
+    const expectedReduction = Math.max(0, beforeQuantity - remainingPositionQuantity)
+    if (expectedReduction > 0.00000001) {
+      resizingTypeCount += 1
+      const firstChanged = changedFlags.indexOf(true)
+      assert(firstChanged >= 0, `partial close must auto-resize or cancel ${protectionType} levels`)
+      assert(
+        changedFlags.slice(firstChanged).every(Boolean),
+        `${protectionType} newest-first auto-resize must change one contiguous newest-order suffix without gaps`
+      )
+    }
+    assertNear(beforeQuantity - afterQuantity, expectedReduction, 0.00000001, `${protectionType} newest-first protection reduction amount`)
+    assert(afterQuantity <= remainingPositionQuantity + 0.00000001, `active ${protectionType} quantity must not exceed the remaining position capacity`)
+  }
+  assert(resizingTypeCount > 0, 'partial close must require at least one protection type to resize')
 }
 
 async function assertNoForeignOpenPositions(symbol, label) {
-  const count = number(runDbSql(`
+  const count = number(await runDbSql(`
     SELECT count(*)
     FROM trading.positions
     WHERE symbol = '${sqlLiteral(symbol)}'
@@ -4793,16 +5082,17 @@ async function assertNoForeignOpenPositions(symbol, label) {
 async function prepareSelectedFundingRate() {
   await applySourceMode(SOURCE_MODES.find((mode) => mode.id === 'BINANCE_PUBLIC'))
   const externalPhaseStartedAt = Date.now()
-  clearFundingRatesForSymbol(PERP_SYMBOL)
+  await clearFundingRatesForSymbol(PERP_SYMBOL)
   try {
+    const config = await waitForFundingConfigSource(PERP_SYMBOL, ['BINANCE', 'OKX'], 'PUBLIC_EXTERNAL', null, 45000)
+    const expectedProviders = config.actualSource === 'BINANCE' ? ['binance-usdm'] : ['okx-swap']
     const rate = await waitForRealFundingRate(
       PERP_SYMBOL,
-      ['binance-usdm', 'okx-swap'],
+      expectedProviders,
       null,
       45000,
       externalPhaseStartedAt
     )
-    const config = await fundingConfig(PERP_SYMBOL)
     const expectedActualSource = rate.providerCode === 'binance-usdm' ? 'BINANCE' : 'OKX'
     assert(config.actualSource === expectedActualSource, `selected funding config must expose actualSource=${expectedActualSource}, got ${config.actualSource}`)
     assert(config.sourceMode === 'PUBLIC_EXTERNAL', `selected external funding must expose PUBLIC_EXTERNAL, got ${config.sourceMode}`)
@@ -4829,7 +5119,8 @@ async function prepareSelectedFundingRate() {
       fixedFundingIntervalMinutes: 1,
       reason: 'Task18 selected-source fallback after external funding unavailability'
     })
-    clearFundingRatesForSymbol(PERP_SYMBOL)
+    await clearFundingRatesForSymbol(PERP_SYMBOL)
+    const fixedConfig = await waitForFundingConfigSource(PERP_SYMBOL, 'FIXED', 'LOCAL_SIMULATED', fixedPhaseStartedAt, 75000)
     const rate = await waitForRealFundingRate(
       PERP_SYMBOL,
       ['fixed'],
@@ -4838,9 +5129,8 @@ async function prepareSelectedFundingRate() {
       fixedPhaseStartedAt,
       15000
     )
-    const fixedConfig = await fundingConfig(PERP_SYMBOL)
-    assert(fixedConfig.actualSource === 'FIXED', `selected funding fallback must expose actualSource=FIXED, got ${fixedConfig.actualSource}`)
-    assert(fixedConfig.sourceMode === 'LOCAL_SIMULATED', `selected funding fallback must expose LOCAL_SIMULATED, got ${fixedConfig.sourceMode}`)
+    assert(fixedConfig.actualSource === 'FIXED', 'selected funding fallback must expose actualSource=FIXED')
+    assert(fixedConfig.sourceMode === 'LOCAL_SIMULATED', 'selected funding fallback must expose LOCAL_SIMULATED')
     await isolatePreparedFundingRate(PERP_SYMBOL, rate)
     return { rate, externalUnavailable: true }
   }
@@ -4854,7 +5144,7 @@ async function waitForRealFundingRate(
   createdAtOrAfterMs = null,
   minimumNextFundingLeadMs = 0
 ) {
-  return waitFor(() => {
+  return waitFor(async () => {
     const providerPredicate = expectedProviderCodes?.length
       ? `AND provider_code IN (${expectedProviderCodes.map((code) => `'${sqlLiteral(code)}'`).join(',')})`
       : ''
@@ -4867,7 +5157,7 @@ async function waitForRealFundingRate(
     const nextFundingLeadPredicate = minimumNextFundingLeadMs > 0
       ? `AND next_funding_time >= now() + (${Number(minimumNextFundingLeadMs)} * interval '1 millisecond')`
       : ''
-    const row = runDbSql(`
+    const row = await runDbSql(`
       SELECT id::text || '|' || funding_rate::text || '|'
         || floor(extract(epoch FROM funding_time) * 1000)::bigint || '|'
         || floor(extract(epoch FROM next_funding_time) * 1000)::bigint || '|'
@@ -4921,12 +5211,12 @@ async function settleRealFundingRateForLong(position, rate, label) {
     fundingSettlements()
   ])
   const settlementIdsBefore = new Set(settlementsBefore.map((settlement) => settlement.id))
-  const originalOpenedAtMicros = shiftPositionOpenedBeforeFunding(position.id, rate)
+  const originalOpenedAtMicros = await shiftPositionOpenedBeforeFunding(position.id, rate)
   let settlement
   try {
     settlement = await waitFundingSettlement(rate, position, settlementIdsBefore)
   } finally {
-    restorePositionOpenedAt(position.id, originalOpenedAtMicros)
+    await restorePositionOpenedAt(position.id, originalOpenedAtMicros)
   }
   const after = await accountSummary()
   assertNear(
@@ -4944,8 +5234,8 @@ async function settleRealFundingRateForLong(position, rate, label) {
   return { rate, settlement, balanceBefore: before.balance, balanceAfter: after.balance }
 }
 
-function shiftPositionOpenedBeforeFunding(positionId, rate) {
-  const originalOpenedAtMicros = runDbSql(`
+async function shiftPositionOpenedBeforeFunding(positionId, rate) {
+  const originalOpenedAtMicros = await runDbSql(`
     SELECT floor(extract(epoch FROM opened_at) * 1000000)::bigint
     FROM trading.positions
     WHERE id = '${sqlLiteral(positionId)}'
@@ -4953,11 +5243,10 @@ function shiftPositionOpenedBeforeFunding(positionId, rate) {
       AND status = 'OPEN'
   `)
   assert(originalOpenedAtMicros, `funding fixture position ${positionId} must be an open position owned by the smoke account`)
-  const updated = number(runDbSql(`
+  const updated = number(await runDbSql(`
     WITH updated AS (
       UPDATE trading.positions
-      SET opened_at = to_timestamp(${rate.fundingTimeMs} / 1000.0) - interval '1 millisecond',
-          updated_at = now()
+      SET opened_at = to_timestamp(${rate.fundingTimeMs} / 1000.0) - interval '1 millisecond'
       WHERE id = '${sqlLiteral(positionId)}'
         AND account_id = '${sqlLiteral(accountId)}'
         AND status = 'OPEN'
@@ -4969,12 +5258,11 @@ function shiftPositionOpenedBeforeFunding(positionId, rate) {
   return originalOpenedAtMicros
 }
 
-function restorePositionOpenedAt(positionId, originalOpenedAtMicros) {
-  const restored = number(runDbSql(`
+async function restorePositionOpenedAt(positionId, originalOpenedAtMicros) {
+  const restored = number(await runDbSql(`
     WITH restored AS (
       UPDATE trading.positions
-      SET opened_at = to_timestamp(${originalOpenedAtMicros} / 1000000.0),
-          updated_at = now()
+      SET opened_at = to_timestamp(${originalOpenedAtMicros} / 1000000.0)
       WHERE id = '${sqlLiteral(positionId)}'
         AND account_id = '${sqlLiteral(accountId)}'
       RETURNING id
@@ -4993,6 +5281,20 @@ function adminSymbolFor(symbol) {
 function fundingConfig(symbol) {
   const adminSymbol = adminSymbolFor(symbol)
   return adminApi(`/api/admin/market/symbols/${adminSymbol.id}/funding-config`)
+}
+
+async function waitForFundingConfigSource(symbol, expectedSource, expectedMode, asOfOrAfterMs, timeoutMs) {
+  const expectedSources = Array.isArray(expectedSource) ? expectedSource : [expectedSource]
+  return waitFor(async () => {
+    const candidate = await fundingConfig(symbol)
+    const currentEnough = asOfOrAfterMs === null
+      || (candidate.asOf && Date.parse(candidate.asOf) >= asOfOrAfterMs)
+    return expectedSources.includes(candidate.actualSource)
+      && candidate.sourceMode === expectedMode
+      && currentEnough
+      ? candidate
+      : false
+  }, `active ${expectedSources.join('/')} funding config for ${symbol}`, timeoutMs)
 }
 
 async function snapshotFundingConfig(symbol) {
@@ -5016,8 +5318,8 @@ async function updateFundingConfig(symbol, patch) {
   })
 }
 
-function clearFundingRatesForSymbol(symbol) {
-  runDbSql(`DELETE FROM trading.funding_rates WHERE symbol = '${sqlLiteral(symbol)}'`)
+async function clearFundingRatesForSymbol(symbol) {
+  await runDbSql(`DELETE FROM trading.funding_rates WHERE symbol = '${sqlLiteral(symbol)}'`)
 }
 
 async function isolatePreparedFundingRate(symbol, rate) {
@@ -5025,7 +5327,7 @@ async function isolatePreparedFundingRate(symbol, rate) {
     fixedFundingIntervalMinutes: 525600,
     reason: 'Isolate the prepared Task18 funding cycle while its smoke position is open'
   })
-  const deleted = number(runDbSql(`
+  const deleted = number(await runDbSql(`
     WITH deleted AS (
       DELETE FROM trading.funding_rates
       WHERE symbol = '${sqlLiteral(symbol)}'
@@ -5034,7 +5336,7 @@ async function isolatePreparedFundingRate(symbol, rate) {
     )
     SELECT count(*) FROM deleted
   `))
-  const nearCompetingRates = number(runDbSql(`
+  const nearCompetingRates = number(await runDbSql(`
     SELECT count(*)
     FROM trading.funding_rates
     WHERE symbol = '${sqlLiteral(symbol)}'
@@ -5146,7 +5448,7 @@ async function runIsolatedLiquidation() {
     ledger,
     'Isolated liquidation'
   )
-  const notifications = runDbSql(`
+  const notifications = await runDbSql(`
     SELECT count(*)
     FROM trading.order_events event
     JOIN trading.orders orders ON orders.id = event.order_id
@@ -5169,13 +5471,13 @@ async function runCrossLiquidation() {
     positionSide: 'BOTH', marginMode: 'CROSS'
   })
   await createOrder('Cross liquidation XRP leg', {
-    symbol: 'XRPUSDT-PERP', side: 'BUY', orderType: 'MARKET', quantity: '10000', quantityUnit: 'BASE', leverage: 100,
+    symbol: 'XRPUSDT-PERP', side: 'BUY', orderType: 'MARKET', quantity: '100', quantityUnit: 'BASE', leverage: 100,
     positionSide: 'BOTH', marginMode: 'CROSS'
   })
   const opened = await openPositions()
   const openedCross = opened.filter((position) => position.marginMode === 'CROSS')
   assert(openedCross.length >= 2, 'Cross liquidation fixture must have at least two Cross positions')
-  installAccountScopedCrossShortfallFixture()
+  await installAccountScopedCrossShortfallFixture()
   await waitFor(async () => (await openPositions()).every((position) => position.marginMode !== 'CROSS'), 'Cross liquidation closes all Cross positions', 30000)
   const after = await accountSummary()
   assert(number(after.balance) >= 0, 'Cross liquidation shortfall keeps balance at zero, never negative')
@@ -5203,7 +5505,7 @@ async function runCrossLiquidation() {
   const chargePairs = evidence.liquidationOrders
     .map((order) => `('${sqlLiteral(order.id)}','${sqlLiteral(order.parentPositionId)}')`)
     .join(',')
-  const settledCharges = number(runDbSql(`
+  const settledCharges = number(await runDbSql(`
     SELECT count(*)
     FROM trading.cross_liquidation_charges
     WHERE account_id = '${sqlLiteral(accountId)}'
@@ -5215,8 +5517,8 @@ async function runCrossLiquidation() {
   return { closed: openedCross.map((position) => position.id), shortfall: shortfall.length, balance: after.balance }
 }
 
-function installAccountScopedCrossShortfallFixture() {
-  const updated = number(runDbSql(`
+async function installAccountScopedCrossShortfallFixture() {
+  const updated = number(await runDbSql(`
     WITH updated AS (
       UPDATE core.trading_accounts
       SET balance = 0,
@@ -5376,7 +5678,7 @@ async function runBrowserMinimalTradingLoop(mode) {
   const runtimeErrors = []
   page.on('Runtime.exceptionThrown', (event) => runtimeErrors.push(event.exceptionDetails?.text ?? 'runtime exception'))
   page.on('Log.entryAdded', (event) => {
-    if (event.entry?.level === 'error') runtimeErrors.push(event.entry.text)
+    if (event.entry?.level === 'error') runtimeErrors.push(event.entry)
   })
   await page.send('Page.enable')
   await page.send('Runtime.enable')
@@ -5386,9 +5688,7 @@ async function runBrowserMinimalTradingLoop(mode) {
   try {
     await installBrowserSession(page, webBaseUrl, { 'fx-platform-auth-token': userToken })
 
-    const spotQuote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
     const spotRules = await api(`/api/market/symbols/${SPOT_SYMBOL}/rules`)
-    const spotLast = number(spotQuote.mid ?? spotQuote.ask)
     const spotTick = number(spotRules.tickSize ?? 0.1)
     await openBrowserTradeRoute(page, `/trade/spot/${encodeURIComponent(SPOT_SYMBOL)}?ui-loop=${runId}`, SPOT_SYMBOL)
     const spotExecutionStartedAt = new Date().toISOString()
@@ -5399,9 +5699,11 @@ async function runBrowserMinimalTradingLoop(mode) {
     })
     assert(spotMarket.status === 'FILLED', `${mode.id} browser Spot MARKET must fill`)
     await assertOrderTradeUsesMode(spotMarket, mode, 'spot', spotExecutionQuote, SPOT_SYMBOL, 300)
+    const spotLimitQuote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
+    const spotLimitLast = number(spotLimitQuote.mid ?? spotLimitQuote.ask)
     const spotLimit = await submitBrowserOrder(page, {
       side: 'buy', tabIndex: 0,
-      values: [aligned(spotLast * 0.5, spotTick, 'floor'), '0.001'],
+      values: [aligned(spotLimitLast * 0.5, spotTick, 'floor'), '0.001'],
       label: `${mode.id} browser Spot LIMIT`
     })
     assert(!TERMINAL_ORDER_STATUSES.has(spotLimit.status), `${mode.id} browser Spot LIMIT must remain cancelable`)
@@ -5441,36 +5743,96 @@ async function runBrowserMinimalTradingLoop(mode) {
 async function openBrowserTradeRoute(page, route, symbol) {
   await page.navigate(`${webBaseUrl}${route}`)
   await waitForPageReady(page, route)
-  await page.waitForFunction(() => Boolean(
-    document.querySelector('.trade-panel')
-      && document.querySelector('[data-source]')
-      && !document.querySelector('.trade-panel__submit--login')
-      && [...document.querySelectorAll('.trade-panel__balance strong')].some((value) => !value.textContent?.trim().startsWith('-'))
-  ), `real order controls ${route}`)
-  const actual = await api(`/api/market/quotes/${symbol}`)
-  await page.waitForFunction(
-    (provider) => document.body.textContent?.toUpperCase().includes(provider.toUpperCase()),
-    `actual provider visible ${route}`,
-    actual.providerCode
-  )
+  try {
+    await page.waitForFunction((panelSelector) => {
+      const panel = document.querySelector(panelSelector)
+      const submitButtons = [...(panel?.querySelectorAll('[data-trading-action="submit-order"]') ?? [])]
+      return Boolean(
+        panel
+          && document.querySelector('[data-source]')
+          && !panel.querySelector('[data-trading-action="login-required"]')
+          && submitButtons.length === 2
+          && submitButtons.every((button) => [...(button.previousElementSibling?.querySelectorAll('strong') ?? [])]
+            .some((value) => !value.textContent?.trim().startsWith('-')))
+      )
+    }, `real order controls ${route}`, TRADE_PANEL_SELECTOR)
+    const actual = await api(`/api/market/quotes/${symbol}`)
+    await page.waitForFunction(
+      (provider) => document.body.textContent?.toUpperCase().includes(provider.toUpperCase()),
+      `actual provider visible ${route}`,
+      actual.providerCode
+    )
+  } catch (error) {
+    const diagnostic = await page.evaluate((panelSelector) => {
+      const panel = document.querySelector(panelSelector)
+      const settings = document.querySelector('[aria-label="Perpetual trading settings"]')
+      const sources = [...document.querySelectorAll('[data-source]')].map((source) => ({
+        source: source.getAttribute('data-source'),
+        stale: source.getAttribute('data-stale'),
+        text: source.textContent?.trim(),
+        container: source.closest('[aria-label]')?.getAttribute('aria-label') ?? null
+      }))
+      const buttons = [...(panel?.querySelectorAll('[data-trading-action]') ?? [])].map((button) => ({
+        action: button.getAttribute('data-trading-action'),
+        text: button.textContent?.trim(),
+        disabled: button.disabled,
+        title: button.getAttribute('title'),
+        balance: [...(button.previousElementSibling?.querySelectorAll('strong') ?? [])]
+          .map((value) => value.textContent?.trim())
+      }))
+      const marketResources = performance.getEntriesByType('resource')
+        .filter((entry) => entry.name.includes('/api/market/'))
+        .slice(-20)
+        .map((entry) => ({
+          name: entry.name.replace(window.location.origin, ''),
+          duration: Math.round(entry.duration),
+          responseEnd: Math.round(entry.responseEnd)
+        }))
+      return {
+        pathname: window.location.pathname,
+        panelPresent: Boolean(panel),
+        panelText: panel?.textContent?.trim().slice(0, 600) ?? null,
+        sources,
+        marketStatus: document.querySelector('[aria-label$="market side panel"] [role="status"]')?.textContent?.trim() ?? null,
+        buttons,
+        session: panel?.querySelector('[aria-live="polite"]')?.textContent?.trim() ?? null,
+        sessionAlert: panel?.querySelector('[role="alert"]')?.textContent?.trim() ?? null,
+        settingsBusy: settings?.getAttribute('aria-busy') ?? null,
+        settingsControls: [...(settings?.querySelectorAll('select, input, button') ?? [])].map((control) => ({
+          label: control.getAttribute('aria-label'),
+          disabled: control.disabled,
+          value: control.value
+        })),
+        tokenPresent: Boolean(localStorage.getItem('fx-platform-auth-token')),
+        marketResources
+      }
+    }, TRADE_PANEL_SELECTOR)
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`${message}; route state: ${JSON.stringify(diagnostic)}`)
+  }
 }
 
 async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = false, label }) {
   const beforeIds = new Set((await orders({ size: 500 })).map((order) => order.id))
-  const tabSelected = await page.evaluate((index) => {
-    const tabs = document.querySelector('.trade-panel__order-tabs')
+  const tabSelected = await page.evaluate((panelSelector, index) => {
+    const panel = document.querySelector(panelSelector)
+    const tabs = panel?.querySelector('[role="tablist"] [role="tab"]')?.closest('[role="tablist"]')
     const button = tabs?.querySelectorAll('button')[index]
     button?.click()
     return Boolean(button)
-  }, tabIndex)
+  }, TRADE_PANEL_SELECTOR, tabIndex)
   assert(tabSelected, `${label} order-type tab must be available`)
-  await page.waitForFunction((index) => {
-    const button = document.querySelector('.trade-panel__order-tabs')?.querySelectorAll('button')[index]
+  await page.waitForFunction((panelSelector, index) => {
+    const panel = document.querySelector(panelSelector)
+    const tabs = panel?.querySelector('[role="tablist"] [role="tab"]')?.closest('[role="tablist"]')
+    const button = tabs?.querySelectorAll('button')[index]
     return button?.getAttribute('aria-selected') === 'true'
-  }, `${label} order-type tab selected`, tabIndex)
+  }, `${label} order-type tab selected`, TRADE_PANEL_SELECTOR, tabIndex)
   for (let index = 0; index < values.length; index += 1) {
-    const changed = await page.evaluate((targetSide, inputIndex, value) => {
-      const section = document.querySelector(`.trade-panel__side--${targetSide}`)
+    const changed = await page.evaluate((panelSelector, targetSide, inputIndex, value) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
       const inputs = [...(section?.querySelectorAll('input[inputmode="decimal"]:not([disabled])') ?? [])]
       const input = inputs[inputIndex]
       if (!input) return false
@@ -5478,48 +5840,118 @@ async function submitBrowserOrder(page, { side, tabIndex, values, reduceOnly = f
       input.dispatchEvent(new Event('input', { bubbles: true }))
       input.dispatchEvent(new Event('change', { bubbles: true }))
       return true
-    }, side, index, values[index])
+    }, TRADE_PANEL_SELECTOR, side, index, values[index])
     assert(changed, `${label} input ${index} must be editable`)
-    await sleep(50)
+    await page.waitForFunction((panelSelector, targetSide, inputIndex, expected) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
+      const inputs = [...(section?.querySelectorAll('input[inputmode="decimal"]:not([disabled])') ?? [])]
+      const input = inputs[inputIndex]
+      return input?.value === String(expected) && input.defaultValue === String(expected)
+    }, `${label} input ${index} controlled state`, TRADE_PANEL_SELECTOR, side, index, values[index])
   }
   if (reduceOnly) {
-    const checked = await page.evaluate((targetSide) => {
-      const input = document.querySelector(`.trade-panel__side--${targetSide} .trade-panel__perpetual-options input[type="checkbox"]`)
-      if (!input) return false
-      if (!input.checked) input.click()
+    const checked = await waitFor(() => page.evaluate((panelSelector, targetSide) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
+      const input = section?.querySelector('section[aria-label="Perpetual order options"] input[type="checkbox"]')
+      if (!input || input.disabled) return false
+      if (!input.checked) {
+        input.click()
+        return false
+      }
       return input.checked
-    }, side)
+    }, TRADE_PANEL_SELECTOR, side), `${label} reduce-only control`, 15000)
     assert(checked, `${label} must visibly enable reduce-only`)
   }
-  const clicked = await page.evaluate((targetSide) => {
-    const button = document.querySelector(`.trade-panel__submit--${targetSide}`)
-    if (!button || button.disabled) return false
-    button.click()
-    return true
-  }, side)
-  assert(clicked, `${label} submit control must be enabled`)
-  const confirmationState = await waitFor(() => page.evaluate(() => {
-    if (document.querySelector('.trade-panel__confirm')) return 'dialog'
-    return localStorage.getItem('fx-trade-confirm-skip') === 'true' ? 'skipped' : null
-  }), `${label} confirmation`, 5000)
-  if (confirmationState === 'dialog') {
-    const confirmed = await page.evaluate(() => {
-      const dialog = document.querySelector('.trade-panel__confirm')
-      const skip = dialog?.querySelector('input[type="checkbox"]')
-      const submit = dialog?.querySelector('.trade-panel__confirm-submit')
-      if (!dialog || !skip || !submit) return false
-      if (!skip.checked) skip.click()
-      submit.click()
+  try {
+    const clicked = await waitFor(() => page.evaluate((panelSelector, targetSide) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
+      const button = section?.querySelector('[data-trading-action="submit-order"]')
+      const balance = button?.previousElementSibling
+      const ready = [...(balance?.querySelectorAll('strong') ?? [])]
+        .some((value) => !value.textContent?.trim().startsWith('-'))
+      if (!button || button.disabled || !ready) return false
+      button.click()
       return true
-    })
-    assert(confirmed, `${label} confirmation dialog must submit`)
+    }, TRADE_PANEL_SELECTOR, side), `${label} ready submit control`, 15000)
+    assert(clicked, `${label} submit control must be enabled`)
+    const confirmationState = await waitFor(() => page.evaluate(() => {
+      if (document.querySelector('section[role="dialog"] > dl')) return 'dialog'
+      return localStorage.getItem('fx-trade-confirm-skip') === 'true' ? 'skipped' : null
+    }), `${label} confirmation`, 5000)
+    if (confirmationState === 'dialog') {
+      const confirmed = await waitFor(() => page.evaluate((panelSelector, targetSide) => {
+        const panel = document.querySelector(panelSelector)
+        const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+        const section = sections[targetSide === 'buy' ? 0 : 1]
+        const button = section?.querySelector('[data-trading-action="submit-order"]')
+        const balance = button?.previousElementSibling
+        const ready = [...(balance?.querySelectorAll('strong') ?? [])]
+          .some((value) => !value.textContent?.trim().startsWith('-'))
+        if (!button || button.disabled || !ready) return false
+        const dialog = document.querySelector('section[role="dialog"] > dl')?.closest('section[role="dialog"]')
+        const skip = dialog?.querySelector('input[type="checkbox"]')
+        const submit = dialog?.querySelector('footer button:last-of-type')
+        if (!dialog || !skip || !submit) return false
+        if (!skip.checked) skip.click()
+        submit.click()
+        return true
+      }, TRADE_PANEL_SELECTOR, side), `${label} ready confirmation`, 15000)
+      assert(confirmed, `${label} confirmation dialog must submit`)
+    }
+    const created = await waitFor(async () => {
+      const created = (await orders({ size: 500 }))
+        .filter((order) => !beforeIds.has(order.id))
+        .toSorted((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+      return created[0] ?? false
+    }, `${label} resulting REST order`, 15000)
+    if (reduceOnly) assert(created.reduceOnly === true, `${label} resulting order must be reduce-only`)
+    await page.waitForFunction((panelSelector, targetSide) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
+      const button = section?.querySelector('[data-trading-action="submit-order"]')
+      return Boolean(button && !button.disabled)
+    }, `${label} browser submission settled`, TRADE_PANEL_SELECTOR, side)
+    return created
+  } catch (error) {
+    const diagnostic = await page.evaluate((panelSelector, targetSide) => {
+      const panel = document.querySelector(panelSelector)
+      const sections = [...(panel?.querySelectorAll('section[data-price-precision]') ?? [])]
+      const section = sections[targetSide === 'buy' ? 0 : 1]
+      const button = section?.querySelector('[data-trading-action="submit-order"]')
+      const balance = button?.previousElementSibling
+      const settings = document.querySelector('[aria-label="Perpetual trading settings"]')
+      return {
+        button: button ? [button.textContent?.trim(), button.disabled, button.getAttribute('title')] : null,
+        action: button?.getAttribute('data-trading-action') ?? null,
+        balance: [...(balance?.querySelectorAll('strong') ?? [])].map((value) => value.textContent?.trim()),
+        inputs: [...(section?.querySelectorAll('input') ?? [])].map((input) => ({
+          label: input.getAttribute('aria-label'),
+          disabled: input.disabled,
+          value: input.value
+        })),
+        notice: panel?.querySelector('[role="status"]')?.textContent?.trim() ?? null,
+        session: panel?.querySelector('[aria-live="polite"]')?.textContent?.trim() ?? null,
+        sessionAlert: panel?.querySelector('[role="alert"]')?.textContent?.trim() ?? null,
+        settingsBusy: settings?.getAttribute('aria-busy') ?? null,
+        settingsControls: [...(settings?.querySelectorAll('select, input, button') ?? [])].map((control) => ({
+          label: control.getAttribute('aria-label'),
+          disabled: control.disabled
+        })),
+        source: document.querySelector('[data-source]')?.textContent?.trim() ?? null,
+        tokenPresent: Boolean(localStorage.getItem('fx-platform-auth-token')),
+        skipConfirm: localStorage.getItem('fx-trade-confirm-skip')
+      }
+    }, TRADE_PANEL_SELECTOR, side)
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`${message}; browser state: ${JSON.stringify(diagnostic)}`)
   }
-  return waitFor(async () => {
-    const created = (await orders({ size: 500 }))
-      .filter((order) => !beforeIds.has(order.id))
-      .toSorted((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-    return created[0] ?? false
-  }, `${label} resulting REST order`, 15000)
 }
 
 async function cancelBrowserOrder(page, orderId, label) {
@@ -5528,12 +5960,20 @@ async function cancelBrowserOrder(page, orderId, label) {
   const clicked = await waitFor(() => page.evaluate((targetOrderId) => {
     const actions = [...document.querySelectorAll('[data-order-id]')]
       .find((element) => element.getAttribute('data-order-id') === targetOrderId)
-    const button = actions?.querySelector('button.table-action--danger:not([disabled])')
+    const button = actions?.querySelectorAll(':scope > button')[2]
     if (!button) return false
     button.click()
     return true
   }, orderId), `${label} UI action`, 15000)
   assert(clicked, `${label} must click the real Orders-page action`)
+  const confirmed = await waitFor(() => page.evaluate(() => {
+    const dialog = document.getElementById('order-cancel-title')?.closest('section[role="dialog"]')
+    const button = dialog?.querySelector('button:not([disabled])')
+    if (!button) return false
+    button.click()
+    return true
+  }), `${label} confirmation`, 5000)
+  assert(confirmed, `${label} must confirm the real Orders-page action`)
   const canceled = await waitFor(async () => {
     const order = (await orders({ size: 500 })).find((candidate) => candidate.id === orderId)
     return order && ['CANCELED', 'CANCELLED'].includes(order.status) ? order : false
@@ -5547,7 +5987,7 @@ async function startAccountEventObserver() {
   const network = { webSockets: [], sentFrames: [], receivedFrames: [] }
   page.on('Runtime.exceptionThrown', (event) => runtimeErrors.push(event.exceptionDetails?.text ?? 'runtime exception'))
   page.on('Log.entryAdded', (event) => {
-    if (event.entry?.level === 'error') runtimeErrors.push(event.entry.text)
+    if (event.entry?.level === 'error') runtimeErrors.push(event.entry)
   })
   page.on('Network.webSocketCreated', (event) => network.webSockets.push(event.url ?? ''))
   page.on('Network.webSocketFrameSent', (event) => network.sentFrames.push(event.response?.payloadData ?? ''))
@@ -5596,7 +6036,7 @@ async function captureBrowserEvidence(mode, viewport) {
   const network = { webSockets: [], sentFrames: [], receivedFrames: [] }
   page.on('Runtime.exceptionThrown', (event) => runtimeErrors.push(event.exceptionDetails?.text ?? 'runtime exception'))
   page.on('Log.entryAdded', (event) => {
-    if (event.entry?.level === 'error') runtimeErrors.push(event.entry.text)
+    if (event.entry?.level === 'error') runtimeErrors.push(event.entry)
   })
   page.on('Network.webSocketCreated', (event) => network.webSockets.push(event.url ?? ''))
   page.on('Network.webSocketFrameSent', (event) => network.sentFrames.push(event.response?.payloadData ?? ''))
@@ -5649,21 +6089,25 @@ async function captureWebCriticalPaths(page, mode, viewport, runtimeErrors, netw
       }
       if (viewport.mobile) {
         const opened = await page.evaluate(() => {
-          const actionBar = document.querySelector('nav[class*="actionBar"]')
-          const tradeButton = actionBar?.querySelector('button:nth-of-type(2)')
+          const tradeButton = document.querySelector('[data-testid="mobile-trade-action"]')
           tradeButton?.click()
           return Boolean(tradeButton)
         })
         assert(opened, `${route} mobile Trade action must be available`)
         await page.waitForFunction(() => {
-          const panel = document.querySelector('.trade-panel')
-          const layer = panel?.closest('[aria-hidden]')
+          const layer = document.getElementById('mobile-order-sheet-title')?.closest('[aria-hidden]')
+          const side = layer?.querySelector('section[data-price-precision]')
+          const panel = side?.parentElement?.closest('section[aria-label]')
           const rect = panel?.getBoundingClientRect()
           return layer?.getAttribute('aria-hidden') === 'false'
             && Boolean(rect && rect.width > 0 && rect.height > 0)
         }, 'mobile real order sheet')
       } else {
-        await page.waitForFunction(() => Boolean(document.querySelector('.trade-panel')), 'desktop real order controls')
+        await page.waitForFunction(
+          (panelSelector) => Boolean(document.querySelector(panelSelector)?.querySelector('section[data-price-precision]')),
+          'desktop real order controls',
+          TRADE_PANEL_SELECTOR
+        )
       }
     }
     await assertPageLayout(page, route)
@@ -5716,18 +6160,21 @@ async function captureAdminCriticalPaths(page, mode, viewport, runtimeErrors) {
 
 async function assertAdminBindingMode(page, mode) {
   const providerCodes = ['binance-usdm', 'okx-swap', 'local-perp']
-  const selected = await page.evaluate((symbol) => {
+  const selected = await waitFor(() => page.evaluate((symbol) => {
     const select = [...document.querySelectorAll('select')].find((candidate) =>
       [...candidate.options].some((option) => option.textContent?.includes(symbol))
     )
     const option = select && [...select.options].find((candidate) => candidate.textContent?.includes(symbol))
     if (!select || !option) return false
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
-    setter?.call(select, option.value)
-    select.dispatchEvent(new Event('input', { bubbles: true }))
-    select.dispatchEvent(new Event('change', { bubbles: true }))
+    if (select.value !== option.value) {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+      setter?.call(select, option.value)
+      select.dispatchEvent(new Event('input', { bubbles: true }))
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+      return false
+    }
     return true
-  }, PERP_SYMBOL)
+  }, PERP_SYMBOL), `Admin ${PERP_SYMBOL} symbol option`, 15000)
   assert(selected, `Admin binding page must expose ${PERP_SYMBOL}`)
   const rows = await waitFor(() => page.evaluate((codes) => {
     const tableRows = [...document.querySelectorAll('tbody tr')].map((row) =>
@@ -5912,18 +6359,27 @@ async function captureScreenshot(page, mode, viewport, route) {
   return path
 }
 
-function assertNoRuntimeErrors(errors, label) {
-  const relevant = errors.filter((message) => !/ResizeObserver loop|favicon\.ico/i.test(message))
-  assert(relevant.length === 0, `${label} browser runtime errors: ${relevant.join(' | ')}`)
+function browserRuntimeErrorMessage(error) {
+  return typeof error === 'string' ? error : error?.text ?? 'browser log error'
 }
 
-async function launchBrowser() {
+export function assertNoRuntimeErrors(errors, label) {
+  const relevant = errors.filter((error) => !/ResizeObserver loop|favicon\.ico/i.test(browserRuntimeErrorMessage(error)))
+  const details = relevant.map((error) => typeof error === 'string'
+    ? error
+    : `${browserRuntimeErrorMessage(error)} [source=${error.source ?? 'unknown'}, url=${error.url ?? 'unknown'}]`)
+  assert(relevant.length === 0, `${label} browser runtime errors: ${details.join(' | ')}`)
+}
+
+export async function launchBrowser({ onSpawn, signal } = {}) {
+  throwIfP0Aborted(signal)
   const executable = browserCandidates().find(existsSync)
   assert(executable, 'Chrome or Edge is required; set SMOKE_BROWSER_PATH or CHROME_PATH')
   const port = await freePort()
   const userDataDir = await mkdtemp(join(tmpdir(), 'fx-usdt-demo-smoke-'))
-  const child = spawn(executable, [
+  const args = [
     '--headless=new',
+    ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${userDataDir}`,
     '--disable-gpu',
@@ -5934,22 +6390,45 @@ async function launchBrowser() {
     '--no-default-browser-check',
     '--window-size=1440,900',
     'about:blank'
-  ], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-  observeLocalChildSpawn(child, { label: 'browser' })
+  ]
+  const child = spawn(executable, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true
+  })
+  observeLocalChildSpawn(child, {
+    descriptor: { command: executable, args, cwd: projectRoot },
+    label: 'browser',
+    registerIdentity: true
+  })
+  bindP0AbortToManagedProcess(child, signal, 'browser')
   const log = { label: 'browser', command: executable, output: '' }
   processLogs.push(log)
-  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
-  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
-  await child.p0SpawnReady
-  await waitFor(async () => {
-    assertProcessRunning(child)
-    return canFetch(`http://127.0.0.1:${port}/json/version`)
-  }, 'Chrome DevTools endpoint', 30000)
+  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
+  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
+  try {
+    await child.p0SpawnReady
+    await onSpawn?.(child)
+    throwIfP0Aborted(signal)
+    await waitFor(async () => {
+      assertProcessRunning(child)
+      return canFetch(`http://127.0.0.1:${port}/json/version`, signal)
+    }, 'Chrome DevTools endpoint', 30000, signal)
+  } catch (error) {
+    await terminateProcessTree(child, 'browser launch cleanup').catch(() => {})
+    await rm(userDataDir, { recursive: true, force: true })
+    throw error
+  }
   return {
+    pid: child.pid,
+    processIdentity: child.processIdentity,
     port,
     close: async () => {
-      await terminateProcessTree(child, 'browser')
-      await rm(userDataDir, { recursive: true, force: true })
+      try {
+        if (child.p0AbortTermination) await child.p0AbortTermination
+        else await terminateProcessTree(child, 'browser')
+      } finally {
+        await rm(userDataDir, { recursive: true, force: true })
+      }
     }
   }
 }
@@ -6035,6 +6514,10 @@ async function createCdpPage(port) {
     on(method, listener) {
       if (!listeners.has(method)) listeners.set(method, new Set())
       listeners.get(method).add(listener)
+      return () => {
+        listeners.get(method)?.delete(listener)
+        if (listeners.get(method)?.size === 0) listeners.delete(method)
+      }
     },
     async navigate(url) {
       await send('Page.navigate', { url })
@@ -6089,6 +6572,2520 @@ async function setViewport(page, viewport) {
     screenWidth: viewport.width,
     screenHeight: viewport.height
   })
+}
+
+export async function createEvidencePage(browserInstance, options = {}) {
+  const createPage = options.createPage ?? createCdpPage
+  const page = await createPage(browserInstance.port)
+  const evidence = {
+    caseId: options.caseId ?? null,
+    cursor: 0,
+    requests: [],
+    byRequestId: new Map(),
+    consoleErrors: [],
+    httpErrors: [],
+    stompFrames: [],
+    allowedHttpErrors: new Map(),
+    dispose: []
+  }
+  const listen = (method, listener) => {
+    const dispose = page.on(method, listener)
+    if (typeof dispose === 'function') evidence.dispose.push(dispose)
+  }
+  const advance = () => {
+    evidence.cursor += 1
+    return evidence.cursor
+  }
+
+  listen('Runtime.exceptionThrown', ({ exceptionDetails = {} }) => {
+    evidence.consoleErrors.push({
+      text: exceptionDetails.exception?.description
+        ?? exceptionDetails.text
+        ?? 'browser runtime exception',
+      source: 'Runtime.exceptionThrown',
+      url: exceptionDetails.url
+    })
+  })
+  listen('Runtime.consoleAPICalled', ({ type, args = [], stackTrace }) => {
+    if (type !== 'error' && type !== 'assert') return
+    evidence.consoleErrors.push({
+      text: args.map((argument) => (
+        argument.value ?? argument.description ?? argument.type ?? ''
+      )).join(' ') || `console.${type}`,
+      source: 'Runtime.consoleAPICalled',
+      url: stackTrace?.callFrames?.[0]?.url
+    })
+  })
+  listen('Log.entryAdded', ({ entry = {} }) => {
+    if (entry.level === 'error') evidence.consoleErrors.push(entry)
+  })
+  listen('Network.requestWillBeSent', ({ requestId, request = {}, type }) => {
+    const record = {
+      cursor: advance(),
+      requestId,
+      type,
+      method: String(request.method ?? '').toUpperCase(),
+      url: request.url ?? '',
+      postData: request.postData,
+      requestHeaders: request.headers ?? {},
+      idempotencyKey: extractP0IdempotencyKey(request),
+      response: null,
+      responseBody: undefined,
+      loadingFinished: false,
+      loadingFailure: null
+    }
+    evidence.requests.push(record)
+    evidence.byRequestId.set(requestId, record)
+  })
+  listen('Network.responseReceived', ({ requestId, response = {} }) => {
+    const record = evidence.byRequestId.get(requestId)
+    if (!record) return
+    advance()
+    record.response = {
+      status: response.status,
+      mimeType: response.mimeType,
+      headers: response.headers ?? {}
+    }
+    if (Number(response.status) >= 400) {
+      evidence.httpErrors.push({
+        requestId,
+        method: record.method,
+        url: record.url,
+        status: Number(response.status)
+      })
+    }
+  })
+  listen('Network.loadingFinished', ({ requestId }) => {
+    const record = evidence.byRequestId.get(requestId)
+    if (!record) return
+    advance()
+    record.loadingFinished = true
+  })
+  listen('Network.loadingFailed', ({ requestId, errorText, canceled }) => {
+    const record = evidence.byRequestId.get(requestId)
+    if (!record) return
+    advance()
+    record.loadingFailure = { errorText, canceled: Boolean(canceled) }
+  })
+  listen('Network.webSocketFrameSent', ({ response = {} }) => {
+    evidence.stompFrames.push(parseP0StompFrame('sent', response.payloadData))
+  })
+  listen('Network.webSocketFrameReceived', ({ response = {} }) => {
+    evidence.stompFrames.push(parseP0StompFrame('received', response.payloadData))
+  })
+
+  await page.send('Page.enable')
+  await page.send('Runtime.enable')
+  await page.send('Log.enable')
+  await page.send('Network.enable')
+  if (options.viewport) await setViewport(page, options.viewport)
+
+  Object.defineProperty(page, 'p0Evidence', { value: evidence })
+  Object.defineProperty(page, 'p0Options', {
+    value: Object.freeze({
+      webBaseUrl: options.webBaseUrl,
+      adminBaseUrl: options.adminBaseUrl,
+      apiBaseUrl: options.apiBaseUrl,
+      caseId: options.caseId
+    })
+  })
+  page.allowHttpError = (requestRef, reason) => {
+    if (typeof requestRef !== 'string' || requestRef.length === 0
+      || typeof reason !== 'string' || reason.length === 0) {
+      throw new Error('P0_EXPECTED_HTTP_ERROR_SCOPE_REQUIRED')
+    }
+    evidence.allowedHttpErrors.set(requestRef, reason)
+  }
+  page.assertEvidenceClean = (label = options.caseId ?? 'P0 browser page') => {
+    assertNoRuntimeErrors(evidence.consoleErrors, label)
+    const unexplained = evidence.httpErrors.filter(({ requestId }) => (
+      !evidence.allowedHttpErrors.has(requestId)
+    ))
+    if (unexplained.length > 0) {
+      const first = unexplained[0]
+      throw new Error(
+        `${label} unexplained HTTP ${first.status} ${first.method} ${first.url}`
+      )
+    }
+  }
+  page.snapshotEvidence = () => ({
+    networkEvidence: evidence.requests.map(redactP0NetworkRecord),
+    eventEvidence: evidence.stompFrames.filter(Boolean),
+    consoleErrors: evidence.consoleErrors.map((error) => browserRuntimeErrorMessage(error))
+  })
+  const closePage = page.close.bind(page)
+  page.close = async () => {
+    for (const dispose of evidence.dispose.splice(0)) dispose()
+    await closePage()
+  }
+  return page
+}
+
+export async function withCapturedMutation(page, matcher, action) {
+  if (!page?.p0Evidence || typeof action !== 'function') {
+    throw new Error('P0_CAPTURED_MUTATION_PAGE_REQUIRED')
+  }
+  const cursor = page.p0Evidence.cursor
+  const actionResult = await action()
+  const record = await waitFor(
+    () => page.p0Evidence.requests.find((candidate) => (
+      candidate.cursor > cursor && matchesP0NetworkRequest(candidate, matcher)
+    )),
+    'browser mutation request',
+    15000
+  )
+  await waitFor(() => {
+    if (record.loadingFailure) {
+      throw new Error(
+        `P0_MUTATION_NETWORK_FAILED: ${record.method} ${record.url} `
+          + `${record.loadingFailure.errorText ?? 'unknown'}`
+      )
+    }
+    return record.response && record.loadingFinished
+  }, `browser mutation response ${record.requestId}`, 30000)
+  const responseBody = await page.send('Network.getResponseBody', {
+    requestId: record.requestId
+  })
+  record.responseBody = responseBody?.base64Encoded
+    ? Buffer.from(responseBody.body ?? '', 'base64').toString('utf8')
+    : String(responseBody?.body ?? '')
+  const capture = {
+    actionResult,
+    requestRef: record.requestId,
+    method: record.method,
+    url: record.url,
+    idempotencyKey: record.idempotencyKey,
+    status: Number(record.response.status),
+    networkEvidence: redactP0NetworkRecord(record)
+  }
+  Object.defineProperties(capture, {
+    rawRequest: {
+      value: Object.freeze({
+        method: record.method,
+        url: record.url,
+        postData: record.postData,
+        requestHeaders: Object.freeze({ ...record.requestHeaders })
+      })
+    },
+    parsedResponse: {
+      value: parseP0CapturedResponse(record.responseBody)
+    }
+  })
+  return capture
+}
+
+export async function registerViaUi(page, credentials) {
+  requireP0Credentials(credentials)
+  const baseUrl = p0PageBaseUrl(page, 'webBaseUrl', 'WEB_BASE_URL', 'http://127.0.0.1:5199')
+  await page.navigate(`${baseUrl}/register`)
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[aria-labelledby="register-title"] form')),
+    'real registration form'
+  )
+  const capture = await withCapturedMutation(
+    page,
+    { method: 'POST', url: /\/api\/auth\/register$/ },
+    () => page.evaluate((email, password) => {
+      const form = document.querySelector('[aria-labelledby="register-title"] form')
+      const channel = form?.querySelector('[aria-label="注册方式"] button')
+      const emailInput = form?.querySelector('input[autocomplete="email"]')
+      const passwordInput = form?.querySelector('input[autocomplete="new-password"]')
+      const submit = form?.querySelector('button[type="submit"]')
+      if (!form || !channel || !emailInput || !passwordInput || !submit) {
+        throw new Error('P0_REGISTER_FORM_INCOMPLETE')
+      }
+      channel.click()
+      const setValue = (input, value) => {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value'
+        )?.set
+        setter?.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      setValue(emailInput, email)
+      setValue(passwordInput, password)
+      submit.click()
+      return true
+    }, credentials.email, credentials.password)
+  )
+  assertP0MutationSucceeded(capture, 'registration')
+  await page.waitForFunction(
+    () => window.location.pathname === '/account/overview',
+    'registration authenticated redirect'
+  )
+  return { ...capture, authenticated: true }
+}
+
+export async function loginViaUi(page, credentials, options = {}) {
+  requireP0Credentials(credentials)
+  const baseUrl = p0PageBaseUrl(page, 'webBaseUrl', 'WEB_BASE_URL', 'http://127.0.0.1:5199')
+  const redirect = options.redirect ?? credentials.redirect
+  const loginPath = redirect
+    ? `/login?redirect=${encodeURIComponent(redirect)}`
+    : '/login'
+  await page.navigate(`${baseUrl}${loginPath}`)
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[aria-labelledby="login-title"] form')),
+    'real login form'
+  )
+  const capture = await withCapturedMutation(
+    page,
+    { method: 'POST', url: /\/api\/auth\/login$/ },
+    () => page.evaluate((email, password) => {
+      const form = document.querySelector('[aria-labelledby="login-title"] form')
+      const emailInput = form?.querySelector('input[autocomplete="email"]')
+      const passwordInput = form?.querySelector('input[autocomplete="current-password"]')
+      const submit = form?.querySelector('button[type="submit"]')
+      if (!form || !emailInput || !passwordInput || !submit) {
+        throw new Error('P0_LOGIN_FORM_INCOMPLETE')
+      }
+      const setValue = (input, value) => {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value'
+        )?.set
+        setter?.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      setValue(emailInput, email)
+      setValue(passwordInput, password)
+      submit.click()
+      return true
+    }, credentials.email, credentials.password)
+  )
+  if (options.expectFailure) {
+    assert(
+      capture.status >= 400 && capture.status < 500,
+      `wrong-password login must return 4xx, got ${capture.status}`
+    )
+    page.allowHttpError(capture.requestRef, options.reason ?? 'expected login rejection')
+    await page.waitForFunction(
+      () => Boolean(document.querySelector('[aria-labelledby="login-title"] [role="alert"]')),
+      'visible login rejection'
+    )
+    return { ...capture, authenticated: false }
+  }
+  assertP0MutationSucceeded(capture, 'login')
+  await page.waitForFunction(
+    (expectedPath) => window.location.pathname === expectedPath,
+    'login authenticated redirect',
+    redirect ?? '/account/overview'
+  )
+  return { ...capture, authenticated: true }
+}
+
+export async function loginAdminViaUi(page, credentials, options = {}) {
+  requireP0Credentials(credentials)
+  const baseUrl = p0PageBaseUrl(page, 'adminBaseUrl', 'ADMIN_BASE_URL', 'http://127.0.0.1:5200')
+  await page.navigate(`${baseUrl}/login`)
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('form.login-panel')),
+    'real Admin login form'
+  )
+  const capture = await withCapturedMutation(
+    page,
+    { method: 'POST', url: /\/api\/auth\/login$/ },
+    () => page.evaluate((email, password) => {
+      const form = document.querySelector('form.login-panel')
+      const emailInput = form?.querySelector('input[autocomplete="username"]')
+      const passwordInput = form?.querySelector('input[autocomplete="current-password"]')
+      const submit = form?.querySelector('button')
+      if (!form || !emailInput || !passwordInput || !submit) {
+        throw new Error('P0_ADMIN_LOGIN_FORM_INCOMPLETE')
+      }
+      const setValue = (input, value) => {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          'value'
+        )?.set
+        setter?.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      setValue(emailInput, email)
+      setValue(passwordInput, password)
+      submit.click()
+      return true
+    }, credentials.email, credentials.password)
+  )
+  assertP0MutationSucceeded(capture, 'Admin login')
+  await page.waitForFunction(
+    () => window.location.pathname !== '/login',
+    'Admin authenticated redirect'
+  )
+  return { ...capture, authenticated: true, expectedRoute: options.redirect ?? '/dashboard' }
+}
+
+export async function logoutViaUi(page) {
+  const opened = await page.evaluate(() => {
+    const trigger = document.querySelector('button[aria-label="个人中心"][aria-haspopup="menu"]')
+    if (!trigger) return false
+    trigger.click()
+    return true
+  })
+  assert(opened, 'authenticated user menu must be available for UI logout')
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[role="menu"][aria-label="个人中心"]')),
+    'authenticated user menu'
+  )
+  const capture = await withCapturedMutation(
+    page,
+    { method: 'POST', url: /\/api\/auth\/logout$/ },
+    () => page.evaluate(() => {
+      const menu = document.querySelector('[role="menu"][aria-label="个人中心"]')
+      const logout = [...(menu?.querySelectorAll('button[role="menuitem"]') ?? [])]
+        .find((button) => button.textContent?.includes('退出登录'))
+      if (!logout) throw new Error('P0_LOGOUT_ACTION_MISSING')
+      logout.click()
+      return true
+    })
+  )
+  assertP0MutationSucceeded(capture, 'logout')
+  await page.waitForFunction(
+    () => window.location.pathname === '/',
+    'logout public redirect'
+  )
+  return { ...capture, authenticated: false }
+}
+
+export async function openTradePanel(page, target) {
+  const route = resolveP0TradeRoute(target)
+  const baseUrl = p0PageBaseUrl(page, 'webBaseUrl', 'WEB_BASE_URL', 'http://127.0.0.1:5199')
+  await page.navigate(`${baseUrl}${route}`)
+  await page.waitForFunction(
+    (expectedPath) => window.location.pathname === expectedPath
+      && (document.body?.innerText?.trim().length ?? 0) > 40,
+    `real trade route ${route}`,
+    route
+  )
+  const mobile = target?.mobile ?? await page.evaluate(() => {
+    const root = document.querySelector('[data-platform-view="mobile"]')
+    if (!root) return false
+    const rect = root.getBoundingClientRect()
+    const style = getComputedStyle(root)
+    return rect.width > 0 && rect.height > 0
+      && style.display !== 'none' && style.visibility !== 'hidden'
+  })
+  const selector = mobile
+    ? '[data-platform-view="mobile"] [aria-hidden="false"] section[aria-label][class*="trade-panel"]'
+    : '[data-platform-view="pc"] [data-panel-id="trade"] section[aria-label][class*="trade-panel"]'
+  if (mobile) {
+    const clicked = await page.evaluate(() => {
+      const button = document.querySelector('[data-testid="mobile-trade-action"]')
+      if (!button) return false
+      const rect = button.getBoundingClientRect()
+      const style = getComputedStyle(button)
+      if (rect.width <= 0 || rect.height <= 0
+        || style.display === 'none' || style.visibility === 'hidden') return false
+      button.click()
+      return true
+    })
+    assert(clicked, 'visible mobile Trade action must open the real order sheet')
+  }
+  await page.waitForFunction((panelSelector) => {
+    const panels = [...document.querySelectorAll(panelSelector)]
+    const visible = panels.filter((panel) => {
+      const rect = panel.getBoundingClientRect()
+      const style = getComputedStyle(panel)
+      return rect.width > 0 && rect.height > 0
+        && rect.bottom > 0 && rect.right > 0
+        && rect.top < window.innerHeight && rect.left < window.innerWidth
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number(style.opacity) > 0
+    })
+    return visible.length === 1
+  }, `one visible scoped trade panel ${route}`, selector)
+  page.p0TradePanel = { selector, mobile, route }
+  return page.p0TradePanel
+}
+
+export async function setPerpetualSettingsViaUi(page, options = {}) {
+  const requested = [
+    ['positionMode', 'Position mode', options.positionMode],
+    ['marginMode', 'Margin', options.marginMode],
+    ['leverage', 'Leverage', options.leverage],
+    ['quantityUnit', 'Quantity unit', options.quantityUnit]
+  ].filter(([, , value]) => value !== undefined)
+  const captures = []
+  if (requested.length === 0) return captures
+
+  await page.waitForFunction((fieldLabels) => {
+    const section = document.querySelector(
+      'section[aria-label="Perpetual trading settings"]'
+    )
+    if (!section || section.getAttribute('aria-busy') === 'true') return false
+    return fieldLabels.every((fieldLabel) => {
+      const field = [...section.querySelectorAll(':scope > label')]
+        .find((candidate) => (
+          candidate.querySelector(':scope > span')?.textContent?.trim() === fieldLabel
+        ))
+      const control = field?.querySelector('select, input')
+      return Boolean(control && !control.disabled)
+    })
+  }, 'ready Perpetual trading settings', requested.map(([, label]) => label))
+  for (const [field, label, value] of requested) {
+    const desired = String(value)
+    const current = await page.evaluate((fieldLabel) => {
+      const section = document.querySelector(
+        'section[aria-label="Perpetual trading settings"]'
+      )
+      const field = [...(section?.querySelectorAll(':scope > label') ?? [])]
+        .find((candidate) => (
+          candidate.querySelector(':scope > span')?.textContent?.trim() === fieldLabel
+        ))
+      return field?.querySelector('select, input')?.value ?? null
+    }, label)
+    if (current === desired) continue
+
+    const matcher = field === 'positionMode'
+      ? { method: 'PATCH', url: /\/api\/accounts\/[^/]+\/position-mode$/ }
+      : {
+          method: 'PATCH',
+          url: /\/api\/accounts\/[^/]+\/symbols\/[^/]+\/settings$/
+        }
+    const capture = await withCapturedMutation(
+      page,
+      matcher,
+      () => page.evaluate((fieldLabel, nextValue) => {
+        const section = document.querySelector(
+          'section[aria-label="Perpetual trading settings"]'
+        )
+        const field = [...(section?.querySelectorAll(':scope > label') ?? [])]
+          .find((candidate) => (
+            candidate.querySelector(':scope > span')?.textContent?.trim() === fieldLabel
+          ))
+        const control = field?.querySelector('select, input')
+        if (!control || control.disabled) {
+          throw new Error(`P0_PERPETUAL_SETTING_UNAVAILABLE: ${fieldLabel}`)
+        }
+        const prototype = control instanceof HTMLSelectElement
+          ? HTMLSelectElement.prototype
+          : HTMLInputElement.prototype
+        const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+        setter?.call(control, nextValue)
+        control.dispatchEvent(new Event('input', { bubbles: true }))
+        control.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      }, label, desired)
+    )
+    finishP0UiMutation(page, capture, `Perpetual ${label}`, options)
+    captures.push(capture)
+    if (!options.expectFailure) {
+      await page.waitForFunction((fieldLabel, expected) => {
+        const section = document.querySelector(
+          'section[aria-label="Perpetual trading settings"]'
+        )
+        if (!section || section.getAttribute('aria-busy') === 'true') return false
+        const field = [...section.querySelectorAll(':scope > label')]
+          .find((candidate) => (
+            candidate.querySelector(':scope > span')?.textContent?.trim() === fieldLabel
+          ))
+        return field?.querySelector('select, input')?.value === expected
+      }, `saved Perpetual ${label}`, label, desired)
+    }
+  }
+  return captures
+}
+
+export async function submitOrderViaUi(page, order) {
+  if (!page.p0TradePanel) await openTradePanel(page, order.target ?? order)
+  const panelSelector = page.p0TradePanel.selector
+  const side = String(order.side ?? 'BUY').toLowerCase()
+  const orderType = String(order.orderType ?? 'MARKET').toUpperCase()
+  await page.evaluate((selector, selectedSide, selectedType, values) => {
+    const panel = document.querySelector(selector)
+    if (!panel) throw new Error('P0_SCOPED_TRADE_PANEL_MISSING')
+    const visible = (element) => {
+      const rect = element?.getBoundingClientRect()
+      const style = element ? getComputedStyle(element) : null
+      return Boolean(rect && style && rect.width > 0 && rect.height > 0
+        && style.display !== 'none' && style.visibility !== 'hidden')
+    }
+    const tabIndex = selectedType === 'LIMIT' ? 0 : selectedType === 'MARKET' ? 1 : 2
+    const tabs = [...panel.querySelectorAll('[role="tablist"]')]
+      .map((tablist) => [...tablist.querySelectorAll(':scope > [role="tab"]')].filter(visible))
+      .find((candidates) => candidates.length >= 3) ?? []
+    const orderTab = tabs[tabIndex]
+    if (!orderTab) throw new Error(`P0_ORDER_TAB_MISSING: ${selectedType}`)
+    orderTab.click()
+    if (values.mobile) {
+      const sideTabs = [...panel.querySelectorAll('[role="tablist"] button')]
+        .filter((button) => !button.hasAttribute('role') && visible(button))
+      const sideTab = sideTabs[selectedSide === 'buy' ? 0 : 1]
+      sideTab?.click()
+    }
+  }, panelSelector, side, orderType, { mobile: page.p0TradePanel.mobile })
+  await waitFor(() => page.evaluate((selector, selectedSide, selectedType, values) => {
+    const panel = document.querySelector(selector)
+    const form = panel?.querySelector(
+      `section[data-price-precision][class*="side--${selectedSide}"]`
+    )
+    if (!form) return false
+    const perpetualOptions = panel.querySelector(
+      'section[aria-label="Perpetual order options"]'
+    )
+    if (values.positionSide !== undefined && values.positionSide !== 'BOTH') {
+      const positionSide = perpetualOptions?.querySelector('select')
+      if (!positionSide) throw new Error('P0_POSITION_SIDE_CONTROL_MISSING')
+      if (positionSide.value !== String(values.positionSide)) {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLSelectElement.prototype,
+          'value'
+        )?.set
+        setter?.call(positionSide, String(values.positionSide))
+        positionSide.dispatchEvent(new Event('change', { bubbles: true }))
+        return false
+      }
+    }
+    if (values.reduceOnly !== undefined) {
+      const reduceOnly = perpetualOptions?.querySelector('input[type="checkbox"]')
+      if (!reduceOnly && values.reduceOnly) {
+        throw new Error('P0_REDUCE_ONLY_CONTROL_MISSING')
+      }
+      if (reduceOnly && reduceOnly.checked !== Boolean(values.reduceOnly)) {
+        reduceOnly.click()
+        return false
+      }
+    }
+    const inputs = [...form.querySelectorAll('input[inputmode="decimal"]:not([disabled])')]
+    const setValue = (input, value) => {
+      if (value === undefined || value === null) return true
+      if (input.value === String(value)) return true
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value'
+      )?.set
+      setter?.call(input, String(value))
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+      return false
+    }
+    if (selectedType === 'LIMIT') {
+      if (inputs.length < 2) return false
+      const priceReady = setValue(inputs[0], values.price)
+      const amountReady = setValue(inputs.at(-1), values.amount)
+      return priceReady && amountReady
+    } else if (selectedType === 'STOP_MARKET' || selectedType === 'STOP') {
+      if (inputs.length < 2) return false
+      const triggerReady = setValue(inputs[0], values.triggerPrice)
+      const amountReady = setValue(inputs.at(-1), values.amount)
+      return triggerReady && amountReady
+    } else {
+      if (inputs.length < 1) return false
+      return setValue(inputs.at(-1), values.amount)
+    }
+  }, panelSelector, side, orderType, {
+    price: order.price,
+    triggerPrice: order.triggerPrice,
+    amount: order.amount ?? order.quantity,
+    positionSide: order.positionSide,
+    reduceOnly: order.reduceOnly
+  }), 'scoped order form inputs', 15000)
+
+  if (order.expectLogin) {
+    const cursor = page.p0Evidence.cursor
+    const clicked = await waitFor(() => page.evaluate((selector, selectedSide) => {
+      const panel = document.querySelector(selector)
+      const form = panel?.querySelector(
+        `section[data-price-precision][class*="side--${selectedSide}"]`
+      )
+      const button = form?.querySelector('[data-trading-action="login-required"]')
+      if (!button || button.disabled) return false
+      button.click()
+      return true
+    }, panelSelector, side), 'guest scoped login-required action', 15000)
+    assert(clicked, 'guest order attempt must use the visible login-required action')
+    await page.waitForFunction(
+      () => Boolean(document.querySelector(
+        'section[role="dialog"] [data-trading-action="go-to-login"]'
+      )),
+      'guest login prompt'
+    )
+    await sleep(400)
+    const leaked = page.p0Evidence.requests.some((request) => (
+      request.cursor > cursor
+        && request.method === 'POST'
+        && /\/api\/trading\/orders$/.test(request.url)
+    ))
+    assert(!leaked, 'guest order attempt must not issue create-order request')
+    return { loginRequired: true, requestRef: null }
+  }
+
+  const opened = await waitFor(() => page.evaluate((selector, selectedSide) => {
+    const panel = document.querySelector(selector)
+    const form = panel?.querySelector(
+      `section[data-price-precision][class*="side--${selectedSide}"]`
+    )
+    const button = form?.querySelector('[data-trading-action="submit-order"]')
+    const balanceReady = [...(form?.querySelectorAll('strong') ?? [])]
+      .some((value) => !value.textContent?.trim().startsWith('-'))
+    if (!button || button.disabled || !balanceReady) return false
+    button.click()
+    return true
+  }, panelSelector, side), 'scoped order submit action', 15000)
+  assert(opened, 'real order confirmation must open from the scoped panel')
+  await page.waitForFunction((selector) => {
+    const panel = document.querySelector(selector)
+    const dialog = panel?.querySelector('section[role="dialog"]')
+    if (!dialog) return false
+    const rect = dialog.getBoundingClientRect()
+    const style = getComputedStyle(dialog)
+    return rect.width > 0 && rect.height > 0
+      && style.display !== 'none' && style.visibility !== 'hidden'
+  }, 'scoped order confirmation', panelSelector)
+  const capture = await withCapturedMutation(
+    page,
+    order.matcher ?? { method: 'POST', url: /\/api\/trading\/orders$/ },
+    () => page.evaluate((selector) => {
+      const panel = document.querySelector(selector)
+      const dialog = panel?.querySelector('section[role="dialog"]')
+      const submit = dialog?.querySelector('footer button:last-child')
+      if (!dialog || !submit || submit.disabled) {
+        throw new Error('P0_SCOPED_ORDER_CONFIRM_MISSING')
+      }
+      submit.click()
+      return true
+    }, panelSelector)
+  )
+  finishP0UiMutation(page, capture, 'order submission', order)
+  return capture
+}
+
+export async function positionActionViaUi(page, options) {
+  if (!options?.action) throw new Error('P0_POSITION_ACTION_REQUIRED')
+  await openCurrentPositionsTabViaUi(page)
+  await page.waitForFunction((positionId, positionSide) => {
+    const tablist = [...document.querySelectorAll('[role="tablist"]')]
+      .find((candidate) => [...candidate.querySelectorAll(':scope > [role="tab"]')]
+        .some((tab) => [
+          'Current positions',
+          '当前持仓',
+          '現在ポジション'
+        ].includes(tab.textContent?.trim())))
+    const panel = tablist?.closest('section')?.querySelector(':scope > [role="tabpanel"]')
+    const closableRows = [...(panel?.querySelectorAll('tbody tr') ?? [])]
+      .filter((row) => row.querySelector('button'))
+    let candidates = positionId
+      ? closableRows.filter((row) => row.getAttribute('data-position-id') === positionId)
+      : closableRows
+    if (positionSide && String(positionSide).toUpperCase() !== 'BOTH') {
+      const expectedSide = String(positionSide).trim().toUpperCase()
+      candidates = candidates.filter((row) => (
+        [...row.querySelectorAll('td')]
+          .some((cell) => cell.textContent?.trim().toUpperCase() === expectedSide)
+      ))
+    }
+    const button = candidates[0]?.querySelector('button')
+    return candidates.length === 1 && Boolean(button && !button.disabled)
+  }, 'target current-position row', options.positionId, options.positionSide)
+  const selected = await page.evaluate((positionId, positionSide) => {
+    const tablist = [...document.querySelectorAll('[role="tablist"]')]
+      .find((candidate) => [...candidate.querySelectorAll(':scope > [role="tab"]')]
+        .some((tab) => [
+          'Current positions',
+          '当前持仓',
+          '現在ポジション'
+        ].includes(tab.textContent?.trim())))
+    const panel = tablist?.closest('section')?.querySelector(':scope > [role="tabpanel"]')
+    const closableRows = [...(panel?.querySelectorAll('tbody tr') ?? [])]
+      .filter((row) => row.querySelector('button'))
+    let candidates = positionId
+      ? closableRows.filter((row) => row.getAttribute('data-position-id') === positionId)
+      : closableRows
+    if (positionSide && String(positionSide).toUpperCase() !== 'BOTH') {
+      const expectedSide = String(positionSide).trim().toUpperCase()
+      candidates = candidates.filter((row) => (
+        [...row.querySelectorAll('td')]
+          .some((cell) => cell.textContent?.trim().toUpperCase() === expectedSide)
+      ))
+    }
+    if (candidates.length !== 1) {
+      throw new Error(`P0_POSITION_ROW_AMBIGUOUS: ${candidates.length}`)
+    }
+    const button = [...candidates[0].querySelectorAll('button')]
+      .find((candidate) => !candidate.disabled)
+    if (!button) throw new Error('P0_POSITION_ACTION_BUTTON_MISSING')
+    button.click()
+    return {
+      positionId: candidates[0].getAttribute('data-position-id'),
+      rowText: candidates[0].textContent?.trim() ?? ''
+    }
+  }, options.positionId, options.positionSide)
+  assert(selected?.positionId, 'one real current-position row must open Position action')
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[role="dialog"][aria-label="Position action"]')),
+    'Position action'
+  )
+  await waitFor(() => page.evaluate((values) => {
+    const dialog = document.querySelector('[role="dialog"][aria-label="Position action"]')
+    if (!dialog) return false
+    const actionLabel = {
+      PARTIAL_CLOSE: 'Partial close',
+      FULL_CLOSE: 'Close all',
+      ADJUST_MARGIN: 'Adjust margin'
+    }[values.action]
+    const actionTab = [...dialog.querySelectorAll(
+      '[role="tablist"][aria-label="Position action type"] [role="tab"]'
+    )].find((candidate) => candidate.textContent?.trim() === actionLabel)
+    if (!actionTab || actionTab.disabled) {
+      throw new Error(`P0_POSITION_ACTION_UNAVAILABLE: ${values.action}`)
+    }
+    if (actionTab.getAttribute('aria-selected') !== 'true') {
+      actionTab.click()
+      return false
+    }
+
+    const setValue = (control, value) => {
+      if (value === undefined || value === null || control.value === String(value)) {
+        return true
+      }
+      const prototype = control instanceof HTMLSelectElement
+        ? HTMLSelectElement.prototype
+        : HTMLInputElement.prototype
+      const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+      setter?.call(control, String(value))
+      control.dispatchEvent(new Event('input', { bubbles: true }))
+      control.dispatchEvent(new Event('change', { bubbles: true }))
+      return false
+    }
+    const labelControl = (labelText) => {
+      const label = [...dialog.querySelectorAll('label')]
+        .find((candidate) => candidate.querySelector('span')?.textContent?.trim()
+          .startsWith(labelText))
+      return label?.querySelector('select, input') ?? null
+    }
+
+    if (values.action === 'PARTIAL_CLOSE') {
+      const unit = labelControl('Quantity unit')
+      const quantity = labelControl('Close quantity')
+      if (!unit || !quantity) throw new Error('P0_PARTIAL_CLOSE_CONTROLS_MISSING')
+      if (!setValue(unit, values.quantityUnit)) return false
+      if (!setValue(quantity, values.quantity)) return false
+    } else if (values.action === 'ADJUST_MARGIN') {
+      const directionGroup = dialog.querySelector(
+        '[role="group"][aria-label="Margin adjustment direction"]'
+      )
+      const directionLabel = values.marginDirection === 'REDUCE' ? 'Reduce' : 'Add'
+      const direction = [...(directionGroup?.querySelectorAll('button') ?? [])]
+        .find((candidate) => candidate.textContent?.trim() === directionLabel)
+      const amount = labelControl('Margin amount')
+      if (!direction || !amount) throw new Error('P0_MARGIN_ADJUSTMENT_CONTROLS_MISSING')
+      if (direction.getAttribute('aria-pressed') !== 'true') {
+        direction.click()
+        return false
+      }
+      if (!setValue(amount, values.marginAmount)) return false
+    }
+    const confirm = dialog.querySelector('footer button[type="submit"]')
+    return Boolean(confirm && !confirm.disabled)
+  }, {
+    action: options.action,
+    quantity: options.quantity,
+    quantityUnit: options.quantityUnit,
+    marginDirection: options.marginDirection,
+    marginAmount: options.marginAmount
+  }), `ready Position action ${options.action}`, 15000)
+
+  const matcher = options.action === 'ADJUST_MARGIN'
+    ? {
+        method: 'POST',
+        url: /\/api\/trading\/positions\/[^/?]+\/margin$/
+      }
+    : {
+        method: 'POST',
+        url: /\/api\/trading\/positions\/[^/?]+\/close(?:\?|$)/
+      }
+  const capture = await withCapturedMutation(
+    page,
+    options.matcher ?? matcher,
+    () => page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-label="Position action"]')
+      const confirm = dialog?.querySelector('footer button[type="submit"]')
+      if (!confirm || confirm.disabled) {
+        throw new Error('P0_POSITION_ACTION_CONFIRM_MISSING')
+      }
+      confirm.click()
+      return true
+    })
+  )
+  finishP0UiMutation(page, capture, `Position action ${options.action}`, options)
+  if (!options.expectFailure) {
+    await page.waitForFunction((positionId, previousText, shouldDisappear) => {
+      if (document.querySelector('[role="dialog"][aria-label="Position action"]')) {
+        return false
+      }
+      const row = [...document.querySelectorAll('tbody tr')]
+        .find((candidate) => candidate.getAttribute('data-position-id') === positionId)
+      return shouldDisappear
+        ? !row
+        : Boolean(row && row.textContent?.trim() !== previousText)
+    }, `refreshed Position row ${selected.positionId}`,
+    selected.positionId, selected.rowText, options.action === 'FULL_CLOSE')
+  }
+  return capture
+}
+
+export async function closeAllPositionsViaUi(page, options = {}) {
+  await openCurrentPositionsTabViaUi(page)
+  const capture = await withCapturedMutation(
+    page,
+    options.matcher ?? {
+      method: 'POST',
+      url: /\/api\/trading\/positions\/close-all$/
+    },
+    () => acceptNextNativeDialog(page, () => waitFor(() => page.evaluate(() => {
+      const buttons = [...document.querySelectorAll('button')]
+      const closeAll = buttons.find((button) => {
+        const label = button.textContent?.trim()
+        return !button.disabled && (
+          label === 'Close all positions'
+            || label === '全部平仓'
+            || label === 'すべてのポジションを決済'
+        )
+      })
+      if (!closeAll) return false
+      closeAll.click()
+      return true
+    }), 'visible Close all positions action', 15000))
+  )
+  finishP0UiMutation(page, capture, 'Close all positions', options)
+  return capture
+}
+
+export async function transferViaUi(page, options) {
+  if (!options?.direction || options.amount === undefined) {
+    throw new Error('P0_TRANSFER_INPUT_REQUIRED')
+  }
+  await openWalletViaUi(page)
+  const opened = await page.evaluate(() => {
+    const button = [...document.querySelectorAll('button')]
+      .find((candidate) => (
+        candidate.textContent?.trim() === 'Transfer Spot / Perpetual'
+          && !candidate.disabled
+      ))
+    button?.click()
+    return Boolean(button)
+  })
+  assert(opened, 'real wallet Transfer Spot / Perpetual action must be available')
+  await page.waitForFunction(
+    () => Boolean(document.getElementById('wallet-transfer-title')?.closest('[role="dialog"]')),
+    'wallet-transfer-title'
+  )
+  await waitFor(() => page.evaluate((direction, amount) => {
+    const dialog = document.getElementById('wallet-transfer-title')?.closest('[role="dialog"]')
+    const directionControl = dialog?.querySelector('select')
+    const amountControl = [...(dialog?.querySelectorAll('input') ?? [])]
+      .find((input) => input.inputMode === 'decimal')
+    if (!directionControl || !amountControl) return false
+    const setValue = (control, value) => {
+      if (control.value === String(value)) return true
+      const prototype = control instanceof HTMLSelectElement
+        ? HTMLSelectElement.prototype
+        : HTMLInputElement.prototype
+      const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+      setter?.call(control, String(value))
+      control.dispatchEvent(new Event('input', { bubbles: true }))
+      control.dispatchEvent(new Event('change', { bubbles: true }))
+      return false
+    }
+    if (!setValue(directionControl, direction)) return false
+    if (!setValue(amountControl, amount)) return false
+    const confirm = [...dialog.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Confirm transfer')
+    return Boolean(confirm && !confirm.disabled)
+  }, options.direction, options.amount), 'ready wallet transfer', 15000)
+  const capture = await withCapturedMutation(
+    page,
+    options.matcher ?? {
+      method: 'POST',
+      url: /\/api\/accounts\/[^/]+\/transfers$/
+    },
+    () => page.evaluate(() => {
+      const dialog = document.getElementById('wallet-transfer-title')?.closest('[role="dialog"]')
+      const confirm = [...(dialog?.querySelectorAll('button') ?? [])]
+        .find((button) => button.textContent?.trim() === 'Confirm transfer')
+      if (!confirm || confirm.disabled) throw new Error('P0_TRANSFER_CONFIRM_MISSING')
+      confirm.click()
+      return true
+    })
+  )
+  finishP0UiMutation(page, capture, 'wallet transfer', options)
+  return capture
+}
+
+export async function resetDemoViaUi(page, options = {}) {
+  await openWalletViaUi(page)
+  const opened = await page.evaluate(() => {
+    const button = [...document.querySelectorAll('button')]
+      .find((candidate) => (
+        candidate.textContent?.trim() === 'Reset Demo account'
+          && !candidate.disabled
+      ))
+    button?.click()
+    return Boolean(button)
+  })
+  assert(opened, 'real wallet Reset Demo account action must be available')
+  await page.waitForFunction(
+    () => Boolean(document.getElementById('wallet-reset-title')?.closest('[role="dialog"]')),
+    'wallet-reset-title'
+  )
+  const capture = await withCapturedMutation(
+    page,
+    options.matcher ?? {
+      method: 'POST',
+      url: /\/api\/accounts\/[^/]+\/demo-reset$/
+    },
+    () => page.evaluate(() => {
+      const dialog = document.getElementById('wallet-reset-title')?.closest('[role="dialog"]')
+      const confirm = [...(dialog?.querySelectorAll('button') ?? [])]
+        .find((button) => button.textContent?.trim() === 'Confirm reset')
+      if (!confirm || confirm.disabled) throw new Error('P0_DEMO_RESET_CONFIRM_MISSING')
+      confirm.click()
+      return true
+    })
+  )
+  finishP0UiMutation(page, capture, 'Demo reset', options)
+  return capture
+}
+
+async function openCurrentPositionsTabViaUi(page) {
+  await waitFor(() => page.evaluate(() => {
+    const tablist = [...document.querySelectorAll('[role="tablist"]')]
+      .find((candidate) => {
+        const labels = [...candidate.querySelectorAll(':scope > [role="tab"]')]
+          .map((tab) => tab.textContent?.trim())
+        return labels.some((label) => [
+          'Current positions',
+          '当前持仓',
+          '現在ポジション'
+        ].includes(label))
+      })
+    const tabs = [...(tablist?.querySelectorAll(':scope > [role="tab"]') ?? [])]
+    const currentPositions = tabs.find((tab) => [
+      'Current positions',
+      '当前持仓',
+      '現在ポジション'
+    ].includes(tab.textContent?.trim())) ?? tabs[2]
+    if (!currentPositions) return false
+    if (currentPositions.getAttribute('aria-selected') !== 'true') {
+      currentPositions.click()
+      return false
+    }
+    const panel = tablist?.closest('section')?.querySelector(':scope > [role="tabpanel"]')
+    return Boolean(panel && panel.getAttribute('aria-busy') !== 'true')
+  }), 'visible Current positions tab', 15000)
+}
+
+async function openWalletViaUi(page) {
+  const baseUrl = p0PageBaseUrl(
+    page,
+    'webBaseUrl',
+    'WEB_BASE_URL',
+    'http://127.0.0.1:5199'
+  )
+  await page.navigate(`${baseUrl}/wallet`)
+  await page.waitForFunction(
+    () => window.location.pathname === '/wallet'
+      && [...document.querySelectorAll('button')].some((button) => (
+        button.textContent?.trim() === 'Transfer Spot / Perpetual'
+          && !button.disabled
+      )),
+    'real wallet route'
+  )
+}
+
+function finishP0UiMutation(page, capture, label, options = {}) {
+  if (!options.expectFailure) {
+    assertP0MutationSucceeded(capture, label)
+    return capture
+  }
+  assert(
+    capture.status >= 400 && capture.status < 500,
+    `${label} rejection must return 4xx, got HTTP ${capture.status}`
+  )
+  assert(
+    typeof page.allowHttpError === 'function',
+    `${label} expected HTTP error must be request-scoped`
+  )
+  page.allowHttpError(capture.requestRef, options.reason ?? `expected ${label} rejection`)
+  return capture
+}
+
+export async function followLoginPromptViaUi(page) {
+  const followed = await page.evaluate(() => {
+    const button = document.querySelector(
+      'section[role="dialog"] [data-trading-action="go-to-login"]'
+    )
+    if (!button) return false
+    button.click()
+    return true
+  })
+  assert(followed, 'guest login prompt must expose its real login action')
+  await page.waitForFunction(
+    () => window.location.pathname === '/login'
+      && new URLSearchParams(window.location.search).has('redirect'),
+    'guest trade login redirect'
+  )
+  return page.evaluate(() => ({
+    path: window.location.pathname,
+    redirect: new URLSearchParams(window.location.search).get('redirect')
+  }))
+}
+
+export async function cancelAllOrdersViaUi(page) {
+  const capture = await withCapturedMutation(
+    page,
+    { method: 'POST', url: /\/api\/trading\/orders\/cancel-all$/ },
+    () => acceptNextNativeDialog(page, () => waitFor(() => page.evaluate(() => {
+        const panels = [...document.querySelectorAll('section[aria-label]')]
+          .filter((section) => section.querySelector('[role="tabpanel"]'))
+          .filter((section) => {
+            const rect = section.getBoundingClientRect()
+            const style = getComputedStyle(section)
+            return rect.width > 0 && rect.height > 0
+              && style.display !== 'none' && style.visibility !== 'hidden'
+          })
+        const panel = panels.find((candidate) => (
+          candidate.querySelector(':scope > [role="tablist"] > [role="tab"]')
+        ))
+        const tablist = panel?.querySelector(':scope > [role="tablist"]')
+        const firstTab = tablist?.querySelector(':scope > [role="tab"]')
+        if (!firstTab) return false
+        if (firstTab.getAttribute('aria-selected') !== 'true') {
+          firstTab.click()
+          return false
+        }
+        const toolbar = tablist.nextElementSibling
+        const cancelAll = [...(toolbar?.querySelectorAll('button') ?? [])]
+          .find((button) => !button.disabled)
+        if (!cancelAll) return false
+        cancelAll.click()
+        return true
+      }), 'visible cancel-all orders action', 15000))
+  )
+  assertP0MutationSucceeded(capture, 'cancel-all orders')
+  return capture
+}
+
+export async function acceptNextNativeDialog(page, action) {
+  let opening
+  const dispose = page.on('Page.javascriptDialogOpening', (event) => {
+    opening ??= event
+  })
+  try {
+    const actionResult = Promise.resolve()
+      .then(action)
+      .then(
+        (value) => ({ value }),
+        (error) => ({ error })
+      )
+    const dialog = await waitFor(() => opening, 'native browser confirmation', 5000)
+    await page.send('Page.handleJavaScriptDialog', { accept: true })
+    const settled = await actionResult
+    if (settled.error) throw settled.error
+    return {
+      actionResult: settled.value,
+      dialog: { type: dialog.type, hasBrowserHandler: dialog.hasBrowserHandler }
+    }
+  } finally {
+    if (typeof dispose === 'function') dispose()
+  }
+}
+
+export async function captureCheckpoint(context, name, scope = {}) {
+  const caseId = scope.caseId ?? scope.definition?.id
+  assert(caseId, 'P0 checkpoint requires caseId')
+  const directory = join(context.run.artifactRoot, safeName(caseId))
+  await mkdir(directory, { recursive: true })
+  const pages = scope.pages ?? (scope.page ? [scope.page] : [])
+  const uiEvidence = []
+  const networkEvidence = []
+  const eventEvidence = []
+  const artifactHashes = {}
+  const subrunSuffix = scope.subrunIdentity
+    ? `-${safeName(scope.subrunIdentity)}`
+    : ''
+  for (let index = 0; index < pages.length; index += 1) {
+    const page = pages[index]
+    page.assertEvidenceClean(`${caseId}/${name}`)
+    const suffix = index === 0 ? '' : `-${index + 1}`
+    const filename = `${safeName(name)}${subrunSuffix}${suffix}.png`
+    const screenshot = await page.send('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: false
+    })
+    const screenshotBytes = Buffer.from(screenshot.data, 'base64')
+    await writeFile(join(directory, filename), screenshotBytes)
+    artifactHashes[`${safeName(caseId)}/${filename}`] = (
+      `sha256:${createHash('sha256').update(screenshotBytes).digest('hex')}`
+    )
+    const snapshot = page.snapshotEvidence()
+    uiEvidence.push({ checkpoint: name, screenshot: filename })
+    networkEvidence.push(...snapshot.networkEvidence)
+    eventEvidence.push(...snapshot.eventEvidence)
+  }
+  const resolveEvidence = async (value) => (
+    typeof value === 'function' ? value() : value
+  )
+  return {
+    name,
+    artifactHashes,
+    uiEvidence,
+    networkEvidence,
+    eventEvidence,
+    apiEvidence: await resolveEvidence(scope.apiEvidence) ?? [],
+    dbEvidence: await resolveEvidence(scope.dbEvidence) ?? [],
+    oracleEvidence: await resolveEvidence(scope.oracleEvidence) ?? []
+  }
+}
+
+const AUTHORITY_MOBILE_VIEWPORT = Object.freeze({
+  name: 'p0-authority-mobile',
+  width: 390,
+  height: 844,
+  mobile: true
+})
+const AUTHORITY_ADMIN_VIEWPORT = Object.freeze({
+  name: 'p0-authority-admin',
+  width: 1440,
+  height: 900,
+  mobile: false
+})
+const AUTHORITY_TARGET_TTL = 'PT5M'
+
+function authorityDecimal(value, label) {
+  const result = String(value)
+  if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(result)) {
+    throw new Error(`P0_AUTHORITY_DECIMAL_REQUIRED: ${label}`)
+  }
+  return result
+}
+
+function authorityPositiveDecimal(value, label) {
+  const result = authorityDecimal(value, label)
+  if (Number(result) <= 0) throw new Error(`P0_AUTHORITY_POSITIVE_DECIMAL_REQUIRED: ${label}`)
+  return result
+}
+
+function authorityRules(rawRules) {
+  if (!rawRules || typeof rawRules !== 'object') {
+    throw new Error('P0_AUTHORITY_RULES_REQUIRED')
+  }
+  const rules = { ...rawRules }
+  for (const field of [
+    'tickSize',
+    'stepSize',
+    'minQty',
+    'minNotional',
+    'contractSize',
+    'contractMultiplier',
+    'persistenceStep'
+  ]) {
+    if (rules[field] !== undefined && rules[field] !== null) {
+      rules[field] = authorityDecimal(rules[field], `rules.${field}`)
+    }
+  }
+  authorityPositiveDecimal(rules.tickSize, 'rules.tickSize')
+  authorityPositiveDecimal(rules.stepSize, 'rules.stepSize')
+  return rules
+}
+
+function authorityQuoteEvidence(quote) {
+  if (!quote || typeof quote !== 'object') throw new Error('P0_AUTHORITY_QUOTE_REQUIRED')
+  return {
+    symbol: quote.symbol,
+    bid: authorityPositiveDecimal(quote.bid, `${quote.symbol}.bid`),
+    ask: authorityPositiveDecimal(quote.ask, `${quote.symbol}.ask`),
+    ...(quote.markPrice === undefined || quote.markPrice === null
+      ? {}
+      : { markPrice: authorityPositiveDecimal(quote.markPrice, `${quote.symbol}.markPrice`) }),
+    providerCode: quote.providerCode,
+    providerSymbol: quote.providerSymbol,
+    sourceMode: quote.sourceMode,
+    asOf: quote.asOf,
+    expiresAt: quote.expiresAt,
+    stale: quote.stale
+  }
+}
+
+function authorityReferenceEvidence(reference) {
+  if (!reference || typeof reference !== 'object') {
+    throw new Error('P0_AUTHORITY_PERP_REFERENCE_REQUIRED')
+  }
+  return {
+    symbol: reference.symbol,
+    bid: authorityPositiveDecimal(reference.bid, `${reference.symbol}.bid`),
+    ask: authorityPositiveDecimal(reference.ask, `${reference.symbol}.ask`),
+    mark: authorityPositiveDecimal(reference.mark, `${reference.symbol}.mark`),
+    index: authorityPositiveDecimal(reference.index, `${reference.symbol}.index`),
+    providerCode: reference.providerCode,
+    providerSymbol: reference.providerSymbol,
+    sourceMode: reference.sourceMode,
+    asOf: reference.asOf,
+    expiresAt: reference.expiresAt,
+    stale: reference.stale
+  }
+}
+
+function authorityTradeEvidence(trade) {
+  if (!trade || typeof trade !== 'object') throw new Error('P0_AUTHORITY_TRADE_REQUIRED')
+  return {
+    id: trade.id,
+    orderId: trade.orderId,
+    symbol: trade.symbol,
+    productType: trade.productType,
+    positionSide: trade.positionSide,
+    marginMode: trade.marginMode,
+    side: trade.side,
+    lots: authorityPositiveDecimal(trade.lots, `${trade.symbol}.trade.lots`),
+    price: authorityPositiveDecimal(trade.price, `${trade.symbol}.trade.price`),
+    realizedPnl: authorityDecimal(trade.realizedPnl ?? '0', `${trade.symbol}.trade.realizedPnl`),
+    fee: authorityDecimal(trade.fee ?? '0', `${trade.symbol}.trade.fee`),
+    feeAsset: trade.feeAsset,
+    liquidityRole: trade.liquidityRole,
+    sourceMode: trade.sourceMode,
+    providerCode: trade.providerCode,
+    executedAt: trade.executedAt
+  }
+}
+
+function authorityPositionEvidence(position) {
+  if (!position || typeof position !== 'object') {
+    throw new Error('P0_AUTHORITY_POSITION_REQUIRED')
+  }
+  return {
+    id: position.id,
+    symbol: position.symbol,
+    side: position.side,
+    productType: position.productType,
+    positionMode: position.positionMode,
+    positionSide: position.positionSide,
+    marginMode: position.marginMode,
+    leverage: position.leverage,
+    lots: authorityPositiveDecimal(position.lots, `${position.symbol}.position.lots`),
+    openPrice: authorityPositiveDecimal(
+      position.openPrice,
+      `${position.symbol}.position.openPrice`
+    ),
+    markPrice: authorityPositiveDecimal(
+      position.markPrice,
+      `${position.symbol}.position.markPrice`
+    ),
+    floatingPnl: authorityDecimal(
+      position.floatingPnl,
+      `${position.symbol}.position.floatingPnl`
+    ),
+    marginHeld: authorityPositiveDecimal(
+      position.marginHeld,
+      `${position.symbol}.position.marginHeld`
+    ),
+    maintenanceMargin: authorityDecimal(
+      position.maintenanceMargin,
+      `${position.symbol}.position.maintenanceMargin`
+    ),
+    maintenanceMarginRate: authorityDecimal(
+      position.maintenanceMarginRate,
+      `${position.symbol}.position.maintenanceMarginRate`
+    ),
+    status: position.status
+  }
+}
+
+function authoritySummaryEvidence(summary) {
+  if (!summary || typeof summary !== 'object') {
+    throw new Error('P0_AUTHORITY_ACCOUNT_SUMMARY_REQUIRED')
+  }
+  return {
+    balance: authorityDecimal(summary.balance, 'summary.balance'),
+    equity: authorityDecimal(summary.equity, 'summary.equity'),
+    usedMargin: authorityDecimal(summary.usedMargin, 'summary.usedMargin'),
+    freeMargin: authorityDecimal(summary.freeMargin, 'summary.freeMargin'),
+    openFloatingPnl: authorityDecimal(
+      summary.openFloatingPnl ?? '0',
+      'summary.openFloatingPnl'
+    ),
+    maintenanceMargin: authorityDecimal(
+      summary.maintenanceMargin ?? '0',
+      'summary.maintenanceMargin'
+    )
+  }
+}
+
+function authoritySourcesMatch(left, right) {
+  return typeof left?.providerCode === 'string'
+    && left.providerCode === right?.providerCode
+    && typeof left?.sourceMode === 'string'
+    && left.sourceMode === right?.sourceMode
+    && (left.providerSymbol === undefined
+      || right?.providerSymbol === undefined
+      || left.providerSymbol === right.providerSymbol)
+}
+
+function authorityQuotesMatch(left, right, rules) {
+  if (!left || !right) return false
+  const tolerance = tolerancesFromRules(rules).price
+  try {
+    return withinTolerance(
+      authorityPositiveDecimal(left.bid, 'visible.bid'),
+      authorityPositiveDecimal(right.bid, 'authority.bid'),
+      tolerance
+    ) && withinTolerance(
+      authorityPositiveDecimal(left.ask, 'visible.ask'),
+      authorityPositiveDecimal(right.ask, 'authority.ask'),
+      tolerance
+    )
+  } catch {
+    return false
+  }
+}
+
+function authorityUiQuoteComplete(quote) {
+  try {
+    authorityPositiveDecimal(quote?.bid, 'visible.bid')
+    authorityPositiveDecimal(quote?.ask, 'visible.ask')
+    return Number(quote.bid) <= Number(quote.ask)
+  } catch {
+    return false
+  }
+}
+
+function authorityTargetQuote(baseline, rules) {
+  const bid = alignPriceToTick(String(Number(baseline.bid) * 1.3), rules)
+  const ask = alignPriceToTick(String(Number(baseline.ask) * 1.3), rules)
+  if (Number(ask) <= Number(bid)) throw new Error('P0_AUTHORITY_TARGET_SPREAD_INVALID')
+  return { symbol: baseline.symbol, bid, ask }
+}
+
+function authorityTargetIsFarEnough(baseline, target) {
+  return Number(target.bid) >= Number(baseline.bid) * 1.2
+    && Number(target.ask) >= Number(baseline.ask) * 1.2
+}
+
+async function authorityVisibleQuote(page) {
+  return page.evaluate(() => {
+    const tradeButton = document.querySelector(
+      '[data-platform-view="mobile"] [data-testid="mobile-trade-action"]'
+    )
+    const shell = tradeButton?.closest('section')
+    const ask = shell?.querySelector('span[class*="ask"]')?.nextElementSibling
+    const bid = shell?.querySelector('span[class*="bid"]')?.nextElementSibling
+    const visible = (element) => {
+      const rect = element?.getBoundingClientRect()
+      const style = element ? getComputedStyle(element) : null
+      return Boolean(rect && style && rect.width > 0 && rect.height > 0
+        && rect.bottom > 0 && rect.right > 0
+        && rect.top < window.innerHeight && rect.left < window.innerWidth
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && Number(style.opacity) > 0)
+    }
+    if (ask?.tagName !== 'STRONG' || bid?.tagName !== 'STRONG'
+      || !visible(shell) || !visible(ask) || !visible(bid)) return null
+    return {
+      ask: ask.textContent?.trim().replaceAll(',', '') ?? '',
+      bid: bid.textContent?.trim().replaceAll(',', '') ?? ''
+    }
+  })
+}
+
+async function readAuthorityUiQuote(page, target, signal) {
+  const route = resolveP0TradeRoute(target)
+  const baseUrl = p0PageBaseUrl(
+    page,
+    'webBaseUrl',
+    'WEB_BASE_URL',
+    'http://127.0.0.1:5199'
+  )
+  page.p0TradePanel = undefined
+  await page.navigate(`${baseUrl}${route}`)
+  await page.waitForFunction(
+    (expectedRoute, expectedSymbol) => {
+      const mobile = document.querySelector('[data-platform-view="mobile"]')
+      const button = mobile?.querySelector('[data-testid="mobile-trade-action"]')
+      const shell = button?.closest('section')
+      const symbol = shell?.querySelector('header button strong')?.textContent?.trim()
+      return window.location.pathname === expectedRoute
+        && symbol === expectedSymbol
+        && Boolean(button)
+    },
+    `authority mobile route ${route}`,
+    route,
+    target.symbol
+  )
+  return waitFor(
+    () => authorityVisibleQuote(page),
+    `visible authority quote ${target.symbol}`,
+    15000,
+    signal
+  )
+}
+
+async function waitForAuthorityUiTarget(page, target, expected, rules, signal) {
+  let visible = await readAuthorityUiQuote(page, target, signal)
+  try {
+    visible = await waitFor(async () => {
+      const candidate = await authorityVisibleQuote(page)
+      if (candidate) visible = candidate
+      return authorityQuotesMatch(candidate, expected, rules) ? candidate : null
+    }, `authority UI target ${target.symbol}`, 15000, signal)
+    return { status: 'PASS', visible }
+  } catch (error) {
+    if (!String(error?.message).startsWith('Timed out waiting for authority UI target')) {
+      throw error
+    }
+    return { status: 'FAIL', visible }
+  }
+}
+
+async function waitForAuthorityUiBootstrap(context, page, target, rules, signal) {
+  let latest
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const visible = await readAuthorityUiQuote(page, target, signal)
+    const quote = authorityQuoteEvidence(
+      (await context.api.snapshotMarket(target.symbol)).quote
+    )
+    latest = { status: 'FAIL', visible, quote }
+    if (authorityQuotesMatch(visible, quote, rules)) {
+      return { status: 'PASS', visible, quote }
+    }
+  }
+  return latest
+}
+
+function newAuthorityTrade(before, after, symbol, side) {
+  const known = new Set(before.trades.map(({ id }) => id))
+  return after.trades.find((trade) => (
+    !known.has(trade.id) && trade.symbol === symbol && trade.side === side
+  ))
+}
+
+function matchingAuthorityOrder(snapshot, trade) {
+  return snapshot.orders.find(({ id }) => id === trade.orderId)
+}
+
+function openAuthorityPosition(snapshot, symbol) {
+  return snapshot.positions.find((position) => (
+    position.symbol === symbol && position.status === 'OPEN'
+  ))
+}
+
+async function submitAuthorityMarketProbe(
+  context,
+  page,
+  { product, symbol, side, amount },
+  signal
+) {
+  const before = await context.api.snapshotAccount(page)
+  await context.ui.openTradePanel(page, { product, symbol, mobile: true })
+  const mutation = await context.ui.submitOrderViaUi(page, {
+    side,
+    orderType: 'MARKET',
+    amount
+  })
+  const completed = await waitFor(async () => {
+    const snapshot = await context.api.snapshotAccount(page)
+    const trade = newAuthorityTrade(before, snapshot, symbol, side)
+    if (!trade) return null
+    const order = matchingAuthorityOrder(snapshot, trade)
+    if (!order || order.status !== 'FILLED') return null
+    const position = product === 'perpetual'
+      ? openAuthorityPosition(snapshot, symbol)
+      : undefined
+    if (product === 'perpetual' && !position) return null
+    return { snapshot, trade, order, position }
+  }, `authority ${symbol} ${side} MARKET fill`, 30000, signal)
+  return { before, mutation, ...completed }
+}
+
+export function authorityFillCheck(probe, quote, rules, productType) {
+  const expected = marketFillOracle({
+    productType,
+    side: probe.trade.side,
+    bid: authorityPositiveDecimal(quote.bid, `${quote.symbol}.bid`),
+    ask: authorityPositiveDecimal(quote.ask, `${quote.symbol}.ask`)
+  })
+  const trade = authorityTradeEvidence(probe.trade)
+  const tolerance = tolerancesFromRules(rules).price
+  return {
+    pass: withinTolerance(trade.price, expected.filledPrice, tolerance)
+      && trade.liquidityRole === expected.liquidityRole
+      && authoritySourcesMatch(trade, quote),
+    oracle: {
+      symbol: quote.symbol,
+      side: probe.trade.side,
+      price: expected.filledPrice,
+      slippage: expected.slippage,
+      liquidityRole: expected.liquidityRole
+    },
+    trade
+  }
+}
+
+export function authorityPerpRiskCheck(probe, reference, rules) {
+  const position = authorityPositionEvidence(probe.position)
+  const summary = authoritySummaryEvidence(probe.snapshot.summary)
+  const side = position.positionSide === 'SHORT' || position.side === 'SHORT'
+    ? 'SHORT'
+    : 'LONG'
+  const oracle = perpPositionOracle({
+    side,
+    quantity: position.lots.replace(/^-/, ''),
+    entryPrice: position.openPrice,
+    markPrice: authorityPositiveDecimal(reference.mark, `${reference.symbol}.mark`),
+    leverage: authorityPositiveDecimal(position.leverage, `${position.symbol}.leverage`),
+    positionMargin: position.marginHeld,
+    maintenanceMarginRate: position.maintenanceMarginRate,
+    rules
+  })
+  const amountTolerance = oracle.tolerances.amount
+  const priceTolerance = oracle.tolerances.price
+  return {
+    markPass: withinTolerance(position.markPrice, reference.mark, priceTolerance),
+    riskPass: withinTolerance(
+      position.floatingPnl,
+      oracle.unrealizedPnl,
+      amountTolerance
+    ) && withinTolerance(
+      position.marginHeld,
+      oracle.initialMargin,
+      amountTolerance
+    ) && withinTolerance(
+      position.maintenanceMargin,
+      oracle.maintenanceMargin,
+      amountTolerance
+    ) && withinTolerance(
+      summary.usedMargin,
+      position.marginHeld,
+      amountTolerance
+    ) && withinTolerance(
+      summary.openFloatingPnl,
+      oracle.unrealizedPnl,
+      amountTolerance
+    ) && withinTolerance(
+      summary.maintenanceMargin,
+      position.maintenanceMargin,
+      amountTolerance
+    ),
+    oracle: {
+      symbol: reference.symbol,
+      markPrice: authorityPositiveDecimal(reference.mark, `${reference.symbol}.mark`),
+      floatingPnl: oracle.unrealizedPnl,
+      marginHeld: oracle.initialMargin,
+      maintenanceMargin: oracle.maintenanceMargin
+    },
+    position,
+    summary
+  }
+}
+
+async function closeAuthorityPerpProbe(context, page, signal) {
+  const before = await context.api.snapshotAccount(page)
+  const position = openAuthorityPosition(before, PERP_SYMBOL)
+  if (!position) return null
+  const side = position.positionSide === 'SHORT' || position.side === 'SHORT'
+    ? 'BUY'
+    : 'SELL'
+  await context.ui.openTradePanel(page, {
+    product: 'perpetual',
+    symbol: PERP_SYMBOL,
+    mobile: true
+  })
+  const mutation = await context.ui.submitOrderViaUi(page, {
+    side,
+    orderType: 'MARKET',
+    amount: authorityPositiveDecimal(position.lots, 'perp.close.lots')
+  })
+  const completed = await waitFor(async () => {
+    const snapshot = await context.api.snapshotAccount(page)
+    const trade = newAuthorityTrade(before, snapshot, PERP_SYMBOL, side)
+    return trade && !openAuthorityPosition(snapshot, PERP_SYMBOL)
+      ? { snapshot, trade }
+      : null
+  }, 'authority Perp probe close', 30000, signal)
+  return { mutation, ...completed }
+}
+
+async function closeAuthoritySpotProbe(context, page, rules, signal) {
+  const before = await context.api.snapshotAccount(page)
+  const wallet = before.wallets.find(({ walletType, asset }) => (
+    walletType === 'SPOT' && asset === 'BTC'
+  ))
+  if (!wallet || Number(wallet.available) <= 0) return null
+  const amount = floorToStep(
+    authorityPositiveDecimal(wallet.available, 'spot.wallet.available'),
+    effectiveQuantityStep(rules)
+  )
+  if (Number(amount) < Number(rules.minQty ?? effectiveQuantityStep(rules))) return null
+  await context.ui.openTradePanel(page, {
+    product: 'spot',
+    symbol: SPOT_SYMBOL,
+    mobile: true
+  })
+  const mutation = await context.ui.submitOrderViaUi(page, {
+    side: 'SELL',
+    orderType: 'MARKET',
+    amount
+  })
+  const completed = await waitFor(async () => {
+    const snapshot = await context.api.snapshotAccount(page)
+    const trade = newAuthorityTrade(before, snapshot, SPOT_SYMBOL, 'SELL')
+    return trade ? { snapshot, trade } : null
+  }, 'authority Spot probe close', 30000, signal)
+  return { mutation, ...completed }
+}
+
+async function cleanupAuthorityProbes({
+  context,
+  userPage,
+  adminPage,
+  adminAuthenticated,
+  spotRules,
+  signal
+}) {
+  const failures = []
+  if (!adminAuthenticated) {
+    failures.push(new Error('P0_AUTHORITY_ADMIN_SESSION_REQUIRED'))
+  } else {
+    for (const symbol of [SPOT_SYMBOL, PERP_SYMBOL]) {
+      try {
+        await context.api.admin(
+          adminPage,
+          `/api/admin/market/test-control/overrides/${encodeURIComponent(symbol)}`,
+          { method: 'DELETE', signal }
+        )
+      } catch (error) {
+        failures.push(error)
+      }
+    }
+  }
+  try {
+    await closeAuthorityPerpProbe(context, userPage, signal)
+  } catch (error) {
+    failures.push(error)
+  }
+  if (spotRules) {
+    try {
+      await closeAuthoritySpotProbe(context, userPage, spotRules, signal)
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  let snapshot
+  let activeOrders = []
+  let openPositions = []
+  try {
+    snapshot = await context.api.snapshotAccount(userPage)
+    activeOrders = snapshot.orders.filter(
+      ({ status }) => !TERMINAL_ORDER_STATUSES.has(status)
+    )
+    if (activeOrders.length > 0) {
+      await context.ui.openTradePanel(userPage, {
+        product: 'spot',
+        symbol: SPOT_SYMBOL,
+        mobile: true
+      })
+      await context.ui.cancelAllOrdersViaUi(userPage)
+      snapshot = await waitFor(async () => {
+        const candidate = await context.api.snapshotAccount(userPage)
+        return candidate.orders.every(({ status }) => TERMINAL_ORDER_STATUSES.has(status))
+          ? candidate
+          : null
+      }, 'authority active order cleanup', 30000, signal)
+      activeOrders = snapshot.orders.filter(
+        ({ status }) => !TERMINAL_ORDER_STATUSES.has(status)
+      )
+    }
+  } catch (error) {
+    failures.push(error)
+  }
+  if (adminAuthenticated && typeof snapshot?.account?.id === 'string') {
+    const accountPath = `/api/admin/accounts/${encodeURIComponent(snapshot.account.id)}`
+    try {
+      await context.api.admin(adminPage, `${accountPath}/force-cleanup`, {
+        method: 'POST',
+        body: {
+          reason: 'P0 Authority gate probe cleanup',
+          requestId: randomUUID(),
+          confirmationText: 'CONFIRM_FORCE_CLEANUP'
+        },
+        signal
+      })
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      await context.api.admin(adminPage, `${accountPath}/demo-reset`, {
+        method: 'POST',
+        body: {
+          reason: 'P0 Authority gate demo reset',
+          requestId: randomUUID(),
+          confirmationText: 'CONFIRM_DEMO_RESET'
+        },
+        signal
+      })
+    } catch (error) {
+      failures.push(error)
+    }
+    try {
+      snapshot = await waitFor(async () => {
+        const candidate = await context.api.snapshotAccount(userPage)
+        const candidateOrders = candidate.orders.filter(
+          ({ status }) => !TERMINAL_ORDER_STATUSES.has(status)
+        )
+        const candidatePositions = candidate.positions.filter(
+          ({ status }) => status === 'OPEN'
+        )
+        return candidateOrders.length === 0 && candidatePositions.length === 0
+          ? candidate
+          : null
+      }, 'authority Admin probe cleanup', 30000, signal)
+      activeOrders = snapshot.orders.filter(
+        ({ status }) => !TERMINAL_ORDER_STATUSES.has(status)
+      )
+      openPositions = snapshot.positions.filter(({ status }) => status === 'OPEN')
+    } catch (error) {
+      failures.push(error)
+    }
+  } else if (adminAuthenticated) {
+    failures.push(new Error('P0_AUTHORITY_ACCOUNT_ID_REQUIRED'))
+  }
+  try {
+    openPositions = snapshot.positions.filter(({ status }) => status === 'OPEN')
+    if (activeOrders.length > 0 || openPositions.length > 0) {
+      failures.push(new Error('P0_AUTHORITY_PROBE_CLEANUP_INCOMPLETE'))
+    }
+  } catch (error) {
+    failures.push(error)
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'P0_AUTHORITY_PROBE_CLEANUP_FAILED')
+  }
+  return {
+    status: 'PASS',
+    count: {
+      order: activeOrders.length,
+      position: openPositions.length
+    },
+    snapshot
+  }
+}
+
+async function closeAuthorityBrowserPages(userPage, adminPage, browser) {
+  const failures = []
+  for (const [page, label] of [
+    [adminPage, 'authority Admin'],
+    [userPage, 'authority user']
+  ]) {
+    if (!page) continue
+    try {
+      page.assertEvidenceClean(label)
+      await page.close()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (browser) {
+    try {
+      await browser.close()
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'P0_AUTHORITY_BROWSER_CLEANUP_FAILED')
+  }
+}
+
+export async function runAuthorityBundleGate(context, options = {}) {
+  if (!context?.run || typeof context.userFactory !== 'function') {
+    throw new Error('P0_AUTHORITY_CONTEXT_REQUIRED')
+  }
+  const signal = options.signal
+  const checks = new Map()
+  const recordCheck = (id, pass, evidence = {}) => {
+    if (!AUTHORITY_BUNDLE_REQUIRED_CHECKS.includes(id) || checks.has(id)) {
+      throw new Error('P0_AUTHORITY_EVIDENCE_INCOMPLETE')
+    }
+    checks.set(id, {
+      id,
+      reasonCode: id.replaceAll('-', '_').toUpperCase(),
+      status: pass ? 'PASS' : 'FAIL',
+      ...evidence
+    })
+  }
+  const checkpoints = []
+  const snapshots = []
+  const oracleEvidence = []
+  const fixtureActions = []
+  const credentials = context.userFactory('AUTHORITY-BUNDLE')
+  const adminCredentials = options.adminCredentials
+  let browser
+  let userPage
+  let adminPage
+  let adminAuthenticated = false
+  let spotRules
+  let cleanup
+  let cleanupFailure
+  let mainFailure
+  let database
+
+  try {
+    throwIfP0Aborted(signal)
+    database = await context.db.assertDedicatedDatabase()
+    browser = await context.ui.launchBrowser()
+    userPage = await context.ui.createEvidencePage(browser, {
+      caseId: 'authority',
+      viewport: AUTHORITY_MOBILE_VIEWPORT
+    })
+    adminPage = await context.ui.createEvidencePage(browser, {
+      caseId: 'authority-admin',
+      viewport: AUTHORITY_ADMIN_VIEWPORT
+    })
+    await userPage.navigate(`${userPage.p0Options.webBaseUrl}/register`)
+    const registration = await context.ui.registerViaUi(userPage, credentials)
+    fixtureActions.push({
+      action: 'register-authority-user-via-ui',
+      reasonCode: 'REGISTER_AUTHORITY_USER_VIA_UI',
+      requestRef: registration.requestRef
+    })
+    const adminLogin = await context.ui.loginAdminViaUi(adminPage, adminCredentials)
+    adminAuthenticated = true
+    fixtureActions.push({
+      action: 'login-admin-via-ui',
+      reasonCode: 'LOGIN_ADMIN_VIA_UI',
+      requestRef: adminLogin.requestRef
+    })
+    for (const symbol of [SPOT_SYMBOL, PERP_SYMBOL]) {
+      await context.api.admin(
+        adminPage,
+        `/api/admin/market/test-control/overrides/${encodeURIComponent(symbol)}`,
+        { method: 'DELETE' }
+      )
+      fixtureActions.push({
+        action: 'clear-authority-override',
+        reasonCode: 'CLEAR_AUTHORITY_OVERRIDE',
+        symbol
+      })
+    }
+
+    const spotTarget = { product: 'spot', symbol: SPOT_SYMBOL, mobile: true }
+    const rawSpotRules = await context.api.user(
+      userPage,
+      `/api/market/symbols/${encodeURIComponent(SPOT_SYMBOL)}/rules`
+    )
+    spotRules = authorityRules(rawSpotRules)
+    const baselineSpotBootstrap = await waitForAuthorityUiBootstrap(
+      context,
+      userPage,
+      spotTarget,
+      spotRules,
+      signal
+    )
+    const baselineSpotVisible = baselineSpotBootstrap.visible
+    const baselineSpotQuote = baselineSpotBootstrap.quote
+    recordCheck(
+      'baseline-spot-ui-quote',
+      baselineSpotBootstrap.status === 'PASS'
+        && authorityUiQuoteComplete(baselineSpotVisible)
+        && typeof baselineSpotQuote.providerCode === 'string'
+        && typeof baselineSpotQuote.sourceMode === 'string'
+        && baselineSpotQuote.stale !== true,
+      { symbol: SPOT_SYMBOL }
+    )
+    const baselineSpotProbe = await submitAuthorityMarketProbe(
+      context,
+      userPage,
+      {
+        product: 'spot',
+        symbol: SPOT_SYMBOL,
+        side: 'BUY',
+        amount: '100'
+      },
+      signal
+    )
+    const baselineSpotFill = authorityFillCheck(
+      baselineSpotProbe,
+      baselineSpotQuote,
+      spotRules,
+      'CRYPTO_SPOT'
+    )
+    recordCheck(
+      'baseline-spot-fill',
+      baselineSpotFill.pass
+        && baselineSpotProbe.order.orderType === 'MARKET'
+        && baselineSpotProbe.order.status === 'FILLED'
+        && authoritySourcesMatch(baselineSpotFill.trade, baselineSpotQuote),
+      { symbol: SPOT_SYMBOL }
+    )
+    oracleEvidence.push(baselineSpotFill.oracle)
+    await closeAuthoritySpotProbe(context, userPage, spotRules, signal)
+
+    const perpTarget = {
+      product: 'perpetual',
+      symbol: PERP_SYMBOL,
+      mobile: true
+    }
+    const rawPerpRules = await context.api.user(
+      userPage,
+      `/api/market/symbols/${encodeURIComponent(PERP_SYMBOL)}/rules`
+    )
+    const perpRules = authorityRules(rawPerpRules)
+    const baselinePerpBootstrap = await waitForAuthorityUiBootstrap(
+      context,
+      userPage,
+      perpTarget,
+      perpRules,
+      signal
+    )
+    const baselinePerpVisible = baselinePerpBootstrap.visible
+    const baselinePerpQuote = baselinePerpBootstrap.quote
+    const rawBaselineReference = await context.api.user(
+      userPage,
+      `/api/market/perpetuals/${encodeURIComponent(PERP_SYMBOL)}/reference`
+    )
+    const baselineReference = authorityReferenceEvidence(rawBaselineReference)
+    recordCheck(
+      'baseline-perp-ui-quote',
+      baselinePerpBootstrap.status === 'PASS'
+        && authorityUiQuoteComplete(baselinePerpVisible)
+        && typeof baselinePerpQuote.providerCode === 'string'
+        && typeof baselinePerpQuote.sourceMode === 'string'
+        && baselinePerpQuote.stale !== true,
+      { symbol: PERP_SYMBOL }
+    )
+    const baselinePerpProbe = await submitAuthorityMarketProbe(
+      context,
+      userPage,
+      {
+        product: 'perpetual',
+        symbol: PERP_SYMBOL,
+        side: 'BUY',
+        amount: '0.001'
+      },
+      signal
+    )
+    const baselinePerpFill = authorityFillCheck(
+      baselinePerpProbe,
+      baselinePerpQuote,
+      perpRules,
+      'LINEAR_PERP'
+    )
+    const baselinePerpRisk = authorityPerpRiskCheck(
+      baselinePerpProbe,
+      baselineReference,
+      perpRules
+    )
+    recordCheck(
+      'baseline-perp-fill',
+      baselinePerpFill.pass
+        && baselinePerpProbe.order.orderType === 'MARKET'
+        && baselinePerpProbe.order.status === 'FILLED'
+        && authoritySourcesMatch(baselinePerpFill.trade, baselinePerpQuote),
+      { symbol: PERP_SYMBOL }
+    )
+    recordCheck(
+      'baseline-perp-mark',
+      baselinePerpRisk.markPass
+        && authoritySourcesMatch(baselineReference, baselinePerpQuote),
+      { symbol: PERP_SYMBOL }
+    )
+    recordCheck('baseline-perp-risk', baselinePerpRisk.riskPass, { symbol: PERP_SYMBOL })
+    oracleEvidence.push(baselinePerpFill.oracle, baselinePerpRisk.oracle)
+    await closeAuthorityPerpProbe(context, userPage, signal)
+    snapshots.push({
+      checkpoint: 'baseline',
+      market: [baselineSpotQuote, baselinePerpQuote, baselineReference],
+      trade: [baselineSpotFill.trade, baselinePerpFill.trade],
+      position: [baselinePerpRisk.position],
+      data: { summary: baselinePerpRisk.summary }
+    })
+    checkpoints.push(await context.evidence.captureCheckpoint(
+      context,
+      'baseline',
+      {
+        caseId: 'authority',
+        pages: [userPage, adminPage],
+        apiEvidence: [snapshots.at(-1)],
+        dbEvidence: async () => [
+          await context.db.snapshotTradingRows(baselinePerpProbe.snapshot.account.id)
+        ],
+        oracleEvidence: [...oracleEvidence]
+      }
+    ))
+
+    const spotOverride = authorityTargetQuote(baselineSpotQuote, spotRules)
+    const perpOverride = authorityTargetQuote(baselinePerpQuote, perpRules)
+    recordCheck(
+      'controlled-spot-target-distance',
+      authorityTargetIsFarEnough(baselineSpotQuote, spotOverride),
+      { symbol: SPOT_SYMBOL }
+    )
+    recordCheck(
+      'controlled-perp-target-distance',
+      authorityTargetIsFarEnough(baselinePerpQuote, perpOverride),
+      { symbol: PERP_SYMBOL }
+    )
+    const [spotOverrideResponse, perpOverrideResponse] = await Promise.all([
+      context.api.admin(
+        adminPage,
+        '/api/admin/market/test-control/overrides',
+        {
+          method: 'POST',
+          body: { ...spotOverride, ttl: AUTHORITY_TARGET_TTL }
+        }
+      ),
+      context.api.admin(
+        adminPage,
+        '/api/admin/market/test-control/overrides',
+        {
+          method: 'POST',
+          body: { ...perpOverride, ttl: AUTHORITY_TARGET_TTL }
+        }
+      )
+    ])
+    fixtureActions.push(
+      {
+        action: 'set-authority-override',
+        reasonCode: 'SET_AUTHORITY_OVERRIDE',
+        symbol: SPOT_SYMBOL
+      },
+      {
+        action: 'set-authority-override',
+        reasonCode: 'SET_AUTHORITY_OVERRIDE',
+        symbol: PERP_SYMBOL
+      }
+    )
+    const controlledSpotQuote = authorityQuoteEvidence(spotOverrideResponse)
+    const controlledPerpQuote = authorityQuoteEvidence(perpOverrideResponse)
+    recordCheck(
+      'controlled-spot-override',
+      authorityQuotesMatch(controlledSpotQuote, spotOverride, spotRules),
+      { symbol: SPOT_SYMBOL }
+    )
+    recordCheck(
+      'controlled-perp-override',
+      authorityQuotesMatch(controlledPerpQuote, perpOverride, perpRules),
+      { symbol: PERP_SYMBOL }
+    )
+
+    const spotUiTarget = await waitForAuthorityUiTarget(
+      userPage,
+      spotTarget,
+      spotOverride,
+      spotRules,
+      signal
+    )
+    recordCheck(
+      'controlled-spot-ui-quote',
+      spotUiTarget.status === 'PASS',
+      { symbol: SPOT_SYMBOL }
+    )
+    const perpUiTarget = await waitForAuthorityUiTarget(
+      userPage,
+      perpTarget,
+      perpOverride,
+      perpRules,
+      signal
+    )
+    recordCheck(
+      'controlled-perp-ui-quote',
+      perpUiTarget.status === 'PASS',
+      { symbol: PERP_SYMBOL }
+    )
+    const [controlledSpotMarket, controlledPerpMarket] = await Promise.all([
+      context.api.snapshotMarket(SPOT_SYMBOL),
+      context.api.snapshotMarket(PERP_SYMBOL)
+    ])
+    const controlledSpotAuthority = authorityQuoteEvidence(controlledSpotMarket.quote)
+    const controlledPerpAuthority = authorityQuoteEvidence(controlledPerpMarket.quote)
+    snapshots.push({
+      checkpoint: 'controlled-quote',
+      market: [
+        controlledSpotQuote,
+        controlledPerpQuote,
+        { ...controlledSpotAuthority, bid: spotUiTarget.visible.bid, ask: spotUiTarget.visible.ask },
+        { ...controlledPerpAuthority, bid: perpUiTarget.visible.bid, ask: perpUiTarget.visible.ask }
+      ]
+    })
+    checkpoints.push(await context.evidence.captureCheckpoint(
+      context,
+      'controlled-quote',
+      {
+        caseId: 'authority',
+        pages: [userPage, adminPage],
+        apiEvidence: [snapshots.at(-1)],
+        dbEvidence: async () => [
+          await context.db.snapshotTradingRows(baselinePerpProbe.snapshot.account.id)
+        ]
+      }
+    ))
+
+    let controlledSpotFill
+    if (spotUiTarget.status === 'PASS') {
+      const probe = await submitAuthorityMarketProbe(
+        context,
+        userPage,
+        {
+          product: 'spot',
+          symbol: SPOT_SYMBOL,
+          side: 'BUY',
+          amount: '100'
+        },
+        signal
+      )
+      controlledSpotFill = authorityFillCheck(
+        probe,
+        controlledSpotAuthority,
+        spotRules,
+        'CRYPTO_SPOT'
+      )
+      recordCheck(
+        'controlled-spot-fill',
+        controlledSpotFill.pass
+          && authorityQuotesMatch(controlledSpotAuthority, spotOverride, spotRules),
+        { symbol: SPOT_SYMBOL }
+      )
+      oracleEvidence.push(controlledSpotFill.oracle)
+    } else {
+      recordCheck('controlled-spot-fill', false, { symbol: SPOT_SYMBOL })
+    }
+
+    let controlledPerpFill
+    let controlledPerpRisk
+    if (perpUiTarget.status === 'PASS') {
+      const probe = await submitAuthorityMarketProbe(
+        context,
+        userPage,
+        {
+          product: 'perpetual',
+          symbol: PERP_SYMBOL,
+          side: 'BUY',
+          amount: '0.001'
+        },
+        signal
+      )
+      const rawControlledReference = await context.api.user(
+        userPage,
+        `/api/market/perpetuals/${encodeURIComponent(PERP_SYMBOL)}/reference`
+      )
+      const controlledReference = authorityReferenceEvidence(rawControlledReference)
+      controlledPerpFill = authorityFillCheck(
+        probe,
+        controlledPerpAuthority,
+        perpRules,
+        'LINEAR_PERP'
+      )
+      controlledPerpRisk = authorityPerpRiskCheck(
+        probe,
+        controlledReference,
+        perpRules
+      )
+      const controlledPerpAuthorityMatches = authorityQuotesMatch(
+        controlledPerpAuthority,
+        perpOverride,
+        perpRules
+      ) && authorityQuotesMatch(controlledReference, perpOverride, perpRules)
+        && withinTolerance(
+          controlledReference.mark,
+          controlledPerpAuthority.markPrice,
+          tolerancesFromRules(perpRules).price
+        )
+      recordCheck(
+        'controlled-perp-fill',
+        controlledPerpFill.pass && controlledPerpAuthorityMatches,
+        { symbol: PERP_SYMBOL }
+      )
+      recordCheck(
+        'controlled-perp-mark',
+        controlledPerpRisk.markPass
+          && controlledPerpAuthorityMatches
+          && authoritySourcesMatch(controlledReference, controlledPerpAuthority),
+        { symbol: PERP_SYMBOL }
+      )
+      recordCheck(
+        'controlled-perp-risk',
+        controlledPerpRisk.riskPass && controlledPerpAuthorityMatches,
+        { symbol: PERP_SYMBOL }
+      )
+      oracleEvidence.push(controlledPerpFill.oracle, controlledPerpRisk.oracle)
+      snapshots.push({
+        checkpoint: 'controlled-probes',
+        market: [controlledSpotAuthority, controlledPerpAuthority, controlledReference],
+        trade: [
+          ...(controlledSpotFill ? [controlledSpotFill.trade] : []),
+          controlledPerpFill.trade
+        ],
+        position: [controlledPerpRisk.position],
+        data: { summary: controlledPerpRisk.summary }
+      })
+    } else {
+      recordCheck('controlled-perp-fill', false, { symbol: PERP_SYMBOL })
+      recordCheck('controlled-perp-mark', false, { symbol: PERP_SYMBOL })
+      recordCheck('controlled-perp-risk', false, { symbol: PERP_SYMBOL })
+      snapshots.push({
+        checkpoint: 'controlled-probes',
+        market: [controlledSpotAuthority, controlledPerpAuthority],
+        trade: controlledSpotFill ? [controlledSpotFill.trade] : []
+      })
+    }
+    checkpoints.push(await context.evidence.captureCheckpoint(
+      context,
+      'controlled-probes',
+      {
+        caseId: 'authority',
+        pages: [userPage, adminPage],
+        apiEvidence: [snapshots.at(-1)],
+        dbEvidence: async () => [
+          await context.db.snapshotTradingRows(baselinePerpProbe.snapshot.account.id)
+        ],
+        oracleEvidence: [...oracleEvidence]
+      }
+    ))
+
+    for (const symbol of [SPOT_SYMBOL, PERP_SYMBOL]) {
+      await context.api.admin(
+        adminPage,
+        `/api/admin/market/test-control/overrides/${encodeURIComponent(symbol)}`,
+        { method: 'DELETE' }
+      )
+      fixtureActions.push({
+        action: 'delete-authority-override',
+        reasonCode: 'DELETE_AUTHORITY_OVERRIDE',
+        symbol
+      })
+    }
+    const restoredSpotBootstrap = await waitForAuthorityUiBootstrap(
+      context,
+      userPage,
+      spotTarget,
+      spotRules,
+      signal
+    )
+    const restoredSpotVisible = restoredSpotBootstrap.visible
+    const restoredSpotQuote = restoredSpotBootstrap.quote
+    const restoredPerpBootstrap = await waitForAuthorityUiBootstrap(
+      context,
+      userPage,
+      perpTarget,
+      perpRules,
+      signal
+    )
+    const restoredPerpVisible = restoredPerpBootstrap.visible
+    const restoredPerpQuote = restoredPerpBootstrap.quote
+    const restoredReference = authorityReferenceEvidence(await context.api.user(
+      userPage,
+      `/api/market/perpetuals/${encodeURIComponent(PERP_SYMBOL)}/reference`
+    ))
+    recordCheck(
+      'restored-spot-provider',
+      restoredSpotBootstrap.status === 'PASS'
+        && authoritySourcesMatch(restoredSpotQuote, baselineSpotQuote)
+        && authorityUiQuoteComplete(restoredSpotVisible)
+        && !authorityQuotesMatch(restoredSpotVisible, spotOverride, spotRules)
+        && !authorityQuotesMatch(restoredSpotQuote, spotOverride, spotRules),
+      { symbol: SPOT_SYMBOL }
+    )
+    recordCheck(
+      'restored-perp-provider',
+      restoredPerpBootstrap.status === 'PASS'
+        && authoritySourcesMatch(restoredPerpQuote, baselinePerpQuote)
+        && authoritySourcesMatch(restoredReference, baselineReference)
+        && authorityUiQuoteComplete(restoredPerpVisible)
+        && !authorityQuotesMatch(restoredPerpVisible, perpOverride, perpRules)
+        && !authorityQuotesMatch(restoredPerpQuote, perpOverride, perpRules),
+      { symbol: PERP_SYMBOL }
+    )
+    snapshots.push({
+      checkpoint: 'restored',
+      market: [restoredSpotQuote, restoredPerpQuote, restoredReference]
+    })
+    checkpoints.push(await context.evidence.captureCheckpoint(
+      context,
+      'restored',
+      {
+        caseId: 'authority',
+        pages: [userPage, adminPage],
+        apiEvidence: [snapshots.at(-1)],
+        dbEvidence: async () => [
+          await context.db.snapshotTradingRows(baselinePerpProbe.snapshot.account.id)
+        ]
+      }
+    ))
+  } catch (error) {
+    mainFailure = error
+  } finally {
+    const cleanupSignal = AbortSignal.timeout(120000)
+    try {
+      cleanup = await cleanupAuthorityProbes({
+        context,
+        userPage,
+        adminPage,
+        adminAuthenticated,
+        spotRules,
+        signal: cleanupSignal
+      })
+    } catch (error) {
+      cleanupFailure = error
+      cleanup = { status: 'FAIL' }
+    }
+    try {
+      await closeAuthorityBrowserPages(userPage, adminPage, browser)
+    } catch (error) {
+      cleanupFailure = cleanupFailure
+        ? new AggregateError([cleanupFailure, error], 'P0_AUTHORITY_CLEANUP_FAILED')
+        : error
+      cleanup = { status: 'FAIL' }
+    }
+  }
+
+  if (mainFailure || cleanupFailure) {
+    const failures = [mainFailure, cleanupFailure].filter(Boolean)
+    throw failures.length === 1
+      ? failures[0]
+      : new AggregateError(failures, 'P0_AUTHORITY_GATE_FAILED')
+  }
+  const orderedChecks = AUTHORITY_BUNDLE_REQUIRED_CHECKS.map((id) => checks.get(id))
+  const verdict = evaluateAuthorityBundleEvidence({
+    checks: orderedChecks,
+    cleanup: {
+      status: cleanup.status,
+      count: cleanup.count
+    }
+  })
+  const dbEvidence = await context.db.snapshotTradingRows(cleanup.snapshot.account.id)
+  const finalCheckpoint = checkpoints.at(-1)
+  const result = {
+    ...verdict,
+    kind: 'P0_AUTHORITY_BUNDLE_GATE',
+    profile: 'UI_CORE',
+    database,
+    fixtureActions,
+    checkpoints: checkpoints.map(({ name, uiEvidence }) => ({ name, uiEvidence })),
+    uiEvidence: checkpoints.flatMap(({ uiEvidence }) => uiEvidence),
+    networkEvidence: finalCheckpoint?.networkEvidence ?? [],
+    apiEvidence: snapshots,
+    eventEvidence: finalCheckpoint?.eventEvidence ?? [],
+    oracleEvidence,
+    snapshots,
+    dbEvidence: [dbEvidence]
+  }
+  context.authority.authorityBundleFixture = result.authorityBundleFixture
+  context.authority.status = 'COMPLETE'
+  context.authority.evidence = result
+  context.evidence.writeCaseResultAtomic(
+    join(context.run.artifactRoot, 'authority', 'result.json'),
+    result
+  )
+  return result
+}
+
+function extractP0IdempotencyKey(request) {
+  const headers = request.headers ?? {}
+  const header = Object.entries(headers).find(([name]) => (
+    name.toLowerCase() === 'x-idempotency-key'
+  ))?.[1]
+  if (typeof header === 'string' && header) return header
+  try {
+    const body = JSON.parse(request.postData ?? '')
+    return body.idempotencyKey ?? body.clientOrderId ?? null
+  } catch {
+    return null
+  }
+}
+
+function parseP0StompFrame(direction, payload) {
+  if (typeof payload !== 'string' || payload.length === 0) {
+    return { direction, command: 'UNKNOWN' }
+  }
+  const command = payload.match(/(?:^|["\[])((?:CONNECTED|SUBSCRIBE|MESSAGE|ERROR|SEND))\\?n/)?.[1]
+    ?? payload.match(/^(CONNECTED|SUBSCRIBE|MESSAGE|ERROR|SEND)/)?.[1]
+    ?? 'UNKNOWN'
+  const destination = payload.match(/destination:([^\\\n\r"]+)/)?.[1]
+  const eventType = payload.match(/"type"\s*:\s*"([A-Z_]+)"/)?.[1]
+  return {
+    direction,
+    command,
+    ...(destination ? { destination } : {}),
+    ...(eventType ? { eventType } : {})
+  }
+}
+
+function matchesP0NetworkRequest(record, matcher) {
+  if (typeof matcher === 'function') return Boolean(matcher({
+    method: record.method,
+    url: record.url,
+    postData: record.postData,
+    requestId: record.requestId,
+    idempotencyKey: record.idempotencyKey
+  }))
+  if (!matcher || typeof matcher !== 'object') return false
+  if (matcher.method && record.method !== String(matcher.method).toUpperCase()) return false
+  if (matcher.url instanceof RegExp) {
+    matcher.url.lastIndex = 0
+    if (!matcher.url.test(record.url)) return false
+  } else if (typeof matcher.url === 'string' && !record.url.includes(matcher.url)) {
+    return false
+  }
+  return true
+}
+
+function parseP0CapturedResponse(body) {
+  if (body === '') return null
+  try {
+    return JSON.parse(body)
+  } catch {
+    return body
+  }
+}
+
+function redactP0NetworkRecord(record) {
+  return redactNetworkEntry({
+    requestId: record.requestId,
+    requestRef: record.requestId,
+    method: record.method,
+    url: record.url,
+    postData: record.postData,
+    requestHeaders: record.requestHeaders,
+    status: record.response?.status,
+    responseHeaders: record.response?.headers,
+    mimeType: record.response?.mimeType,
+    responseBody: record.responseBody
+  })
+}
+
+function requireP0Credentials(credentials) {
+  if (typeof credentials?.email !== 'string' || credentials.email.length === 0
+    || typeof credentials?.password !== 'string' || credentials.password.length < 8) {
+    throw new Error('P0_UI_CREDENTIALS_REQUIRED')
+  }
+}
+
+function p0PageBaseUrl(page, option, environmentKey, fallback) {
+  return page.p0Options?.[option] ?? process.env[environmentKey] ?? fallback
+}
+
+function assertP0MutationSucceeded(capture, label) {
+  assert(
+    capture.status >= 200 && capture.status < 300,
+    `${label} browser mutation failed with HTTP ${capture.status}`
+  )
+}
+
+function resolveP0TradeRoute(target = {}) {
+  if (typeof target === 'string' && target.startsWith('/trade/')) return target
+  if (typeof target.route === 'string' && target.route.startsWith('/trade/')) {
+    return target.route
+  }
+  const product = target.product ?? target.productType
+  const segment = product === 'spot' || product === 'CRYPTO_SPOT'
+    ? 'spot'
+    : 'perpetual'
+  const symbol = target.symbol ?? (segment === 'spot' ? SPOT_SYMBOL : PERP_SYMBOL)
+  return `/trade/${segment}/${encodeURIComponent(symbol)}`
 }
 
 function browserCandidates() {
@@ -6335,13 +9332,17 @@ async function assertDatabaseState() {
     openPositions(),
     api(`/api/trading/funding/settlements?accountId=${accountId}&page=0&size=1000`, { token: userToken })
   ])
-  const raw = runDbSql(`
+  const raw = await runDbSql(`
     SELECT json_build_object(
       'wallets', (SELECT count(*) FROM core.wallet_balances WHERE account_id = '${sqlLiteral(accountId)}'),
       'assetLedger', (SELECT count(*) FROM ledger.asset_ledger_entries WHERE account_id = '${sqlLiteral(accountId)}'),
       'orders', (SELECT count(*) FROM trading.orders WHERE account_id = '${sqlLiteral(accountId)}'),
       'trades', (SELECT count(*) FROM trading.trades WHERE account_id = '${sqlLiteral(accountId)}'),
-      'positions', (SELECT count(*) FROM trading.positions WHERE account_id = '${sqlLiteral(accountId)}' AND status = 'OPEN'),
+      'positions', (
+        (SELECT count(*) FROM trading.positions WHERE account_id = '${sqlLiteral(accountId)}' AND status = 'OPEN')
+        + (SELECT count(*) FROM trading.spot_positions
+           WHERE account_id = '${sqlLiteral(accountId)}' AND wallet_type = 'SPOT' AND quantity > 0)
+      ),
       'funding', (SELECT count(*) FROM trading.funding_settlements WHERE account_id = '${sqlLiteral(accountId)}')
     )::text
   `)
@@ -6355,17 +9356,22 @@ async function assertDatabaseState() {
   return { rest: rest.map((rows) => pageContent(rows).length), db }
 }
 
-function runDbSql(sql) {
+async function runDbSql(sql) {
   const postgresContainerId = canonicalComposeIdentity?.postgres?.id
   if (typeof postgresContainerId !== 'string' || !/^[a-f0-9]{64}$/.test(postgresContainerId)) {
     throw new Error('P0_VERIFIED_POSTGRES_CONTAINER_REQUIRED')
   }
-  const result = spawnSync('docker', ['exec', postgresContainerId, 'psql', '-U', 'postgres', '-d', smokeDatabase, '-tA', '-v', 'ON_ERROR_STOP=1', '-c', sql], {
-    encoding: 'utf8',
-    windowsHide: true
+  const result = await runLocalCommand({
+    id: 'canonical-db-sql',
+    command: 'docker',
+    args: ['exec', '-i', postgresContainerId, 'psql', '-U', 'postgres', '-d', smokeDatabase, '-tA', '-v', 'ON_ERROR_STOP=1', '-f', '-'],
+    cwd: projectRoot,
+    stdin: `${sql}\n`,
+    shell: false,
+    signal: shutdownController.signal
   })
-  if (result.status !== 0) throw new Error(`PostgreSQL assertion/fixture failed:\n${result.error?.message ?? result.stderr ?? result.stdout}`)
-  return result.stdout.trim()
+  if (result.status !== 0 || result.signal) throw new Error(`PostgreSQL assertion/fixture failed:\n${result.stderr ?? result.stdout}`)
+  return String(result.stdout ?? '').trim()
 }
 
 async function dropSmokeDatabase() {
@@ -6906,7 +9912,21 @@ export function normalizeLocalCommandDescriptor(
     env: scrubLocalLauncherEnvironment(descriptor.env),
     shell: false
   }
-  if (platform !== 'win32') return normalized
+  if (platform !== 'win32') {
+    const trustedPath = [
+      dirname(realpathSync(process.execPath)),
+      '/usr/local/sbin',
+      '/usr/local/bin',
+      '/usr/sbin',
+      '/usr/bin',
+      '/sbin',
+      '/bin'
+    ].filter((path, index, paths) => paths.indexOf(path) === index).join(delimiter)
+    return {
+      ...normalized,
+      env: { ...normalized.env, PATH: trustedPath }
+    }
+  }
   const command = descriptor.command.toLowerCase()
   if (!WINDOWS_COMMAND_SHIMS.has(command)) return normalized
   for (const argument of args) assertSafeWindowsCommandArgument(argument)
@@ -7598,6 +10618,13 @@ export function createDockerPostgresAdapter(
     executeAdminSql(sql, { sensitive = false, signal } = {}) {
       return execute('postgres-admin', 'postgres', `${sql};\n`, sensitive, signal)
     },
+    queryDatabase(segmentName, sql, { sensitive = true, signal } = {}) {
+      assertP0DatabaseName(segmentName)
+      if (typeof sql !== 'string' || sql.trim().length === 0) {
+        throw new Error('P0_DATABASE_QUERY_REQUIRED')
+      }
+      return execute('postgres-case-query', segmentName, `${sql}\n`, sensitive, signal)
+    },
     async readDatabaseOwnership(segmentName, { signal } = {}) {
       assertP0DatabaseName(segmentName)
       const row = await execute('postgres-owner-read', 'postgres', `
@@ -7985,8 +11012,8 @@ export function startP0ManagedProcess(
     output: ''
   }
   processLogs.push(log)
-  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
-  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, 20000) })
+  child.stdout?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
+  child.stderr?.on('data', (chunk) => { log.output = appendTail(log.output, chunk, CANONICAL_PROCESS_LOG_TAIL_BYTES) })
   managedProcesses.push(child)
   bindP0AbortToManagedProcess(child, signal, label)
   return child
@@ -8000,6 +11027,46 @@ export function createLocalProcessManager(
   } = {}
 ) {
   return {
+    async startOwnedFrontend(surface, { environment, signal } = {}) {
+      const port = surface === 'web'
+        ? 5199
+        : surface === 'admin'
+          ? 5200
+          : null
+      if (port === null) throw new Error('P0_FRONTEND_SURFACE_INVALID')
+      const child = startP0ManagedProcess(
+        `p0-frontend-${surface}`,
+        process.platform === 'win32' ? 'npm.cmd' : 'npm',
+        [
+          '--workspace', `apps/${surface}`,
+          'run', 'dev', '--',
+          '--host', '127.0.0.1',
+          '--port', String(port),
+          '--strictPort'
+        ],
+        projectRoot,
+        environment,
+        signal
+      )
+      await child.p0SpawnReady
+      if (!child.processIdentity) {
+        await terminateProcessTree(child, `unidentified P0 ${surface} frontend`)
+        throw new Error('P0_PROCESS_IDENTITY_UNKNOWN')
+      }
+      return child
+    },
+    async waitForFrontend(frontend, url, signal) {
+      await waitFor(async () => {
+        assertProcessRunning(frontend)
+        return canFetch(url, signal)
+      }, 'owned P0 frontend', 60000, signal)
+    },
+    async stopOwnedFrontend(frontend, { signal } = {}) {
+      if (!frontend) return
+      if (frontend.p0AbortTermination) await frontend.p0AbortTermination
+      throwIfP0Aborted(signal)
+      await terminateProcessTree(frontend, 'owned P0 frontend', signal)
+    },
     async startOwnedBackend({ environment, signal }) {
       const mavenArguments = [
         'spring-boot:run',
@@ -8038,7 +11105,7 @@ export function createLocalProcessManager(
         })
         throwIfP0Aborted(signal)
         return body?.status === 'UP'
-      }, 'owned P0 backend health', 120000, signal)
+      }, 'owned P0 backend health', 600000, signal)
     },
     async waitForBusinessEndpoint(backend, url, signal) {
       await waitFor(async () => {
@@ -8253,51 +11320,395 @@ async function recoverP0CleanupContext(artifactBase, runId) {
   }
 }
 
-export function mergeP0CaseFragments(entry, fragments) {
-  if (!entry || typeof entry !== 'object'
-    || !Array.isArray(entry.selectedSubruns)
-    || !Array.isArray(fragments)
+const P0_CASE_STATUS_PRIORITY = {
+  PASS: 0,
+  BLOCKED: 1,
+  INVALID_TEST: 2,
+  FAIL: 3
+}
+const P0_ARTIFACT_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
+const P0_CASE_ARRAY_EVIDENCE_FIELDS = [
+  'preconditions',
+  'userActions',
+  'fixtureActions',
+  'contractProbes',
+  'replayProbes',
+  'checkpoints',
+  'uiEvidence',
+  'networkEvidence',
+  'apiEvidence',
+  'dbEvidence',
+  'eventEvidence',
+  'oracleEvidence',
+  'consoleErrors'
+]
+const P0_CASE_STRICT_SHARED_EVIDENCE_FIELDS = [
+  'commit',
+  'authorityBundleFixture'
+]
+const P0_CASE_OPTIONAL_SHARED_EVIDENCE_FIELDS = [
+  'database',
+  'profile',
+  'viewport'
+]
+
+function isPlainP0CaseEvidence(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || utilTypes.isProxy(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+function ownP0CaseEvidenceValue(source, field) {
+  if (!isPlainP0CaseEvidence(source)) return undefined
+  const descriptor = Object.getOwnPropertyDescriptor(source, field)
+  return descriptor?.enumerable === true && Object.hasOwn(descriptor, 'value')
+    ? descriptor.value
+    : undefined
+}
+
+function denseP0CaseEvidenceArray(value) {
+  if (!Array.isArray(value) || utilTypes.isProxy(value)) return null
+  const items = []
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index))
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return null
+    items.push(descriptor.value)
+  }
+  return items
+}
+
+function p0SubrunIdentity(value) {
+  if (!isPlainP0CaseEvidence(value)) return null
+  const identity = {
+    id: ownP0CaseEvidenceValue(value, 'id'),
+    profile: ownP0CaseEvidenceValue(value, 'profile'),
+    viewport: ownP0CaseEvidenceValue(value, 'viewport')
+  }
+  return Object.values(identity).every((item) => (
+    typeof item === 'string' && item.length > 0
+  )) ? identity : null
+}
+
+function validatedP0SubrunDescriptors(value) {
+  const subruns = denseP0CaseEvidenceArray(value)
+  if (!subruns || subruns.length === 0) return null
+  const identities = subruns.map(p0SubrunIdentity)
+  if (identities.some((identity) => identity === null)
+    || new Set(identities.map(({ id }) => id)).size !== identities.length) return null
+  return identities
+}
+
+function cloneP0CaseSubrun(value) {
+  const identity = p0SubrunIdentity(value)
+  const status = ownP0CaseEvidenceValue(value, 'status')
+  if (!identity || !Object.hasOwn(P0_CASE_STATUS_PRIORITY, status)) return null
+  const clone = {}
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string') return null
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return null
+    if (descriptor.enumerable) {
+      Object.defineProperty(clone, key, {
+        value: descriptor.value,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      })
+    }
+  }
+  return { identity, status, clone }
+}
+
+function cloneP0CasePlainRecord(value) {
+  if (!isPlainP0CaseEvidence(value)) return null
+  const clone = {}
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== 'string') return null
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (!descriptor || !Object.hasOwn(descriptor, 'value')) return null
+    if (descriptor.enumerable) {
+      Object.defineProperty(clone, key, {
+        value: descriptor.value,
+        enumerable: true,
+        configurable: true,
+        writable: true
+      })
+    }
+  }
+  return clone
+}
+
+function isCanonicalP0ArtifactPath(value) {
+  if (typeof value !== 'string' || value.length === 0
+    || value.startsWith('/')
+    || /^[a-z]:/i.test(value)
+    || value.includes('\\')
+    || /[\u0000-\u001f\u007f-\u009f]/.test(value)) return false
+  return value.split('/').every((segment) => (
+    segment.length > 0 && segment !== '.' && segment !== '..'
+  ))
+}
+
+function p0ArtifactHashEntries(value) {
+  if (!isPlainP0CaseEvidence(value)) return null
+  const entries = []
+  for (const key of Reflect.ownKeys(value)) {
+    if (!isCanonicalP0ArtifactPath(key)) return null
+    const descriptor = Object.getOwnPropertyDescriptor(value, key)
+    if (!descriptor || descriptor.enumerable !== true
+      || !Object.hasOwn(descriptor, 'value')
+      || typeof descriptor.value !== 'string'
+      || !P0_ARTIFACT_HASH_PATTERN.test(descriptor.value)) return null
+    entries.push([key, descriptor.value])
+  }
+  return entries
+}
+
+function exactP0SubrunIdentity(left, right) {
+  return left.id === right.id
+    && left.profile === right.profile
+    && left.viewport === right.viewport
+}
+
+function mergedP0CaseEvidence(fragments, terminalStatus) {
+  const merged = {}
+  for (const field of P0_CASE_ARRAY_EVIDENCE_FIELDS) {
+    const values = fragments.map((fragment) => ownP0CaseEvidenceValue(fragment, field))
+    if (values.every((value) => value === undefined)) continue
+    const arrays = values.map(denseP0CaseEvidenceArray)
+    if (arrays.some((value) => value === null)) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    merged[field] = arrays.flat()
+  }
+
+  for (const field of P0_CASE_STRICT_SHARED_EVIDENCE_FIELDS) {
+    const values = fragments.map((fragment) => ownP0CaseEvidenceValue(fragment, field))
+    if (values.every((value) => value === undefined)) continue
+    if (values.some((value) => typeof value !== 'string' || value !== values[0])) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    merged[field] = values[0]
+  }
+
+  for (const field of P0_CASE_OPTIONAL_SHARED_EVIDENCE_FIELDS) {
+    const values = fragments.map((fragment) => ownP0CaseEvidenceValue(fragment, field))
+    if (values.every((value) => (
+      typeof value === 'string' && value === values[0]
+    ))) {
+      merged[field] = values[0]
+    }
+  }
+
+  const started = fragments.map((fragment) => (
+    ownP0CaseEvidenceValue(fragment, 'startedAt')
+  ))
+  const finished = fragments.map((fragment) => (
+    ownP0CaseEvidenceValue(fragment, 'finishedAt')
+  ))
+  const hasTiming = [...started, ...finished].some((value) => value !== undefined)
+  if (hasTiming) {
+    if ([...started, ...finished].some((value) => (
+      typeof value !== 'string' || !Number.isFinite(Date.parse(value))
+    ))) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    merged.startedAt = started.toSorted()[0]
+    merged.finishedAt = finished.toSorted().at(-1)
+  }
+
+  const calculations = fragments.map((fragment) => (
+    ownP0CaseEvidenceValue(fragment, 'financialCalculation')
+  ))
+  if (calculations.some((value) => value !== undefined)) {
+    if (calculations.some((value) => (
+      !isPlainP0CaseEvidence(value)
+      || !Object.hasOwn(
+        P0_CASE_STATUS_PRIORITY,
+        ownP0CaseEvidenceValue(value, 'status')
+      )
+    ))) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    merged.financialCalculation = calculations.length === 1
+      ? calculations[0]
+      : { status: terminalStatus, checks: calculations }
+  }
+
+  const cleanup = fragments.map((fragment) => (
+    ownP0CaseEvidenceValue(fragment, 'cleanup')
+  ))
+  if (cleanup.some((value) => value !== undefined)) {
+    if (cleanup.some((value) => (
+      !isPlainP0CaseEvidence(value)
+      || typeof ownP0CaseEvidenceValue(value, 'status') !== 'string'
+    ))) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    const statuses = cleanup.map((value) => ownP0CaseEvidenceValue(value, 'status'))
+    merged.cleanup = statuses.every((value) => value === 'PASS')
+      ? { status: 'PASS' }
+      : { status: statuses.find((value) => value !== 'PASS') }
+  }
+  const blockers = []
+  for (const fragment of fragments) {
+    if (ownP0CaseEvidenceValue(fragment, 'status') !== terminalStatus) continue
+    const raw = ownP0CaseEvidenceValue(fragment, 'failureOrBlocker')
+    if (raw === undefined) continue
+    const blocker = cloneP0CasePlainRecord(raw)
+    const status = ownP0CaseEvidenceValue(blocker, 'status')
+    const reason = ownP0CaseEvidenceValue(blocker, 'reason')
+    const reasonCode = ownP0CaseEvidenceValue(blocker, 'reasonCode')
+    if (!blocker
+      || status !== terminalStatus
+      || typeof reason !== 'string' || reason.length === 0
+      || (reasonCode !== undefined
+        && (typeof reasonCode !== 'string' || reasonCode.length === 0))
+      || (terminalStatus === 'BLOCKED'
+        && merged.authorityBundleFixture === 'BLOCKED'
+        && (reason !== 'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+          || reasonCode !== 'AUTHORITY_BUNDLE_FIXTURE_MISSING'))) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    blockers.push({ blocker, reason, reasonCode })
+  }
+  if (blockers.length > 0) {
+    const reasonCodes = new Set(
+      blockers.map(({ reasonCode }) => reasonCode).filter(Boolean)
+    )
+    if (blockers.some(({ reason }) => reason !== blockers[0].reason)
+      || reasonCodes.size > 1) {
+      throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
+    }
+    merged.failureOrBlocker = (
+      blockers.find(({ reasonCode }) => reasonCode)?.blocker ?? blockers[0].blocker
+    )
+  }
+  return merged
+}
+
+export function mergeP0CaseFragments(entry, fragmentsValue) {
+  const entryId = ownP0CaseEvidenceValue(entry, 'id')
+  const definition = ownP0CaseEvidenceValue(entry, 'definition')
+  const definitionId = ownP0CaseEvidenceValue(definition, 'id')
+  const selected = validatedP0SubrunDescriptors(
+    ownP0CaseEvidenceValue(entry, 'selectedSubruns')
+  )
+  const canonical = validatedP0SubrunDescriptors(
+    ownP0CaseEvidenceValue(definition, 'requiredSubruns')
+  )
+  const cropped = ownP0CaseEvidenceValue(entry, 'cropped')
+  const fragments = denseP0CaseEvidenceArray(fragmentsValue)
+  if (typeof entryId !== 'string' || entryId.length === 0
+    || definitionId !== entryId
+    || !selected
+    || !canonical
+    || typeof cropped !== 'boolean'
+    || !fragments
     || fragments.length === 0) {
     throw new Error('P0_CASE_FRAGMENT_INCOMPLETE')
   }
-  const expected = new Map(entry.selectedSubruns.map((subrun) => [subrun?.id, subrun]))
-  if (expected.size !== entry.selectedSubruns.length || expected.has(undefined)) {
+
+  const canonicalById = new Map(canonical.map((subrun) => [subrun.id, subrun]))
+  if (selected.some((subrun) => {
+    const required = canonicalById.get(subrun.id)
+    return !required || !exactP0SubrunIdentity(subrun, required)
+  }) || (!cropped && (
+    selected.length !== canonical.length
+    || selected.some((subrun, index) => !exactP0SubrunIdentity(subrun, canonical[index]))
+  ))) {
     throw new Error('P0_CASE_FRAGMENT_INCOMPLETE')
   }
+
+  const expected = new Map(selected.map((subrun) => [subrun.id, subrun]))
   const observed = new Map()
-  let passed = true
-  for (const fragment of fragments) {
-    if (fragment?.id !== entry.id || !Array.isArray(fragment.subruns)) {
+  const hashes = new Map()
+  let attempt
+  let durationMs = 0
+  let status = 'PASS'
+  const includeStatus = (candidate) => {
+    if (!Object.hasOwn(P0_CASE_STATUS_PRIORITY, candidate)) {
       throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
     }
-    if (fragment.status !== 'PASS') passed = false
-    for (const subrun of fragment.subruns) {
-      const required = expected.get(subrun?.id)
-      if (!required
-        || subrun.profile !== required.profile
-        || subrun.viewport !== required.viewport) {
-        throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
-      }
-      if (observed.has(subrun.id)) throw new Error('P0_CASE_FRAGMENT_DUPLICATE')
-      observed.set(subrun.id, subrun)
-      if (subrun.status !== 'PASS') passed = false
+    if (P0_CASE_STATUS_PRIORITY[candidate] > P0_CASE_STATUS_PRIORITY[status]) {
+      status = candidate
     }
   }
+
+  for (const fragment of fragments) {
+    const fragmentId = ownP0CaseEvidenceValue(fragment, 'id')
+    const fragmentStatus = ownP0CaseEvidenceValue(fragment, 'status')
+    const fragmentSchemaVersion = ownP0CaseEvidenceValue(fragment, 'schemaVersion')
+    const fragmentAttempt = ownP0CaseEvidenceValue(fragment, 'attempt')
+    const fragmentDurationMs = ownP0CaseEvidenceValue(fragment, 'durationMs')
+    const fragmentScopeComplete = ownP0CaseEvidenceValue(fragment, 'scopeComplete')
+    const fragmentSubruns = denseP0CaseEvidenceArray(
+      ownP0CaseEvidenceValue(fragment, 'subruns')
+    )
+    const fragmentHashes = p0ArtifactHashEntries(
+      ownP0CaseEvidenceValue(fragment, 'artifactHashes')
+    )
+    if (fragmentId !== entryId
+      || !Object.hasOwn(P0_CASE_STATUS_PRIORITY, fragmentStatus)
+      || fragmentSchemaVersion !== 1
+      || !Number.isSafeInteger(fragmentAttempt) || fragmentAttempt < 1
+      || !Number.isSafeInteger(fragmentDurationMs) || fragmentDurationMs < 0
+      || fragmentScopeComplete !== true
+      || !fragmentSubruns || fragmentSubruns.length === 0
+      || !fragmentHashes) {
+      throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
+    }
+    if (attempt !== undefined && attempt !== fragmentAttempt) {
+      throw new Error('P0_CASE_FRAGMENT_METADATA_CONFLICT')
+    }
+    attempt ??= fragmentAttempt
+    durationMs += fragmentDurationMs
+    if (!Number.isSafeInteger(durationMs)) throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
+    includeStatus(fragmentStatus)
+
+    for (const subrun of fragmentSubruns) {
+      const evidence = cloneP0CaseSubrun(subrun)
+      const required = evidence ? expected.get(evidence.identity.id) : undefined
+      if (!evidence || !required
+        || !exactP0SubrunIdentity(evidence.identity, required)) {
+        throw new Error('P0_CASE_FRAGMENT_UNEXPECTED')
+      }
+      if (observed.has(evidence.identity.id)) throw new Error('P0_CASE_FRAGMENT_DUPLICATE')
+      observed.set(evidence.identity.id, evidence.clone)
+      includeStatus(evidence.status)
+    }
+
+    for (const [path, hash] of fragmentHashes) {
+      if (hashes.has(path)) {
+        throw new Error(hashes.get(path) === hash
+          ? 'P0_CASE_FRAGMENT_HASH_DUPLICATE'
+          : 'P0_CASE_FRAGMENT_HASH_CONFLICT')
+      }
+      hashes.set(path, hash)
+    }
+  }
+
   if (observed.size !== expected.size) throw new Error('P0_CASE_FRAGMENT_INCOMPLETE')
-  const canonical = entry.definition?.requiredSubruns ?? []
-  const exactCanonicalScope = !entry.cropped
-    && canonical.length === entry.selectedSubruns.length
-    && canonical.every((subrun, index) => {
-      const selected = entry.selectedSubruns[index]
-      return selected?.id === subrun.id
-        && selected.profile === subrun.profile
-        && selected.viewport === subrun.viewport
+  const artifactHashes = {}
+  for (const [path, hash] of hashes) {
+    Object.defineProperty(artifactHashes, path, {
+      value: hash,
+      enumerable: true,
+      configurable: true,
+      writable: true
     })
+  }
   return {
-    id: entry.id,
-    status: passed ? 'PASS' : 'FAIL',
-    scopeComplete: exactCanonicalScope,
-    subruns: entry.selectedSubruns.map(({ id }) => observed.get(id))
+    ...mergedP0CaseEvidence(fragments, status),
+    schemaVersion: 1,
+    id: entryId,
+    status,
+    attempt,
+    durationMs,
+    scopeComplete: !cropped,
+    subruns: selected.map(({ id }) => observed.get(id)),
+    artifactHashes
   }
 }
 
@@ -8478,6 +11889,1286 @@ export function validateP0ResumeJournal(manifest, matrixDatabase) {
   return databases
 }
 
+function p0FixtureCleanupRegistry(prepared) {
+  prepared.p0FixtureCleanupRegistry ??= []
+  if (!Array.isArray(prepared.p0FixtureCleanupRegistry)) {
+    throw new Error('P0_FIXTURE_CLEANUP_REGISTRY_INVALID')
+  }
+  return prepared.p0FixtureCleanupRegistry
+}
+
+function registerP0FixtureCleanup(prepared, label, cleanup) {
+  if (typeof cleanup !== 'function') throw new Error('P0_FIXTURE_CLEANUP_INVALID')
+  const registry = p0FixtureCleanupRegistry(prepared)
+  let active = true
+  const entry = {
+    label,
+    async restore(options = {}) {
+      if (!active) return { status: 'ALREADY_RESTORED' }
+      const result = await cleanup(options)
+      active = false
+      const index = registry.lastIndexOf(entry)
+      if (index >= 0) registry.splice(index, 1)
+      return result
+    }
+  }
+  registry.push(entry)
+  return entry.restore
+}
+
+export async function restoreP0CaseFixtures(prepared, { signal } = {}) {
+  const registry = prepared?.p0FixtureCleanupRegistry
+  if (registry === undefined) return { status: 'PASS', restored: 0 }
+  if (!Array.isArray(registry)) throw new Error('P0_FIXTURE_CLEANUP_REGISTRY_INVALID')
+  const failures = []
+  let restored = 0
+  for (const entry of [...registry].reverse()) {
+    throwIfP0Aborted(signal)
+    try {
+      if (!entry || typeof entry.restore !== 'function') {
+        throw new Error('P0_FIXTURE_CLEANUP_INVALID')
+      }
+      await entry.restore({ signal })
+      restored += 1
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `failed to restore ${failures.length} P0 case fixture(s)`
+    )
+  }
+  return { status: 'PASS', restored }
+}
+
+function p0ActiveProfile(prepared, guard) {
+  guard()
+  const active = prepared.activeProfileRuntime
+  if (!active
+    || typeof active !== 'object'
+    || typeof active.phase !== 'string'
+    || typeof active.profile !== 'string'
+    || !Number.isSafeInteger(active.attempt)
+    || active.attempt < 1
+    || typeof active.segmentName !== 'string'
+    || typeof active.databaseUrl !== 'string'
+    || !active.environment
+    || typeof active.environment !== 'object'
+    || !Number.isSafeInteger(active.restartCount)
+    || active.restartCount < 0) {
+    throw new Error('P0_ACTIVE_PROFILE_REQUIRED')
+  }
+  if (!prepared.activeBackend) throw new Error('P0_ACTIVE_BACKEND_REQUIRED')
+  assertP0DatabaseName(active.segmentName)
+  if (prepared.activeDatabaseSegment !== active.segmentName) {
+    throw new Error('P0_ACTIVE_DATABASE_MISMATCH')
+  }
+  if (prepared.activeDatabaseUrl !== active.databaseUrl
+    || active.environment.DATABASE_URL !== active.databaseUrl
+    || (active.environment.SPRING_DATASOURCE_URL !== undefined
+      && active.environment.SPRING_DATASOURCE_URL !== active.databaseUrl)) {
+    throw new Error('P0_ACTIVE_DATABASE_MISMATCH')
+  }
+  return active
+}
+
+function safeP0ActiveProfile(active) {
+  return {
+    phase: active.phase,
+    profile: active.profile,
+    attempt: active.attempt,
+    segmentName: active.segmentName,
+    databaseUrl: active.databaseUrl,
+    restartCount: active.restartCount
+  }
+}
+
+function p0FixtureSymbol(value) {
+  const symbol = String(value ?? '').trim().toUpperCase()
+  if (!/^[A-Z0-9]+(?:-[A-Z0-9]+)?$/.test(symbol)) {
+    throw new Error('P0_FIXTURE_SYMBOL_INVALID')
+  }
+  return symbol
+}
+
+function p0FixtureUuid(value, label) {
+  const uuid = String(value ?? '').trim().toLowerCase()
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(uuid)) {
+    throw new Error(`P0_FIXTURE_${label}_INVALID`)
+  }
+  return uuid
+}
+
+function p0FixtureJson(raw, label) {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw
+  const line = String(raw ?? '').split(/\r?\n/).filter(Boolean).at(-1)
+  try {
+    return JSON.parse(line)
+  } catch (error) {
+    throw new Error(`P0_FIXTURE_${label}_INVALID`, { cause: error })
+  }
+}
+
+function p0AdminPageContent(value) {
+  if (Array.isArray(value)) return value
+  return value?.content ?? value?.items ?? value?.records ?? []
+}
+
+function p0BindingRequest(binding, enabled = binding.enabled) {
+  return {
+    providerId: binding.providerId,
+    providerInstrumentId: binding.providerInstrumentId,
+    providerSymbol: binding.providerSymbol,
+    priority: binding.priority,
+    enabled,
+    configJson: binding.configJson ?? '{}'
+  }
+}
+
+function safeP0BindingEvidence(symbol, providerCode, binding) {
+  return {
+    id: binding.id,
+    symbol,
+    providerCode,
+    providerSymbol: binding.providerSymbol,
+    priority: binding.priority,
+    enabled: binding.enabled
+  }
+}
+
+function p0FundingConfigRequest(config, reason) {
+  return {
+    fundingSourcePriority: config.fundingSourcePriority,
+    fixedFundingRate: config.fixedFundingRate,
+    fixedFundingIntervalMinutes: config.fixedFundingIntervalMinutes,
+    fundingStaleSeconds: config.fundingStaleSeconds,
+    reason
+  }
+}
+
+async function restoreP0ProviderBindingChanges(admin, changes, { signal } = {}) {
+  const failures = []
+  for (const change of [...changes].reverse()) {
+    try {
+      await admin(
+        `/api/admin/market/symbols/${encodeURIComponent(change.symbolId)}/provider-bindings/${
+          encodeURIComponent(change.original.id)
+        }`,
+        {
+          method: 'PUT',
+          body: p0BindingRequest(change.original),
+          signal
+        }
+      )
+    } catch (error) {
+      failures.push(error)
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `failed to restore ${failures.length} P0 provider binding(s)`
+    )
+  }
+  const bySymbol = new Map()
+  for (const change of changes) {
+    if (!bySymbol.has(change.symbolId)) {
+      bySymbol.set(
+        change.symbolId,
+        await admin(
+          `/api/admin/market/symbols/${encodeURIComponent(change.symbolId)}/provider-bindings`,
+          { signal }
+        )
+      )
+    }
+    const restored = p0AdminPageContent(bySymbol.get(change.symbolId))
+      .find(({ id }) => id === change.original.id)
+    if (!restored
+      || JSON.stringify(p0BindingRequest(restored))
+        !== JSON.stringify(p0BindingRequest(change.original))) {
+      throw new Error('P0_PROVIDER_BINDING_RESTORE_MISMATCH')
+    }
+  }
+  return { status: 'RESTORED', bindings: changes.length }
+}
+
+export function createP0CaseRuntimeCapabilities({
+  prepared,
+  signal,
+  guard = assertP0ProcessTreeCapability,
+  processManager,
+  infrastructure,
+  journalMutation,
+  verifyActiveDatabase,
+  adminApi,
+  createAdminApi,
+  query
+}) {
+  if (!prepared || typeof prepared !== 'object') {
+    throw new Error('P0_CASE_RUNTIME_CONTEXT_REQUIRED')
+  }
+  const adminForPage = async (page) => {
+    guard()
+    const admin = typeof createAdminApi === 'function'
+      ? await createAdminApi(page)
+      : (path, request) => adminApi(page, path, request)
+    if (typeof admin !== 'function') throw new Error('P0_ADMIN_SESSION_REQUIRED')
+    return admin
+  }
+  const ensureProfile = async (expectedProfile) => {
+    const active = p0ActiveProfile(prepared, guard)
+    if (expectedProfile !== undefined && active.profile !== expectedProfile) {
+      throw new Error(
+        `P0_ACTIVE_PROFILE_MISMATCH: expected ${expectedProfile}, got ${active.profile}`
+      )
+    }
+    if (typeof verifyActiveDatabase !== 'function') {
+      throw new Error('P0_ACTIVE_DATABASE_VERIFIER_REQUIRED')
+    }
+    await verifyActiveDatabase({
+      backend: prepared.activeBackend,
+      segmentName: active.segmentName,
+      databaseUrl: active.databaseUrl,
+      profile: active.profile,
+      signal
+    })
+    return safeP0ActiveProfile(active)
+  }
+  const restartBackend = async (input = {}) => {
+    const active = p0ActiveProfile(prepared, guard)
+    if (typeof processManager?.stopOwnedBackend !== 'function'
+      || typeof processManager?.startOwnedBackend !== 'function'
+      || typeof processManager?.waitForBackendHealth !== 'function'
+      || typeof processManager?.waitForBusinessEndpoint !== 'function'
+      || typeof infrastructure?.assertPortsFree !== 'function'
+      || typeof journalMutation !== 'function'
+      || typeof verifyActiveDatabase !== 'function') {
+      throw new Error('P0_RESTART_BACKEND_RUNTIME_INCOMPLETE')
+    }
+    const options = typeof input === 'function'
+      ? { duringDowntime: input }
+      : input
+    if (!options || typeof options !== 'object'
+      || (options.duringDowntime !== undefined
+        && typeof options.duringDowntime !== 'function')) {
+      throw new Error('P0_RESTART_BACKEND_OPTIONS_INVALID')
+    }
+    const callSignal = options.signal ?? signal
+    throwIfP0Aborted(callSignal)
+    const stopped = prepared.activeBackend
+    await processManager.stopOwnedBackend(stopped, { signal: callSignal })
+    if (prepared.activeBackend === stopped) prepared.activeBackend = undefined
+    throwIfP0Aborted(callSignal)
+    await infrastructure.assertPortsFree([18086], { signal: callSignal })
+    throwIfP0Aborted(callSignal)
+
+    let downtimeFailure
+    try {
+      await options.duringDowntime?.({ signal: callSignal })
+      throwIfP0Aborted(callSignal)
+    } catch (error) {
+      downtimeFailure = error
+    }
+
+    active.restartCount += 1
+    const restartAttempt = active.restartCount
+    let backend
+    let restartFailure
+    try {
+      backend = await journalMutation({
+        resource: {
+          type: 'process',
+          id: `backend:${active.phase}:${active.attempt}:${active.profile}:restart:${restartAttempt}`,
+          live: true,
+          commandFingerprint: sha256Text(
+            `owned-p0-backend:${active.phase}:${active.attempt}:${active.profile}:restart:${restartAttempt}`
+          )
+        },
+        start: () => processManager.startOwnedBackend({
+          profile: active.profile,
+          environment: { ...active.environment },
+          signal: callSignal
+        }),
+        stopLiveProcess: (handle, details) => (
+          processManager.stopOwnedBackend(handle, details)
+        ),
+        signal: callSignal
+      })
+      prepared.activeBackend = backend
+      await processManager.waitForBackendHealth(
+        backend,
+        'http://127.0.0.1:18086/actuator/health',
+        callSignal
+      )
+      throwIfP0Aborted(callSignal)
+      await processManager.waitForBusinessEndpoint(
+        backend,
+        'http://127.0.0.1:18086/api/market/symbols',
+        callSignal
+      )
+      throwIfP0Aborted(callSignal)
+      await verifyActiveDatabase({
+        backend,
+        segmentName: active.segmentName,
+        databaseUrl: active.databaseUrl,
+        profile: active.profile,
+        signal: callSignal
+      })
+      throwIfP0Aborted(callSignal)
+    } catch (error) {
+      restartFailure = error
+    }
+    if (downtimeFailure && restartFailure) {
+      throw new AggregateError(
+        [downtimeFailure, restartFailure],
+        'P0_DOWNTIME_AND_BACKEND_RESTART_FAILED'
+      )
+    }
+    if (restartFailure) throw restartFailure
+    if (downtimeFailure) throw downtimeFailure
+    return backend
+  }
+  const assertOwnedPorts = async (input = [18086, 5199, 5200]) => {
+    const ports = Array.isArray(input) ? input : input?.ports
+    if (!Array.isArray(ports)
+      || ports.length === 0
+      || new Set(ports).size !== ports.length
+      || ports.some((port) => ![18086, 5199, 5200].includes(port))) {
+      throw new Error('P0_OWNED_PORTS_INVALID')
+    }
+    const active = p0ActiveProfile(prepared, guard)
+    if (ports.includes(18086)) {
+      await processManager.waitForBackendHealth(
+        prepared.activeBackend,
+        'http://127.0.0.1:18086/actuator/health',
+        signal
+      )
+      await processManager.waitForBusinessEndpoint(
+        prepared.activeBackend,
+        'http://127.0.0.1:18086/api/market/symbols',
+        signal
+      )
+    }
+    const frontends = [
+      [5199, 'web', 'http://127.0.0.1:5199'],
+      [5200, 'admin', 'http://127.0.0.1:5200']
+    ]
+    for (const [port, surface, url] of frontends) {
+      if (!ports.includes(port)) continue
+      const frontend = prepared.parentFrontends?.get(surface)
+      if (!frontend || typeof processManager?.waitForFrontend !== 'function') {
+        throw new Error(`P0_OWNED_FRONTEND_REQUIRED: ${surface}`)
+      }
+      await processManager.waitForFrontend(frontend, url, signal)
+    }
+    return { ...safeP0ActiveProfile(active), ports: [...ports] }
+  }
+  const marketOverride = async (page, input = {}) => {
+    const admin = await adminForPage(page)
+    const symbol = p0FixtureSymbol(input.symbol)
+    const action = String(input.action ?? 'SET').toUpperCase()
+    if (['CLEAR', 'DELETE'].includes(action)) {
+      await admin(
+        `/api/admin/market/test-control/overrides/${encodeURIComponent(symbol)}`,
+        { method: 'DELETE', signal: input.signal ?? signal }
+      )
+      return {
+        kind: 'MARKET_OVERRIDE',
+        action: 'CLEAR',
+        symbol,
+        restorable: false
+      }
+    }
+    if (action !== 'SET') throw new Error('P0_MARKET_OVERRIDE_ACTION_INVALID')
+    const authority = prepared.authorityState?.authorityBundleFixture
+      ?? prepared.authorityBundleFixture
+    if (authority !== 'PASS') {
+      throw new Error('P0_AUTHORITY_BUNDLE_FIXTURE_REQUIRED')
+    }
+    const bid = String(input.bid ?? '')
+    const ask = String(input.ask ?? '')
+    if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(bid)
+      || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(ask)
+      || Number(bid) <= 0
+      || Number(ask) <= Number(bid)) {
+      throw new Error('P0_MARKET_OVERRIDE_PRICE_INVALID')
+    }
+    const ttl = input.ttl ?? 'PT5M'
+    if (typeof ttl !== 'string' || !/^PT[0-9A-Z.]+$/.test(ttl)) {
+      throw new Error('P0_MARKET_OVERRIDE_TTL_INVALID')
+    }
+    const request = { symbol, bid, ask, ttl }
+    const restore = registerP0FixtureCleanup(
+      prepared,
+      `market-override:${symbol}`,
+      async ({ signal: cleanupSignal } = {}) => {
+        await admin(
+          `/api/admin/market/test-control/overrides/${encodeURIComponent(symbol)}`,
+          { method: 'DELETE', signal: cleanupSignal }
+        )
+        return { status: 'RESTORED', symbol }
+      }
+    )
+    let result
+    try {
+      result = await admin('/api/admin/market/test-control/overrides', {
+        method: 'POST',
+        body: request,
+        signal: input.signal ?? signal
+      })
+    } catch (error) {
+      try {
+        await restore({ signal: input.signal ?? signal })
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          'P0_MARKET_OVERRIDE_APPLY_AND_RESTORE_FAILED'
+        )
+      }
+      throw error
+    }
+    return {
+      kind: 'MARKET_OVERRIDE',
+      action: 'SET',
+      symbol,
+      request,
+      result,
+      restore
+    }
+  }
+  const providerBindings = async (page, input = {}) => {
+    const admin = await adminForPage(page)
+    const requestedSymbols = input.symbols ?? (input.symbol ? [input.symbol] : [])
+    const symbols = [...new Set(requestedSymbols.map(p0FixtureSymbol))]
+    const enabledProviders = input.enabledProviders
+    if (symbols.length === 0
+      || !Array.isArray(enabledProviders)
+      || enabledProviders.some((code) => (
+        typeof code !== 'string' || code.trim().length === 0
+      ))) {
+      throw new Error('P0_PROVIDER_BINDING_FIXTURE_INVALID')
+    }
+    const enabled = new Set(enabledProviders.map((code) => code.trim().toLowerCase()))
+    const [providerRows, symbolPage] = await Promise.all([
+      admin('/api/admin/market/data-providers', { signal: input.signal ?? signal }),
+      admin('/api/admin/market/symbols?page=0&size=2000', {
+        signal: input.signal ?? signal
+      })
+    ])
+    const providerCodeById = new Map(
+      p0AdminPageContent(providerRows).map(({ id, code }) => [
+        id,
+        String(code).trim().toLowerCase()
+      ])
+    )
+    const symbolRows = p0AdminPageContent(symbolPage)
+    const fixtures = []
+    const seenProviderCodes = new Set()
+    for (const symbol of symbols) {
+      const metadata = symbolRows.find((candidate) => candidate.symbol === symbol)
+      if (!metadata) throw new Error(`P0_ADMIN_SYMBOL_REQUIRED: ${symbol}`)
+      const rows = p0AdminPageContent(await admin(
+        `/api/admin/market/symbols/${encodeURIComponent(metadata.id)}/provider-bindings`,
+        { signal: input.signal ?? signal }
+      ))
+      for (const binding of rows) {
+        const providerCode = providerCodeById.get(binding.providerId)
+        if (!providerCode) throw new Error('P0_PROVIDER_BINDING_PROVIDER_REQUIRED')
+        seenProviderCodes.add(providerCode)
+        fixtures.push({
+          symbol,
+          symbolId: metadata.id,
+          providerCode,
+          original: structuredClone(binding)
+        })
+      }
+    }
+    for (const providerCode of enabled) {
+      if (!seenProviderCodes.has(providerCode)) {
+        throw new Error(`P0_PROVIDER_BINDING_PROVIDER_REQUIRED: ${providerCode}`)
+      }
+    }
+    const changes = fixtures
+      .filter(({ providerCode, original }) => (
+        Boolean(original.enabled) !== enabled.has(providerCode)
+      ))
+    if (changes.length === 0) {
+      return {
+        kind: 'PROVIDER_BINDINGS',
+        symbols,
+        enabledProviders: [...enabled],
+        before: fixtures.map(({ symbol, providerCode, original }) => (
+          safeP0BindingEvidence(symbol, providerCode, original)
+        )),
+        after: fixtures.map(({ symbol, providerCode, original }) => (
+          safeP0BindingEvidence(symbol, providerCode, original)
+        )),
+        restore: async () => ({ status: 'ALREADY_RESTORED' })
+      }
+    }
+    const applied = []
+    const restore = registerP0FixtureCleanup(
+      prepared,
+      `provider-bindings:${symbols.join(',')}`,
+      (details) => restoreP0ProviderBindingChanges(admin, applied, details)
+    )
+    try {
+      for (const change of changes) {
+        applied.push(change)
+        await admin(
+          `/api/admin/market/symbols/${encodeURIComponent(change.symbolId)}/provider-bindings/${
+            encodeURIComponent(change.original.id)
+          }`,
+          {
+            method: 'PUT',
+            body: p0BindingRequest(
+              change.original,
+              enabled.has(change.providerCode)
+            ),
+            signal: input.signal ?? signal
+          }
+        )
+      }
+    } catch (error) {
+      try {
+        await restore({ signal: input.signal ?? signal })
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          'P0_PROVIDER_BINDING_APPLY_AND_RESTORE_FAILED'
+        )
+      }
+      throw error
+    }
+    const after = []
+    for (const symbol of symbols) {
+      const metadata = symbolRows.find((candidate) => candidate.symbol === symbol)
+      const rows = p0AdminPageContent(await admin(
+        `/api/admin/market/symbols/${encodeURIComponent(metadata.id)}/provider-bindings`,
+        { signal: input.signal ?? signal }
+      ))
+      after.push(...rows.map((binding) => safeP0BindingEvidence(
+        symbol,
+        providerCodeById.get(binding.providerId),
+        binding
+      )))
+    }
+    return {
+      kind: 'PROVIDER_BINDINGS',
+      symbols,
+      enabledProviders: [...enabled],
+      before: fixtures.map(({ symbol, providerCode, original }) => (
+        safeP0BindingEvidence(symbol, providerCode, original)
+      )),
+      after,
+      restore
+    }
+  }
+  const fundingConfig = async (page, input = {}) => {
+    const admin = await adminForPage(page)
+    const symbol = p0FixtureSymbol(input.symbol)
+    const symbolPage = await admin('/api/admin/market/symbols?page=0&size=2000', {
+      signal: input.signal ?? signal
+    })
+    const metadata = p0AdminPageContent(symbolPage)
+      .find((candidate) => candidate.symbol === symbol)
+    if (!metadata) throw new Error(`P0_ADMIN_SYMBOL_REQUIRED: ${symbol}`)
+    const path = `/api/admin/market/symbols/${encodeURIComponent(metadata.id)}/funding-config`
+    const original = await admin(path, { signal: input.signal ?? signal })
+    const next = {
+      ...p0FundingConfigRequest(
+        original,
+        input.reason ?? `P0 ${prepared.options?.runId ?? 'run'} funding fixture`
+      ),
+      ...Object.fromEntries([
+        'fundingSourcePriority',
+        'fixedFundingRate',
+        'fixedFundingIntervalMinutes',
+        'fundingStaleSeconds'
+      ].filter((key) => input[key] !== undefined).map((key) => [key, input[key]]))
+    }
+    const restore = registerP0FixtureCleanup(
+      prepared,
+      `funding-config:${symbol}`,
+      async ({ signal: cleanupSignal } = {}) => {
+        await admin(path, {
+          method: 'PUT',
+          body: p0FundingConfigRequest(
+            original,
+            `Restore P0 ${prepared.options?.runId ?? 'run'} funding fixture`
+          ),
+          signal: cleanupSignal
+        })
+        const restored = await admin(path, { signal: cleanupSignal })
+        for (const key of [
+          'fundingSourcePriority',
+          'fixedFundingRate',
+          'fixedFundingIntervalMinutes',
+          'fundingStaleSeconds'
+        ]) {
+          if (JSON.stringify(restored[key]) !== JSON.stringify(original[key])) {
+            throw new Error('P0_FUNDING_CONFIG_RESTORE_MISMATCH')
+          }
+        }
+        return { status: 'RESTORED', symbol }
+      }
+    )
+    let result
+    try {
+      result = await admin(path, {
+        method: 'PUT',
+        body: next,
+        signal: input.signal ?? signal
+      })
+    } catch (error) {
+      try {
+        await restore({ signal: input.signal ?? signal })
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          'P0_FUNDING_CONFIG_APPLY_AND_RESTORE_FAILED'
+        )
+      }
+      throw error
+    }
+    return {
+      kind: 'FUNDING_CONFIG',
+      symbol,
+      before: original,
+      after: result,
+      restore
+    }
+  }
+  const positionTime = async (input = {}) => {
+    guard()
+    if (typeof query !== 'function') throw new Error('P0_POSITION_TIME_DB_REQUIRED')
+    const accountId = p0FixtureUuid(input.accountId, 'ACCOUNT_ID')
+    const positionId = p0FixtureUuid(input.positionId, 'POSITION_ID')
+    const openedAtDate = new Date(input.openedAt)
+    if (!Number.isFinite(openedAtDate.getTime())) {
+      throw new Error('P0_FIXTURE_POSITION_TIME_INVALID')
+    }
+    const openedAt = openedAtDate.toISOString()
+    const original = p0FixtureJson(await query(`
+      SELECT json_build_object(
+        'count', count(*),
+        'openedAt', max(opened_at)
+      )::text
+      FROM trading.positions
+      WHERE id = '${sqlLiteral(positionId)}'
+        AND account_id = '${sqlLiteral(accountId)}'
+        AND status = 'OPEN';
+    `, { signal: input.signal ?? signal }), 'POSITION_TIME_SNAPSHOT')
+    if (Number(original.count) !== 1 || typeof original.openedAt !== 'string') {
+      throw new Error('P0_POSITION_TIME_TARGET_REQUIRED')
+    }
+    const restore = registerP0FixtureCleanup(
+      prepared,
+      `position-time:${accountId}:${positionId}`,
+      async ({ signal: cleanupSignal } = {}) => {
+        const restored = p0FixtureJson(await query(`
+          WITH changed AS (
+            UPDATE trading.positions
+            SET opened_at = '${sqlLiteral(original.openedAt)}'::timestamptz
+            WHERE id = '${sqlLiteral(positionId)}'
+              AND account_id = '${sqlLiteral(accountId)}'
+            RETURNING opened_at
+          )
+          SELECT json_build_object(
+            'count', count(*),
+            'openedAt', max(opened_at)
+          )::text
+          FROM changed;
+        `, { signal: cleanupSignal }), 'POSITION_TIME_RESTORE')
+        if (Number(restored.count) !== 1) {
+          throw new Error('P0_POSITION_TIME_RESTORE_MISMATCH')
+        }
+        if (restored.openedAt !== original.openedAt) {
+          throw new Error('P0_POSITION_TIME_RESTORE_MISMATCH')
+        }
+        return { status: 'RESTORED', accountId, positionId }
+      }
+    )
+    let current
+    try {
+      current = p0FixtureJson(await query(`
+        WITH changed AS (
+          UPDATE trading.positions
+          SET opened_at = '${sqlLiteral(openedAt)}'::timestamptz
+          WHERE id = '${sqlLiteral(positionId)}'
+            AND account_id = '${sqlLiteral(accountId)}'
+            AND status = 'OPEN'
+          RETURNING opened_at
+        )
+        SELECT json_build_object(
+          'count', count(*),
+          'openedAt', max(opened_at)
+        )::text
+        FROM changed;
+      `, { signal: input.signal ?? signal }), 'POSITION_TIME_UPDATE')
+      if (Number(current.count) !== 1) {
+        throw new Error('P0_POSITION_TIME_TARGET_REQUIRED')
+      }
+      if (Date.parse(current.openedAt) !== Date.parse(openedAt)) {
+        throw new Error('P0_POSITION_TIME_UPDATE_MISMATCH')
+      }
+    } catch (error) {
+      try {
+        await restore({ signal: input.signal ?? signal })
+      } catch (restoreError) {
+        throw new AggregateError(
+          [error, restoreError],
+          'P0_POSITION_TIME_APPLY_AND_RESTORE_FAILED'
+        )
+      }
+      throw error
+    }
+    return {
+      kind: 'POSITION_TIME',
+      accountId,
+      positionId,
+      before: original.openedAt,
+      after: current.openedAt,
+      restore
+    }
+  }
+  return {
+    services: {
+      ensureProfile,
+      restartBackend,
+      assertOwnedPorts
+    },
+    fixtures: {
+      marketOverride,
+      providerBindings,
+      fundingConfig,
+      positionTime,
+      async kline() {
+        throw new Error('P0_RUNTIME_OPERATION_REQUIRED: kline')
+      }
+    }
+  }
+}
+
+function createDefaultP0CaseContext({
+  prepared,
+  options,
+  postgres,
+  processManager,
+  infrastructure,
+  journalMutation,
+  verifyActiveDatabase,
+  runtime,
+  inheritedEnv,
+  signal
+}) {
+  const users = new Map()
+  let browserAttempt = 0
+  const runtimeUrl = (key, fallback) => inheritedEnv[key] ?? fallback
+  const apiUrl = runtimeUrl('API_BASE_URL', 'http://127.0.0.1:18086')
+  const webUrl = runtimeUrl('WEB_BASE_URL', 'http://127.0.0.1:5199')
+  const adminUrl = runtimeUrl('ADMIN_BASE_URL', 'http://127.0.0.1:5200')
+  const userFactory = (role = 'USER') => {
+    if (!users.has(role)) {
+      const digest = createHash('sha256')
+        .update(`${options.runId}\0${role}`)
+        .digest('hex')
+        .slice(0, 20)
+      users.set(role, Object.freeze({
+        email: `p0-${digest}@example.com`,
+        password: `P0!${digest}Aa9`
+      }))
+    }
+    return users.get(role)
+  }
+  const userApi = (page, path, request = {}) => (
+    requestP0BrowserApi(page, apiUrl, 'fx-platform-auth-token', path, request)
+  )
+  const adminApiForPage = (page, path, request = {}) => (
+    requestP0BrowserApi(page, apiUrl, 'fx-platform-admin-token', path, request)
+  )
+  const fixtureAdminSessions = new WeakMap()
+  const createFixtureAdminApi = async (page) => {
+    const existing = fixtureAdminSessions.get(page)
+    if (existing) return existing
+    let [accessToken, refreshToken] = await page.evaluate(
+      (storageKeys) => storageKeys.map((key) => localStorage.getItem(key)),
+      ['fx-platform-admin-token', 'fx-platform-admin-refresh-token']
+    )
+    if (typeof accessToken !== 'string' || accessToken.length === 0) {
+      throw new Error('P0_ADMIN_SESSION_REQUIRED')
+    }
+    let refreshing
+    const refresh = (requestSignal) => {
+      refreshing ??= requestP0Json(apiUrl, '/api/auth/refresh', {
+        method: 'POST',
+        body: { refreshToken },
+        signal: requestSignal
+      }).then((tokens) => {
+        if (typeof tokens?.accessToken !== 'string'
+          || tokens.accessToken.length === 0
+          || typeof tokens.refreshToken !== 'string'
+          || tokens.refreshToken.length === 0) {
+          throw new Error('P0_ADMIN_SESSION_REFRESH_INVALID')
+        }
+        accessToken = tokens.accessToken
+        refreshToken = tokens.refreshToken
+      }).finally(() => {
+        refreshing = undefined
+      })
+      return refreshing
+    }
+    const admin = async (path, request = {}) => {
+      try {
+        return await requestP0Json(apiUrl, path, {
+          ...request,
+          token: accessToken
+        })
+      } catch (error) {
+        if (error?.status !== 401
+          || typeof refreshToken !== 'string'
+          || refreshToken.length === 0) {
+          throw error
+        }
+        await refresh(request.signal)
+        return requestP0Json(apiUrl, path, {
+          ...request,
+          token: accessToken
+        })
+      }
+    }
+    fixtureAdminSessions.set(page, admin)
+    return admin
+  }
+  const snapshotAccount = async (page) => {
+    const accounts = await userApi(page, '/api/accounts')
+    const activeDemoAccounts = accounts.filter((candidate) => (
+      candidate.accountType === 'DEMO' && candidate.status === 'ACTIVE'
+    ))
+    assert(
+      activeDemoAccounts.length === 1,
+      'authenticated user must own one ACTIVE DEMO account'
+    )
+    const account = activeDemoAccounts[0]
+    const accountId = encodeURIComponent(account.id)
+    const [
+      summary,
+      wallets,
+      settings,
+      ordersPage,
+      tradesPage,
+      positionsPage,
+      positionHistoryPage,
+      fundingPage,
+      assetLedger,
+      transfersPage
+    ] = await Promise.all([
+      userApi(page, `/api/accounts/${accountId}/summary`),
+      userApi(page, `/api/accounts/${accountId}/wallet-balances`),
+      userApi(page, `/api/accounts/${accountId}/trading-settings`),
+      userApi(page, `/api/trading/orders?accountId=${accountId}&page=0&size=200`),
+      userApi(page, `/api/trading/trades?accountId=${accountId}&page=0&size=200`),
+      userApi(page, `/api/trading/positions?accountId=${accountId}&page=0&size=200`),
+      userApi(page, `/api/trading/positions/history?accountId=${accountId}&page=0&size=200`),
+      userApi(page, `/api/trading/funding/settlements?accountId=${accountId}&page=0&size=200`),
+      userApi(page, `/api/accounts/${accountId}/asset-ledger`),
+      userApi(page, `/api/accounts/${accountId}/transfers?page=0&size=200`)
+    ])
+    return {
+      accounts,
+      activeDemoAccounts,
+      account,
+      summary,
+      wallets,
+      settings,
+      orders: pageContent(ordersPage),
+      trades: pageContent(tradesPage),
+      positions: pageContent(positionsPage),
+      positionHistory: pageContent(positionHistoryPage),
+      fundingSettlements: pageContent(fundingPage),
+      assetLedger: pageContent(assetLedger),
+      transfers: pageContent(transfersPage)
+    }
+  }
+  const snapshotMarket = async (symbol = SPOT_SYMBOL) => {
+    const [symbols, rules, quote] = await Promise.all([
+      requestP0Json(apiUrl, '/api/market/symbols'),
+      requestP0Json(
+        apiUrl,
+        `/api/market/symbols/${encodeURIComponent(symbol)}/rules`
+      ),
+      requestP0Json(apiUrl, `/api/market/quotes/${encodeURIComponent(symbol)}`)
+    ])
+    const market = symbols.find((candidate) => candidate.symbol === symbol)
+    const perpetual = market?.productType === 'LINEAR_PERP'
+      || String(symbol).toUpperCase().endsWith('-PERP')
+    const reference = perpetual
+      ? await requestP0Json(
+          apiUrl,
+          `/api/market/perpetuals/${encodeURIComponent(symbol)}/reference`
+        )
+      : undefined
+    return { symbols, rules, quote, ...(perpetual ? { reference } : {}) }
+  }
+  const activeDatabaseSegment = () => (
+    prepared.activeDatabaseSegment ?? prepared.matrixDatabase
+  )
+  const query = (sql, details = {}) => postgres.queryDatabase(
+    activeDatabaseSegment(),
+    sql,
+    { ...details, signal: details.signal ?? signal }
+  )
+  const snapshotTradingRows = async (targetAccountId) => {
+    if (typeof targetAccountId !== 'string' || targetAccountId.length === 0) {
+      throw new Error('P0_ACCOUNT_ID_REQUIRED')
+    }
+    const raw = await query(`
+      SELECT json_build_object(
+        'database', current_database(),
+        'activeDemoAccounts', (
+          SELECT count(*)
+          FROM core.trading_accounts candidate
+          WHERE candidate.user_id = (
+            SELECT owner.user_id
+            FROM core.trading_accounts owner
+            WHERE owner.id = '${sqlLiteral(targetAccountId)}'
+          )
+            AND candidate.account_type = 'DEMO'
+            AND candidate.status = 'ACTIVE'
+        ),
+        'orders', (
+          SELECT count(*) FROM trading.orders
+          WHERE account_id = '${sqlLiteral(targetAccountId)}'
+        ),
+        'trades', (
+          SELECT count(*) FROM trading.trades
+          WHERE account_id = '${sqlLiteral(targetAccountId)}'
+        ),
+        'openPositions', (
+          SELECT count(*) FROM trading.positions
+          WHERE account_id = '${sqlLiteral(targetAccountId)}' AND status = 'OPEN'
+        ),
+        'fundingSettlements', (
+          SELECT count(*) FROM trading.funding_settlements
+          WHERE account_id = '${sqlLiteral(targetAccountId)}'
+        ),
+        'accountRow', (
+          SELECT to_jsonb(account_row)
+          FROM core.trading_accounts account_row
+          WHERE account_row.id = '${sqlLiteral(targetAccountId)}'
+        ),
+        'walletRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(wallet_row) ORDER BY wallet_row.wallet_type, wallet_row.asset)
+          FROM core.wallet_balances wallet_row
+          WHERE wallet_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'orderRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(order_row) ORDER BY order_row.created_at, order_row.id)
+          FROM trading.orders order_row
+          WHERE order_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'orderEventRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(event_row) ORDER BY event_row.created_at, event_row.id)
+          FROM trading.order_events event_row
+          JOIN trading.orders order_row ON order_row.id = event_row.order_id
+          WHERE order_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'tradeRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(trade_row) ORDER BY trade_row.executed_at, trade_row.id)
+          FROM trading.trades trade_row
+          WHERE trade_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'positionRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(position_row) ORDER BY position_row.opened_at, position_row.id)
+          FROM trading.positions position_row
+          WHERE position_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'spotPositionRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(position_row) ORDER BY position_row.asset, position_row.id)
+          FROM trading.spot_positions position_row
+          WHERE position_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'symbolSettingRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(setting_row) ORDER BY setting_row.symbol)
+          FROM trading.account_symbol_settings setting_row
+          WHERE setting_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'assetLedgerRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(ledger_row) ORDER BY ledger_row.created_at, ledger_row.id)
+          FROM ledger.asset_ledger_entries ledger_row
+          WHERE ledger_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'cashLedgerRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(ledger_row) ORDER BY ledger_row.created_at, ledger_row.id)
+          FROM ledger.ledger_entries ledger_row
+          WHERE ledger_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'fundingSettlementRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(settlement_row) ORDER BY settlement_row.funding_time, settlement_row.id)
+          FROM trading.funding_settlements settlement_row
+          WHERE settlement_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'batchActionRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(batch_row) ORDER BY batch_row.created_at, batch_row.id)
+          FROM trading.batch_action_requests batch_row
+          WHERE batch_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'auditRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(audit_row) ORDER BY audit_row.created_at, audit_row.id)
+          FROM audit.audit_logs audit_row
+          WHERE audit_row.actor_user_id = (
+            SELECT owner.user_id
+            FROM core.trading_accounts owner
+            WHERE owner.id = '${sqlLiteral(targetAccountId)}'
+          )
+            AND (
+              audit_row.target_id = '${sqlLiteral(targetAccountId)}'
+              OR audit_row.details::text LIKE '%${sqlLiteral(targetAccountId)}%'
+            )
+        ), '[]'::jsonb)
+      )::text;
+    `)
+    const json = String(raw).split(/\r?\n/).filter(Boolean).at(-1)
+    return JSON.parse(json)
+  }
+  const assertDedicatedDatabase = async () => {
+    const expectedDatabase = activeDatabaseSegment()
+    assertP0DatabaseName(expectedDatabase)
+    const actual = await query('SELECT current_database();')
+    assert(
+      actual === expectedDatabase,
+      'P0 case DB oracle must use the active profile database'
+    )
+    return actual
+  }
+  const defaultCaseRuntime = createP0CaseRuntimeCapabilities({
+    prepared,
+    signal,
+    processManager,
+    infrastructure,
+    journalMutation,
+    verifyActiveDatabase,
+    createAdminApi: createFixtureAdminApi,
+    adminApi: adminApiForPage,
+    query
+  })
+  const uiOverrides = { ...(runtime.p0Ui ?? {}) }
+  const startBrowser = uiOverrides.launchBrowser ?? launchBrowser
+  delete uiOverrides.launchBrowser
+  const launchOwnedBrowser = () => {
+    browserAttempt += 1
+    return runP0JournaledMutation({
+      artifactBase: prepared.artifactBase,
+      runId: options.runId,
+      runToken: prepared.ownerToken,
+      resource: {
+        type: 'process',
+        id: `browser:${browserAttempt}`,
+        live: true,
+        commandFingerprint: sha256Text(`owned-p0-browser:${browserAttempt}`)
+      },
+      start: (markStarted) => startBrowser({ onSpawn: markStarted, signal }),
+      stopLiveProcess: (browser) => browser?.close(),
+      signal
+    })
+  }
+  const ui = {
+    launchBrowser: launchOwnedBrowser,
+    createEvidencePage: (browserInstance, pageOptions = {}) => createEvidencePage(
+      browserInstance,
+      {
+        webBaseUrl: webUrl,
+        adminBaseUrl: adminUrl,
+        apiBaseUrl: apiUrl,
+        ...pageOptions
+      }
+    ),
+    registerViaUi,
+    loginViaUi,
+    loginAdminViaUi,
+    logoutViaUi,
+    openTradePanel,
+    withCapturedMutation,
+    submitOrderViaUi,
+    setPerpetualSettingsViaUi,
+    positionActionViaUi,
+    closeAllPositionsViaUi,
+    transferViaUi,
+    resetDemoViaUi,
+    acceptNextNativeDialog,
+    followLoginPromptViaUi,
+    cancelAllOrdersViaUi,
+    ...uiOverrides
+  }
+  return buildP0Context({
+    run: Object.freeze({
+      runId: options.runId,
+      mode: String(options.mode).toUpperCase(),
+      commit: prepared.identity?.commit,
+      artifactRoot: prepared.runRoot
+    }),
+    authority: prepared.authorityState ?? {
+      status: 'PENDING',
+      authorityBundleFixture: 'BLOCKED'
+    },
+    ui,
+    api: {
+      user: userApi,
+      admin: adminApiForPage,
+      snapshotAccount,
+      snapshotMarket,
+      ...(runtime.p0Api ?? {})
+    },
+    db: {
+      query,
+      snapshotTradingRows,
+      assertDedicatedDatabase,
+      ...(runtime.p0Db ?? {})
+    },
+    events: {
+      waitForStompEvent: waitForP0StompEvent,
+      snapshotFrames: snapshotP0StompFrames,
+      probeForbiddenSubscription: probeForbiddenStompSubscription,
+      ...(runtime.p0Events ?? {})
+    },
+    services: {
+      ensureProfile: runtime.ensureProfile ?? defaultCaseRuntime.services.ensureProfile,
+      restartBackend: runtime.restartBackend ?? defaultCaseRuntime.services.restartBackend,
+      assertOwnedPorts: runtime.assertOwnedPorts ?? defaultCaseRuntime.services.assertOwnedPorts,
+      ...(runtime.p0Services ?? {})
+    },
+    fixtures: {
+      marketOverride: runtime.marketOverride ?? defaultCaseRuntime.fixtures.marketOverride,
+      providerBindings: runtime.providerBindings ?? defaultCaseRuntime.fixtures.providerBindings,
+      fundingConfig: runtime.fundingConfig ?? defaultCaseRuntime.fixtures.fundingConfig,
+      positionTime: runtime.positionTime ?? defaultCaseRuntime.fixtures.positionTime,
+      kline: runtime.kline ?? defaultCaseRuntime.fixtures.kline,
+      ...(runtime.p0Fixtures ?? {})
+    },
+    evidence: {
+      captureCheckpoint,
+      writeCaseResultAtomic,
+      ...(runtime.p0Evidence ?? {})
+    },
+    userFactory,
+    adminFactory: () => p0AuthorityAdminCredentials(prepared)
+  })
+}
+
+async function requestP0BrowserApi(page, baseUrl, tokenKey, path, request = {}) {
+  const token = await page.evaluate((storageKey) => localStorage.getItem(storageKey), tokenKey)
+  if (typeof token !== 'string' || token.length === 0) throw new Error('P0_BROWSER_SESSION_REQUIRED')
+  return requestP0Json(baseUrl, path, { ...request, token })
+}
+
+async function requestP0Json(baseUrl, path, request = {}) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: request.method ?? 'GET',
+    headers: {
+      ...(request.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(request.token ? { Authorization: `Bearer ${request.token}` } : {})
+    },
+    body: request.body === undefined ? undefined : JSON.stringify(request.body),
+    signal: request.signal
+      ? AbortSignal.any([
+          request.signal,
+          AbortSignal.timeout(request.timeoutMs ?? 30000)
+        ])
+      : operationSignal(request.timeoutMs ?? 30000)
+  })
+  const payload = await response.json().catch(() => null)
+  if (!response.ok || payload?.success === false) {
+    const error = new Error(
+      payload?.error?.code
+        ?? payload?.code
+        ?? `HTTP_${response.status}`
+    )
+    error.status = response.status
+    error.code = payload?.error?.code ?? payload?.code ?? `HTTP_${response.status}`
+    throw error
+  }
+  return payload?.data ?? payload
+}
+
+async function waitForP0StompEvent(page, expected, options = {}) {
+  return waitFor(() => page.p0Evidence.stompFrames.find((frame) => {
+    if (typeof expected === 'function') return expected(frame)
+    if (String(expected).startsWith('/')) return frame.destination === expected
+    return frame.direction === 'received' && frame.eventType === expected
+  }), `STOMP event ${typeof expected === 'string' ? expected : 'predicate'}`, options.timeoutMs ?? 15000)
+}
+
+export async function probeForbiddenStompSubscription(page, destination) {
+  if (typeof destination !== 'string'
+    || !destination.startsWith('/topic/trading/accounts/')) {
+    throw new Error('P0_FORBIDDEN_STOMP_DESTINATION_REQUIRED')
+  }
+  const apiUrl = page.p0Options?.apiBaseUrl
+    ?? process.env.API_BASE_URL
+    ?? 'http://127.0.0.1:18086'
+  const result = await page.evaluate(async (baseUrl, targetDestination) => {
+    const token = localStorage.getItem('fx-platform-auth-token')
+    if (!token) throw new Error('P0_BROWSER_SESSION_REQUIRED')
+    const url = new URL(baseUrl)
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    url.pathname = '/ws'
+    url.search = ''
+    url.hash = ''
+    return new Promise((resolvePromise, rejectPromise) => {
+      const socket = new WebSocket(url.toString(), ['v12.stomp', 'v11.stomp'])
+      let subscribed = false
+      const timeout = window.setTimeout(() => {
+        socket.close()
+        rejectPromise(new Error('P0_FORBIDDEN_STOMP_SUBSCRIPTION_NOT_REJECTED'))
+      }, 10000)
+      const finish = (value, error) => {
+        window.clearTimeout(timeout)
+        socket.onopen = null
+        socket.onmessage = null
+        socket.onerror = null
+        socket.onclose = null
+        if (socket.readyState < WebSocket.CLOSING) socket.close()
+        if (error) rejectPromise(error)
+        else resolvePromise(value)
+      }
+      socket.onopen = () => socket.send(
+        `CONNECT\naccept-version:1.2,1.1\nheart-beat:0,0\nAuthorization:Bearer ${token}\n\n\u0000`
+      )
+      socket.onmessage = ({ data }) => {
+        const frame = String(data)
+        if (frame.startsWith('CONNECTED')) {
+          subscribed = true
+          socket.send(
+            `SUBSCRIBE\nid:p0-forbidden-account-topic\nack:auto\ndestination:${targetDestination}\n\n\u0000`
+          )
+          return
+        }
+        if (frame.startsWith('ERROR')) {
+          finish({ status: 'REJECTED', command: 'ERROR' })
+        }
+      }
+      socket.onerror = () => {
+        if (!subscribed) finish(null, new Error('P0_FORBIDDEN_STOMP_PROBE_CONNECT_FAILED'))
+      }
+      socket.onclose = () => {
+        if (subscribed) finish({ status: 'REJECTED', command: 'CLOSE' })
+        else finish(null, new Error('P0_FORBIDDEN_STOMP_PROBE_CONNECT_FAILED'))
+      }
+    })
+  }, apiUrl, destination)
+  assert(
+    result?.status === 'REJECTED',
+    'legacy mutable account topic must be rejected'
+  )
+  return result
+}
+
+function snapshotP0StompFrames(page) {
+  return page.p0Evidence.stompFrames.map((frame) => ({ ...frame }))
+}
+
 export function createDefaultP0Dependencies(runtime = {}) {
   const platform = P0_HOST_PLATFORM
   const processTreeProvider = runtime.processTreeProvider
@@ -8535,6 +13226,51 @@ export function createDefaultP0Dependencies(runtime = {}) {
       ? (segmentName, details) => infrastructure.databaseExists(segmentName, details)
       : async () => false)
   const dispatchCaseOperation = runtime.dispatchCase ?? runCase
+  const ensureParentFrontends = async (context, { signal } = {}) => {
+    assertP0ProcessTreeCapability()
+    throwIfP0Aborted(signal)
+    context.parentFrontends ??= new Map()
+    if (!(context.parentFrontends instanceof Map)) {
+      throw new Error('P0_PARENT_FRONTEND_STATE_INVALID')
+    }
+    const specifications = [
+      { surface: 'web', port: 5199, url: 'http://127.0.0.1:5199' },
+      { surface: 'admin', port: 5200, url: 'http://127.0.0.1:5200' }
+    ]
+    for (const { surface, port, url } of specifications) {
+      let frontend = context.parentFrontends.get(surface)
+      if (!frontend) {
+        await infrastructure.assertPortsFree([port], { signal })
+        throwIfP0Aborted(signal)
+        frontend = await runP0JournaledMutation({
+          artifactBase,
+          runId: context.options.runId,
+          runToken: context.ownerToken,
+          resource: {
+            type: 'process',
+            id: `frontend:${surface}`,
+            live: true,
+            commandFingerprint: sha256Text(`owned-p0-frontend:${surface}`)
+          },
+          start: () => processManager.startOwnedFrontend(surface, {
+            environment: {
+              ...commandEnvironment,
+              VITE_API_BASE_URL: 'http://127.0.0.1:18086'
+            },
+            signal
+          }),
+          stopLiveProcess: (handle, details) => (
+            processManager.stopOwnedFrontend(handle, details)
+          ),
+          signal,
+          now
+        })
+        context.parentFrontends.set(surface, frontend)
+      }
+      await processManager.waitForFrontend(frontend, url, signal)
+      throwIfP0Aborted(signal)
+    }
+  }
 
   const finalizePendingCleanupReceipt = async (cleanedContext, runId, { signal } = {}) => {
     throwIfP0Aborted(signal)
@@ -8798,7 +13534,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
       throwIfP0Aborted(signal)
       redisSnapshot = await snapshotRedisKeys({ redis, keys: redisKeys, signal })
       throwIfP0Aborted(signal)
-      touchedRedisKeys = []
+      touchedRedisKeys = [...redisKeys]
       await writeRedisRecoveryState({
         runRoot: reservation.runRoot,
         runId: options.runId,
@@ -8848,11 +13584,12 @@ export function createDefaultP0Dependencies(runtime = {}) {
       return buildPreparedContext(redisSnapshot, touchedRedisKeys)
     },
     phaseOperations: {
+      ensureParentFrontends,
       async runPreflight(context, _plan, { signal } = {}) {
         assertP0ProcessTreeCapability()
         return runP0Preflight({
           projectRoot,
-          gateOutput: join(context.runRoot, 'preflight', 'surefire-gate.json'),
+          gateOutput: join(context.runRoot, 'preflight', 'surefire-details.json'),
           databaseUrl: context.databaseUrl,
           now,
           signal,
@@ -8924,10 +13661,13 @@ export function createDefaultP0Dependencies(runtime = {}) {
           }
         })
       },
-      stopProfileBackend(_context, _profile, { signal } = {}) {
+      async stopProfileBackend(context, _profile, { signal } = {}) {
         assertP0ProcessTreeCapability()
         throwIfP0Aborted(signal)
-        return processManager.stopParentBackend({ signal })
+        if (!context.activeBackend) return
+        const backend = context.activeBackend
+        await processManager.stopOwnedBackend(context.activeBackend, { signal })
+        if (context.activeBackend === backend) context.activeBackend = undefined
       },
       assertProfilePortFree(port, _context, _profile, { signal } = {}) {
         assertP0ProcessTreeCapability()
@@ -8994,10 +13734,10 @@ export function createDefaultP0Dependencies(runtime = {}) {
         }
         return descriptor
       },
-      startProfileBackend({ phase, profile, attempt, environment, signal }, context) {
+      async startProfileBackend({ phase, profile, attempt, environment, signal }, context) {
         assertP0ProcessTreeCapability()
         const ownedEnvironment = withVerifiedComposeDatabaseCredentials(environment, composeIdentity)
-        return runP0JournaledMutation({
+        const backend = await runP0JournaledMutation({
           artifactBase,
           runId: context.options.runId,
           runToken: context.ownerToken,
@@ -9016,6 +13756,9 @@ export function createDefaultP0Dependencies(runtime = {}) {
           signal,
           now
         })
+        context.activeBackend = backend
+        context.activeProfileEnvironment = ownedEnvironment
+        return backend
       },
       waitForProfileHealth(backend, _context, _profile, { signal } = {}) {
         assertP0ProcessTreeCapability()
@@ -9056,9 +13799,11 @@ export function createDefaultP0Dependencies(runtime = {}) {
         }
         throwIfP0Aborted(signal)
       },
-      stopParentBackend(_context, { signal } = {}) {
+      async stopParentBackend(context, { signal } = {}) {
         assertP0ProcessTreeCapability()
-        return processManager.stopParentBackend({ signal })
+        await processManager.stopParentBackend({ signal })
+        context.activeBackend = undefined
+        context.parentFrontends?.clear()
       },
       assertBusinessPortsFree(ports, _context, { signal } = {}) {
         assertP0ProcessTreeCapability()
@@ -9107,11 +13852,25 @@ export function createDefaultP0Dependencies(runtime = {}) {
       async runAuthority(context, plan, { signal } = {}) {
         assertP0ProcessTreeCapability()
         throwIfP0Aborted(signal)
-        if (typeof runtime.runAuthority !== 'function') {
-          throw new Error('P0_AUTHORITY_OPERATION_REQUIRED')
-        }
-        const result = await runtime.runAuthority(context, plan, { signal })
+        const result = typeof runtime.runAuthority === 'function'
+          ? await runtime.runAuthority(context, plan, { signal })
+          : await runAuthorityBundleGate(context.p0Context, {
+              signal,
+              plan,
+              adminCredentials: p0AuthorityAdminCredentials(context)
+            })
         throwIfP0Aborted(signal)
+        if (['PASS', 'BLOCKED'].includes(result?.authorityBundleFixture)) {
+          context.authorityState ??= {
+            status: 'PENDING',
+            authorityBundleFixture: 'BLOCKED'
+          }
+          context.authorityState.authorityBundleFixture = result.authorityBundleFixture
+          context.authorityState.status = 'COMPLETE'
+          context.authorityState.evidence = result
+          context.authorityBundleFixture = result.authorityBundleFixture
+          context.authorityEvidence = result
+        }
         return result
       },
       async writeReport(context, plan, { signal } = {}) {
@@ -9119,7 +13878,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
         return executeP0ReportPhaseBoundary({
           context,
           plan,
-          writePhaseReport: runtime.writePhaseReport,
+          writePhaseReport: runtime.writePhaseReport ?? defaultP0ReportPhaseWriter,
           signal
         })
       }
@@ -9128,7 +13887,44 @@ export function createDefaultP0Dependencies(runtime = {}) {
       assertP0ProcessTreeCapability()
       return dispatchCaseOperation(...args)
     },
-    handlers: runtime.handlers ?? Object.create(null),
+    createP0Context(prepared, options, { signal } = {}) {
+      if (typeof runtime.createP0Context === 'function') {
+        return runtime.createP0Context(prepared, options, { signal })
+      }
+      return createDefaultP0CaseContext({
+        prepared,
+        options,
+        postgres,
+        processManager,
+        infrastructure,
+        journalMutation(details) {
+          return runP0JournaledMutation({
+            artifactBase: prepared.artifactBase ?? artifactBase,
+            runId: options.runId,
+            runToken: prepared.ownerToken,
+            now,
+            ...details
+          })
+        },
+        verifyActiveDatabase({
+          segmentName,
+          databaseUrl,
+          signal: verificationSignal
+        }) {
+          return verifyLiveBackendDatabaseIdentity({
+            segmentName,
+            runToken: prepared.ownerToken,
+            databaseUrl,
+            postgres,
+            signal: verificationSignal
+          })
+        },
+        runtime,
+        inheritedEnv,
+        signal
+      })
+    },
+    handlers: runtime.handlers ?? CASE_HANDLERS,
     async writeReport(execution, prepared, { signal } = {}) {
       assertP0ProcessTreeCapability()
       throwIfP0Aborted(signal)
@@ -9212,7 +14008,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
       throwIfP0Aborted(signal)
       return persisted
     },
-    async cleanup(prepared, { signal } = {}, options) {
+    async cleanup(prepared, { signal, error: runError } = {}, options) {
       throwIfP0Aborted(signal)
       let context = prepared
       let active
@@ -9233,6 +14029,14 @@ export function createDefaultP0Dependencies(runtime = {}) {
         )
         throwIfP0Aborted(signal)
       } else {
+        if (runError) {
+          try {
+            await lstat(resolveP0RunRoot(artifactBase, options.runId))
+          } catch (error) {
+            if (error?.code !== 'ENOENT') throw error
+            return { status: 'NOT_STARTED' }
+          }
+        }
         const recovered = await recoverP0ActiveControlContext(artifactBase, options.runId)
         throwIfP0Aborted(signal)
         if (recovered.alreadyCleaned) {
@@ -9267,11 +14071,21 @@ export function createDefaultP0Dependencies(runtime = {}) {
         requireTreeProof: platform === 'win32',
         signal
       })
+      if (prepared) {
+        await restoreP0CaseFixtures(prepared, { signal })
+        throwIfP0Aborted(signal)
+      }
       if (platform === 'win32' && hasJournaledProcesses) {
         await terminateOwnedProcesses()
         throwIfP0Aborted(signal)
       }
       await processManager.stopParentBackend({ signal })
+      if (prepared) {
+        prepared.activeBackend = undefined
+        prepared.activeProfileRuntime = undefined
+        prepared.activeProfileEnvironment = undefined
+        prepared.parentFrontends?.clear()
+      }
       throwIfP0Aborted(signal)
       if (platform !== 'win32' && hasJournaledProcesses) {
         await terminateOwnedProcesses()
@@ -9421,6 +14235,111 @@ export function createDefaultP0Dependencies(runtime = {}) {
   return dependencies
 }
 
+function p0AuthorityBlocker() {
+  return {
+    status: 'BLOCKED',
+    reason: 'AUTHORITY_BUNDLE_FIXTURE_MISSING',
+    reasonCode: 'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+  }
+}
+
+function blockedP0AuthorityFragment(definition, subruns, details = {}) {
+  const attempt = Number.isSafeInteger(details.attempt) && details.attempt > 0
+    ? details.attempt
+    : 1
+  const profileAttempt = Number.isSafeInteger(details.profileAttempt)
+    && details.profileAttempt > 0
+    ? details.profileAttempt
+    : 1
+  const timestamp = new Date().toISOString()
+  const profiles = new Set(subruns.map(({ profile }) => profile))
+  const viewports = new Set(subruns.map(({ viewport }) => viewport))
+  const blocker = p0AuthorityBlocker()
+  return {
+    schemaVersion: 1,
+    id: definition.id,
+    status: 'BLOCKED',
+    ...(typeof details.commit === 'string' && details.commit.length > 0
+      ? { commit: details.commit }
+      : {}),
+    ...(typeof details.database === 'string' && details.database.length > 0
+      ? { database: details.database }
+      : {}),
+    ...(profiles.size === 1 ? { profile: [...profiles][0] } : {}),
+    ...(viewports.size === 1 ? { viewport: [...viewports][0] } : {}),
+    startedAt: timestamp,
+    finishedAt: timestamp,
+    attempt,
+    durationMs: 0,
+    scopeComplete: true,
+    preconditions: [],
+    userActions: [],
+    fixtureActions: [],
+    authorityBundleFixture: 'BLOCKED',
+    contractProbes: [],
+    replayProbes: [],
+    checkpoints: [],
+    financialCalculation: {
+      status: 'BLOCKED',
+      reasonCode: blocker.reasonCode
+    },
+    uiEvidence: [],
+    networkEvidence: [],
+    apiEvidence: [],
+    dbEvidence: [],
+    eventEvidence: [],
+    oracleEvidence: [],
+    consoleErrors: [],
+    subruns: subruns.map((subrun) => ({
+      ...subrun,
+      status: 'BLOCKED',
+      attempt,
+      profileAttempt,
+      durationMs: 0,
+      artifactHashes: {},
+      failureOrBlocker: blocker
+    })),
+    artifactHashes: {},
+    cleanup: { status: 'PASS' },
+    failureOrBlocker: blocker
+  }
+}
+
+function combineP0AuthorityFragments(
+  definition,
+  selectedSubruns,
+  executed,
+  blocked,
+  details
+) {
+  if (!executed) return blockedP0AuthorityFragment(definition, blocked, details)
+  const executedById = new Map(
+    Array.isArray(executed.subruns)
+      ? executed.subruns.map((subrun) => [subrun?.id, subrun])
+      : []
+  )
+  const blockedById = new Map(
+    blockedP0AuthorityFragment(definition, blocked, {
+      attempt: executed.attempt ?? details.attempt,
+      profileAttempt: executed.subruns?.[0]?.profileAttempt ?? details.profileAttempt
+    }).subruns.map((subrun) => [subrun.id, subrun])
+  )
+  const subruns = selectedSubruns.map(({ id }) => (
+    executedById.get(id) ?? blockedById.get(id)
+  ))
+  if (subruns.some((subrun) => !subrun)) {
+    throw new Error('P0_AUTHORITY_EXECUTION_FRAGMENT_INVALID')
+  }
+  return {
+    ...executed,
+    status: 'BLOCKED',
+    authorityBundleFixture: 'BLOCKED',
+    scopeComplete: true,
+    subruns,
+    failureOrBlocker: p0AuthorityBlocker()
+  }
+}
+
 export async function runP0Suite(options, dependencies) {
   const usesDefaultDependencies = dependencies === undefined
     || defaultP0DependencyInstances.has(dependencies)
@@ -9439,14 +14358,24 @@ export async function runP0Suite(options, dependencies) {
       async prepare(receivedOptions, details) {
         const prepared = await dependencies.initializeOwnership(receivedOptions, plan, details)
         if (!prepared || typeof prepared !== 'object') throw new Error('P0_OWNERSHIP_INVALID')
-        return {
+        const preparedContext = {
           ...prepared,
           options: receivedOptions,
           plan,
-          caseResults: Array.isArray(prepared.caseResults) ? prepared.caseResults : []
+          caseResults: Array.isArray(prepared.caseResults) ? prepared.caseResults : [],
+          authorityState: prepared.authorityState ?? {
+            status: 'PENDING',
+            authorityBundleFixture: 'BLOCKED'
+          }
         }
+        const p0Context = dependencies.createP0Context
+          ? await dependencies.createP0Context(preparedContext, receivedOptions, details)
+          : null
+        preparedContext.p0Context = p0Context
+        return preparedContext
       },
       async execute(prepared, details) {
+        const p0Context = prepared.p0Context ?? prepared
         const baseOperations = typeof dependencies.phaseOperations === 'function'
           ? await dependencies.phaseOperations(prepared, plan, details)
           : dependencies.phaseOperations
@@ -9465,15 +14394,107 @@ export async function runP0Suite(options, dependencies) {
               const entries = phase === 'selected'
                 ? plan.executionEntries
                 : plan.executionEntries.filter((entry) => entry.phase === phase)
-              const executeEntry = async (entry, selectedSubruns = entry.selectedSubruns) => {
+              const executeEntry = async (
+                entry,
+                selectedSubruns = entry.selectedSubruns,
+                profileAttempt = 1,
+                fragment = false
+              ) => {
+                const blockedSubruns = authorityBlockedSubruns(
+                  entry.definition,
+                  selectedSubruns,
+                  prepared.authorityState
+                )
+                const blockedIds = new Set(blockedSubruns.map(({ id }) => id))
+                const executableSubruns = selectedSubruns.filter(
+                  ({ id }) => !blockedIds.has(id)
+                )
                 const definition = {
                   ...entry.definition,
-                  requiredSubruns: selectedSubruns
+                  requiredSubruns: executableSubruns
                 }
-                throwIfP0Aborted(signal)
-                const result = await dispatchCase(definition, prepared, handlers, { signal })
-                throwIfP0Aborted(signal)
-                return result
+                let caseContext = p0Context
+                if (fragment
+                  && p0Context?.run?.artifactRoot
+                  && typeof p0Context?.evidence?.captureCheckpoint === 'function'
+                  && typeof p0Context?.evidence?.writeCaseResultAtomic === 'function') {
+                  const evidence = p0Context.evidence
+                  const profile = selectedSubruns[0].profile
+                  const subrunIdentity = `${
+                    selectedSubruns.map(({ id }) => id).join('-')
+                  }-p${profileAttempt}`
+                  caseContext = {
+                    ...p0Context,
+                    evidence: {
+                      ...evidence,
+                      captureCheckpoint(checkpointContext, name, scope = {}) {
+                        return evidence.captureCheckpoint.call(
+                          evidence,
+                          checkpointContext,
+                          name,
+                          { ...scope, subrunIdentity }
+                        )
+                      },
+                      writeCaseResultAtomic(_path, result) {
+                        return evidence.writeCaseResultAtomic.call(
+                          evidence,
+                          join(
+                            p0Context.run.artifactRoot,
+                            safeName(entry.id),
+                            'fragments',
+                            `${safeName(profile)}-${profileAttempt}.json`
+                          ),
+                          result
+                        )
+                      }
+                    }
+                  }
+                }
+                const details = {
+                  signal,
+                  attempt: 1,
+                  profileAttempt,
+                  commit: p0Context?.run?.commit,
+                  database: prepared.activeDatabaseSegment
+                }
+                let result
+                let failure
+                try {
+                  throwIfP0Aborted(signal)
+                  result = executableSubruns.length > 0
+                    ? await dispatchCase(definition, caseContext, handlers, details)
+                    : null
+                  throwIfP0Aborted(signal)
+                } catch (error) {
+                  failure = error
+                }
+                try {
+                  await restoreP0CaseFixtures(prepared, { signal })
+                } catch (error) {
+                  failure = appendFailure(failure, error, 'P0 case fixture cleanup')
+                }
+                if (failure) throw failure
+                const combined = blockedSubruns.length > 0
+                  ? combineP0AuthorityFragments(
+                      entry.definition,
+                      selectedSubruns,
+                      result,
+                      blockedSubruns,
+                      details
+                    )
+                  : result
+                if (blockedSubruns.length > 0
+                  && typeof caseContext?.evidence?.writeCaseResultAtomic === 'function') {
+                  caseContext.evidence.writeCaseResultAtomic(
+                    join(
+                      p0Context?.run?.artifactRoot ?? prepared.runRoot,
+                      safeName(entry.id),
+                      'result.json'
+                    ),
+                    combined
+                  )
+                }
+                return combined
               }
               if (supportsP0ProfileLifecycle(baseOperations)) {
                 const fragmentsByEntry = new Map(entries.map(({ id }) => [id, []]))
@@ -9496,14 +14517,23 @@ export async function runP0Suite(options, dependencies) {
                     const selectedSubruns = entry.selectedSubruns
                       .filter((subrun) => subrun.profile === profile)
                     fragmentsByEntry.get(entry.id).push(
-                      await executeEntry(entry, selectedSubruns)
+                      await executeEntry(entry, selectedSubruns, attempt, true)
                     )
                   }
                 }
                 for (const entry of entries) {
                   const fragments = fragmentsByEntry.get(entry.id)
                   if (fragments.length === 0) fragments.push(await executeEntry(entry))
-                  prepared.caseResults.push(mergeP0CaseFragments(entry, fragments))
+                  const merged = mergeP0CaseFragments(entry, fragments)
+                  writeCaseResultAtomic(
+                    join(
+                      p0Context?.run?.artifactRoot ?? prepared.runRoot,
+                      safeName(entry.id),
+                      'result.json'
+                    ),
+                    merged
+                  )
+                  prepared.caseResults.push(merged)
                 }
                 return
               }

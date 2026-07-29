@@ -1,0 +1,349 @@
+.disclaimer {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--theme-warning-border);
+  border-radius: 6px;
+  color: var(--theme-warning);
+  background: var(--theme-warning-soft);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.disclaimer p {
+  margin: 0;
+}
+
+.disclaimerEstimate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--theme-text-muted);
+}
+
+.disclaimerEstimate strong {
+  color: var(--theme-text-contrast);
+  font-variant-numeric: tabular-nums;
+}
+
+.sourceBadge {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border: 1px solid var(--theme-success-border);
+  border-radius: 999px;
+  color: var(--theme-success);
+  background: var(--theme-success-soft);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.sourceBadgeStale {
+  border-color: var(--theme-danger-border);
+  color: var(--theme-danger);
+  background: var(--theme-danger-soft);
+}
+
+.sourceDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.sourceState {
+  padding-left: 5px;
+  border-left: 1px solid currentColor;
+}
+
+.settingsBar,
+.protectionEditor {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--theme-border-on-contrast);
+  border-radius: 6px;
+  background: var(--theme-surface-contrast);
+}
+
+.perpetualControls {
+  display: grid;
+  gap: 8px;
+}
+
+.referenceUnavailable {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--theme-border-on-contrast);
+  border-radius: 6px;
+  color: var(--theme-text-muted);
+  background: var(--theme-surface-contrast);
+  font-size: 11px;
+}
+
+.settingsBar {
+  align-items: end;
+  grid-template-columns: repeat(4, minmax(92px, 1fr)) auto;
+}
+
+.settingField,
+.protectionLevel label,
+.dialogForm label {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: var(--theme-text-muted);
+  font-size: 11px;
+}
+
+.settingField select,
+.settingField input,
+.protectionLevel select,
+.protectionLevel input,
+.dialogForm input {
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--theme-border-on-contrast);
+  border-radius: 4px;
+  color: var(--theme-text-contrast);
+  background: var(--theme-surface-contrast);
+  font: inherit;
+}
+
+.settingField select:focus-visible,
+.settingField input:focus-visible,
+.protectionLevel select:focus-visible,
+.protectionLevel input:focus-visible,
+.dialogForm input:focus-visible,
+.settingsBar button:focus-visible,
+.protectionEditor button:focus-visible,
+.dialog button:focus-visible {
+  outline: 2px solid var(--theme-info-border);
+  outline-offset: 1px;
+}
+
+.leverageInput {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.leverageInput input {
+  grid-area: 1 / 1 / 2 / 3;
+  padding-right: 24px;
+}
+
+.leverageInput span {
+  z-index: 1;
+  grid-area: 1 / 2;
+  padding-right: 8px;
+  color: var(--theme-text-muted);
+}
+
+.controlStatus {
+  color: var(--theme-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.controlError {
+  color: var(--theme-danger);
+  font-size: 11px;
+}
+
+.settingsBar > .controlError,
+.settingsBar > .controlStatus {
+  grid-column: 1 / -1;
+}
+
+.controlHeader,
+.controlHeader > span,
+.compactActions,
+.dialogHeader,
+.dialogActions,
+.actionTabs,
+.segmentedControl {
+  display: flex;
+  align-items: center;
+}
+
+.controlHeader,
+.dialogHeader,
+.dialogActions {
+  justify-content: space-between;
+}
+
+.controlHeader > span,
+.compactActions,
+.actionTabs,
+.segmentedControl {
+  gap: 6px;
+}
+
+.controlHeader small {
+  color: var(--theme-text-muted);
+}
+
+.compactActions button,
+.removeAction,
+.actionTabs button,
+.segmentedControl button,
+.dialogHeader button,
+.dialogActions button {
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--theme-border-on-contrast);
+  border-radius: 4px;
+  color: var(--theme-text-contrast);
+  background: var(--theme-surface-contrast);
+  cursor: pointer;
+}
+
+.compactActions button:disabled,
+.removeAction:disabled,
+.actionTabs button:disabled,
+.dialogActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.emptyControl {
+  margin: 0;
+  color: var(--theme-text-muted);
+  font-size: 12px;
+}
+
+.protectionLevels {
+  display: grid;
+  gap: 8px;
+}
+
+.protectionLevel {
+  display: grid;
+  min-width: 0;
+  align-items: end;
+  grid-template-columns: repeat(5, minmax(88px, 1fr)) auto;
+  gap: 8px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--theme-border-on-contrast);
+  border-radius: 5px;
+}
+
+.protectionLevel legend {
+  padding: 0 4px;
+  color: var(--theme-text-muted);
+  font-size: 10px;
+}
+
+.removeAction {
+  color: var(--theme-danger);
+}
+
+.dialogLayer {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.dialogBackdrop {
+  position: absolute;
+  border: 0;
+  background: var(--theme-overlay-medium);
+  inset: 0;
+}
+
+.dialog {
+  position: relative;
+  width: min(440px, 100%);
+  border: 1px solid var(--theme-border-on-contrast);
+  border-radius: 8px;
+  background: var(--theme-surface-contrast);
+  box-shadow: 0 18px 50px var(--theme-shadow-soft);
+}
+
+.dialogHeader,
+.dialogForm {
+  padding: 14px;
+}
+
+.dialogHeader {
+  border-bottom: 1px solid var(--theme-border-on-contrast);
+}
+
+.dialogHeader button {
+  border: 0;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.actionTabs {
+  padding: 10px 14px 0;
+}
+
+.actionTabs button[aria-selected='true'],
+.segmentedControl button[aria-pressed='true'] {
+  border-color: var(--theme-info-border);
+  color: var(--theme-info);
+  background: var(--theme-info-soft);
+}
+
+.dialogForm {
+  display: grid;
+  gap: 12px;
+}
+
+.dialogForm p {
+  margin: 0;
+  color: var(--theme-text-contrast);
+  font-size: 13px;
+}
+
+.dialogActions {
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.dialogActions button:last-child {
+  border-color: var(--theme-info-border);
+  color: var(--theme-text-inverse);
+  background: var(--theme-info);
+}
+
+@media (max-width: 760px) {
+  .settingsBar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .protectionLevel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .removeAction {
+    grid-column: 1 / -1;
+  }
+
+  .actionTabs {
+    align-items: stretch;
+  }
+
+  .actionTabs button {
+    flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dialog,
+  .sourceBadge {
+    scroll-behavior: auto;
+  }
+}

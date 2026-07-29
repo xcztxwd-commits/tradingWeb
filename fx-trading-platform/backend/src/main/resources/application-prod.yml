@@ -1,3 +1,15 @@
+app:
+  engagement:
+    assets:
+      storage: ${ENGAGEMENT_ASSET_STORAGE:disabled}
+      max-bytes: ${ENGAGEMENT_ASSET_MAX_BYTES:5242880}
+    scheduler:
+      enabled: ${ENGAGEMENT_SCHEDULER_ENABLED:true}
+    retention:
+      enabled: ${ENGAGEMENT_RETENTION_ENABLED:true}
+    outbox:
+      enabled: ${ENGAGEMENT_OUTBOX_ENABLED:true}
+
 market:
   demo-quotes:
     enabled: ${MARKET_DEMO_QUOTES_ENABLED:false}

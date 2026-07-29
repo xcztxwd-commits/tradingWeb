@@ -1,0 +1,137 @@
+.root {
+  position: relative;
+  width: var(--select-root-width, max-content);
+  min-width: var(--select-root-min-width, 0);
+  min-height: var(--select-root-min-height, 0);
+  color: var(--select-root-color, var(--theme-text-primary));
+  font-size: var(--select-font-size, 13px);
+}
+
+.button {
+  width: var(--select-button-width, 100%);
+  min-width: var(--select-button-min-width, 0);
+  min-height: var(--select-button-min-height, 36px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--select-button-gap, 12px);
+  border: var(--select-button-border, 1px solid color-mix(in srgb, var(--theme-border) 74%, transparent));
+  border-radius: var(--select-button-radius, 7px);
+  background: var(--select-button-background, var(--theme-background));
+  color: var(--select-button-color, var(--theme-text-primary));
+  padding: var(--select-button-padding, 0 10px 0 12px);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.button:hover {
+  border-color: var(--select-button-hover-border-color, color-mix(in srgb, var(--theme-primary) 42%, transparent));
+  background: var(--select-button-hover-background, var(--theme-surface-elevated));
+  color: var(--select-button-hover-color, var(--select-button-color, var(--theme-text-primary)));
+}
+
+.button:focus-visible {
+  outline: var(--select-button-focus-outline, 2px solid color-mix(in srgb, var(--theme-primary) 28%, transparent));
+  outline-offset: var(--select-button-focus-outline-offset, 2px);
+  border-color: var(--select-button-focus-border-color, color-mix(in srgb, var(--theme-primary-hover) 68%, transparent));
+  background: var(--select-button-focus-background, var(--select-button-background, var(--theme-background)));
+  color: var(--select-button-focus-color, var(--select-button-color, var(--theme-text-primary)));
+}
+
+.root[data-open='true'] .button {
+  border-color: var(--select-button-open-border-color, color-mix(in srgb, var(--theme-border) 74%, transparent));
+  background: var(--select-button-open-background, var(--select-button-background, var(--theme-background)));
+  color: var(--select-button-open-color, var(--select-button-color, var(--theme-text-primary)));
+}
+
+.button:disabled {
+  color: var(--select-button-disabled-color, var(--theme-text-muted));
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.value {
+  min-width: 0;
+  display: var(--select-value-display, inline);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.chevron {
+  flex: 0 0 auto;
+  display: var(--select-chevron-display, block);
+  color: var(--select-chevron-color, var(--theme-primary-hover));
+  transition: transform 160ms ease;
+}
+
+.root[data-open='true'] .chevron {
+  transform: rotate(180deg);
+}
+
+.menu {
+  position: absolute;
+  top: var(--select-menu-top, calc(100% + 6px));
+  right: var(--select-menu-right, auto);
+  bottom: var(--select-menu-bottom, auto);
+  left: var(--select-menu-left, 0);
+  z-index: var(--select-menu-z-index, 80);
+  width: var(--select-menu-width, max-content);
+  min-width: var(--select-menu-min-width, 100%);
+  max-width: var(--select-menu-max-width, min(280px, calc(100vw - 24px)));
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--select-menu-border, color-mix(in srgb, var(--theme-border) 74%, transparent));
+  border-radius: var(--select-menu-radius, 8px);
+  background: var(--select-menu-background, color-mix(in srgb, var(--theme-surface) 96%, var(--theme-background)));
+  padding: 4px;
+}
+
+.option {
+  min-height: var(--select-option-min-height, 34px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--select-option-color, var(--theme-text-primary));
+  padding: 0 8px 0 10px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.option:hover,
+.option[data-active='true'] {
+  background: color-mix(in srgb, var(--theme-text-primary) 8%, transparent);
+}
+
+.option[aria-selected='true'] {
+  background: color-mix(in srgb, var(--theme-primary) 12%, transparent);
+  color: var(--theme-primary-hover);
+  font-weight: 700;
+}
+
+.option:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--theme-primary) 28%, transparent);
+  outline-offset: -2px;
+}
+
+.option svg {
+  flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .chevron,
+  .menu,
+  .option {
+    transition: none;
+    animation: none;
+  }
+}

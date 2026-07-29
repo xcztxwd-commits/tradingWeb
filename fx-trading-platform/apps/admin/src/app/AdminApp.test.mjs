@@ -10,6 +10,7 @@ const appSource = readSource('AdminApp.tsx')
 const mainSource = readSource('../main.tsx')
 const layoutSource = readSource('AdminLayout.tsx')
 const guardSource = readSource('RequireAdmin.tsx')
+const tradingLabIndexSource = readSource('../features/tradingLab/index.ts')
 
 function readSource(relativePath) {
   const absolutePath = join(currentDir, relativePath)
@@ -50,7 +51,6 @@ describe('admin app routing shell', () => {
       ['logs/request-logs', 'request-logs'],
       ['content/notices', 'notices'],
       ['content/news', 'news'],
-      ['content/member-notices', 'member-notices'],
       ['config/settings/site', 'settings-site'],
       ['config/settings/upload', 'settings-upload'],
       ['config/settings/sms', 'settings-sms'],
@@ -59,6 +59,17 @@ describe('admin app routing shell', () => {
     ]) {
       assert.ok(appSource.includes(`<Route path="/${route[0]}" element={<FeatureCrudPage pageKey="${route[1]}" />} />`))
     }
+  })
+
+  it('routes normal messages through their dedicated list and editor pages', () => {
+    assert.match(appSource, /import \{ MemberNoticePage \} from '\.\.\/pages\/MemberNoticePage'/)
+    assert.match(appSource, /import \{ MemberNoticeEditorPage \} from '\.\.\/pages\/MemberNoticeEditorPage'/)
+    assert.match(appSource, /<Route path="\/content\/member-notices" element=\{<MemberNoticePage \/>\} \/>/)
+    assert.match(appSource, /<Route path="\/content\/member-notices\/new" element=\{<MemberNoticeEditorPage \/>\} \/>/)
+    assert.match(appSource, /<Route path="\/content\/member-notices\/:id\/edit" element=\{<MemberNoticeEditorPage \/>\} \/>/)
+    assert.match(appSource, /<Route path="\/content\/messages" element=\{<Navigate to="\/content\/member-notices" replace \/>\} \/>/)
+    assert.doesNotMatch(appSource, /import \{ MessagesPage \}/)
+    assert.doesNotMatch(appSource, /pageKey="member-notices"/)
   })
 
   it('keeps legacy data pages reachable without making them the screenshot menu source', () => {
@@ -93,5 +104,18 @@ describe('admin app routing shell', () => {
     assert.match(guardSource, /getValidAdminToken/)
     assert.match(guardSource, /<Navigate to="\/login"/)
     assert.match(guardSource, /<Outlet \/>/)
+  })
+
+  it('lazy-loads the Trading Lab route behind Suspense and the VIEW authority gate', () => {
+    assert.match(appSource, /import \{[^}]*\blazy\b[^}]*\} from 'react'/)
+    assert.match(appSource, /import \{[^}]*\bSuspense\b[^}]*\} from 'react'/)
+    assert.match(appSource, /lazy\(\(\)\s*=>\s*import\('\.\.\/features\/tradingLab'\)/)
+    assert.match(appSource, /default:\s*module\.TradingLabPage/)
+    assert.doesNotMatch(appSource, /^import\s+.*\bTradingLabPage\b.*from/m)
+    assert.match(appSource, /<Route path="\/trading\/lab"/)
+    assert.match(appSource, /hasAdminAuthority\(['"]TRADING_LAB_VIEW['"]\)/)
+    assert.match(appSource, /<Suspense\b/)
+    assert.match(appSource, /<TradingLabPage\s*\/>/)
+    assert.match(tradingLabIndexSource, /export \{\s*TradingLabPage\s*\} from ['"]\.\/TradingLabPage['"]/)
   })
 })

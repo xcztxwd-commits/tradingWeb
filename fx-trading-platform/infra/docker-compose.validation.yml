@@ -1,0 +1,100 @@
+name: fx-trading-validation
+
+services:
+  validation-backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: fx-trading-validation-backend:local
+    environment:
+      SPRING_PROFILES_ACTIVE: validation
+      EXECUTION_MODE: demo
+      DATABASE_PASSWORD: ${VALIDATION_DATABASE_PASSWORD:?Set VALIDATION_DATABASE_PASSWORD}
+      VALIDATION_DATABASE_PASSWORD: ${VALIDATION_DATABASE_PASSWORD:?Set VALIDATION_DATABASE_PASSWORD}
+      REDIS_PASSWORD: ${VALIDATION_REDIS_PASSWORD:?Set VALIDATION_REDIS_PASSWORD}
+      VALIDATION_REDIS_PASSWORD: ${VALIDATION_REDIS_PASSWORD:?Set VALIDATION_REDIS_PASSWORD}
+      JWT_SECRET: ${VALIDATION_JWT_SECRET:?Set VALIDATION_JWT_SECRET}
+      VALIDATION_JWT_SECRET: ${VALIDATION_JWT_SECRET:?Set VALIDATION_JWT_SECRET}
+      CONFIG_ENCRYPTION_KEY: ${VALIDATION_CONFIG_ENCRYPTION_KEY:?Set VALIDATION_CONFIG_ENCRYPTION_KEY}
+      VALIDATION_CONFIG_ENCRYPTION_KEY: ${VALIDATION_CONFIG_ENCRYPTION_KEY:?Set VALIDATION_CONFIG_ENCRYPTION_KEY}
+      VALIDATION_INTERNAL_SECRET: ${VALIDATION_INTERNAL_SECRET:?Set VALIDATION_INTERNAL_SECRET}
+      ADMIN_BOOTSTRAP_ENABLED: "false"
+      ENGAGEMENT_SCHEDULER_ENABLED: "false"
+      ENGAGEMENT_RETENTION_ENABLED: "false"
+      ENGAGEMENT_OUTBOX_ENABLED: "false"
+      MARKET_DEMO_QUOTES_ENABLED: "false"
+      MARKET_REALTIME_ENABLED: "false"
+      MARKET_REALTIME_BACKFILL_ENABLED: "false"
+      MARKET_REALTIME_DYNAMIC_SYMBOLS_ENABLED: "false"
+      MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED: "false"
+      MARKET_QUOTE_BROADCAST_ENABLED: "false"
+      MARKET_TEST_DATA_ENABLED: "false"
+      MARKET_TEST_CONTROL_ENABLED: "false"
+      MARKET_WRITE_QUOTES_TO_DB: "false"
+      TRADING_PENDING_ORDER_EXECUTION_ENABLED: "false"
+      TRADING_PROTECTIVE_ORDER_EXECUTION_ENABLED: "false"
+      TRADING_FUNDING_ENABLED: "false"
+      TRADING_FX_FINANCING_ENABLED: "false"
+      TRADING_LIQUIDATION_ENABLED: "false"
+      TRADING_LAB_QUEUE_ENABLED: "false"
+      TRADING_LAB_REPORT_CLEANUP_ENABLED: "false"
+    depends_on:
+      validation-postgres:
+        condition: service_healthy
+      validation-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8080/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    networks:
+      - validation-internal
+
+  validation-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: fx_validation_lab
+      POSTGRES_USER: fx_validation_app
+      POSTGRES_PASSWORD: ${VALIDATION_DATABASE_PASSWORD:?Set VALIDATION_DATABASE_PASSWORD}
+    volumes:
+      - validation-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fx_validation_app -d fx_validation_lab"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - validation-internal
+
+  validation-redis:
+    image: redis:7
+    environment:
+      REDIS_PASSWORD: ${VALIDATION_REDIS_PASSWORD:?Set VALIDATION_REDIS_PASSWORD}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    volumes:
+      - validation-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks:
+      - validation-internal
+
+volumes:
+  validation-postgres-data:
+    name: fx-trading-validation-postgres-data
+  validation-redis-data:
+    name: fx-trading-validation-redis-data
+
+networks:
+  validation-internal:
+    name: fx-trading-validation-internal
+    internal: true

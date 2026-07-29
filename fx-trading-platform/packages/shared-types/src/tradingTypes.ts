@@ -16,7 +16,7 @@ export const CANONICAL_TRADING_SYMBOLS = [
 export type CanonicalTradingSymbol = (typeof CANONICAL_TRADING_SYMBOLS)[number]
 export type ProductType = 'FX_MARGIN' | 'CRYPTO_SPOT' | 'LINEAR_PERP' | 'INVERSE_PERP'
 export type OrderSide = 'BUY' | 'SELL'
-export type OrderType = 'MARKET' | 'LIMIT' | 'STOP_MARKET'
+export type OrderType = 'MARKET' | 'LIMIT' | 'STOP_MARKET' | 'STOP_LIMIT' | 'TRAILING_STOP_MARKET'
 export type OrderStatus =
   | 'RECEIVED'
   | 'VALIDATING'
@@ -44,7 +44,7 @@ export type PositionSide = 'BOTH' | 'LONG' | 'SHORT'
 export type PositionStatus = 'OPEN' | 'CLOSED'
 export type MarginMode = 'CASH' | 'CROSS' | 'ISOLATED'
 export type QuantityUnit = 'BASE' | 'QUOTE' | 'CONTRACTS'
-export type TimeInForce = 'GTC'
+export type TimeInForce = 'GTC' | 'IOC' | 'FOK'
 export type ProtectionType = 'TAKE_PROFIT' | 'STOP_LOSS'
 export type TriggerPriceType = 'LAST_PRICE' | 'MARK_PRICE'
 export type TriggerExecutionType = 'MARKET' | 'LIMIT'

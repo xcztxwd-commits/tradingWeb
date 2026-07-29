@@ -1,0 +1,49 @@
+.skeleton {
+  position: relative;
+  display: block;
+  width: var(--skeleton-width, 100%);
+  height: var(--skeleton-height, 12px);
+  overflow: hidden;
+  background: var(--skeleton-background, var(--trading-surface-3));
+}
+
+.skeleton::after {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--skeleton-highlight, var(--trading-border-strong)), transparent);
+  opacity: 0.34;
+  transform: translateX(-100%);
+  animation: skeleton-shimmer 1400ms ease-in-out infinite;
+  content: '';
+}
+
+.line {
+  border-radius: var(--skeleton-radius, 999px);
+}
+
+.block {
+  border-radius: var(--skeleton-radius, var(--radius-2));
+}
+
+.circle {
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+    transform: none;
+    opacity: 0.18;
+  }
+}

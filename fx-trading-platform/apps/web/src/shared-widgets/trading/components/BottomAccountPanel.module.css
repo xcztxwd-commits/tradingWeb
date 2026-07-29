@@ -1,0 +1,388 @@
+.panel {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 38px 34px minmax(0, 1fr);
+  border: 1px solid var(--trading-border);
+  border-radius: 8px;
+  background: var(--trading-surface-2);
+  overflow: hidden;
+}
+
+.tabs {
+  min-width: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border-bottom: 1px solid var(--trading-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs button {
+  position: relative;
+  min-width: max-content;
+  min-height: 38px;
+  border: 0;
+  background: transparent;
+  color: var(--trading-muted);
+  padding: 0 13px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease,
+    transform 120ms ease;
+}
+
+.tabs button:hover {
+  background: var(--trading-surface-3);
+  color: var(--trading-heading);
+}
+
+.tabs button:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: -2px;
+  color: var(--trading-text-strong);
+  box-shadow: inset 0 0 0 1px var(--trading-accent-border);
+}
+
+.tabs button:active {
+  transform: translateY(1px);
+}
+
+.tabs .activeTab {
+  color: var(--trading-text-strong);
+}
+
+.tabs .activeTab::after {
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--trading-accent);
+  box-shadow: none;
+  content: '';
+}
+
+.accountToolbar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--trading-border-soft);
+  padding: 0 12px;
+  color: var(--trading-muted);
+  font-size: 12px;
+}
+
+.accountToolbar label {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.accountToolbar label strong {
+  color: var(--trading-text-strong);
+  font-size: 11px;
+}
+
+.accountToolbar input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--trading-accent);
+}
+
+.accountToolbar input:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.batchAction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batchButton {
+  min-height: 24px;
+  border: 1px solid var(--trading-danger);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--trading-danger);
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.batchButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.batchError {
+  max-width: 240px;
+  color: var(--trading-danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.closeButton:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
+}
+
+.body {
+  min-width: 0;
+  min-height: 0;
+  background: var(--trading-surface-2);
+  overflow: auto;
+  scrollbar-color: var(--trading-border-strong) var(--trading-surface-2);
+  color: var(--trading-text-strong);
+}
+
+.body::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.body::-webkit-scrollbar-track {
+  background: var(--trading-surface-2);
+}
+
+.body::-webkit-scrollbar-thumb {
+  border: 2px solid var(--trading-surface-2);
+  border-radius: 999px;
+  background: var(--trading-border-strong);
+}
+
+.empty {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  color: var(--trading-subtle);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.table th,
+.table td {
+  height: 34px;
+  border-bottom: 1px solid var(--trading-border-soft);
+  background: var(--trading-surface-2);
+  color: var(--trading-text);
+  padding: 0 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table th {
+  color: var(--trading-subtle);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.table tr:hover td {
+  background: var(--trading-surface-3);
+  color: var(--trading-text-strong);
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border: 1px solid var(--trading-border-strong);
+  border-radius: 4px;
+  background: var(--trading-field-bg);
+  color: var(--trading-text);
+  padding: 0 7px;
+  font-size: 11px;
+  font-weight: 800;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.actionState {
+  min-width: 150px;
+  line-height: 16px;
+  white-space: normal !important;
+}
+
+.orderTimeline {
+  min-width: 150px;
+  display: grid;
+  gap: 4px;
+  margin: 5px 0;
+  padding: 0;
+  list-style: none;
+  white-space: normal;
+}
+
+.orderTimeline li {
+  display: grid;
+  grid-template-columns: minmax(44px, max-content) minmax(52px, max-content) minmax(56px, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--trading-subtle);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.orderTimeline span {
+  color: var(--trading-subtle);
+}
+
+.orderTimeline strong {
+  color: var(--trading-text-strong);
+  font-weight: 800;
+}
+
+.orderTimeline time {
+  color: var(--trading-muted);
+}
+
+.positiveValue {
+  color: var(--trading-buy) !important;
+  font-weight: 800;
+}
+
+.negativeValue {
+  color: var(--trading-sell) !important;
+  font-weight: 800;
+}
+
+.positionSymbol {
+  display: block;
+  color: var(--trading-text-strong);
+  font-weight: 800;
+}
+
+.positionMeta {
+  display: block;
+  margin-top: 2px;
+  color: var(--trading-subtle);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.protectionValues {
+  display: grid;
+  gap: 2px;
+}
+
+.actionGroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.metricGrid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(92px, 1fr));
+  gap: 1px;
+  background: var(--trading-border-soft);
+}
+
+.assetView {
+  min-width: 0;
+  display: grid;
+}
+
+.metric {
+  min-width: 0;
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  background: var(--trading-surface-2);
+  padding: 12px;
+  transition:
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.metric:hover {
+  background: var(--trading-surface-3);
+}
+
+.metric span {
+  color: var(--trading-subtle);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.metric strong {
+  min-width: 0;
+  color: var(--trading-text-strong);
+  font-size: 14px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.closeButton {
+  min-height: 24px;
+  border: 1px solid var(--trading-border-strong);
+  border-radius: 5px;
+  background: var(--trading-field-bg);
+  color: var(--trading-text);
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease,
+    transform 120ms ease;
+}
+
+.closeButton:hover {
+  border-color: var(--trading-accent-border);
+  background: var(--trading-surface-3);
+  color: var(--trading-accent);
+}
+
+.closeButton:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@media (max-width: 980px) {
+  .metricGrid {
+    grid-template-columns: repeat(3, minmax(100px, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tabs button,
+  .statusPill,
+  .metric,
+  .closeButton {
+    transition: none;
+  }
+}

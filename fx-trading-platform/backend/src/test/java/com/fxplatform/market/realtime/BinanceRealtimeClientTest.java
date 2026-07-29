@@ -153,12 +153,14 @@ class BinanceRealtimeClientTest {
   }
 
   @Test
-  void maintenanceRotationIsScheduledInProduction() throws IOException {
-    String source = Files.readString(Path.of("src/main/java/com/fxplatform/market/realtime/BinanceRealtimeClient.java"));
+  void maintenanceRotationIsScheduledOutsideValidation() throws IOException {
+    String source = Files.readString(
+        Path.of("src/main/java/com/fxplatform/market/realtime/BinanceRealtimeRotationScheduler.java"));
 
+    assertThat(source).contains("@Profile(\"!validation\")");
     assertThat(source).contains("@Scheduled");
     assertThat(source).contains("market.realtime.rotation-check-ms");
-    assertThat(source).contains("runMaintenance()");
+    assertThat(source).contains("binanceRealtimeClient.runMaintenance()");
   }
 
   @Test

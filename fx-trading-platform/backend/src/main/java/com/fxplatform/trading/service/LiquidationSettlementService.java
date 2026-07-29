@@ -79,6 +79,12 @@ public class LiquidationSettlementService {
     return transactionExecutor.execute(() -> settleLocked(accountId, true));
   }
 
+  /** Validation-only settlement that joins the owning system-step transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public boolean settleIfReadyStrict(UUID accountId) {
+    return transactionExecutor.executeJoined(() -> settleLocked(accountId, true));
+  }
+
   /** Admin cleanup variant that keeps its write gate until the final empty-scope check. */
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public boolean settleIfReadyKeepingPending(UUID accountId) {

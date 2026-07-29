@@ -1,0 +1,107 @@
+.drawerViewport,
+.sheetLayer {
+  display: none;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: color-mix(in srgb, var(--theme-background) 72%, transparent);
+  opacity: 1;
+  cursor: pointer;
+  transition: opacity var(--motion-panel) var(--ease-standard);
+}
+
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 88vh;
+  border: 1px solid var(--trading-border-strong);
+  border-radius: var(--radius-4) var(--radius-4) var(--radius-0) var(--radius-0);
+  background: var(--trading-surface-2);
+  box-shadow: var(--trading-shadow-lg);
+  opacity: 1;
+  transform: translate(0);
+  transition:
+    opacity var(--motion-panel) var(--ease-standard),
+    transform var(--motion-panel) var(--ease-standard);
+}
+
+.mobileHeader {
+  min-height: calc(var(--space-8) + var(--space-5));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-0) var(--space-3);
+  border-bottom: 1px solid var(--trading-border);
+}
+
+.mobileHeader h2 {
+  margin: 0;
+  color: var(--trading-heading);
+  font-size: 14px;
+}
+
+.mobileHeader button {
+  width: calc(var(--space-8) + var(--space-1));
+  height: calc(var(--space-8) + var(--space-1));
+  border: 1px solid var(--trading-border-strong);
+  border-radius: var(--radius-3);
+  background: var(--trading-field-bg);
+  color: var(--trading-text);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-base) var(--ease-standard),
+    background-color var(--motion-base) var(--ease-standard),
+    color var(--motion-base) var(--ease-standard),
+    box-shadow var(--motion-base) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.mobileHeader button:hover,
+.mobileHeader button:focus-visible {
+  border-color: var(--trading-accent-border);
+  background: var(--trading-surface-3);
+  color: var(--trading-text-strong);
+}
+
+.mobileHeader button:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: var(--space-1);
+  box-shadow: 0 0 0 var(--space-1) var(--trading-accent-soft);
+}
+
+.mobileHeader button:active {
+  transform: scale(0.94);
+}
+
+.sheetBody {
+  min-height: 0;
+  max-height: calc(88vh - (var(--space-8) + var(--space-5)));
+  overflow: auto;
+  padding: var(--space-2);
+}
+
+@media (max-width: 900px) {
+  .drawerViewport,
+  .sheetLayer {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-drawer);
+    display: block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop,
+  .sheet,
+  .mobileHeader button {
+    transition: none;
+  }
+}

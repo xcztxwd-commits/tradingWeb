@@ -1,0 +1,388 @@
+.assetMark {
+  --asset-bg: var(--theme-surface-elevated);
+  --asset-fg: var(--theme-text-primary);
+  --asset-ring: color-mix(in srgb, var(--theme-text-primary) 18%, transparent);
+  position: relative;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--asset-ring);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 28% 22%, var(--theme-highlight-subtle), transparent 24%),
+    var(--asset-bg);
+  color: var(--asset-fg);
+  font-family: BinanceNova, Arial, sans-serif;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0;
+  box-shadow: inset 0 0 0 1px var(--theme-overlay-medium);
+}
+
+.assetMark::before,
+.assetMark::after {
+  position: absolute;
+  pointer-events: none;
+  content: '';
+}
+
+.assetMark::before {
+  inset: 3px;
+  border-radius: inherit;
+  border: 1px solid var(--theme-border-contrast);
+}
+
+.assetMark span {
+  position: relative;
+  z-index: 1;
+}
+
+.assetMark__image {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--theme-background);
+  object-fit: cover;
+}
+
+.assetMark--sm {
+  width: 24px;
+  height: 24px;
+  font-size: 8px;
+}
+
+.assetMark--md {
+  width: 28px;
+  height: 28px;
+}
+
+.assetMark--lg {
+  width: 32px;
+  height: 32px;
+  font-size: 10px;
+}
+
+.assetMark--pair {
+  --asset-bg: var(--theme-background);
+  --asset-ring: var(--theme-border-strong);
+  background: var(--asset-bg);
+}
+
+.assetMark--pair::before {
+  inset: 2px;
+}
+
+.assetMark .assetMark__pair {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.assetMark .assetMark__currency {
+  position: absolute;
+  display: grid;
+  width: 65%;
+  height: 65%;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--theme-overlay-medium);
+  border-radius: 50%;
+  background: var(--theme-surface-contrast-subtle);
+  box-shadow: 0 1px 3px var(--theme-shadow-medium);
+  color: var(--theme-text-contrast);
+  font-family: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', BinanceNova, Arial, sans-serif;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.assetMark .assetMark__flag {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: inherit;
+  background: var(--asset-flag-1);
+  box-shadow: inset 0 0 0 1px var(--theme-border-contrast);
+}
+
+.assetMark .assetMark__flag[data-flag-style='solid'] {
+  background:
+    radial-gradient(circle at 66% 34%, var(--asset-flag-2) 0 10%, transparent 11%),
+    radial-gradient(circle at 50% 62%, var(--asset-flag-2) 0 7%, transparent 8%),
+    var(--asset-flag-1);
+}
+
+.assetMark .assetMark__flag[data-flag-style='horizontal'] {
+  background: linear-gradient(
+    to bottom,
+    var(--asset-flag-1) 0 33.333%,
+    var(--asset-flag-2) 33.333% 66.666%,
+    var(--asset-flag-3) 66.666% 100%
+  );
+}
+
+.assetMark .assetMark__flag[data-flag-style='vertical'] {
+  background: linear-gradient(
+    to right,
+    var(--asset-flag-1) 0 33.333%,
+    var(--asset-flag-2) 33.333% 66.666%,
+    var(--asset-flag-3) 66.666% 100%
+  );
+}
+
+.assetMark .assetMark__flag[data-flag-style='disc'] {
+  background: radial-gradient(circle at center, var(--asset-flag-2) 0 29%, var(--asset-flag-1) 30% 100%);
+}
+
+.assetMark .assetMark__flag[data-flag-style='stripes'] {
+  background:
+    linear-gradient(90deg, var(--asset-flag-3) 0 42%, transparent 42% 100%) 0 0 / 100% 54% no-repeat,
+    repeating-linear-gradient(
+      to bottom,
+      var(--asset-flag-1) 0 8%,
+      var(--asset-flag-1) 8% 16%,
+      var(--asset-flag-2) 16% 24%,
+      var(--asset-flag-2) 24% 32%
+    );
+}
+
+.assetMark .assetMark__flag[data-flag-style='cross'] {
+  background:
+    linear-gradient(to right, transparent 0 36%, var(--asset-flag-2) 36% 64%, transparent 64% 100%),
+    linear-gradient(to bottom, transparent 0 36%, var(--asset-flag-2) 36% 64%, transparent 64% 100%),
+    radial-gradient(circle at center, var(--asset-flag-3) 0 16%, transparent 17%),
+    var(--asset-flag-1);
+}
+
+.assetMark .assetMark__flag[data-flag-style='diagonal'] {
+  background: linear-gradient(
+    135deg,
+    var(--asset-flag-1) 0 35%,
+    var(--asset-flag-2) 35% 58%,
+    var(--asset-flag-3) 58% 100%
+  );
+}
+
+.assetMark .assetMark__currency--base {
+  top: 1px;
+  left: 1px;
+  z-index: 2;
+}
+
+.assetMark .assetMark__currency--quote {
+  right: 1px;
+  bottom: 1px;
+  z-index: 1;
+}
+
+.assetMark .assetMark__currency--fallback {
+  font-family: BinanceNova, Arial, sans-serif;
+  font-size: 7px;
+  font-weight: 900;
+}
+
+.assetMark--sm .assetMark__currency {
+  font-size: 10px;
+}
+
+.assetMark--sm .assetMark__currency--fallback {
+  font-size: 6px;
+}
+
+.assetMark--lg .assetMark__currency {
+  font-size: 13px;
+}
+
+.assetMark--btc {
+  --asset-bg: var(--theme-asset-bitcoin);
+  --asset-fg: var(--theme-text-contrast);
+  --asset-ring: color-mix(in srgb, var(--theme-asset-bitcoin) 42%, transparent);
+}
+
+.assetMark--btc span {
+  font-size: 0;
+}
+
+.assetMark--btc span::before {
+  font-size: 13px;
+  content: 'B';
+}
+
+.assetMark--eth {
+  --asset-bg: linear-gradient(145deg, var(--theme-asset-ethereum), var(--theme-asset-ethereum-shadow));
+  --asset-ring: color-mix(in srgb, var(--theme-asset-ethereum) 42%, transparent);
+}
+
+.assetMark--eth span {
+  font-size: 0;
+}
+
+.assetMark--eth::after {
+  width: 9px;
+  height: 14px;
+  border-radius: 2px;
+  background: linear-gradient(
+    180deg,
+    var(--theme-asset-ethereum-mark) 0 48%,
+    var(--theme-asset-ethereum-mark-shadow) 49% 100%
+  );
+  transform: rotate(45deg) skew(-10deg, -10deg);
+}
+
+.assetMark--bnb {
+  --asset-bg: var(--theme-asset-bnb);
+  --asset-fg: var(--theme-text-contrast);
+  --asset-ring: color-mix(in srgb, var(--theme-asset-bnb) 45%, transparent);
+}
+
+.assetMark--bnb span {
+  font-size: 0;
+}
+
+.assetMark--bnb::after {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--theme-text-contrast);
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.assetMark--usdt {
+  --asset-bg: var(--theme-asset-usdt);
+  --asset-ring: color-mix(in srgb, var(--theme-asset-usdt) 42%, transparent);
+}
+
+.assetMark--usdc {
+  --asset-bg: var(--theme-asset-usdc);
+  --asset-ring: color-mix(in srgb, var(--theme-asset-usdc) 42%, transparent);
+}
+
+.assetMark--xrp {
+  --asset-bg: var(--theme-surface-inverse);
+  --asset-ring: var(--theme-border-contrast);
+}
+
+.assetMark--sol {
+  --asset-bg: linear-gradient(135deg, var(--theme-asset-solana), var(--theme-asset-solana-accent));
+  --asset-ring: color-mix(in srgb, var(--theme-asset-solana-accent) 42%, transparent);
+}
+
+.assetMark--wld,
+.assetMark--night,
+.assetMark--stg,
+.assetMark--epic {
+  --asset-bg: var(--theme-background);
+  --asset-ring: var(--theme-border-contrast);
+}
+
+.assetMark--baby {
+  --asset-bg: var(--theme-asset-baby);
+  --asset-ring: var(--theme-info-border);
+}
+
+.assetMark--doge,
+.assetMark--hmstr,
+.assetMark--jasmy {
+  --asset-bg: linear-gradient(145deg, var(--theme-asset-bnb), var(--theme-asset-gold-shadow));
+  --asset-fg: var(--theme-text-contrast);
+  --asset-ring: color-mix(in srgb, var(--theme-asset-bnb) 42%, transparent);
+}
+
+.assetMark--opg,
+.assetMark--hei {
+  --asset-bg: linear-gradient(145deg, var(--theme-asset-opg-hei), var(--theme-asset-opg-hei-shadow));
+  --asset-ring: color-mix(in srgb, var(--theme-asset-opg-hei) 40%, transparent);
+}
+
+.assetMark--zkc,
+.assetMark--zkp,
+.assetMark--robo {
+  --asset-bg: var(--theme-surface-contrast-subtle);
+  --asset-fg: var(--theme-text-contrast);
+  --asset-ring: var(--theme-border-contrast);
+}
+
+.assetMark--syn {
+  --asset-bg: var(--theme-asset-syn);
+  --asset-ring: color-mix(in srgb, var(--theme-asset-syn) 42%, transparent);
+}
+
+.assetMark--mito {
+  --asset-bg: linear-gradient(145deg, var(--theme-asset-mito), var(--theme-asset-mito-shadow));
+  --asset-ring: color-mix(in srgb, var(--theme-asset-mito) 42%, transparent);
+}
+
+.assetMark--mega {
+  --asset-bg: var(--theme-surface);
+  --asset-ring: var(--theme-border-contrast);
+}
+
+.assetMark--mira,
+.assetMark--io {
+  --asset-bg: var(--theme-background);
+  --asset-ring: var(--theme-border-contrast);
+}
+
+.assetMark--eigen {
+  --asset-bg: var(--theme-surface-contrast);
+  --asset-fg: var(--theme-asset-eigen);
+  --asset-ring: var(--theme-border-contrast);
+}
+
+.assetMark--tst {
+  --asset-bg: var(--theme-asset-bnb);
+  --asset-fg: var(--theme-text-inverse);
+  --asset-ring: color-mix(in srgb, var(--theme-asset-bnb) 42%, transparent);
+}
+
+.assetMark--trump {
+  --asset-bg: linear-gradient(145deg, var(--theme-asset-trump), var(--theme-asset-trump-shadow));
+  --asset-ring: color-mix(in srgb, var(--theme-asset-trump) 42%, transparent);
+}
+
+.assetMark--pond {
+  --asset-bg: var(--theme-surface-contrast);
+  --asset-fg: var(--theme-asset-pond);
+  --asset-ring: var(--theme-border-contrast);
+}
+
+.assetMark--bananas {
+  --asset-bg: var(--theme-surface-inverse);
+  --asset-fg: var(--theme-asset-bnb);
+  --asset-ring: color-mix(in srgb, var(--theme-asset-bnb) 28%, transparent);
+}
+
+.assetMark--xau,
+.assetMark--xaut,
+.assetMark--metal {
+  --asset-bg: linear-gradient(145deg, var(--theme-asset-bnb), var(--theme-asset-gold-shadow));
+  --asset-fg: var(--theme-text-contrast);
+  --asset-ring: color-mix(in srgb, var(--theme-asset-bnb) 42%, transparent);
+}
+
+.assetMark--eur,
+.assetMark--gbp,
+.assetMark--usd,
+.assetMark--aud,
+.assetMark--fx {
+  --asset-bg: linear-gradient(145deg, var(--theme-asset-fx), var(--theme-asset-fx-shadow));
+  --asset-ring: var(--theme-border-strong);
+}
+
+.assetMark--us100,
+.assetMark--index {
+  --asset-bg: linear-gradient(145deg, var(--theme-asset-index), var(--theme-asset-index-accent));
+  --asset-ring: color-mix(in srgb, var(--theme-asset-index) 42%, transparent);
+}
+
+.assetMark--default {
+  --asset-bg: linear-gradient(145deg, var(--theme-surface-elevated), var(--theme-background));
+}

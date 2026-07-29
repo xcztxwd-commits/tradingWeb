@@ -11,6 +11,7 @@ import com.fxplatform.trading.enums.OrderStatus;
 import com.fxplatform.trading.event.TradingAccountMutationEvent;
 import com.fxplatform.trading.repository.OrderEventRepository;
 import com.fxplatform.trading.repository.OrderRepository;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
@@ -89,6 +90,43 @@ class OrderEventServiceTest {
         OrderStatus.PENDING,
         "MARKET_DATA_STALE",
         "Pending order execution deferred");
+
+    verify(eventRepository, org.mockito.Mockito.never()).save(
+        org.mockito.ArgumentMatchers.any(OrderEventEntity.class));
+    verify(eventPublisher, org.mockito.Mockito.never()).publishEvent(
+        org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void workerFailureEventIsSkippedWhenTheExecutionContractChanged() {
+    OrderEventRepository eventRepository = org.mockito.Mockito.mock(OrderEventRepository.class);
+    OrderRepository orderRepository = org.mockito.Mockito.mock(OrderRepository.class);
+    ApplicationEventPublisher eventPublisher = org.mockito.Mockito.mock(ApplicationEventPublisher.class);
+    OrderEventService service = new OrderEventService(
+        eventRepository, orderRepository, eventPublisher);
+    UUID orderId = UUID.randomUUID();
+    OrderEntity scanned = new OrderEntity();
+    scanned.setId(orderId);
+    scanned.setStatus(OrderStatus.PENDING);
+    scanned.setPrice(new BigDecimal("100"));
+    scanned.setVersion(3L);
+    PendingOrderExecutionFingerprint fingerprint =
+        PendingOrderExecutionFingerprint.capture(scanned);
+
+    OrderEntity modified = new OrderEntity();
+    modified.setId(orderId);
+    modified.setStatus(OrderStatus.PENDING);
+    modified.setPrice(new BigDecimal("101"));
+    modified.setVersion(4L);
+    when(orderRepository.findByIdForUpdate(orderId)).thenReturn(Optional.of(modified));
+
+    service.recordWorkerFailure(
+        orderId,
+        "ORDER_EXECUTION_FAILED",
+        OrderStatus.PENDING,
+        "EXECUTION_UNAVAILABLE",
+        "Pending order execution deferred",
+        fingerprint);
 
     verify(eventRepository, org.mockito.Mockito.never()).save(
         org.mockito.ArgumentMatchers.any(OrderEventEntity.class));

@@ -1,0 +1,300 @@
+.layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(var(--theme-overlay-strong), var(--theme-overlay-strong)),
+    radial-gradient(circle at 50% 24%, var(--theme-warning-soft), transparent 32%);
+  padding: 20px;
+  animation: loginPromptLayerIn 150ms ease-out;
+}
+
+.dialog {
+  position: relative;
+  width: min(440px, 100%);
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--trading-border-strong);
+  background:
+    linear-gradient(180deg, var(--theme-overlay-strong), var(--theme-overlay-strong)),
+    var(--trading-surface);
+  color: var(--trading-text);
+  padding: 28px;
+  box-shadow: 0 28px 90px var(--theme-shadow-strong);
+  transform-origin: center;
+  animation: loginPromptIn 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.closeButton {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--trading-muted);
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    transform 120ms ease;
+}
+
+.closeButton:hover,
+.closeButton:focus-visible {
+  border-color: var(--trading-border-strong);
+  background: var(--trading-surface-3);
+  color: var(--trading-text-strong);
+}
+
+.closeButton:active {
+  transform: scale(0.94);
+}
+
+.icon {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--trading-accent-border);
+  background: var(--trading-accent-soft);
+  color: var(--trading-accent);
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--trading-buy);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.dialog h2 {
+  margin: 0;
+  color: var(--trading-heading);
+  font-size: 24px;
+  line-height: 1.22;
+}
+
+.summary {
+  margin: 0;
+  color: var(--trading-muted);
+  font-size: 14px;
+  line-height: 1.68;
+}
+
+.featureGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.featureGrid span {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--trading-border);
+  background: var(--trading-surface-2);
+  color: var(--trading-text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.error {
+  margin: 0;
+  border: 1px solid var(--theme-danger-border);
+  background: var(--theme-danger-soft);
+  color: var(--theme-danger);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.primaryButton,
+.secondaryButton {
+  min-height: 44px;
+  border: 1px solid transparent;
+  font-weight: 900;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease,
+    color 150ms ease,
+    transform 120ms ease;
+}
+
+.primaryButton {
+  background: var(--trading-accent);
+  color: var(--trading-accent-text);
+}
+
+.secondaryButton {
+  border-color: var(--trading-border-strong);
+  background: var(--trading-surface-2);
+  color: var(--trading-text-strong);
+}
+
+.primaryButton:hover,
+.primaryButton:focus-visible {
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
+}
+
+.secondaryButton:hover,
+.secondaryButton:focus-visible {
+  border-color: var(--trading-accent-border);
+  background: var(--trading-surface-3);
+}
+
+.closeButton:focus-visible,
+.primaryButton:focus-visible,
+.secondaryButton:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: 2px;
+}
+
+.primaryButton:active,
+.secondaryButton:active {
+  transform: scale(0.985);
+}
+
+:global(:root[data-theme='minimal-white']) .layer {
+  background: var(--theme-overlay-medium);
+}
+
+:global(:root[data-theme='minimal-white']) .dialog {
+  border-color: var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast);
+  color: var(--theme-text-contrast);
+  box-shadow: 0 28px 90px var(--theme-shadow-soft);
+}
+
+:global(:root[data-theme='minimal-white']) .closeButton {
+  color: var(--theme-text-muted-on-contrast);
+}
+
+:global(:root[data-theme='minimal-white']) .closeButton:hover,
+:global(:root[data-theme='minimal-white']) .closeButton:focus-visible {
+  border-color: var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast-subtle);
+  color: var(--theme-text-contrast);
+}
+
+:global(:root[data-theme='minimal-white']) .icon {
+  border-color: var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast-subtle);
+  color: var(--theme-text-contrast);
+}
+
+:global(:root[data-theme='minimal-white']) .eyebrow {
+  color: var(--theme-success);
+}
+
+:global(:root[data-theme='minimal-white']) .dialog h2 {
+  color: var(--theme-text-contrast);
+}
+
+:global(:root[data-theme='minimal-white']) .summary {
+  color: var(--theme-text-muted-on-contrast);
+}
+
+:global(:root[data-theme='minimal-white']) .featureGrid span {
+  border-color: var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast-subtle);
+  color: var(--theme-text-contrast);
+}
+
+:global(:root[data-theme='minimal-white']) .error {
+  border-color: var(--theme-danger-border);
+  background: var(--theme-danger-soft);
+  color: var(--theme-danger);
+}
+
+:global(:root[data-theme='minimal-white']) .primaryButton {
+  border-color: var(--theme-border-inverse);
+  background: var(--theme-surface-inverse);
+  color: var(--theme-text-inverse);
+}
+
+:global(:root[data-theme='minimal-white']) .secondaryButton {
+  border-color: var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast);
+  color: var(--theme-text-contrast);
+}
+
+:global(:root[data-theme='minimal-white']) .primaryButton:hover,
+:global(:root[data-theme='minimal-white']) .primaryButton:focus-visible {
+  background: var(--theme-surface-inverse);
+  box-shadow: 0 0 0 3px var(--theme-shadow-soft);
+}
+
+:global(:root[data-theme='minimal-white']) .secondaryButton:hover,
+:global(:root[data-theme='minimal-white']) .secondaryButton:focus-visible {
+  border-color: var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast-subtle);
+}
+
+:global(:root[data-theme='minimal-white']) .closeButton:focus-visible,
+:global(:root[data-theme='minimal-white']) .primaryButton:focus-visible,
+:global(:root[data-theme='minimal-white']) .secondaryButton:focus-visible {
+  outline-color: var(--theme-focus-ring);
+}
+
+@keyframes loginPromptLayerIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes loginPromptIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 520px) {
+  .dialog {
+    padding: 24px;
+  }
+
+  .featureGrid,
+  .actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layer,
+  .dialog {
+    animation: none;
+  }
+
+  .closeButton,
+  .primaryButton,
+  .secondaryButton {
+    transition: none;
+  }
+}

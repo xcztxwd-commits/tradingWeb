@@ -21,7 +21,7 @@ public class OrderCommandFactory {
     String clientOrderId = request.clientOrderId();
     String idempotencyKey = hasText(request.idempotencyKey())
         ? request.idempotencyKey()
-        : clientOrderId;
+        : java.util.UUID.randomUUID().toString();
     OrderIdempotencyKeyPolicy.requireUserControlled(clientOrderId, idempotencyKey);
     return new OrderCommand(
         principal.id(),
@@ -44,7 +44,12 @@ public class OrderCommandFactory {
         request.reduceOnly(),
         request.triggerPrice(),
         request.triggerPriceType(),
-        request.attachedProtections());
+        request.attachedProtections(),
+        request.timeInForce(),
+        request.postOnly(),
+        request.activationPrice(),
+        request.trailingDelta(),
+        request.trailingRate());
   }
 
   private boolean hasText(String value) {

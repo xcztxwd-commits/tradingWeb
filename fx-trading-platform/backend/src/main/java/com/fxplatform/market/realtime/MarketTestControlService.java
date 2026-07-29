@@ -3,6 +3,8 @@ package com.fxplatform.market.realtime;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.market.SymbolNormalizer;
 import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.market.model.PerpetualMarketBundle;
+import com.fxplatform.market.model.SpotMarketBundle;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -59,16 +61,53 @@ public class MarketTestControlService {
   }
 
   public Optional<QuoteResponse> overrideQuote(String symbol) {
-    String normalizedSymbol = normalizeSymbol(symbol);
-    OverrideState state = overrides.get(normalizedSymbol);
-    if (state == null) {
-      return Optional.empty();
-    }
-    if (!state.expiresAt().isAfter(clock.instant())) {
-      overrides.remove(normalizedSymbol, state);
-      return Optional.empty();
-    }
-    return Optional.of(state.quote(clock.millis()));
+    return activeOverride(symbol).map(state -> state.quote(clock.millis()));
+  }
+
+  public SpotMarketBundle applySpotOverride(SpotMarketBundle providerBundle) {
+    return overrideQuote(providerBundle.platformSymbol())
+        .map(quote -> new SpotMarketBundle(
+            providerBundle.platformSymbol(),
+            providerBundle.providerSymbol(),
+            providerBundle.providerCode(),
+            providerBundle.sourceMode(),
+            quote.bid(),
+            quote.ask(),
+            quote.mid(),
+            providerBundle.changePercent(),
+            providerBundle.high24h(),
+            providerBundle.low24h(),
+            providerBundle.volume24h(),
+            providerBundle.orderBook(),
+            providerBundle.recentTrades(),
+            providerBundle.candles(),
+            providerBundle.asOf(),
+            providerBundle.expiresAt()))
+        .orElse(providerBundle);
+  }
+
+  public PerpetualMarketBundle applyPerpetualOverride(PerpetualMarketBundle providerBundle) {
+    return overrideQuote(providerBundle.platformSymbol())
+        .map(quote -> new PerpetualMarketBundle(
+            providerBundle.platformSymbol(),
+            providerBundle.providerSymbol(),
+            providerBundle.providerCode(),
+            providerBundle.sourceMode(),
+            quote.bid(),
+            quote.ask(),
+            quote.mid(),
+            quote.mid(),
+            quote.mid(),
+            providerBundle.changePercent(),
+            providerBundle.high24h(),
+            providerBundle.low24h(),
+            providerBundle.volume24h(),
+            providerBundle.orderBook(),
+            providerBundle.recentTrades(),
+            providerBundle.candles(),
+            providerBundle.asOf(),
+            providerBundle.expiresAt()))
+        .orElse(providerBundle);
   }
 
   public void endOverride(String requestedSymbol) {
@@ -85,6 +124,19 @@ public class MarketTestControlService {
     return SymbolNormalizer.normalize(symbol);
   }
 
+  private Optional<OverrideState> activeOverride(String requestedSymbol) {
+    String symbol = normalizeSymbol(requestedSymbol);
+    OverrideState state = overrides.get(symbol);
+    if (state == null) {
+      return Optional.empty();
+    }
+    if (!state.expiresAt().isAfter(clock.instant())) {
+      overrides.remove(symbol, state);
+      return Optional.empty();
+    }
+    return Optional.of(state);
+  }
+
   private void validateQuote(BigDecimal bid, BigDecimal ask) {
     if (bid == null || ask == null || bid.signum() <= 0 || ask.signum() <= 0 || ask.compareTo(bid) <= 0) {
       throw new BusinessException("MARKET_TEST_CONTROL_INVALID_QUOTE", "Bid and ask must be positive and ask must exceed bid");
@@ -92,9 +144,13 @@ public class MarketTestControlService {
   }
 
   private Duration effectiveTtl(Duration requestedTtl) {
-    Duration maxTtl = properties.maxTtl() == null || properties.maxTtl().isZero() || properties.maxTtl().isNegative()
+    Duration configuredMaxTtl =
+        properties.maxTtl() == null || properties.maxTtl().isZero() || properties.maxTtl().isNegative()
         ? DEFAULT_MAX_TTL
         : properties.maxTtl();
+    Duration maxTtl = configuredMaxTtl.compareTo(DEFAULT_MAX_TTL) > 0
+        ? DEFAULT_MAX_TTL
+        : configuredMaxTtl;
     Duration ttl = requestedTtl == null ? maxTtl : requestedTtl;
     if (ttl.isZero() || ttl.isNegative()) {
       throw new BusinessException("MARKET_TEST_CONTROL_INVALID_TTL", "TTL must be positive");

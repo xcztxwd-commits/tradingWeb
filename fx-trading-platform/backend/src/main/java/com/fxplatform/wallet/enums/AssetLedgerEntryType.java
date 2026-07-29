@@ -6,6 +6,7 @@ import java.util.Locale;
 public enum AssetLedgerEntryType {
   DEMO_INIT,
   DEMO_RESET,
+  VALIDATION_SEED,
   TRANSFER_IN,
   TRANSFER_OUT,
   CREDIT_AVAILABLE,

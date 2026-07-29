@@ -1,0 +1,90 @@
+import { MultiLevelProtectionEditor, type ProtectionLevel } from './MultiLevelProtectionEditor'
+import type { TradeField, TradeFormState } from '@fx-platform/frontend-core'
+import styles from './TradePanel.module.css'
+
+type Props = {
+  form: TradeFormState
+  positionMode: 'ONE_WAY' | 'HEDGE'
+  disabled?: boolean
+  error?: string
+  onFieldChange: (field: TradeField, value: string | number | boolean) => void
+  onProtectionsChange: (protections: TradeFormState['attachedProtections']) => void
+}
+
+export function PerpetualOrderOptions({
+  form,
+  positionMode,
+  disabled = false,
+  error,
+  onFieldChange,
+  onProtectionsChange
+}: Props) {
+  const levels: ProtectionLevel[] = form.attachedProtections.map((protection, index) => ({
+    id: String(index),
+    protectionType: protection.protectionType,
+    triggerPrice: String(protection.triggerPrice),
+    protectedQuantity: protection.quantity === undefined ? '' : String(protection.quantity),
+    executionType: protection.triggerExecutionType,
+    limitPrice: protection.price === undefined ? '' : String(protection.price)
+  }))
+
+  const updateLevel = (id: string, patch: Partial<Omit<ProtectionLevel, 'id'>>) => {
+    const index = Number(id)
+    onProtectionsChange(form.attachedProtections.map((protection, current) => {
+      if (current !== index) return protection
+      const quantity = patch.protectedQuantity === undefined
+        ? protection.quantity
+        : Number(patch.protectedQuantity)
+      return {
+        ...protection,
+        protectionType: patch.protectionType ?? protection.protectionType,
+        triggerPrice: patch.triggerPrice === undefined ? protection.triggerPrice : Number(patch.triggerPrice),
+        triggerExecutionType: patch.executionType ?? protection.triggerExecutionType,
+        price: (patch.executionType ?? protection.triggerExecutionType) === 'LIMIT'
+          ? Number(patch.limitPrice ?? protection.price ?? 0)
+          : undefined,
+        quantity,
+        quantityUnit: quantity === undefined ? undefined : form.quantityUnit
+      }
+    }))
+  }
+
+  const addLevel = (protectionType: ProtectionLevel['protectionType']) => {
+    if (form.attachedProtections.length >= 10) return
+    onProtectionsChange([...form.attachedProtections, {
+      protectionType,
+      triggerPrice: 0,
+      triggerPriceType: 'MARK_PRICE',
+      triggerExecutionType: 'MARKET',
+      quantity: 0,
+      quantityUnit: form.quantityUnit
+    }])
+  }
+
+  return (
+    <section aria-label="Perpetual order options">
+      {positionMode === 'HEDGE' ? (
+        <label className={styles['trade-panel__field']}>
+          <span className={styles['trade-panel__field-label']}>Position side</span>
+          <select value={form.positionSide === 'BOTH' ? (form.side === 'buy' ? 'LONG' : 'SHORT') : form.positionSide} disabled={disabled} onChange={(event) => onFieldChange('positionSide', event.target.value)}>
+            <option value="LONG">Long</option>
+            <option value="SHORT">Short</option>
+          </select>
+        </label>
+      ) : null}
+      <label className={styles['trade-panel__check']}>
+        <input type="checkbox" checked={form.reduceOnly} disabled={disabled} onChange={(event) => onFieldChange('reduceOnly', event.target.checked)} />
+        <span>Reduce only</span>
+      </label>
+      <MultiLevelProtectionEditor
+        levels={levels}
+        disabled={disabled}
+        error={error}
+        quantityUnit={form.quantityUnit}
+        onLevelChange={updateLevel}
+        onAdd={addLevel}
+        onRemove={(id) => onProtectionsChange(form.attachedProtections.filter((_, index) => index !== Number(id)))}
+      />
+    </section>
+  )
+}

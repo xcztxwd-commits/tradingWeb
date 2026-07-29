@@ -34,6 +34,17 @@ public class SecurityErrorResponseWriter {
   }
 
   /**
+   * validation 内部链使用固定且不包含请求细节的未授权响应。
+   */
+  public void writeValidationInternalUnauthorized(HttpServletResponse response) throws IOException {
+    write(
+        response,
+        HttpServletResponse.SC_UNAUTHORIZED,
+        "VALIDATION_INTERNAL_UNAUTHORIZED",
+        "Validation internal authentication failed");
+  }
+
+  /**
    * Spring Security 在 Controller 之前返回错误，这里补齐和业务接口一致的响应格式。
    */
   private void write(HttpServletResponse response, int status, String code, String message) throws IOException {

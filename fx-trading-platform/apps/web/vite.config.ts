@@ -4,6 +4,20 @@ import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [react()],
+  esbuild: {
+    logOverride: {
+      'css-syntax-error': 'error'
+    }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-i18n': ['i18next', 'react-i18next']
+        }
+      }
+    }
+  },
   resolve: {
     alias: {
       klinecharts: resolve(__dirname, '../../../dist/index.esm.js')

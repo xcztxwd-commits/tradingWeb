@@ -1,0 +1,124 @@
+.table {
+  display: block;
+  overflow: auto;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.table table {
+  width: 100%;
+  border-collapse: collapse;
+  background: transparent;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  height: 48px;
+  border-bottom-color: var(--theme-border-subtle);
+  color: var(--bn-text);
+  padding: 0 12px;
+}
+
+.table th {
+  color: var(--bn-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.table th button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--user-muted);
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.table th button:hover,
+.table th button:focus-visible {
+  color: var(--user-primary);
+  outline: 0;
+}
+
+.table tbody tr {
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    transform 120ms ease;
+}
+
+.table tbody tr:hover {
+  background: var(--theme-overlay-subtle);
+}
+
+.table td:first-child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.table small {
+  display: block;
+  color: var(--user-muted);
+}
+
+.changeUp {
+  color: var(--theme-buy);
+}
+
+.changeDown {
+  color: var(--theme-sell);
+}
+
+.tradeAction {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--bn-muted);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    transform 120ms ease;
+}
+
+.tradeAction:hover,
+.tradeAction:focus-visible {
+  border-color: color-mix(in srgb, var(--user-primary) 18%, transparent);
+  background: color-mix(in srgb, var(--user-primary) 8%, transparent);
+  color: var(--bn-gold-strong);
+  outline: 0;
+}
+
+.tradeAction:active {
+  transform: scale(0.98);
+}
+
+.tradeAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table tbody tr,
+  .tradeAction {
+    transition: none;
+  }
+}

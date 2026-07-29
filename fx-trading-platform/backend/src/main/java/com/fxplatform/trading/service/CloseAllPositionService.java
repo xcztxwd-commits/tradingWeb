@@ -190,8 +190,17 @@ public class CloseAllPositionService {
       return List.of();
     }
     return positions.stream()
+        .sorted(Comparator
+            .comparing(
+                PositionEntity::getSymbol,
+                Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(
+                PositionEntity::getPositionSide,
+                Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(
+                PositionEntity::getId,
+                Comparator.nullsLast(Comparator.naturalOrder())))
         .map(PositionEntity::getId)
-        .sorted(Comparator.nullsLast(Comparator.naturalOrder()))
         .toList();
   }
 

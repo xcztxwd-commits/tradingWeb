@@ -8,9 +8,11 @@ import com.fxplatform.market.model.MarketSourceMode;
 import com.fxplatform.market.model.PerpetualMarketBundle;
 import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.model.SpotMarketBundle;
+import com.fxplatform.market.realtime.MarketTestControlService;
 import com.fxplatform.market.service.MarketSourceSelectionTracker;
 import com.fxplatform.market.service.ProviderHealthRecorder;
 import com.fxplatform.market.service.SymbolProductTypes;
+import com.fxplatform.validation.service.ValidationMarketState;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -18,6 +20,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -35,16 +38,43 @@ public class MarketBundleResolver {
   private final MarketBundleValidator validator;
   private final MarketSourceSelectionTracker selectionTracker;
   private final ProviderHealthRecorder healthRecorder;
+  private final MarketTestControlService testControlService;
   private final Clock clock;
+  private final ValidationMarketState validationMarketState;
 
   @Autowired
   public MarketBundleResolver(
       ProviderResolver providerResolver,
       MarketBundleValidator validator,
       MarketSourceSelectionTracker selectionTracker,
+      ProviderHealthRecorder healthRecorder,
+      MarketTestControlService testControlService,
+      ObjectProvider<ValidationMarketState> validationMarketState
+  ) {
+    this(
+        providerResolver,
+        validator,
+        selectionTracker,
+        healthRecorder,
+        testControlService,
+        Clock.systemUTC(),
+        validationMarketState.getIfAvailable());
+  }
+
+  public MarketBundleResolver(
+      ProviderResolver providerResolver,
+      MarketBundleValidator validator,
+      MarketSourceSelectionTracker selectionTracker,
       ProviderHealthRecorder healthRecorder
   ) {
-    this(providerResolver, validator, selectionTracker, healthRecorder, Clock.systemUTC());
+    this(
+        providerResolver,
+        validator,
+        selectionTracker,
+        healthRecorder,
+        null,
+        Clock.systemUTC(),
+        null);
   }
 
   public MarketBundleResolver(
@@ -52,7 +82,14 @@ public class MarketBundleResolver {
       MarketBundleValidator validator,
       MarketSourceSelectionTracker selectionTracker
   ) {
-    this(providerResolver, validator, selectionTracker, ProviderHealthRecorder.noop(), Clock.systemUTC());
+    this(
+        providerResolver,
+        validator,
+        selectionTracker,
+        ProviderHealthRecorder.noop(),
+        null,
+        Clock.systemUTC(),
+        null);
   }
 
   public MarketBundleResolver(
@@ -62,32 +99,93 @@ public class MarketBundleResolver {
       ProviderHealthRecorder healthRecorder,
       Clock clock
   ) {
+    this(providerResolver, validator, selectionTracker, healthRecorder, null, clock, null);
+  }
+
+  public MarketBundleResolver(
+      ProviderResolver providerResolver,
+      MarketBundleValidator validator,
+      MarketSourceSelectionTracker selectionTracker,
+      ProviderHealthRecorder healthRecorder,
+      MarketTestControlService testControlService,
+      Clock clock
+  ) {
+    this(
+        providerResolver,
+        validator,
+        selectionTracker,
+        healthRecorder,
+        testControlService,
+        clock,
+        null);
+  }
+
+  public MarketBundleResolver(
+      ProviderResolver providerResolver,
+      MarketBundleValidator validator,
+      MarketSourceSelectionTracker selectionTracker,
+      ProviderHealthRecorder healthRecorder,
+      Clock clock,
+      ValidationMarketState validationMarketState
+  ) {
+    this(
+        providerResolver,
+        validator,
+        selectionTracker,
+        healthRecorder,
+        null,
+        clock,
+        validationMarketState);
+  }
+
+  public MarketBundleResolver(
+      ProviderResolver providerResolver,
+      MarketBundleValidator validator,
+      MarketSourceSelectionTracker selectionTracker,
+      ProviderHealthRecorder healthRecorder,
+      MarketTestControlService testControlService,
+      Clock clock,
+      ValidationMarketState validationMarketState
+  ) {
     this.providerResolver = providerResolver;
     this.validator = validator;
     this.selectionTracker = selectionTracker;
     this.healthRecorder = healthRecorder;
+    this.testControlService = testControlService;
     this.clock = clock;
+    this.validationMarketState = validationMarketState;
   }
 
   public SpotMarketBundle resolveSpot(String platformSymbol, CandleRequest candleRequest) {
     CandleRequestPolicy.requireValid(candleRequest);
     String symbol = SymbolNormalizer.normalize(platformSymbol);
+    if (validationMarketState != null) {
+      return validationMarketState.requireSpot(symbol);
+    }
     for (ProviderResolution candidate : candidates(symbol, ProductType.CRYPTO_SPOT, SPOT_PROVIDERS)) {
       Instant startedAt = clock.instant();
       try {
         Optional<SpotMarketBundle> bundle = candidate.adapter().fetchSpotBundle(
             symbol, candidate.providerSymbol(), candleRequest);
         throwIfInterrupted();
-        if (bundle.isPresent() && matchesCandidate(bundle.get(), candidate) && validator.valid(bundle.get())) {
-          recordSuccess(candidate, MarketBundleAssembler.quote(bundle.get(), clock), startedAt);
-          selectionTracker.recordSelection(
-              symbol,
-              bundle.get().providerCode(),
-              bundle.get().sourceMode(),
-              bundle.get().asOf(),
-              bundle.get().expiresAt(),
-              false);
-          return bundle.get();
+        if (bundle.isPresent()) {
+          SpotMarketBundle providerBundle = bundle.get();
+          if (matchesCandidate(providerBundle, candidate) && validator.valid(providerBundle)) {
+            SpotMarketBundle authorityBundle = testControlService == null
+                ? providerBundle
+                : testControlService.applySpotOverride(providerBundle);
+            if (validator.valid(authorityBundle)) {
+              recordSuccess(candidate, MarketBundleAssembler.quote(providerBundle, clock), startedAt);
+              selectionTracker.recordSelection(
+                  symbol,
+                  providerBundle.providerCode(),
+                  providerBundle.sourceMode(),
+                  providerBundle.asOf(),
+                  providerBundle.expiresAt(),
+                  false);
+              return authorityBundle;
+            }
+          }
         }
       } catch (RuntimeException ignored) {
         // An incomplete or failed candidate causes whole-bundle fallback.
@@ -101,22 +199,33 @@ public class MarketBundleResolver {
   public PerpetualMarketBundle resolvePerp(String platformSymbol, CandleRequest candleRequest) {
     CandleRequestPolicy.requireValid(candleRequest);
     String symbol = SymbolNormalizer.normalize(platformSymbol);
+    if (validationMarketState != null) {
+      return validationMarketState.requirePerpetual(symbol);
+    }
     for (ProviderResolution candidate : candidates(symbol, ProductType.LINEAR_PERP, PERP_PROVIDERS)) {
       Instant startedAt = clock.instant();
       try {
         Optional<PerpetualMarketBundle> bundle = candidate.adapter().fetchPerpetualBundle(
             symbol, candidate.providerSymbol(), candleRequest);
         throwIfInterrupted();
-        if (bundle.isPresent() && matchesCandidate(bundle.get(), candidate) && validator.valid(bundle.get())) {
-          recordSuccess(candidate, MarketBundleAssembler.quote(bundle.get(), clock), startedAt);
-          selectionTracker.recordSelection(
-              symbol,
-              bundle.get().providerCode(),
-              bundle.get().sourceMode(),
-              bundle.get().asOf(),
-              bundle.get().expiresAt(),
-              false);
-          return bundle.get();
+        if (bundle.isPresent()) {
+          PerpetualMarketBundle providerBundle = bundle.get();
+          if (matchesCandidate(providerBundle, candidate) && validator.valid(providerBundle)) {
+            PerpetualMarketBundle authorityBundle = testControlService == null
+                ? providerBundle
+                : testControlService.applyPerpetualOverride(providerBundle);
+            if (validator.valid(authorityBundle)) {
+              recordSuccess(candidate, MarketBundleAssembler.quote(providerBundle, clock), startedAt);
+              selectionTracker.recordSelection(
+                  symbol,
+                  providerBundle.providerCode(),
+                  providerBundle.sourceMode(),
+                  providerBundle.asOf(),
+                  providerBundle.expiresAt(),
+                  false);
+              return authorityBundle;
+            }
+          }
         }
       } catch (RuntimeException ignored) {
         // An incomplete or failed candidate causes whole-bundle fallback.

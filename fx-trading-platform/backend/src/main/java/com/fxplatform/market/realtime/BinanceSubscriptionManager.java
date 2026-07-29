@@ -15,7 +15,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -139,7 +138,6 @@ public class BinanceSubscriptionManager {
         rejectedSymbolCount.get());
   }
 
-  @Scheduled(fixedDelayString = "${market.realtime.maintenance-delay:1000}")
   synchronized void runMaintenance() {
     Instant now = clock.instant();
     List<String> expired = pendingUnsubscribes.entrySet().stream()

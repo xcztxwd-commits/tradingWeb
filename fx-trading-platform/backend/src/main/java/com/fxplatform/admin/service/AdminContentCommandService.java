@@ -9,9 +9,7 @@ import com.fxplatform.audit.service.AuditDetailsBuilder;
 import com.fxplatform.audit.service.AuditLogService;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.content.entity.ContentArticleEntity;
-import com.fxplatform.content.entity.ContentMessageEntity;
 import com.fxplatform.content.repository.ContentArticleRepository;
-import com.fxplatform.content.repository.ContentMessageRepository;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -25,8 +23,6 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class AdminContentCommandService {
 
-  /** 站内消息仓储，用于保存后台消息。 */
-  private final ContentMessageRepository messageRepository;
   /** 内容仓储，用于保存公告和新闻。 */
   private final ContentArticleRepository articleRepository;
   /** 审计服务，用于记录内容发布和修改动作。 */
@@ -37,46 +33,19 @@ public class AdminContentCommandService {
    */
   @Transactional
   public AdminMessageResponse createMessage(UUID actorUserId, AdminMessageRequest request) {
-    ContentMessageEntity message = new ContentMessageEntity();
-    applyMessage(message, actorUserId, request);
-    ContentMessageEntity saved = messageRepository.save(message);
-    auditLogService.record(
-        actorUserId,
-        "ADMIN_MESSAGE_CREATE",
-        "MESSAGE",
-        saved.getId().toString(),
-        details(request.title(), request.status()));
-    return AdminMessageResponse.from(saved);
+    throw legacyMessageReadOnly();
   }
 
   /** 编辑站内消息，供通知表格的编辑弹窗保存使用。 */
   @Transactional
   public AdminMessageResponse updateMessage(UUID actorUserId, UUID messageId, AdminMessageRequest request) {
-    ContentMessageEntity message = messageRepository.findById(messageId)
-        .orElseThrow(() -> new BusinessException("MESSAGE_NOT_FOUND", "Message not found"));
-    applyMessage(message, actorUserId, request);
-    ContentMessageEntity saved = messageRepository.save(message);
-    auditLogService.record(
-        actorUserId,
-        "ADMIN_MESSAGE_UPDATE",
-        "MESSAGE",
-        messageId.toString(),
-        details(request.title(), request.status()));
-    return AdminMessageResponse.from(saved);
+    throw legacyMessageReadOnly();
   }
 
   /** 删除站内消息，并记录后台操作原因。 */
   @Transactional
   public void deleteMessage(UUID actorUserId, UUID messageId, String reason) {
-    ContentMessageEntity message = messageRepository.findById(messageId)
-        .orElseThrow(() -> new BusinessException("MESSAGE_NOT_FOUND", "Message not found"));
-    messageRepository.deleteById(messageId);
-    auditLogService.record(
-        actorUserId,
-        "ADMIN_MESSAGE_DELETE",
-        "MESSAGE",
-        messageId.toString(),
-        details(message.getTitle(), reason));
+    throw legacyMessageReadOnly();
   }
 
   /**
@@ -126,15 +95,11 @@ public class AdminContentCommandService {
         details(article.getTitle(), reason));
   }
 
-  /** 将消息请求写入实体，新增和编辑共用，减少字段遗漏。 */
-  private void applyMessage(ContentMessageEntity message, UUID actorUserId, AdminMessageRequest request) {
-    message.setTargetUserId(request.targetUserId());
-    message.setTitle(request.title());
-    message.setBody(request.body());
-    message.setMessageType(request.messageType());
-    message.setStatus(request.status());
-    message.setSentBy(actorUserId);
-    message.setPublishedAt(publishedAtFor(request.status()));
+  /** 旧消息写入口保留用于兼容路由，但数据只能通过新的 engagement API 写入。 */
+  private static BusinessException legacyMessageReadOnly() {
+    return new BusinessException(
+        "LEGACY_MESSAGE_READ_ONLY",
+        "Legacy content.messages is read-only; use the engagement message API");
   }
 
   /** 将文章请求写入实体，新增和编辑共用，保持公告/新闻字段一致。 */

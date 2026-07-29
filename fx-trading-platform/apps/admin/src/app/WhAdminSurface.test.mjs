@@ -49,6 +49,8 @@ describe('WH screenshot admin surface', () => {
     assert.match(appSource, /<Route path="\/system\/users" element=\{<FeatureCrudPage pageKey="system-users" \/>\} \/>/)
     assert.match(appSource, /<Route path="\/finance\/recharge-orders" element=\{<FeatureCrudPage pageKey="recharge-orders" \/>\} \/>/)
     assert.match(appSource, /<Route path="\/config\/settings\/footer" element=\{<FeatureCrudPage pageKey="settings-footer" \/>\} \/>/)
+    assert.match(appSource, /<Route path="\/content\/member-notices" element=\{<MemberNoticePage \/>\} \/>/)
+    assert.doesNotMatch(appSource, /<FeatureCrudPage pageKey="member-notices" \/>/)
   })
 
   it('contains screenshot shell features and CRUD controls', () => {

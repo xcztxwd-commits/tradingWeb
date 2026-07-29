@@ -15,6 +15,7 @@ import com.fxplatform.market.provider.MarketDataRouter;
 import com.fxplatform.market.model.MarketSourceMode;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -322,6 +323,28 @@ class QuoteServiceTest {
   }
 
   @Test
+  void freshQuoteDelegatesTheWallMarkedValidationQuoteToTheInjectedAuthority() {
+    Instant virtualTime = Instant.parse("2020-01-01T00:00:01Z");
+    QuoteResponse validationQuote = validationQuote(virtualTime);
+    when(marketDataRouter.latestQuote("BTCUSDT-PERP")).thenReturn(validationQuote);
+    QuoteService service = service(false, (quote, staleMs) -> false);
+
+    assertThat(service.freshQuote("BTCUSDT-PERP")).isSameAs(validationQuote);
+  }
+
+  @Test
+  void freshQuoteRejectsWhenTheInjectedAuthorityMarksTheQuoteStale() {
+    Instant virtualTime = Instant.parse("2020-01-01T00:00:01Z");
+    when(marketDataRouter.latestQuote("BTCUSDT-PERP"))
+        .thenReturn(validationQuote(virtualTime));
+    QuoteService service = service(false, (quote, staleMs) -> true);
+
+    assertThatThrownBy(() -> service.freshQuote("BTCUSDT-PERP"))
+        .isInstanceOfSatisfying(BusinessException.class, ex ->
+            assertThat(ex.getCode()).isEqualTo("QUOTE_STALE"));
+  }
+
+  @Test
   void statusReportsProviderRoutingMode() {
     QuoteService service = service(false);
     ReflectionTestUtils.setField(service, "quoteStaleMs", 2500);
@@ -338,6 +361,42 @@ class QuoteServiceTest {
     QuoteService service = new QuoteService(marketDataRouter, redisTemplate, objectMapper);
     ReflectionTestUtils.setField(service, "demoQuotesEnabled", demoEnabled);
     return service;
+  }
+
+  private QuoteService service(
+      boolean demoEnabled,
+      QuoteFreshnessAuthority freshnessAuthority
+  ) {
+    QuoteService service = new QuoteService(
+        marketDataRouter,
+        redisTemplate,
+        objectMapper,
+        freshnessAuthority);
+    ReflectionTestUtils.setField(service, "demoQuotesEnabled", demoEnabled);
+    return service;
+  }
+
+  private QuoteResponse validationQuote(Instant virtualTime) {
+    return new QuoteResponse(
+        "quote",
+        "BTCUSDT-PERP",
+        new BigDecimal("49999"),
+        new BigDecimal("50001"),
+        new BigDecimal("50000"),
+        new BigDecimal("50000"),
+        new BigDecimal("2"),
+        "validation",
+        virtualTime.toEpochMilli(),
+        null,
+        null,
+        null,
+        null,
+        MarketSourceMode.LOCAL_SIMULATED,
+        "validation",
+        "BTCUSDT",
+        virtualTime,
+        virtualTime.plusSeconds(60),
+        true);
   }
 
   private QuoteResponse quote(String symbol, String source) {

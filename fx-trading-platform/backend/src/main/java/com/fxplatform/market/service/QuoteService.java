@@ -17,7 +17,8 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import lombok.RequiredArgsConstructor;
+import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -26,12 +27,37 @@ import org.springframework.stereotype.Service;
  * QuoteService 是行情模块的业务服务。
  */
 @Service
-@RequiredArgsConstructor
 public class QuoteService {
 
   private final MarketDataRouter marketDataRouter;
   private final StringRedisTemplate redisTemplate;
   private final ObjectMapper objectMapper;
+  private final QuoteFreshnessAuthority freshnessAuthority;
+
+  @Autowired
+  public QuoteService(
+      MarketDataRouter marketDataRouter,
+      StringRedisTemplate redisTemplate,
+      ObjectMapper objectMapper,
+      QuoteFreshnessAuthority freshnessAuthority
+  ) {
+    this.marketDataRouter = Objects.requireNonNull(marketDataRouter, "marketDataRouter");
+    this.redisTemplate = Objects.requireNonNull(redisTemplate, "redisTemplate");
+    this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
+    this.freshnessAuthority = Objects.requireNonNull(freshnessAuthority, "freshnessAuthority");
+  }
+
+  public QuoteService(
+      MarketDataRouter marketDataRouter,
+      StringRedisTemplate redisTemplate,
+      ObjectMapper objectMapper
+  ) {
+    this(
+        marketDataRouter,
+        redisTemplate,
+        objectMapper,
+        new WallClockQuoteFreshnessAuthority());
+  }
 
   @Value("${market.quote-stale-ms:${massive.quote-stale-ms:3000}}")
   private long quoteStaleMs;
@@ -180,14 +206,7 @@ public class QuoteService {
   }
 
   private boolean isStale(QuoteResponse quote) {
-    if (quote.stale()) {
-      return true;
-    }
-    if (quote.expiresAt() != null) {
-      return !DateUtil.date().toInstant().isBefore(quote.expiresAt());
-    }
-    long ageMs = DateUtil.date().toInstant().toEpochMilli() - quote.timestamp();
-    return ageMs > quoteStaleMs;
+    return freshnessAuthority.isStale(quote, quoteStaleMs);
   }
 
   private boolean canUseCachedForDisplay(QuoteResponse quote) {

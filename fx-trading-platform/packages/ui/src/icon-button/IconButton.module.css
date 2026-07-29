@@ -1,0 +1,54 @@
+.button {
+  width: var(--icon-button-width, calc(var(--space-8) + var(--space-3)));
+  min-width: var(--icon-button-min-width, calc(var(--space-8) + var(--space-3)));
+  min-height: var(--icon-button-min-height, calc(var(--space-8) + var(--space-3)));
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--trading-border);
+  border-radius: var(--radius-3);
+  background: var(--trading-surface);
+  color: var(--trading-text);
+  padding: var(--space-0);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    border-color var(--motion-base) var(--ease-standard),
+    background-color var(--motion-base) var(--ease-standard),
+    color var(--motion-base) var(--ease-standard),
+    box-shadow var(--motion-base) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.button:hover,
+.button:focus-visible {
+  border-color: var(--trading-accent-border);
+  background: var(--trading-surface-3);
+  color: var(--trading-text-strong);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: var(--space-1);
+  box-shadow: 0 0 0 var(--space-1) var(--trading-accent-soft);
+}
+
+.button:active {
+  transform: scale(0.96);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.primary {
+  border-color: var(--trading-accent-border);
+  background: var(--trading-accent);
+  color: var(--trading-accent-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button {
+    transition: none;
+  }
+}

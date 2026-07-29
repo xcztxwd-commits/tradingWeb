@@ -20,6 +20,15 @@ final class PerpetualIsolatedCloseHoldValidator {
       PerpetualOrderRiskService.OrderRisk newRisk,
       List<OrderEntity> activeOrders
   ) {
+    validate(position, newRisk, newRisk.holdAmount(), activeOrders);
+  }
+
+  static void validate(
+      PositionEntity position,
+      PerpetualOrderRiskService.OrderRisk newRisk,
+      BigDecimal plannedInitialHold,
+      List<OrderEntity> activeOrders
+  ) {
     BigDecimal existingClosing = BigDecimal.ZERO;
     BigDecimal existingHolds = BigDecimal.ZERO;
     for (OrderEntity active : activeOrders) {
@@ -35,7 +44,7 @@ final class PerpetualIsolatedCloseHoldValidator {
           ErrorCode.REDUCE_ONLY_EXCEEDS_POSITION,
           "Aggregate Isolated close orders exceed the locked position slot");
     }
-    if (existingHolds.add(newRisk.holdAmount())
+    if (existingHolds.add(plannedInitialHold)
         .compareTo(newRisk.isolatedHoldCapacity()) >= 0) {
       throw new BusinessException(
           ErrorCode.MARGIN_REDUCTION_UNSAFE,

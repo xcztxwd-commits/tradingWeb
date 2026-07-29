@@ -3,6 +3,7 @@ export type AdminMenuItem = {
   label: string
   icon: string
   pageKey?: string
+  authority?: string
 }
 
 export type AdminMenuGroup = {
@@ -81,7 +82,9 @@ export const adminMenuGroups: AdminMenuGroup[] = [
     items: [
       { to: '/content/notices', label: '公告列表', icon: 'notice', pageKey: 'notices' },
       { to: '/content/news', label: '新闻列表', icon: 'news', pageKey: 'news' },
-      { to: '/content/member-notices', label: '通知表', icon: 'bell', pageKey: 'member-notices' }
+      { to: '/content/popup-campaigns/policy', label: '弹窗策略', icon: 'settings' },
+      { to: '/content/popup-campaigns', label: '弹窗活动', icon: 'layout' },
+      { to: '/content/member-notices', label: '普通消息', icon: 'bell' }
     ]
   },
   {
@@ -99,6 +102,7 @@ export const adminMenuGroups: AdminMenuGroup[] = [
     label: 'Demo 交易运营',
     icon: 'activity',
     items: [
+      { to: '/trading/lab', label: '交易路径实验室', icon: 'activity', authority: 'TRADING_LAB_VIEW' },
       { to: '/accounts', label: '交易账户', icon: 'user' },
       { to: '/trading/orders', label: '订单', icon: 'clipboard' },
       { to: '/trading/positions', label: '持仓', icon: 'chart' },

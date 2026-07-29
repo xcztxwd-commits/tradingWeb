@@ -12,6 +12,7 @@ import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.provider.MarketBundleResolver;
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderStatus;
+import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.repository.OrderRepository;
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -20,17 +21,13 @@ import java.util.List;
 import java.util.Set;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /** Scans untriggered position-bound protection carriers and delegates canonical close execution. */
 @Service
 @Slf4j
-@ConditionalOnProperty(
-    prefix = "trading",
-    name = "protective-order-execution-enabled",
-    havingValue = "true")
 public class ProtectiveOrderExecutionService {
 
   private static final String EXECUTION_FAILURE_EVENT = "PROTECTION_EXECUTION_FAILED";
@@ -70,8 +67,17 @@ public class ProtectiveOrderExecutionService {
     this.orderEventService = orderEventService;
   }
 
-  @Scheduled(fixedDelayString = "${trading.protective-order-scan-ms:1000}")
   public int executeProtectiveOrders() {
+    return executeProtectiveOrders(false);
+  }
+
+  /** Validation-only strict scan that joins the owning system-step transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public int executeProtectiveOrdersStrict() {
+    return executeProtectiveOrders(true);
+  }
+
+  private int executeProtectiveOrders(boolean failClosed) {
     List<OrderEntity> candidates = orderRepository.findBoundProtectionsByStatus(
         OrderStatus.PENDING_ACTIVATION);
     if (candidates == null || candidates.isEmpty()) {
@@ -84,10 +90,17 @@ public class ProtectiveOrderExecutionService {
         continue;
       }
       boolean demoAuthorized = false;
+      if (failClosed) {
+        requireDemoAccount(protection);
+        if (executeCandidateWithRetry(protection, true)) {
+          executed++;
+        }
+        continue;
+      }
       try {
         requireDemoAccount(protection);
         demoAuthorized = true;
-        if (executeCandidateWithRetry(protection)) {
+        if (executeCandidateWithRetry(protection, false)) {
           executed++;
         }
       } catch (BusinessException exception) {
@@ -130,17 +143,26 @@ public class ProtectiveOrderExecutionService {
     }
   }
 
-  private boolean executeCandidateWithRetry(OrderEntity protection) {
+  private boolean executeCandidateWithRetry(
+      OrderEntity protection,
+      boolean joinCallerTransaction
+  ) {
     for (int attempt = 0; attempt < 2; attempt++) {
       ExecutableMarketSnapshot snapshot = resolveSnapshot(protection);
       if (!protectionOrderService.isTriggered(protection, snapshot.mark())) {
         return false;
       }
       try {
-        systemCloseOrderService.executeProtection(protection.getId(), snapshot);
+        if (joinCallerTransaction) {
+          systemCloseOrderService.executeProtectionStrict(protection.getId(), snapshot);
+        } else {
+          systemCloseOrderService.executeProtection(protection.getId(), snapshot);
+        }
         return true;
       } catch (BusinessException exception) {
-        if (!ErrorCode.MARKET_DATA_STALE.equals(exception.getCode()) || attempt > 0) {
+        if (joinCallerTransaction
+            || !ErrorCode.MARKET_DATA_STALE.equals(exception.getCode())
+            || attempt > 0) {
           throw exception;
         }
       }
@@ -167,6 +189,7 @@ public class ProtectiveOrderExecutionService {
         && !order.getSymbol().isBlank()
         && order.getProductType() == ProductType.LINEAR_PERP
         && order.getStatus() == OrderStatus.PENDING_ACTIVATION
+        && order.getOrderType() != OrderType.TRAILING_STOP_MARKET
         && order.getProtectionType() != null
         && order.getParentPositionId() != null;
   }

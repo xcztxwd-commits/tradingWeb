@@ -7,5 +7,7 @@ public enum OrderType {
   MARKET,
   LIMIT,
   STOP,
-  STOP_MARKET
+  STOP_MARKET,
+  STOP_LIMIT,
+  TRAILING_STOP_MARKET
 }

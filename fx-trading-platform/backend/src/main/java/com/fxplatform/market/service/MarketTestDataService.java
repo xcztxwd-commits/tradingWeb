@@ -18,7 +18,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
@@ -48,7 +47,6 @@ public class MarketTestDataService {
   /**
    * 按调度配置执行 publishRealtimeTestData 定时任务。
    */
-  @Scheduled(fixedDelayString = "${market.test-data.realtime-ms:1000}")
   public void publishRealtimeTestData() {
     if (!enabled) {
       return;

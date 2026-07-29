@@ -50,7 +50,6 @@ const zhCN = {
     loadingData: '正在加载数据。',
     loadFailed: '加载失败',
     empty: '暂无数据',
-    placeholderPageMessage: '该页面的业务入口已预留，后续会补齐对应数据和表格。',
     loginRequired: '需要登录',
     goLogin: '前往登录',
     previousPage: '上一页',
@@ -683,6 +682,8 @@ const zhCN = {
     timelineFilled: '成交',
     timelineCanceled: '撤销',
     cancel: '撤单',
+    cancelConfirm: '确认撤销此订单？',
+    cancelConfirmBody: '确认撤销当前 {{symbol}} 订单。',
     modify: '修改',
     modifyOrder: '修改委托',
     cancelUnavailable: '当前订单不能撤单。',
@@ -828,6 +829,12 @@ const zhCN = {
     }
   },
   assets: {
+    transferAmountInvalid: '请输入大于 0 的划转金额。',
+    transferBalanceInsufficient: '划转金额不得超过来源账户的可用余额。',
+    transferCompleted: '已划转 {{amount}} USDT（{{direction}}）。',
+    transferFailed: '{{message}}',
+    resetCompleted: 'Demo 账户已重置。',
+    resetFailed: '{{message}}',
     walletTitle: '资金',
     walletSummary: '管理资产总览、充值入口、提现入口、资金流水和地址簿入口。当前为模拟资金账本。',
     loginMessage: '登录后才能查看模拟资金账本和提交充值/提现申请。',
@@ -1187,6 +1194,7 @@ const zhCN = {
     }
   },
   account: {
+    dataUnavailable: '{{message}}',
     title: '我的',
     summary: '移动端账户入口，集中访问资金、安全和设置。',
     entryTitle: '账户入口',

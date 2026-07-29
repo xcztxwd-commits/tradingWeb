@@ -6,6 +6,7 @@ import com.fxplatform.market.adapter.local.LocalPerpMarketDataProvider;
 import com.fxplatform.market.model.CandleRequest;
 import com.fxplatform.market.model.MarketSourceMode;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -58,7 +59,8 @@ class LocalPerpMarketDataProviderTest {
 
       assertThat(bundle.sourceMode()).isEqualTo(MarketSourceMode.LOCAL_SIMULATED);
       assertThat(bundle.mark()).isEqualByComparingTo(
-          bundle.index().multiply(new BigDecimal("1.001")));
+          bundle.index().multiply(new BigDecimal("1.001")).setScale(10, RoundingMode.HALF_UP));
+      assertThat(bundle.mark().scale()).isEqualTo(10);
       assertThat(bundle.bid()).isLessThanOrEqualTo(bundle.last());
       assertThat(bundle.last()).isLessThanOrEqualTo(bundle.ask());
       assertThat(bundle.last()).isEqualByComparingTo(bundle.mark());

@@ -10,6 +10,9 @@
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
+    "paths": {
+      "klinecharts": ["../../../dist/index.d.ts"]
+    },
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx"

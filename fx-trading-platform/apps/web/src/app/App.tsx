@@ -2,59 +2,52 @@ import { Suspense, lazy } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { ExchangeLoading } from '../components/loading/ExchangeLoading'
+import { AccountRoute } from '../routes/account/AccountRoutes'
+import { AuthRoute } from '../routes/auth/AuthRoute'
+import { HomeRoute } from '../routes/home/HomeRoute'
+import { MarketsRoute } from '../routes/markets/MarketsRoute'
+import { MessagesRoute } from '../routes/messages/MessagesRoute'
+import { OrdersRoute } from '../routes/orders/OrdersRoute'
+import { PositionsRoute } from '../routes/positions/PositionsRoute'
+import { WalletRoute } from '../routes/wallet/WalletRoute'
 import { AppShell } from './AppShell'
 import { LegacyTradingRedirect } from './LegacyTradingRedirect'
 import { resolveSafeTradingPath } from './tradingRoutes'
 
-const HomePage = lazy(() => import('../pages/home/HomePage').then((module) => ({ default: module.HomePage })))
-const TradingPage = lazy(() => import('../pages/trading/TradingPage').then((module) => ({ default: module.TradingPage })))
-const LoginPage = lazy(() => import('../pages/login/LoginPage').then((module) => ({ default: module.LoginPage })))
-const RegisterPage = lazy(() => import('../pages/login/AuthSupportPage').then((module) => ({ default: module.RegisterPage })))
-const ForgotPasswordPage = lazy(() => import('../pages/login/AuthSupportPage').then((module) => ({ default: module.ForgotPasswordPage })))
-const TwoFactorHelpPage = lazy(() => import('../pages/login/AuthSupportPage').then((module) => ({ default: module.TwoFactorHelpPage })))
-const SettingsPage = lazy(() => import('../pages/settings/SettingsPage').then((module) => ({ default: module.SettingsPage })))
-const SecurityCenterPage = lazy(() => import('../pages/security/SecurityCenterPage').then((module) => ({ default: module.SecurityCenterPage })))
-const OrdersPage = lazy(() => import('../pages/orders/OrdersPage').then((module) => ({ default: module.OrdersPage })))
-const PositionsPage = lazy(() => import('../pages/positions/PositionsPage').then((module) => ({ default: module.PositionsPage })))
-const DashboardPage = lazy(() => import('../pages/dashboard/DashboardPage').then((module) => ({ default: module.DashboardPage })))
-const MarketsPage = lazy(() => import('../pages/markets/MarketsPage').then((module) => ({ default: module.MarketsPage })))
-const WalletPage = lazy(() => import('../pages/wallet/WalletPage').then((module) => ({ default: module.WalletPage })))
-const AccountOverviewPage = lazy(() => import('../pages/account/AccountPages').then((module) => ({ default: module.AccountOverviewPage })))
-const AccountAssetsPage = lazy(() => import('../pages/account/AccountPages').then((module) => ({ default: module.AccountAssetsPage })))
-const FundingRecordsPage = lazy(() => import('../pages/account/AccountPages').then((module) => ({ default: module.FundingRecordsPage })))
-const TradeOrdersPage = lazy(() => import('../pages/account/AccountPages').then((module) => ({ default: module.TradeOrdersPage })))
-const KycPage = lazy(() => import('../pages/account/AccountPages').then((module) => ({ default: module.KycPage })))
-const AccountSettingsPage = lazy(() => import('../pages/account/AccountPages').then((module) => ({ default: module.AccountSettingsPage })))
+const TradingRoute = lazy(() =>
+  import('../routes/trading/TradingRoute').then((module) => ({ default: module.TradingRoute }))
+)
 
 export function App() {
   return (
     <AppShell>
       <Suspense fallback={<ExchangeLoading />}>
         <Routes>
-          <Route path="/" element={<HomePage />} />
+          <Route path="/" element={<HomeRoute />} />
           <Route path="/trade" element={<LegacyTradingRedirect />} />
           <Route path="/trading" element={<LegacyTradingRedirect />} />
-          <Route path="/trade/spot/:symbol?" element={<TradingPage product="spot" />} />
-          <Route path="/trade/perpetual/:symbol?" element={<TradingPage product="perpetual" />} />
+          <Route path="/trade/spot/:symbol?" element={<TradingRoute product="spot" />} />
+          <Route path="/trade/perpetual/:symbol?" element={<TradingRoute product="perpetual" />} />
           <Route path="/trade/:product/:symbol?" element={<Navigate to={resolveSafeTradingPath(null)} replace />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/two-factor-help" element={<TwoFactorHelpPage />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/markets" element={<MarketsPage />} />
-          <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/positions" element={<PositionsPage />} />
-          <Route path="/wallet" element={<WalletPage />} />
+          <Route path="/login" element={<AuthRoute mode="login" />} />
+          <Route path="/register" element={<AuthRoute mode="register" />} />
+          <Route path="/forgot-password" element={<AuthRoute mode="forgot-password" />} />
+          <Route path="/two-factor-help" element={<AuthRoute mode="two-factor-help" />} />
+          <Route path="/dashboard" element={<AccountRoute mode="dashboard" />} />
+          <Route path="/markets" element={<MarketsRoute />} />
+          <Route path="/messages" element={<MessagesRoute />} />
+          <Route path="/orders" element={<OrdersRoute />} />
+          <Route path="/positions" element={<PositionsRoute />} />
+          <Route path="/wallet" element={<WalletRoute />} />
           <Route path="/account" element={<Navigate to="/account/overview" replace />} />
-          <Route path="/account/overview" element={<AccountOverviewPage />} />
-          <Route path="/account/assets" element={<AccountAssetsPage />} />
-          <Route path="/account/orders/funding" element={<FundingRecordsPage />} />
-          <Route path="/account/orders/trades" element={<TradeOrdersPage />} />
-          <Route path="/account/security/kyc" element={<KycPage />} />
-          <Route path="/account/settings" element={<AccountSettingsPage />} />
-          <Route path="/security" element={<SecurityCenterPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/account/overview" element={<AccountRoute mode="overview" />} />
+          <Route path="/account/assets" element={<AccountRoute mode="assets" />} />
+          <Route path="/account/orders/funding" element={<AccountRoute mode="funding-records" />} />
+          <Route path="/account/orders/trades" element={<AccountRoute mode="trade-records" />} />
+          <Route path="/account/security/kyc" element={<AccountRoute mode="kyc" />} />
+          <Route path="/account/settings" element={<AccountRoute mode="account-settings" />} />
+          <Route path="/security" element={<AccountRoute mode="security" />} />
+          <Route path="/settings" element={<AccountRoute mode="settings" />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

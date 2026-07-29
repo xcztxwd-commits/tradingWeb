@@ -1,0 +1,405 @@
+.member-notice-no-popup-notice,
+.member-notice-sent-note,
+.member-notice-readonly-note {
+  position: relative;
+  min-width: 0;
+  padding: 13px 16px 13px 44px;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--admin-radius-lg);
+  color: #1e40af;
+  background: #eff6ff;
+  box-shadow: var(--admin-shadow-sm);
+  line-height: 1.6;
+}
+
+.member-notice-no-popup-notice::before,
+.member-notice-sent-note::before,
+.member-notice-readonly-note::before {
+  content: 'i';
+  position: absolute;
+  top: 13px;
+  left: 16px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #ffffff;
+  background: var(--admin-primary);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.member-notice-sent-note {
+  border-color: #bbf7d0;
+  color: #166534;
+  background: #f0fdf4;
+}
+
+.member-notice-sent-note::before {
+  content: '✓';
+  background: #16a34a;
+}
+
+.member-notice-readonly-note {
+  border-color: #fed7aa;
+  color: #9a3412;
+  background: #fff7ed;
+}
+
+.member-notice-readonly-note::before {
+  content: '!';
+  background: #ea580c;
+}
+
+.member-notice-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  color: #475569;
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.member-notice-status--scheduled {
+  border-color: #fed7aa;
+  color: #9a3412;
+  background: #fff7ed;
+}
+
+.member-notice-status--sent {
+  border-color: #bbf7d0;
+  color: #166534;
+  background: #f0fdf4;
+}
+
+.member-notice-status--deleted {
+  border-color: #fecaca;
+  color: #991b1b;
+  background: #fef2f2;
+}
+
+.member-notice-page .feature-pagination select {
+  width: auto;
+  min-width: 112px;
+}
+
+.member-notice-page .feature-pagination span {
+  white-space: nowrap;
+}
+
+.member-notice-editor-page {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  padding-bottom: 24px;
+}
+
+.member-notice-editor-heading,
+.member-notice-card {
+  min-width: 0;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-lg);
+  background: var(--admin-surface);
+  box-shadow: var(--admin-shadow-sm);
+}
+
+.member-notice-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px;
+}
+
+.member-notice-editor-heading h1,
+.member-notice-card h2 {
+  margin: 0;
+  color: var(--admin-heading);
+}
+
+.member-notice-editor-heading h1 {
+  font-size: 24px;
+  line-height: 32px;
+}
+
+.member-notice-editor-heading p,
+.member-notice-card > header p {
+  margin: 5px 0 0;
+  color: var(--admin-muted);
+  line-height: 1.55;
+}
+
+.member-notice-editor-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.75fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.member-notice-card {
+  display: grid;
+  gap: 20px;
+  padding: 22px;
+}
+
+.member-notice-card h2 {
+  font-size: 18px;
+  line-height: 26px;
+}
+
+.member-notice-delivery-card {
+  position: sticky;
+  top: 0;
+}
+
+.member-notice-form-grid,
+.member-notice-asset-field {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.member-notice-form-grid label,
+.member-notice-editor-field,
+.member-notice-asset-field label,
+.member-notice-reason-field,
+.member-notice-schedule-field {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.member-notice-form-grid label {
+  align-content: start;
+}
+
+.member-notice-form-grid input,
+.member-notice-asset-field input,
+.member-notice-link-field input,
+.member-notice-link-field select,
+.member-notice-user-search input,
+.member-notice-reason-field input,
+.member-notice-schedule-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px 11px;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: var(--admin-radius);
+  color: var(--admin-text);
+  background: #ffffff;
+}
+
+.member-notice-form-grid input:focus,
+.member-notice-asset-field input:focus,
+.member-notice-link-field input:focus,
+.member-notice-link-field select:focus,
+.member-notice-user-search input:focus,
+.member-notice-reason-field input:focus,
+.member-notice-schedule-field input:focus {
+  border-color: var(--admin-primary);
+  box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.12);
+  outline: 0;
+}
+
+.member-notice-form-grid input:disabled,
+.member-notice-asset-field input:disabled,
+.member-notice-link-field input:disabled,
+.member-notice-link-field select:disabled,
+.member-notice-user-search input:disabled,
+.member-notice-reason-field input:disabled,
+.member-notice-schedule-field input:disabled {
+  color: var(--admin-muted);
+  background: var(--admin-surface-muted);
+  cursor: not-allowed;
+}
+
+.member-notice-form-grid small,
+.member-notice-asset-field small,
+.member-notice-link-field small,
+.member-notice-user-option small {
+  color: var(--admin-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.member-notice-asset-field > small {
+  grid-column: 1 / -1;
+}
+
+.member-notice-link-field,
+.member-notice-audience-options {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  background: var(--admin-surface-muted);
+}
+
+.member-notice-link-field {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.65fr) minmax(0, 1.35fr);
+  gap: 9px;
+}
+
+.member-notice-link-field legend,
+.member-notice-audience-options legend {
+  padding: 0 6px;
+  color: var(--admin-heading);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.member-notice-link-field small {
+  grid-column: 1 / -1;
+}
+
+.member-notice-audience-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+}
+
+.member-notice-audience-options label,
+.member-notice-user-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--admin-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.member-notice-audience-options input,
+.member-notice-user-option input {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  accent-color: var(--admin-primary);
+}
+
+.member-notice-user-picker {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.member-notice-user-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.member-notice-user-search button,
+.member-notice-actions button {
+  min-height: 40px;
+  border: 1px solid var(--admin-primary);
+  border-radius: var(--admin-radius);
+  padding: 0 14px;
+  color: #ffffff;
+  background: var(--admin-primary);
+  font-weight: 800;
+}
+
+.member-notice-user-search button:hover,
+.member-notice-actions button:hover {
+  background: var(--admin-primary-hover);
+}
+
+.member-notice-user-search button:disabled,
+.member-notice-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.member-notice-user-picker > p {
+  margin: 2px 0;
+  color: var(--admin-primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.member-notice-user-option {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 17px minmax(0, 1fr);
+  padding: 9px 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-sm);
+  background: #ffffff;
+}
+
+.member-notice-user-option small {
+  grid-column: 2;
+}
+
+.member-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.member-notice-actions .ghost-button {
+  border-color: var(--admin-border-strong);
+  color: #334155;
+  background: #ffffff;
+}
+
+.member-notice-actions .danger-button {
+  border-color: var(--admin-danger);
+  background: var(--admin-danger);
+}
+
+@media (max-width: 1100px) {
+  .member-notice-editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .member-notice-delivery-card {
+    position: static;
+  }
+}
+
+@media (max-width: 620px) {
+  .member-notice-editor-heading {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 16px;
+  }
+
+  .member-notice-card {
+    padding: 16px;
+  }
+
+  .member-notice-form-grid,
+  .member-notice-asset-field,
+  .member-notice-link-field,
+  .member-notice-user-search {
+    grid-template-columns: 1fr;
+  }
+
+  .member-notice-asset-field > small,
+  .member-notice-link-field small {
+    grid-column: 1;
+  }
+
+  .member-notice-actions,
+  .member-notice-actions button,
+  .member-notice-user-search button {
+    width: 100%;
+  }
+}

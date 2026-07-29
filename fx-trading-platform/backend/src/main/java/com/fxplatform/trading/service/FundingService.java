@@ -28,6 +28,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
@@ -43,6 +44,8 @@ public class FundingService {
   private static final int MONEY_SCALE = 8;
   private static final String LEDGER_DESCRIPTION = "Perpetual funding fee";
   private static final String SHORTFALL_DESCRIPTION = "Funding bankruptcy shortfall";
+  private static final String VALIDATION_PROVIDER_CODE = "VALIDATION";
+  private static final String DEMO_SOURCE_MODE = "DEMO";
   private static final Set<String> CRYPTO_BASES = Set.of(
       "BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "OKB", "BCH", "LTC");
 
@@ -137,6 +140,7 @@ public class FundingService {
 
   @Transactional
   public BigDecimal settleFundingForAccount(UUID accountId) {
+    Instant authorityTime = Instant.now();
     Map<UUID, FundingCandidate> candidates = positionRepository
         .findByAccountIdAndStatusOrderByOpenedAtDesc(accountId, PositionStatus.OPEN)
         .stream()
@@ -155,7 +159,8 @@ public class FundingService {
         .map(position -> settleLockedPosition(
             account,
             position,
-            candidates.get(position.getId()).fundingRate()).cashflow())
+            candidates.get(position.getId()).fundingRate(),
+            authorityTime).cashflow())
         .reduce(BigDecimal.ZERO, BigDecimal::add)
         .setScale(MONEY_SCALE, RoundingMode.HALF_UP);
   }
@@ -167,7 +172,8 @@ public class FundingService {
 
   @Transactional
   public BigDecimal settleFundingForPosition(PositionEntity position, FundingRateEntity fundingRate) {
-    return settleFundingForPositionOutcome(position, fundingRate).cashflow();
+    Instant authorityTime = Instant.now();
+    return settleFundingForPositionOutcome(position, fundingRate, authorityTime).cashflow();
   }
 
   @Transactional
@@ -175,26 +181,39 @@ public class FundingService {
       PositionEntity position,
       FundingRateEntity fundingRate
   ) {
+    Instant authorityTime = Instant.now();
+    return settleFundingForPositionOutcome(position, fundingRate, authorityTime);
+  }
+
+  @Transactional
+  public FundingSettlementOutcome settleFundingForPositionOutcome(
+      PositionEntity position,
+      FundingRateEntity fundingRate,
+      Instant authorityTime
+  ) {
+    Instant settlementTime = Objects.requireNonNull(
+        authorityTime,
+        "authorityTime");
     TradingAccountEntity account = accountRepository.findByIdForUpdate(position.getAccountId())
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
     PositionEntity lockedPosition = positionRepository.findByIdForUpdate(position.getId())
         .orElseThrow(() -> new BusinessException("POSITION_NOT_FOUND", "Position not found"));
-    return settleLockedPosition(account, lockedPosition, fundingRate);
+    return settleLockedPosition(account, lockedPosition, fundingRate, settlementTime);
   }
 
   private FundingSettlementOutcome settleLockedPosition(
       TradingAccountEntity account,
       PositionEntity position,
-    FundingRateEntity fundingRate
+      FundingRateEntity fundingRate,
+      Instant authorityTime
   ) {
     if (position.getStatus() != PositionStatus.OPEN) {
       return FundingSettlementOutcome.skipped(zeroMoney());
     }
 
     requireMatchingCycle(position, fundingRate);
-    if (fundingRate.getFundingTime().isAfter(Instant.now())
-        || position.getOpenedAt() != null
-        && position.getOpenedAt().isAfter(fundingRate.getFundingTime())) {
+    if (fundingRate.getFundingTime().isAfter(authorityTime)
+        || !isPositionEligibleForFundingCycle(position, fundingRate, authorityTime)) {
       return FundingSettlementOutcome.skipped(zeroMoney());
     }
 
@@ -216,20 +235,23 @@ public class FundingService {
     BigDecimal appliedCashflow = cashflow.add(shortfall).setScale(MONEY_SCALE, RoundingMode.HALF_UP);
 
     if (cashflow.compareTo(BigDecimal.ZERO) == 0) {
-      publishFundingEvents(account, position, settlement, false);
+      publishFundingEvents(account, position, settlement, false, authorityTime);
       return FundingSettlementOutcome.inserted(appliedCashflow, false);
     }
 
     if (marginMode(position) == MarginMode.ISOLATED) {
       applyPositionFunding(position, appliedCashflow);
+      account.setEquity(currentEquity(account).add(appliedCashflow)
+          .setScale(MONEY_SCALE, RoundingMode.HALF_UP));
+      accountRepository.save(account);
       positionRepository.save(position);
+      LedgerEntryEntity ledgerEntry = ledgerService.recordFundingFeeSettlement(
+          account,
+          cashflow,
+          settlement.getId(),
+          LEDGER_DESCRIPTION);
+      attachSettlementLedger(settlement, ledgerEntry);
       if (shortfall.signum() > 0) {
-        LedgerEntryEntity ledgerEntry = ledgerService.recordFundingFeeSettlement(
-            account,
-            shortfall.negate(),
-            settlement.getId(),
-            LEDGER_DESCRIPTION);
-        attachSettlementLedger(settlement, ledgerEntry);
         recordFundingShortfall(account, position, settlement, shortfall);
       }
     } else {
@@ -250,7 +272,8 @@ public class FundingService {
         account,
         position,
         settlement,
-        marginMode(position) == MarginMode.CROSS);
+        marginMode(position) == MarginMode.CROSS,
+        authorityTime);
     return FundingSettlementOutcome.inserted(appliedCashflow, cashflow.signum() < 0);
   }
 
@@ -283,12 +306,12 @@ public class FundingService {
       TradingAccountEntity account,
       PositionEntity position,
       FundingSettlementEntity settlement,
-      boolean balanceUpdated
+      boolean balanceUpdated,
+      Instant occurredAt
   ) {
     if (eventPublisher == null || account.getUserId() == null) {
       return;
     }
-    Instant occurredAt = Instant.now();
     eventPublisher.publishEvent(new TradingAccountMutationEvent(
         account.getUserId(),
         account.getId(),
@@ -585,6 +608,19 @@ public class FundingService {
 
   private String normalizeSymbol(String symbol) {
     return symbol == null ? "" : symbol.trim().toUpperCase();
+  }
+
+  private boolean isPositionEligibleForFundingCycle(
+      PositionEntity position,
+      FundingRateEntity fundingRate,
+      Instant authorityTime
+  ) {
+    if (VALIDATION_PROVIDER_CODE.equals(fundingRate.getProviderCode())
+        && DEMO_SOURCE_MODE.equals(fundingRate.getSourceMode())) {
+      return fundingRate.getFundingTime().equals(authorityTime);
+    }
+    return position.getOpenedAt() == null
+        || !position.getOpenedAt().isAfter(fundingRate.getFundingTime());
   }
 
   private boolean matchesPerpetualProduct(PositionEntity position, SymbolEntity symbol) {

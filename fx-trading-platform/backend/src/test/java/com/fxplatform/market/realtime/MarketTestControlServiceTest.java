@@ -7,6 +7,9 @@ import static org.mockito.Mockito.verify;
 
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.market.dto.QuoteResponse;
+import com.fxplatform.market.model.MarketSourceMode;
+import com.fxplatform.market.model.PerpetualMarketBundle;
+import com.fxplatform.market.model.SpotMarketBundle;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
@@ -47,15 +50,80 @@ class MarketTestControlServiceTest {
   }
 
   @Test
-  void overrideExpiresAfterTtl() {
+  void expiredOverrideReturnsOriginalProviderBundle() {
     MarketTestControlProperties properties = enabledProperties();
     MutableClock clock = new MutableClock(Instant.parse("2026-06-17T00:00:00Z"));
     MarketTestControlService service = service(properties, clock, Mockito.mock(RealtimeBackfillService.class));
+    SpotMarketBundle spot = spotBundle();
+    PerpetualMarketBundle perp = perpBundle();
+
+    assertThat(service.applySpotOverride(spot)).isSameAs(spot);
+    assertThat(service.applyPerpetualOverride(perp)).isSameAs(perp);
 
     service.startOverride(request("BTCUSDT", Duration.ofSeconds(1)));
+    service.startOverride(request("BTCUSDT-PERP", Duration.ofSeconds(1)));
     clock.advance(Duration.ofSeconds(2));
 
     assertThat(service.overrideQuote("BTCUSDT")).isEmpty();
+    assertThat(service.applySpotOverride(spot)).isSameAs(spot);
+    assertThat(service.applyPerpetualOverride(perp)).isSameAs(perp);
+  }
+
+  @Test
+  void configuredMaxTtlCannotRaiseFiveMinuteSafetyCap() {
+    MarketTestControlProperties properties = enabledProperties();
+    properties.setMaxTtl(Duration.ofHours(1));
+    MutableClock clock = new MutableClock(Instant.parse("2026-06-17T00:00:00Z"));
+    MarketTestControlService service = service(properties, clock, Mockito.mock(RealtimeBackfillService.class));
+
+    service.startOverride(request("BTCUSDT", Duration.ofHours(1)));
+    clock.advance(Duration.ofMinutes(5));
+
+    assertThat(service.overrideQuote("BTCUSDT")).isEmpty();
+  }
+
+  @Test
+  void activeOverrideRewritesSpotExecutionPricesAndPreservesProviderBundle() {
+    MarketTestControlProperties properties = enabledProperties();
+    MutableClock clock = new MutableClock(Instant.parse("2026-06-17T00:00:00Z"));
+    MarketTestControlService service = service(properties, clock, Mockito.mock(RealtimeBackfillService.class));
+    SpotMarketBundle spot = spotBundle();
+
+    service.startOverride(request("BTCUSDT", Duration.ofMinutes(1)));
+
+    SpotMarketBundle overriddenSpot = service.applySpotOverride(spot);
+    assertThat(overriddenSpot)
+        .usingRecursiveComparison()
+        .ignoringFields("bid", "ask", "last")
+        .isEqualTo(spot);
+    assertThat(overriddenSpot.bid()).isEqualByComparingTo("100.00");
+    assertThat(overriddenSpot.ask()).isEqualByComparingTo("102.00");
+    assertThat(overriddenSpot.last()).isEqualByComparingTo("101.0000000000");
+    assertThat(overriddenSpot.providerCode()).isEqualTo("binance");
+    assertThat(overriddenSpot.sourceMode()).isEqualTo(MarketSourceMode.PUBLIC_EXTERNAL);
+  }
+
+  @Test
+  void activeOverrideRewritesPerpetualExecutionAndRiskPrices() {
+    MarketTestControlProperties properties = enabledProperties();
+    MutableClock clock = new MutableClock(Instant.parse("2026-06-17T00:00:00Z"));
+    MarketTestControlService service = service(properties, clock, Mockito.mock(RealtimeBackfillService.class));
+    PerpetualMarketBundle perp = perpBundle();
+
+    service.startOverride(request("BTCUSDT-PERP", Duration.ofMinutes(1)));
+
+    PerpetualMarketBundle overriddenPerp = service.applyPerpetualOverride(perp);
+    assertThat(overriddenPerp)
+        .usingRecursiveComparison()
+        .ignoringFields("bid", "ask", "last", "mark", "index")
+        .isEqualTo(perp);
+    assertThat(overriddenPerp.bid()).isEqualByComparingTo("100.00");
+    assertThat(overriddenPerp.ask()).isEqualByComparingTo("102.00");
+    assertThat(overriddenPerp.last()).isEqualByComparingTo("101.0000000000");
+    assertThat(overriddenPerp.mark()).isEqualByComparingTo("101.0000000000");
+    assertThat(overriddenPerp.index()).isEqualByComparingTo("101.0000000000");
+    assertThat(overriddenPerp.providerCode()).isEqualTo("binance-usdm");
+    assertThat(overriddenPerp.sourceMode()).isEqualTo(MarketSourceMode.PUBLIC_EXTERNAL);
   }
 
   @Test
@@ -92,6 +160,48 @@ class MarketTestControlServiceTest {
         new BigDecimal("100.00"),
         new BigDecimal("102.00"),
         ttl);
+  }
+
+  private SpotMarketBundle spotBundle() {
+    return new SpotMarketBundle(
+        "BTCUSDT",
+        "BTCUSDT",
+        "binance",
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        new BigDecimal("99"),
+        new BigDecimal("101"),
+        new BigDecimal("100"),
+        new BigDecimal("1.5"),
+        new BigDecimal("110"),
+        new BigDecimal("90"),
+        new BigDecimal("1000"),
+        null,
+        null,
+        null,
+        Instant.parse("2026-06-16T23:59:59Z"),
+        Instant.parse("2026-06-17T00:00:05Z"));
+  }
+
+  private PerpetualMarketBundle perpBundle() {
+    return new PerpetualMarketBundle(
+        "BTCUSDT-PERP",
+        "BTCUSDT",
+        "binance-usdm",
+        MarketSourceMode.PUBLIC_EXTERNAL,
+        new BigDecimal("99"),
+        new BigDecimal("101"),
+        new BigDecimal("100"),
+        new BigDecimal("100.2"),
+        new BigDecimal("100.1"),
+        new BigDecimal("1.5"),
+        new BigDecimal("110"),
+        new BigDecimal("90"),
+        new BigDecimal("1000"),
+        null,
+        null,
+        null,
+        Instant.parse("2026-06-16T23:59:59Z"),
+        Instant.parse("2026-06-17T00:00:05Z"));
   }
 
   private static final class MutableClock extends Clock {

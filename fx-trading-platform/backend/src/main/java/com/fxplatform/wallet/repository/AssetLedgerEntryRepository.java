@@ -23,7 +23,7 @@ public interface AssetLedgerEntryRepository extends FxBaseMapper<AssetLedgerEntr
         .eq(AssetLedgerEntryEntity::getAccountId, accountId)
         .eq(AssetLedgerEntryEntity::getReferenceType, referenceType)
         .in(AssetLedgerEntryEntity::getReferenceId, referenceIds)
-        .orderByAsc(AssetLedgerEntryEntity::getCreatedAt)
+        .orderByAsc(AssetLedgerEntryEntity::getSequenceNo)
         .orderByAsc(AssetLedgerEntryEntity::getId));
   }
 
@@ -50,7 +50,8 @@ public interface AssetLedgerEntryRepository extends FxBaseMapper<AssetLedgerEntr
   default List<AssetLedgerEntryEntity> findByAccountIdOrderByCreatedAtDesc(UUID accountId) {
     return selectList(new LambdaQueryWrapper<AssetLedgerEntryEntity>()
         .eq(AssetLedgerEntryEntity::getAccountId, accountId)
-        .orderByDesc(AssetLedgerEntryEntity::getCreatedAt));
+        .orderByDesc(AssetLedgerEntryEntity::getSequenceNo)
+        .orderByDesc(AssetLedgerEntryEntity::getId));
   }
 
   default List<AssetLedgerEntryEntity> findByReference(
@@ -62,7 +63,7 @@ public interface AssetLedgerEntryRepository extends FxBaseMapper<AssetLedgerEntr
         .eq(AssetLedgerEntryEntity::getAccountId, accountId)
         .eq(AssetLedgerEntryEntity::getReferenceType, referenceType)
         .eq(AssetLedgerEntryEntity::getReferenceId, referenceId)
-        .orderByAsc(AssetLedgerEntryEntity::getCreatedAt)
+        .orderByAsc(AssetLedgerEntryEntity::getSequenceNo)
         .orderByAsc(AssetLedgerEntryEntity::getId));
   }
 
@@ -95,6 +96,8 @@ public interface AssetLedgerEntryRepository extends FxBaseMapper<AssetLedgerEntr
     if (to != null) {
       query.le(AssetLedgerEntryEntity::getCreatedAt, to);
     }
-    return selectList(query.orderByDesc(AssetLedgerEntryEntity::getCreatedAt));
+    return selectList(query
+        .orderByDesc(AssetLedgerEntryEntity::getSequenceNo)
+        .orderByDesc(AssetLedgerEntryEntity::getId));
   }
 }

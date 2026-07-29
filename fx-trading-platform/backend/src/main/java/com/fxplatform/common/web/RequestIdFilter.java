@@ -8,6 +8,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.slf4j.MDC;
+import org.springframework.boot.autoconfigure.security.SecurityProperties;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -15,6 +17,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
  * RequestIdFilter 是通用基础设施模块的 Web 请求组件。
  */
 @Component
+@Order(SecurityProperties.DEFAULT_FILTER_ORDER - 2)
 public class RequestIdFilter extends OncePerRequestFilter {
 
   public static final String HEADER = "X-Request-Id";

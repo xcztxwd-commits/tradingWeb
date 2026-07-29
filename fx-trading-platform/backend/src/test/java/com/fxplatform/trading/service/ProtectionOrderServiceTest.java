@@ -380,6 +380,45 @@ class ProtectionOrderServiceTest {
   }
 
   @Test
+  void dedicatedProtectionUpdateRejectsTrailingCarrierWithoutConvertingIt() {
+    Fixture fixture = fixture(OrderSide.BUY, "1");
+    OrderEntity trailing = existingProtection(fixture, ProtectionType.STOP_LOSS, "0.5");
+    trailing.setOrderType(OrderType.TRAILING_STOP_MARKET);
+    trailing.setTrailingDelta(new BigDecimal("100"));
+    trailing.setTrailingExtreme(new BigDecimal("50000"));
+    when(orderRepository.findByUserIdAndId(fixture.userId(), trailing.getId()))
+        .thenReturn(Optional.of(trailing));
+
+    assertCode("PROTECTION_NOT_MODIFIABLE", () -> service().update(
+        fixture.userId(), trailing.getId(), new UpdateProtectionRequest(
+            null, null, new BigDecimal("48000"), null, null, 0L)));
+
+    assertThat(trailing.getOrderType()).isEqualTo(OrderType.TRAILING_STOP_MARKET);
+    assertThat(trailing.getTriggerPrice()).isEqualByComparingTo("49000");
+    verify(orderRepository, never()).updateById(any(OrderEntity.class));
+    verifyNoInteractions(marketBundleResolver, fullFillCoordinator);
+  }
+
+  @Test
+  void cancelStillAllowsAnUntriggeredTrailingCarrier() {
+    Fixture fixture = fixture(OrderSide.BUY, "1");
+    OrderEntity preflight = existingProtection(fixture, ProtectionType.STOP_LOSS, "0.5");
+    preflight.setOrderType(OrderType.TRAILING_STOP_MARKET);
+    preflight.setTrailingDelta(new BigDecimal("100"));
+    OrderEntity locked = copyProtection(preflight);
+    when(orderRepository.findByUserIdAndId(fixture.userId(), preflight.getId()))
+        .thenReturn(Optional.of(preflight));
+    when(orderRepository.findActiveLinearPerpBySymbolForUpdate(
+        fixture.accountId(), fixture.symbol())).thenReturn(List.of(locked));
+
+    var response = service().cancel(fixture.userId(), preflight.getId());
+
+    assertThat(response.status()).isEqualTo(OrderStatus.CANCELED.name());
+    assertThat(locked.getStatus()).isEqualTo(OrderStatus.CANCELED);
+    verify(orderRepository).updateById(locked);
+  }
+
+  @Test
   void cancelUsesPreflightVersionOptimisticallyAndNeverResolvesMarketOrReleasesHold() {
     Fixture fixture = fixture(OrderSide.BUY, "1");
     OrderEntity preflight = existingProtection(fixture, ProtectionType.TAKE_PROFIT, "0.5");
@@ -1322,6 +1361,118 @@ class ProtectionOrderServiceTest {
   }
 
   @Test
+  void nonTerminalParentFillReconcilesReductionWithoutBindingAttachedProtections() {
+    Fixture fixture = fixture(OrderSide.BUY, "1.5");
+    OrderEntity parent = parentOrder(fixture, "0.5");
+    parent.setSide(OrderSide.SELL);
+    OrderEntity existingTakeProfit = existingProtection(
+        fixture, ProtectionType.TAKE_PROFIT, "2");
+    OrderEntity attachedStopLoss = unboundAttached(
+        parent, ProtectionType.STOP_LOSS, "49000", TriggerExecutionType.MARKET, null);
+    when(orderRepository.findActiveLinearPerpBySymbolForUpdate(
+        fixture.accountId(), fixture.symbol()))
+        .thenReturn(
+            List.of(existingTakeProfit, attachedStopLoss),
+            List.of(existingTakeProfit, attachedStopLoss));
+
+    serviceWithLedger().afterPerpetualFillLocked(
+        parent,
+        new PositionEngine.PositionUpdateResult(fixture.position())
+            .withReduction(
+                fixture.positionId(),
+                new BigDecimal("2"),
+                new BigDecimal("1.5")),
+        new BigDecimal("50000"),
+        false);
+
+    assertThat(existingTakeProfit.getBaseQuantity()).isEqualByComparingTo("1.5");
+    assertThat(attachedStopLoss.getParentPositionId()).isNull();
+    verify(orderEventService).record(
+        existingTakeProfit.getId(),
+        "PROTECTION_RESIZED",
+        OrderStatus.PENDING_ACTIVATION,
+        OrderStatus.PENDING_ACTIVATION,
+        null,
+        null);
+    verify(orderRepository, never()).findProtectionsByParentOrderIdForUpdate(parent.getId());
+    verify(orderRepository, never()).updateById(attachedStopLoss);
+  }
+
+  @Test
+  void terminalIocThatOnlyReducesOppositeSlotExpiresUnboundAttachedInsteadOfBindingReducedSlot() {
+    Fixture fixture = fixture(OrderSide.BUY, "1.5");
+    OrderEntity parent = parentOrder(fixture, "0.5");
+    parent.setSide(OrderSide.SELL);
+    parent.setTimeInForce(TimeInForce.IOC);
+    OrderEntity attachedStopLoss = unboundAttached(
+        parent, ProtectionType.STOP_LOSS, "49000", TriggerExecutionType.MARKET, null);
+    when(orderRepository.findProtectionsByParentOrderIdForUpdate(parent.getId()))
+        .thenReturn(List.of(attachedStopLoss));
+    when(orderRepository.findActiveLinearPerpBySymbolForUpdate(
+        fixture.accountId(), fixture.symbol()))
+        .thenReturn(List.of(attachedStopLoss), List.of(attachedStopLoss));
+
+    serviceWithLedger().afterPerpetualFillLocked(
+        parent,
+        new PositionEngine.PositionUpdateResult(fixture.position())
+            .withReduction(
+                fixture.positionId(),
+                new BigDecimal("2"),
+                new BigDecimal("1.5")),
+        new BigDecimal("50000"),
+        true);
+
+    assertThat(attachedStopLoss.getParentPositionId()).isNull();
+    assertThat(attachedStopLoss.getStatus()).isEqualTo(OrderStatus.EXPIRED);
+    assertThat(attachedStopLoss.getBaseQuantity()).isZero();
+    assertThat(attachedStopLoss.getRemainingQuantity()).isZero();
+    verify(orderRepository).updateById(attachedStopLoss);
+    verify(orderEventService).record(
+        attachedStopLoss.getId(),
+        "PROTECTION_EXPIRED",
+        OrderStatus.PENDING_ACTIVATION,
+        OrderStatus.EXPIRED,
+        null,
+        null);
+    verify(orderEventService, never()).record(
+        eq(attachedStopLoss.getId()),
+        eq("PROTECTION_ACTIVATED"),
+        any(),
+        any(),
+        any(),
+        any());
+  }
+
+  @Test
+  void terminalParentFillStillBindsAttachedProtections() {
+    Fixture fixture = fixture(OrderSide.BUY, "1");
+    OrderEntity parent = parentOrder(fixture, "1");
+    OrderEntity attachedTakeProfit = unboundAttached(
+        parent, ProtectionType.TAKE_PROFIT, "51000", TriggerExecutionType.MARKET, null);
+    when(orderRepository.findProtectionsByParentOrderIdForUpdate(parent.getId()))
+        .thenReturn(List.of(attachedTakeProfit));
+    when(orderRepository.findActiveLinearPerpBySymbolForUpdate(
+        fixture.accountId(), fixture.symbol())).thenReturn(List.of(attachedTakeProfit));
+
+    serviceWithLedger().afterPerpetualFillLocked(
+        parent,
+        new PositionEngine.PositionUpdateResult(fixture.position()),
+        new BigDecimal("50000"),
+        true);
+
+    assertThat(attachedTakeProfit.getParentPositionId()).isEqualTo(fixture.positionId());
+    assertThat(attachedTakeProfit.getSide()).isEqualTo(OrderSide.SELL);
+    verify(orderRepository).updateById(attachedTakeProfit);
+    verify(orderEventService).record(
+        attachedTakeProfit.getId(),
+        "PROTECTION_ACTIVATED",
+        OrderStatus.PENDING_ACTIVATION,
+        OrderStatus.PENDING_ACTIVATION,
+        null,
+        null);
+  }
+
+  @Test
   void triggeredPendingLimitResizeReleasesExactProportionalHold() {
     Fixture fixture = fixture(OrderSide.BUY, "0.4");
     fixture.account().setUsedMargin(new BigDecimal("200"));
@@ -1757,6 +1908,7 @@ class ProtectionOrderServiceTest {
         10,
         "USDT",
         "USDT",
+        BigDecimal.ONE,
         BigDecimal.ONE,
         "DEFAULT",
         "ALWAYS",

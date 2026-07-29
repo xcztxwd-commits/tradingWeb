@@ -18,7 +18,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Worker } from 'node:worker_threads'
@@ -39,10 +39,10 @@ import {
   runCase
 } from './p0-user-trading-cases.mjs'
 import * as p0CaseContracts from './p0-user-trading-cases.mjs'
+import * as financialOracles from './p0-user-trading-oracles.mjs'
 import * as smokeContracts from './smoke-usdt-demo-browser.mjs'
 import './p0-user-trading-advanced-cases.mjs'
-import './p0-user-trading-core-cases.mjs'
-import './p0-user-trading-oracles.mjs'
+import * as p0CoreContracts from './p0-user-trading-core-cases.mjs'
 import './p0-user-trading-order-cases.mjs'
 
 const specPath = new URL(
@@ -50,6 +50,690 @@ const specPath = new URL(
   import.meta.url
 )
 const artifactsScript = fileURLToPath(new URL('./p0-user-trading-artifacts.mjs', import.meta.url))
+
+const BTC_RULES = Object.freeze({
+  tickSize: '0.01',
+  stepSize: '0.00001',
+  minQty: '0.0001',
+  contractSize: '1',
+  contractMultiplier: '1'
+})
+
+test('financial oracle: BigInt fixed-point uses explicit rounding and rule-derived grids', () => {
+  assert.equal(typeof financialOracles.roundDecimal, 'function')
+  assert.equal(financialOracles.roundDecimal('1.005', 2, 'HALF_UP'), '1.01')
+  assert.equal(financialOracles.roundDecimal('-1.005', 2, 'HALF_UP'), '-1.01')
+  assert.equal(financialOracles.roundDecimal('1.009', 2, 'DOWN'), '1.00')
+  assert.equal(financialOracles.divideDecimal('2', '3', 8, 'HALF_UP'), '0.66666667')
+  assert.equal(financialOracles.divideDecimal('2', '3', 8, 'DOWN'), '0.66666666')
+  assert.throws(
+    () => financialOracles.roundDecimal(1.005, 2, 'HALF_UP'),
+    /decimal string/
+  )
+  assert.equal(
+    financialOracles.floorToStep('0.019998', financialOracles.effectiveQuantityStep(BTC_RULES)),
+    '0.0199'
+  )
+  assert.deepEqual(financialOracles.tolerancesFromRules(BTC_RULES), {
+    price: '0.005',
+    quantity: '0.00005',
+    amount: '0.000000005'
+  })
+  assert.equal(financialOracles.withinTolerance('1.000000004', '1', '0.000000005'), true)
+  assert.equal(financialOracles.withinTolerance('1.000000006', '1', '0.000000005'), false)
+  assert.equal(financialOracles.alignPriceToTick('50000.019', BTC_RULES), '50000.01')
+  assert.equal(financialOracles.quantityFromUnit({
+    unit: 'QUOTE',
+    quantity: '500',
+    authorityMark: '50000',
+    rules: BTC_RULES
+  }), '0.0100')
+  assert.equal(financialOracles.quantityFromUnit({
+    unit: 'CONTRACTS',
+    quantity: '3',
+    authorityMark: '50000',
+    rules: {
+      ...BTC_RULES,
+      contractSize: '0.001',
+      contractMultiplier: '1'
+    }
+  }), '0.0030')
+  assert.throws(
+    () => financialOracles.quantityFromUnit({
+      unit: 'CONTRACTS',
+      quantity: '3.5',
+      authorityMark: '50000',
+      rules: BTC_RULES
+    }),
+    /integral/
+  )
+})
+
+test('financial oracle review: REST and DB money tolerance is half the 8-place unit', () => {
+  assert.equal(
+    financialOracles.tolerancesFromRules(BTC_RULES).amount,
+    '0.000000005'
+  )
+})
+
+test('financial oracle review: BASE quantity rejects rather than floors a step mismatch', () => {
+  assert.throws(
+    () => financialOracles.quantityFromUnit({
+      unit: 'BASE',
+      quantity: '0.01005',
+      authorityMark: '50000',
+      rules: BTC_RULES
+    }),
+    /effective step/
+  )
+  assert.equal(financialOracles.quantityFromUnit({
+    unit: 'QUOTE',
+    quantity: '502.5',
+    authorityMark: '50000',
+    rules: BTC_RULES
+  }), '0.0100')
+})
+
+test('financial oracle: Spot BUY floors gross base and charges the fee in base', () => {
+  assert.equal(typeof financialOracles.spotBuyOracle, 'function')
+  assert.deepEqual(financialOracles.spotBuyOracle({
+    quoteBudget: '1000',
+    fillPrice: '50005',
+    feeRate: '0.0005',
+    rules: BTC_RULES
+  }), {
+    effectiveStep: '0.0001',
+    grossBase: '0.0199',
+    quoteSpent: '995.09950000',
+    baseFee: '0.00000995',
+    netBase: '0.01989005',
+    cumulativeGrossQuoteCost: '995.09950000',
+    currentNetBase: '0.01989005',
+    averageCost: '50030.01500750',
+    feeAsset: 'BASE',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }
+  })
+})
+
+test('financial oracle: Spot SELL keeps quote fee inside realized PnL and checks wallet invariant', () => {
+  assert.equal(typeof financialOracles.spotSellOracle, 'function')
+  assert.deepEqual(financialOracles.spotSellOracle({
+    soldBase: '0.006',
+    fillPrice: '54994.5',
+    feeRate: '0.0005',
+    averageCost: '50030.01500750',
+    rules: BTC_RULES
+  }), {
+    grossQuote: '329.96700000',
+    quoteFee: '0.16498350',
+    netQuote: '329.80201650',
+    costBasis: '300.18009005',
+    realizedPnl: '29.62192646',
+    feeAsset: 'QUOTE',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }
+  })
+  assert.deepEqual(financialOracles.walletBalanceOracle({
+    total: '329.80201650',
+    available: '300',
+    locked: '29.80201650',
+    rules: BTC_RULES
+  }), {
+    balanced: true,
+    nonNegative: true,
+    valid: true,
+    tolerance: '0.000000005'
+  })
+  assert.equal(financialOracles.walletBalanceOracle({
+    total: '1',
+    available: '-0.01',
+    locked: '1.01',
+    rules: BTC_RULES
+  }).valid, false)
+})
+
+test('financial oracle: Spot pending and OCO holds match the backend ceiling policy', () => {
+  assert.deepEqual(financialOracles.spotOrderHoldOracle({
+    side: 'BUY',
+    orderType: 'LIMIT',
+    baseQuantity: '0.2',
+    limitPrice: '45',
+    ask: '50',
+    baseAsset: 'BTC'
+  }), {
+    amount: '9.00450000',
+    currency: 'USDT',
+    basis: 'LIMIT',
+    shared: false
+  })
+  assert.deepEqual(financialOracles.spotOrderHoldOracle({
+    side: 'BUY',
+    orderType: 'STOP_MARKET',
+    baseQuantity: '0.2',
+    stopTriggerPrice: '50.5',
+    ask: '50',
+    baseAsset: 'BTC'
+  }), {
+    amount: '10.10606051',
+    currency: 'USDT',
+    basis: 'STOP_MARKET',
+    shared: false
+  })
+  assert.deepEqual(financialOracles.spotOrderHoldOracle({
+    side: 'BUY',
+    orderType: 'OCO',
+    baseQuantity: '0.2',
+    limitPrice: '45',
+    stopTriggerPrice: '50.5',
+    ask: '50',
+    baseAsset: 'BTC'
+  }), {
+    amount: '10.10606051',
+    currency: 'USDT',
+    basis: 'STOP_MARKET',
+    shared: true
+  })
+  assert.deepEqual(financialOracles.spotOrderHoldOracle({
+    side: 'SELL',
+    orderType: 'OCO',
+    baseQuantity: '0.2',
+    limitPrice: '55',
+    stopTriggerPrice: '49',
+    ask: '50',
+    baseAsset: 'BTC'
+  }), {
+    amount: '0.20000000',
+    currency: 'BTC',
+    basis: 'LIMIT',
+    shared: true
+  })
+})
+
+test('financial oracle: linear Perp long and short use directional gross PnL', () => {
+  assert.equal(typeof financialOracles.perpPositionOracle, 'function')
+  const long = financialOracles.perpPositionOracle({
+    side: 'LONG',
+    quantity: '0.010',
+    entryPrice: '50000',
+    markPrice: '55000',
+    leverage: '50',
+    positionMargin: '10',
+    maintenanceMarginRate: '0.005',
+    rules: BTC_RULES
+  })
+  assert.deepEqual(long, {
+    entryNotional: '500.00000000',
+    markNotional: '550.00000000',
+    initialMargin: '10.00000000',
+    maintenanceMargin: '2.75000000',
+    unrealizedPnl: '50.00000000',
+    roiPercent: '500.00000000',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }
+  })
+  assert.equal(financialOracles.perpPositionOracle({
+    side: 'SHORT',
+    quantity: '0.010',
+    entryPrice: '50000',
+    markPrice: '45000',
+    leverage: '100',
+    positionMargin: '5',
+    maintenanceMarginRate: '0.005',
+    rules: BTC_RULES
+  }).unrealizedPnl, '50.00000000')
+  assert.deepEqual(financialOracles.perpCloseOracle({
+    side: 'LONG',
+    quantity: '0.003',
+    entryPrice: '50000',
+    closeFillPrice: '54994.5',
+    closeFeeRate: '0.0005',
+    openingFee: '0.075',
+    fundingCashflow: '0.01',
+    rules: BTC_RULES
+  }), {
+    grossRealizedPnl: '14.98350000',
+    closeFee: '0.08249175',
+    cashDelta: '14.83600825',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }
+  })
+})
+
+test('financial oracle: funding applies directional cashflow to the correct margin pool', () => {
+  assert.deepEqual(financialOracles.fundingSettlementOracle({
+    side: 'LONG',
+    marginMode: 'CROSS',
+    quantity: '0.01',
+    markPrice: '50000',
+    fundingRate: '0.0001',
+    balanceBefore: '50000',
+    marginHeld: '10',
+    previousFundingPnl: '0'
+  }), {
+    notional: '500.00000000',
+    settlementAmount: '-0.05000000',
+    appliedCashflow: '-0.05000000',
+    shortfall: '0.00000000',
+    balanceAfter: '49999.95000000',
+    isolatedMarginAfter: '0.00000000',
+    fundingPnlAfter: '-0.05000000',
+    ledgerAmount: '-0.05000000'
+  })
+  assert.deepEqual(financialOracles.fundingSettlementOracle({
+    side: 'SHORT',
+    marginMode: 'ISOLATED',
+    quantity: '0.01',
+    markPrice: '50000',
+    fundingRate: '0.0001',
+    balanceBefore: '50000',
+    marginHeld: '10',
+    previousFundingPnl: '0'
+  }), {
+    notional: '500.00000000',
+    settlementAmount: '0.05000000',
+    appliedCashflow: '0.05000000',
+    shortfall: '0.00000000',
+    balanceAfter: '50000.00000000',
+    isolatedMarginAfter: '10.05000000',
+    fundingPnlAfter: '0.05000000',
+    ledgerAmount: null
+  })
+  assert.deepEqual(financialOracles.fundingSettlementOracle({
+    side: 'LONG',
+    marginMode: 'ISOLATED',
+    quantity: '0.01',
+    markPrice: '50000',
+    fundingRate: '0.01',
+    balanceBefore: '50000',
+    marginHeld: '1',
+    previousFundingPnl: '0'
+  }), {
+    notional: '500.00000000',
+    settlementAmount: '-5.00000000',
+    appliedCashflow: '-1.00000000',
+    shortfall: '4.00000000',
+    balanceAfter: '50000.00000000',
+    isolatedMarginAfter: '0.00000000',
+    fundingPnlAfter: '-1.00000000',
+    ledgerAmount: '-4.00000000'
+  })
+})
+
+test('financial oracle: Perp opening hold includes initial margin and worst fee once', () => {
+  assert.deepEqual(financialOracles.perpOpeningHoldOracle({
+    baseQuantity: '0.01',
+    worstPrice: '50005',
+    leverage: '50',
+    worstFeeRate: '0.0005',
+    rules: BTC_RULES
+  }), {
+    notional: '500.05000000',
+    openingInitialMargin: '10.00100000',
+    feeBuffer: '0.25002500',
+    holdAmount: '10.25102500',
+    holdCurrency: 'USDT',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }
+  })
+})
+
+test('financial oracle: Spot and Perp transfer deltas conserve combined USDT', () => {
+  const spotToPerp = financialOracles.transferConservationOracle({
+    direction: 'SPOT_TO_PERP',
+    amount: '1000',
+    spotAvailable: '50000',
+    perpBalance: '50000',
+    perpEquity: '50000',
+    perpFreeMargin: '50000'
+  })
+  assert.deepEqual(spotToPerp, {
+    spotAvailableAfter: '49000.00000000',
+    perpBalanceAfter: '51000.00000000',
+    perpEquityAfter: '51000.00000000',
+    perpFreeMarginAfter: '51000.00000000',
+    combinedBefore: '100000.00000000',
+    combinedAfter: '100000.00000000'
+  })
+  assert.deepEqual(financialOracles.transferConservationOracle({
+    direction: 'PERP_TO_SPOT',
+    amount: '400',
+    spotAvailable: spotToPerp.spotAvailableAfter,
+    perpBalance: spotToPerp.perpBalanceAfter,
+    perpEquity: spotToPerp.perpEquityAfter,
+    perpFreeMargin: spotToPerp.perpFreeMarginAfter
+  }), {
+    spotAvailableAfter: '49400.00000000',
+    perpBalanceAfter: '50600.00000000',
+    perpEquityAfter: '50600.00000000',
+    perpFreeMarginAfter: '50600.00000000',
+    combinedBefore: '100000.00000000',
+    combinedAfter: '100000.00000000'
+  })
+})
+
+test('financial oracle: 30% partial close only realizes and releases the closed quantity', () => {
+  assert.equal(typeof financialOracles.partialCloseOracle, 'function')
+  assert.deepEqual(financialOracles.partialCloseOracle({
+    side: 'LONG',
+    originalQuantity: '0.010',
+    oldMargin: '10',
+    entryPrice: '50000',
+    closeFillPrice: '55000',
+    closeFeeRate: '0.0005',
+    previousPositionRealizedPnl: '2',
+    rules: BTC_RULES
+  }), {
+    entryPrice: '50000',
+    closedQuantity: '0.0030',
+    remainingQuantity: '0.0070',
+    releasedMargin: '3.00000000',
+    remainingMargin: '7.00000000',
+    tradeRealizedPnl: '15.00000000',
+    positionRealizedPnl: '17.00000000',
+    closeFee: '0.08250000',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }
+  })
+  assert.throws(
+    () => financialOracles.partialCloseOracle({
+      side: 'LONG',
+      originalQuantity: '0.0001',
+      oldMargin: '1',
+      entryPrice: '50000',
+      closeFillPrice: '55000',
+      closeFeeRate: '0.0005',
+      rules: BTC_RULES
+    }),
+    /30%.*step/
+  )
+})
+
+test('financial oracle: projected net applies closing-side slippage and never re-deducts opening fee', () => {
+  assert.equal(typeof financialOracles.projectedNetOracle, 'function')
+  assert.deepEqual(financialOracles.projectedNetOracle({
+    side: 'LONG',
+    quantity: '0.010',
+    entryPrice: '50000',
+    closingBid: '55000',
+    closingAsk: '55010',
+    executionPath: 'MARKET',
+    openingFee: '0.25',
+    rules: BTC_RULES
+  }), {
+    liquidityRole: 'TAKER',
+    projectedCloseFill: '54994.50000000',
+    projectedGrossPnl: '49.94500000',
+    projectedCloseFee: '0.27497250',
+    projectedNetFromNow: '49.67002750',
+    projectedWholeTradeNet: '49.42002750',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }
+  })
+  assert.deepEqual(financialOracles.projectedNetOracle({
+    side: 'LONG',
+    quantity: '0.010',
+    entryPrice: '50000',
+    closingBid: '55000',
+    closingAsk: '55010',
+    executionPath: 'RESTING_LIMIT',
+    limitPrice: '54000',
+    rules: BTC_RULES
+  }), {
+    liquidityRole: 'MAKER',
+    projectedCloseFill: '55000.00000000',
+    projectedGrossPnl: '50.00000000',
+    projectedCloseFee: '0.11000000',
+    projectedNetFromNow: '49.89000000',
+    projectedWholeTradeNet: '49.89000000',
+    tolerances: {
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }
+  })
+})
+
+test('financial oracle review: market fill derives independent Spot and Perp slippage', () => {
+  assert.equal(typeof financialOracles.marketFillOracle, 'function')
+  assert.deepEqual(financialOracles.marketFillOracle({
+    productType: 'CRYPTO_SPOT',
+    side: 'BUY',
+    bid: '99.99',
+    ask: '100.01'
+  }), {
+    referencePrice: '100.01',
+    filledPrice: '100.020001',
+    slippage: '0.010001',
+    slippageRate: '0.0001',
+    feeRate: '0.0005',
+    liquidityRole: 'TAKER'
+  })
+  assert.deepEqual(financialOracles.marketFillOracle({
+    productType: 'LINEAR_PERP',
+    side: 'SELL',
+    bid: '100.005678901',
+    ask: '100.015678901'
+  }), {
+    referencePrice: '100.005678901',
+    filledPrice: '99.99567833',
+    slippage: '0.01000057',
+    slippageRate: '0.0001',
+    feeRate: '0.0005',
+    liquidityRole: 'TAKER'
+  })
+})
+
+test('financial oracle: isolated liquidation flips only at the long and short equity boundary', () => {
+  assert.equal(typeof financialOracles.isolatedLiquidationOracle, 'function')
+  const isolated = (side, markPrice) => financialOracles.isolatedLiquidationOracle({
+    side,
+    quantity: '1',
+    entryPrice: '100',
+    markPrice,
+    marginHeld: '10',
+    fundingPnl: '0',
+    maintenanceMarginRate: '0.01',
+    rules: BTC_RULES
+  })
+  assert.equal(isolated('LONG', '90.96').liquidatable, false)
+  assert.equal(isolated('LONG', '90.95').liquidatable, true)
+  assert.equal(isolated('LONG', '90.95').estimatedLiquidationPrice, '90.95502779')
+  assert.equal(isolated('SHORT', '108.85').liquidatable, false)
+  assert.equal(isolated('SHORT', '108.86').liquidatable, true)
+  assert.equal(isolated('SHORT', '108.86').estimatedLiquidationPrice, '108.85700148')
+  assert.equal(financialOracles.isolatedLiquidationOracle({
+    side: 'LONG',
+    quantity: '1',
+    entryPrice: '100',
+    markPrice: '100',
+    marginHeld: '1.05',
+    maintenanceMarginRate: '0.01',
+    rules: BTC_RULES
+  }).liquidatable, true)
+})
+
+test('financial oracle review: liquidation compares backend-rounded money intermediates', () => {
+  const position = {
+    side: 'LONG',
+    quantity: '0.0001',
+    entryPrice: '50225.00985',
+    markPrice: '50000.00995',
+    maintenanceMarginRate: '0.005',
+    rules: BTC_RULES
+  }
+  const isolated = financialOracles.isolatedLiquidationOracle({
+    ...position,
+    marginHeld: '0.05'
+  })
+  assert.deepEqual({
+    unrealizedPnl: isolated.unrealizedPnl,
+    isolatedEquity: isolated.isolatedEquity,
+    maintenanceMargin: isolated.maintenanceMargin,
+    estimatedCloseTakerFee: isolated.estimatedCloseTakerFee,
+    isolatedThreshold: isolated.isolatedThreshold,
+    liquidatable: isolated.liquidatable
+  }, {
+    unrealizedPnl: '-0.02249999',
+    isolatedEquity: '0.02750001',
+    maintenanceMargin: '0.02500001',
+    estimatedCloseTakerFee: '0.00250000',
+    isolatedThreshold: '0.02750001',
+    liquidatable: true
+  })
+
+  const cross = financialOracles.crossLiquidationOracle({
+    perpBalance: '0.05',
+    positions: [position]
+  })
+  assert.deepEqual({
+    crossEquity: cross.crossEquity,
+    crossMaintenance: cross.crossMaintenance,
+    estimatedCloseTakerFees: cross.estimatedCloseTakerFees,
+    crossThreshold: cross.crossThreshold,
+    liquidatable: cross.liquidatable
+  }, {
+    crossEquity: '0.02750001',
+    crossMaintenance: '0.02500001',
+    estimatedCloseTakerFees: '0.00250000',
+    crossThreshold: '0.02750001',
+    liquidatable: true
+  })
+})
+
+test('financial oracle review: cross validates each position with its own symbol rules', () => {
+  const altRules = {
+    tickSize: '0.1',
+    stepSize: '1',
+    minQty: '1',
+    contractSize: '1',
+    contractMultiplier: '1'
+  }
+  const cross = financialOracles.crossLiquidationOracle({
+    perpBalance: '100',
+    positions: [{
+      side: 'LONG',
+      quantity: '0.0001',
+      entryPrice: '50000',
+      markPrice: '50000',
+      maintenanceMarginRate: '0.005',
+      rules: BTC_RULES
+    }, {
+      side: 'SHORT',
+      quantity: '2',
+      entryPrice: '100',
+      markPrice: '90',
+      maintenanceMarginRate: '0.01',
+      rules: altRules
+    }]
+  })
+  assert.deepEqual(cross, {
+    crossEquity: '120.00000000',
+    crossMaintenance: '1.82500000',
+    estimatedCloseTakerFees: '0.09250000',
+    crossThreshold: '1.91750000',
+    liquidatable: false,
+    tolerances: [{
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }, {
+      price: '0.05',
+      quantity: '0.5',
+      amount: '0.000000005'
+    }]
+  })
+  assert.throws(
+    () => financialOracles.crossLiquidationOracle({
+      perpBalance: '100',
+      positions: [{
+        side: 'LONG',
+        quantity: '1',
+        entryPrice: '100',
+        markPrice: '100',
+        maintenanceMarginRate: '0.01'
+      }],
+      rules: BTC_RULES
+    }),
+    /positions\[0\]\.rules/
+  )
+})
+
+test('financial oracle: cross boundary is account-wide and liquidation shortfall includes unpaid fee', () => {
+  assert.equal(typeof financialOracles.crossLiquidationOracle, 'function')
+  const cross = (markPrice) => financialOracles.crossLiquidationOracle({
+    perpBalance: '20',
+    isolatedPrincipal: '10',
+    positions: [{
+      side: 'LONG',
+      quantity: '1',
+      entryPrice: '100',
+      markPrice,
+      maintenanceMarginRate: '0.01',
+      rules: BTC_RULES
+    }]
+  })
+  assert.equal(cross('90.96').liquidatable, false)
+  assert.equal(cross('90.95').liquidatable, true)
+  assert.equal(financialOracles.crossLiquidationOracle({
+    perpBalance: '1.05',
+    positions: [{
+      side: 'LONG',
+      quantity: '1',
+      entryPrice: '100',
+      markPrice: '100',
+      maintenanceMarginRate: '0.01',
+      rules: BTC_RULES
+    }]
+  }).liquidatable, true)
+  assert.deepEqual(cross('90.95'), {
+    crossEquity: '0.95000000',
+    crossMaintenance: '0.90950000',
+    estimatedCloseTakerFees: '0.04547500',
+    crossThreshold: '0.95497500',
+    liquidatable: true,
+    tolerances: [{
+      price: '0.005',
+      quantity: '0.00005',
+      amount: '0.000000005'
+    }]
+  })
+  assert.deepEqual(financialOracles.liquidationFeeOracle({
+    filledQuantity: '1',
+    executionPrice: '90.95',
+    liquidationFeeRate: '0.002',
+    collectionCapacity: '0.1',
+    uncoveredCoreDebit: '0.05',
+    rules: BTC_RULES
+  }), {
+    nominalLiquidationFee: '0.18190000',
+    chargedLiquidationFee: '0.10000000',
+    uncollectedLiquidationFee: '0.08190000',
+    bankruptcyShortfall: '0.13190000',
+    tolerance: '0.000000005'
+  })
+})
 
 const EXPECTED_EXECUTION_MANIFEST = {
   'AUTH-01': {
@@ -681,6 +1365,1403 @@ test('dispatch invokes the declared handler and fails fast when it is absent', a
     new RegExp(`^Error: INCOMPLETE_MATRIX: ${definition.id}$`)
   )
 })
+
+test('P0Context locks the real runtime interfaces used by detailed case modules', () => {
+  const noop = () => {}
+  const input = {
+    run: {
+      runId: 'p0-context-contract-a1',
+      mode: 'DISCOVERY',
+      commit: 'a'.repeat(40),
+      artifactRoot: 'C:\\p0-context-contract'
+    },
+    ui: {
+      launchBrowser: noop,
+      createEvidencePage: noop,
+      registerViaUi: noop,
+      loginViaUi: noop,
+      loginAdminViaUi: noop,
+      logoutViaUi: noop,
+      openTradePanel: noop,
+      withCapturedMutation: noop,
+      submitOrderViaUi: noop,
+      setPerpetualSettingsViaUi: noop,
+      positionActionViaUi: noop,
+      closeAllPositionsViaUi: noop,
+      transferViaUi: noop,
+      resetDemoViaUi: noop,
+      acceptNextNativeDialog: noop,
+      followLoginPromptViaUi: noop,
+      cancelAllOrdersViaUi: noop
+    },
+    api: {
+      user: noop,
+      admin: noop,
+      snapshotAccount: noop,
+      snapshotMarket: noop
+    },
+    db: {
+      query: noop,
+      snapshotTradingRows: noop,
+      assertDedicatedDatabase: noop
+    },
+    events: {
+      waitForStompEvent: noop,
+      snapshotFrames: noop,
+      probeForbiddenSubscription: noop
+    },
+    services: {
+      ensureProfile: noop,
+      restartBackend: noop,
+      assertOwnedPorts: noop
+    },
+    fixtures: {
+      marketOverride: noop,
+      providerBindings: noop,
+      fundingConfig: noop,
+      positionTime: noop,
+      kline: noop
+    },
+    evidence: {
+      captureCheckpoint: noop,
+      writeCaseResultAtomic: noop
+    },
+    userFactory: noop,
+    adminFactory: noop
+  }
+
+  const context = p0CaseContracts.createP0Context(input)
+  assert.notEqual(context, input)
+  assert.equal(context.run.runId, input.run.runId)
+  assert.equal(context.ui.withCapturedMutation, noop)
+  assert.equal(context.evidence.captureCheckpoint, noop)
+  assert.equal(context.userFactory, noop)
+  assert.equal(Object.isFrozen(context), true)
+  assert.throws(
+    () => p0CaseContracts.createP0Context({
+      ...input,
+      ui: { ...input.ui, withCapturedMutation: undefined }
+    }),
+    /P0_CONTEXT_INTERFACE_REQUIRED: ui\.withCapturedMutation/
+  )
+  for (const method of [
+    'launchBrowser',
+    'logoutViaUi',
+    'followLoginPromptViaUi',
+    'cancelAllOrdersViaUi',
+    'setPerpetualSettingsViaUi',
+    'positionActionViaUi',
+    'closeAllPositionsViaUi',
+    'transferViaUi',
+    'resetDemoViaUi'
+  ]) {
+    assert.throws(
+      () => p0CaseContracts.createP0Context({
+        ...input,
+        ui: { ...input.ui, [method]: undefined }
+      }),
+      new RegExp(`P0_CONTEXT_INTERFACE_REQUIRED: ui\\.${method}`)
+    )
+  }
+  assert.throws(
+    () => p0CaseContracts.createP0Context({
+      ...input,
+      adminFactory: undefined
+    }),
+    /P0_CONTEXT_INTERFACE_REQUIRED: adminFactory/
+  )
+  assert.throws(
+    () => p0CaseContracts.createP0Context({
+      ...input,
+      events: { ...input.events, probeForbiddenSubscription: undefined }
+    }),
+    /P0_CONTEXT_INTERFACE_REQUIRED: events\.probeForbiddenSubscription/
+  )
+})
+
+test('core handlers are real owned dispatch targets and AUTH-03 launches two browser processes', () => {
+  assert.deepEqual(Object.keys(p0CoreContracts.CASE_HANDLERS).toSorted(), [
+    'runAuth01',
+    'runAuth02',
+    'runAuth03',
+    'runBatch02',
+    'runCat01',
+    'runCat02',
+    'runCat03',
+    'runLife02',
+    'runPerp01',
+    'runPerp02',
+    'runPerp03',
+    'runPerp04',
+    'runPerp05',
+    'runPerp06',
+    'runPerp07',
+    'runPerp08',
+    'runPerp09',
+    'runPerp12',
+    'runSpot01',
+    'runSpot02',
+    'runSpot03',
+    'runWallet01'
+  ])
+  for (const id of [
+    'AUTH-01', 'AUTH-02', 'AUTH-03',
+    'CAT-01', 'CAT-02', 'CAT-03',
+    'SPOT-01', 'SPOT-02', 'SPOT-03',
+    'PERP-01', 'PERP-02', 'PERP-03', 'PERP-04', 'PERP-05',
+    'PERP-06', 'PERP-07', 'PERP-08', 'PERP-09', 'PERP-12',
+    'BATCH-02', 'WALLET-01', 'LIFE-02'
+  ]) {
+    const definition = P0_CASES.find((candidate) => candidate.id === id)
+    assert.equal(typeof p0CoreContracts.CASE_HANDLERS[definition.handlerId], 'function')
+  }
+
+  const corePath = fileURLToPath(new URL('./p0-user-trading-core-cases.mjs', import.meta.url))
+  const coreSource = readFileSync(corePath, 'utf8')
+  const auth03Source = coreSource.slice(
+    coreSource.indexOf('export async function runAuth03'),
+    coreSource.indexOf('export const CASE_HANDLERS')
+  )
+  assert.doesNotMatch(coreSource, /smoke-usdt-demo-browser/)
+  assert.doesNotMatch(coreSource, /installBrowserSession/)
+  assert.doesNotMatch(coreSource, /fx-trade-confirm-skip/)
+  assert.doesNotMatch(coreSource, /Fetch\.(?:enable|requestPaused|fulfillRequest)/)
+  assert.doesNotMatch(coreSource, /(?:^|[^\\w-])\.trade-panel/)
+  assert.equal(
+    [...auth03Source.matchAll(/context\.ui\.launchBrowser\(\)/g)].length,
+    2,
+    'AUTH-03 must start two independent browser processes'
+  )
+  assert.match(
+    auth03Source,
+    /context\.events\.probeForbiddenSubscription\([\s\S]*\/topic\/trading\/accounts\//
+  )
+})
+
+test('UI core handlers keep deterministic product, batch, reset, and evidence contracts', () => {
+  const corePath = fileURLToPath(new URL('./p0-user-trading-core-cases.mjs', import.meta.url))
+  const source = readFileSync(corePath, 'utf8')
+  const section = (start, end) => {
+    const from = source.indexOf(start)
+    const to = source.indexOf(end, from + start.length)
+    assert.notEqual(from, -1, start)
+    assert.notEqual(to, -1, end)
+    return source.slice(from, to)
+  }
+
+  const persistPass = section('function persistPass', 'function terminalFields')
+  assert.match(persistPass, /const financialChecks =/)
+  assert.match(
+    persistPass,
+    /financialCalculation:\s*\{\s*status:\s*'PASS',\s*checks:\s*financialChecks/
+  )
+
+  const spot03 = section(
+    'async function runSpotMarketableLimitJourney',
+    'async function runCatalogRouteJourney'
+  )
+  assert.match(
+    spot03,
+    /const buyFee = Number\(bought\.trade\.lots\)\s*\*\s*Number\(DEMO_RATES\.takerFeeRate\)/
+  )
+  assert.doesNotMatch(spot03, /const buyFee =[^\r\n]*bought\.trade\.price/)
+  assert.match(spot03, /assert\.equal\(bought\.trade\.feeAsset,\s*'BTC'\)/)
+  assert.match(spot03, /assert\.equal\(sold\.trade\.feeAsset,\s*'USDT'\)/)
+  const spotAuthority = section(
+    'async function prepareSpotAuthorityMarket',
+    'function assertSingleFullFillMutation'
+  )
+  assert.match(
+    spotAuthority,
+    /scope\.context\.authority\?\.authorityBundleFixture\s*===\s*'PASS'/
+  )
+  assert.match(spotAuthority, /scope\.context\.fixtures\.marketOverride\(/)
+  assert.equal(
+    [...spot03.matchAll(/assertSpotTradeLedger\(/g)].length,
+    2,
+    'SPOT-03 must prove one exact settlement ledger set per fill'
+  )
+
+  const spot01 = section(
+    'async function runSpotMarketLifecycle',
+    'async function runPerpLifecycle'
+  )
+  assert.match(spot01, /partialSpotPosition\.realizedPnl/)
+  assert.doesNotMatch(spot01, /partiallySold\.trade\.realizedPnl/)
+  assert.equal(
+    [...spot01.matchAll(/assertSpotTradeLedger\(/g)].length,
+    3,
+    'SPOT-01 must prove one exact settlement ledger set per fill'
+  )
+
+  const spotValidation = section(
+    'async function runSpotValidationJourney',
+    'async function runWalletTransferJourney'
+  )
+  assert.match(spotValidation, /probe\.guarded/)
+  assert.match(spotValidation, /emptySell\.guarded/)
+  assert.doesNotMatch(spotValidation, /probe\.submitDisabled,\s*true/)
+  const invalidInputProbe = section(
+    'async function probeDisabledOrderSubmission',
+    'function tradingStateFingerprint'
+  )
+  assert.match(invalidInputProbe, /submit\.click\(\)/)
+  assert.match(invalidInputProbe, /visibleError/)
+  assert.match(invalidInputProbe, /guarded:/)
+
+  const openPositions = section('function openPositions', 'function activeOrders')
+  assert.match(openPositions, /!isSpotPosition\(position\)/)
+  const spotDust = section('function assertSpotDust', 'function assertWalletInvariant')
+  assert.match(spotDust, /position\.lots/)
+  assert.match(spotDust, /rules\.minQty \?\? effectiveQuantityStep\(rules\)/)
+  for (const [start, end] of [
+    ['async function runSpotMarketableLimitJourney', 'async function runCatalogRouteJourney'],
+    ['async function runCatalogSweepJourney', 'async function runCatalogGuardJourney'],
+    ['async function runCatalogGuardJourney', 'async function runSpotMarketLifecycle'],
+    ['async function runSpotMarketLifecycle', 'async function runPerpLifecycle'],
+    ['async function runSpotValidationJourney', 'async function runWalletTransferJourney'],
+    ['async function runDemoResetJourney', 'function assertCoreCleanup']
+  ]) {
+    assert.match(section(start, end), /assertSpotDust\(/, start)
+  }
+
+  const openMenu = section(
+    'async function openTradingProductFromMenu',
+    'async function inspectTradingSurface'
+  )
+  assert.equal([...openMenu.matchAll(/page\.evaluate/g)].length, 2)
+  assert.match(openMenu, /trigger\.click\(\)[\s\S]*await page\.waitForFunction/)
+  const surface = section(
+    'async function inspectTradingSurface',
+    'async function inspectInvalidTradingRoute'
+  )
+  assert.match(surface, /querySelectorAll\('span, strong'\)/)
+  assert.match(surface, /assert\(result\.marketSymbols\.length > 0/)
+  const forbiddenMenu = section(
+    'async function inspectForbiddenProductReachability',
+    'function scalarResult'
+  )
+  assert.equal([...forbiddenMenu.matchAll(/page\.evaluate/g)].length, 2)
+  assert.match(forbiddenMenu, /trigger\.click\(\)[\s\S]*await page\.waitForFunction/)
+
+  const catalogGuard = section(
+    'async function runCatalogGuardJourney',
+    'async function runSpotMarketLifecycle'
+  )
+  assert.match(catalogGuard, /assert\(reachability\.tradingMenu/)
+  assert.match(catalogGuard, /symbol:\s*'BTCUSDT'/)
+  assert.match(catalogGuard, /marginMode:\s*'CROSS'/)
+  assert.match(catalogGuard, /reduceOnly:\s*true/)
+  assert.doesNotMatch(catalogGuard, /product_type NOT IN/)
+
+  const closeAll = section(
+    'async function runCloseAllJourney',
+    'async function runSpotValidationJourney'
+  )
+  assert.doesNotMatch(closeAll, /trade\.positionId|trade\.parentPositionId/)
+  assert.match(closeAll, /assertBatchCloseTrades\(\s*normalClosed/)
+  assert.match(closeAll, /assertBatchCloseTrades\(\s*final/)
+  const batchTradeCheck = section(
+    'function assertBatchCloseTrades',
+    'async function openBatchPositions'
+  )
+  assert.match(
+    batchTradeCheck,
+    /new Set\(successful\.map\(\(\{ orderId \}\) => orderId\)\)\.size/
+  )
+  assert.match(
+    batchTradeCheck,
+    /successful\.map\(\(\{ positionId \}\) => positionId\)\.toSorted\(\)/
+  )
+  assert.match(batchTradeCheck, /order\.origin,\s*'BATCH_CLOSE'/)
+  assert.match(batchTradeCheck, /order\.parentPositionId,\s*position\.id/)
+  assert.match(
+    batchTradeCheck,
+    /snapshot\.trades\.filter\(\(\{ orderId \}\) => orderId === item\.orderId\)/
+  )
+  assert.match(batchTradeCheck, /perpCloseOracle\(\{/)
+  assert.match(batchTradeCheck, /assertPerpLedgerDelta\(/)
+
+  const walletTransfer = section(
+    'async function runWalletTransferJourney',
+    'async function runDemoResetJourney'
+  )
+  assert.match(walletTransfer, /JSON\.parse\(forward\.rawRequest\.postData\)/)
+  assert.match(walletTransfer, /JSON\.parse\(reverse\.rawRequest\.postData\)/)
+  assert.match(
+    walletTransfer,
+    /assertCapturedTransfer\(\s*forwardRequest,\s*forwardResponse/
+  )
+  assert.match(
+    walletTransfer,
+    /assertCapturedTransfer\(\s*reverseRequest,\s*reverseResponse/
+  )
+  assert.match(walletTransfer, /response\.transferId/)
+  assert.match(walletTransfer, /\['equity',\s*oracle\.perpEquityAfter\]/)
+  assert.match(walletTransfer, /\['freeMargin',\s*oracle\.perpFreeMarginAfter\]/)
+  assert.match(walletTransfer, /assetLedgerRows/)
+  assert.match(walletTransfer, /cashLedgerRows/)
+  assert.match(walletTransfer, /assertTransferLedgerPair\(/)
+
+  const reset = section('async function runDemoResetJourney', 'function assertCoreCleanup')
+  assert.match(reset, /submitted\.db\.accountRow\.demo_generation/)
+  assert.match(reset, /\.map\(\(\{\s*transferId\s*\}\)\s*=>\s*transferId\)/)
+  assert.match(reset, /\/api\/ledger\?accountId=/)
+  assert.match(reset, /resetResponse\.demoGeneration/)
+  assert.match(reset, /resetResponse\.replayed/)
+  assert.match(reset, /replayResponse\.replayed/)
+  assert.match(reset, /replayResponse\.requestId/)
+  assert.match(reset, /context\.events\.waitForStompEvent\(page,\s*'DEMO_RESET'/)
+  assert.match(reset, /\['available',\s*'total'\]/)
+  assert.match(reset, /spotUsdt\[field\]/)
+  assert.match(reset, /spotUsdt\.locked/)
+  assert.match(reset, /spotPositionRows/)
+  assert.match(reset, /average_cost/)
+  assert.match(reset, /unrealized_pnl/)
+  assert.match(reset, /cashLedgerRows/)
+  assert.match(reset, /reference_id === resetResponse\.requestId/)
+  assert.match(reset, /completeResetStateFingerprint\(/)
+  assert.match(reset, /beforeReplayFingerprint/)
+  assert.match(reset, /afterReplayFingerprint/)
+
+  const perp07 = section(
+    'async function runPerpReversalJourney',
+    'async function runPerpHedgeJourney'
+  )
+  const secondOpen = perp07.slice(perp07.indexOf('const secondOpen'))
+  assert.match(secondOpen, /reduceOnly:\s*false/)
+  const perp12 = section(
+    'async function runPerpValidationJourney',
+    'async function runCloseAllJourney'
+  )
+  assert.match(
+    perp12,
+    /kind:\s*'QUANTITY_STEP_MISMATCH',\s*expected:\s*'QUANTITY_STEP_MISMATCH'/
+  )
+})
+
+test('PERP-01/02 lifecycle closes financial, target-mark, and cash-ledger evidence', () => {
+  const corePath = fileURLToPath(new URL('./p0-user-trading-core-cases.mjs', import.meta.url))
+  const source = readFileSync(corePath, 'utf8')
+  const start = source.indexOf('async function runPerpLifecycle')
+  const end = source.indexOf('async function runPerpLeverageJourney', start)
+  assert.notEqual(start, -1)
+  assert.notEqual(end, -1)
+  const lifecycle = source.slice(start, end)
+
+  assert.match(source.slice(0, start), /perpOpeningHoldOracle/)
+  assert.match(lifecycle, /const openingHold = perpOpeningHoldOracle\(/)
+  assert.match(lifecycle, /openingRow\.initial_margin/)
+  assert.match(lifecycle, /openingHold\.openingInitialMargin/)
+  assert.match(lifecycle, /openingHold\.feeBuffer/)
+  assert.match(lifecycle, /assertPerpAccountSummary\(/)
+  assert.equal(
+    [...lifecycle.matchAll(/assertPerpTargetRisk\(/g)].length,
+    3,
+    'T1 and reverse T2 must each recalculate and assert Perp risk/projection'
+  )
+  assert.match(lifecycle, /const reverseTarget =/)
+  assert.match(lifecycle, /partialOracle\.remainingMargin/)
+  assert.match(lifecycle, /partiallyClosed\.position\.realizedPnl/)
+  assert.match(lifecycle, /partialOracle\.closeFee/)
+  assert.match(lifecycle, /adjusted\.position\.liquidationPrice/)
+  assert.match(lifecycle, /adjusted\.position\.openPrice/)
+  assert.match(lifecycle, /adjusted\.position\.realizedPnl/)
+  assert.match(lifecycle, /fullyClosed\.history\.realizedPnl/)
+  assert.match(lifecycle, /const lifecycleTrades =/)
+  assert.match(lifecycle, /new Set\(lifecycleTrades\.map\(\(\{ id \}\) => id\)\)/)
+  assert.match(lifecycle, /const finalBalanceDelta =/)
+  assert.ok(
+    [...lifecycle.matchAll(/assertPerpLedgerDelta\(/g)].length >= 3,
+    'opening, partial close, and final close must prove cash-ledger deltas'
+  )
+
+  const ledgerStart = source.indexOf('function assertPerpLedgerDelta')
+  const ledgerEnd = source.indexOf('function assertSpotTradeLedger', ledgerStart)
+  assert.notEqual(ledgerStart, -1)
+  assert.notEqual(ledgerEnd, -1)
+  const ledger = source.slice(ledgerStart, ledgerEnd)
+  assert.match(ledger, /cashLedgerRows/)
+  assert.match(ledger, /reference_type/)
+  assert.match(ledger, /reference_id/)
+  assert.match(ledger, /operation_type/)
+  assert.match(ledger, /assert\.equal\(matches\.length,\s*1/)
+})
+
+test('default P0 dispatch builds one context and injects the owned AUTH handlers', () => {
+  const smokePath = fileURLToPath(new URL('./smoke-usdt-demo-browser.mjs', import.meta.url))
+  const smokeSource = readFileSync(smokePath, 'utf8')
+
+  assert.match(smokeSource, /createP0Context/)
+  assert.match(smokeSource, /CASE_HANDLERS/)
+  assert.match(smokeSource, /const p0Context = dependencies\.createP0Context/)
+  assert.match(smokeSource, /dispatchCase\(definition, caseContext, handlers/)
+})
+
+test('default P0 DB oracle follows the active profile database', async (t) => {
+  const artifactBase = mkdtempSync(join(tmpdir(), 'p0-active-profile-database-'))
+  t.after(() => rmSync(artifactBase, { recursive: true, force: true }))
+  const matrixDatabase = 'fx_p0_user_e2e_matrix_oracle_a1'
+  const phaseDatabase = 'fx_p0_user_e2e_ui_core_oracle_a1'
+  const queriedDatabases = []
+  const dependencies = smokeContracts.createDefaultP0Dependencies({
+    artifactBase,
+    inheritedEnv: {},
+    infrastructure: {},
+    redis: {},
+    postgres: {
+      async queryDatabase(database, sql) {
+        queriedDatabases.push({ database, sql })
+        return sql === 'SELECT current_database();' ? database : 'ok'
+      }
+    }
+  })
+  const prepared = {
+    matrixDatabase,
+    identity: { commit: 'c'.repeat(40) },
+    runRoot: artifactBase
+  }
+  const context = dependencies.createP0Context(prepared, {
+    runId: 'p0-active-profile-database-a1',
+    mode: 'discovery'
+  })
+
+  assert.deepEqual(context.authority, {
+    status: 'PENDING',
+    authorityBundleFixture: 'BLOCKED'
+  })
+  await context.db.query('SELECT 1;')
+  prepared.activeDatabaseSegment = phaseDatabase
+  await context.db.query('SELECT 2;')
+  assert.equal(await context.db.assertDedicatedDatabase(), phaseDatabase)
+  assert.deepEqual(
+    queriedDatabases.map(({ database }) => database),
+    [matrixDatabase, phaseDatabase, phaseDatabase]
+  )
+})
+
+test('default P0 runtime restarts the same active profile and database around downtime work', async () => {
+  assert.equal(
+    typeof smokeContracts.createP0CaseRuntimeCapabilities,
+    'function',
+    'P0_DEFAULT_CASE_RUNTIME_REQUIRED'
+  )
+  const events = []
+  let nextPid = 7101
+  const prepared = {
+    artifactBase: 'C:\\p0-runtime-capabilities',
+    ownerToken: 'p0-runtime-capabilities-owner-token-a1',
+    options: { runId: 'p0-runtime-capabilities-a1' },
+    activeBackend: { pid: 7100 },
+    activeDatabaseSegment: 'fx_p0_user_e2e_funding_2',
+    activeDatabaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2',
+    activeProfileRuntime: {
+      phase: 'funding',
+      profile: 'FUNDING_ONLY',
+      attempt: 2,
+      segmentName: 'fx_p0_user_e2e_funding_2',
+      databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2',
+      environment: {
+        SPRING_PROFILES_ACTIVE: 'dev',
+        DATABASE_URL: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2',
+        DATABASE_PASSWORD: 'fixture-password',
+        TRADING_FUNDING_ENABLED: 'true'
+      },
+      restartCount: 0
+    },
+    parentFrontends: new Map([
+      ['web', { pid: 7201 }],
+      ['admin', { pid: 7202 }]
+    ])
+  }
+  const capabilities = smokeContracts.createP0CaseRuntimeCapabilities({
+    prepared,
+    guard() {},
+    signal: undefined,
+    processManager: {
+      async stopOwnedBackend(backend) {
+        events.push(`stop:${backend.pid}`)
+      },
+      async startOwnedBackend({ profile, environment }) {
+        events.push(`start:${profile}:${environment.DATABASE_URL}`)
+        return { pid: nextPid++ }
+      },
+      async waitForBackendHealth(backend) {
+        events.push(`health:${backend.pid}`)
+      },
+      async waitForBusinessEndpoint(backend) {
+        events.push(`business:${backend.pid}`)
+      },
+      async waitForFrontend(frontend, url) {
+        events.push(`frontend:${frontend.pid}:${url}`)
+      }
+    },
+    infrastructure: {
+      async assertPortsFree(ports) {
+        events.push(`free:${ports.join(',')}`)
+      }
+    },
+    async verifyActiveDatabase({ segmentName, databaseUrl }) {
+      events.push(`database:${segmentName}:${databaseUrl}`)
+    },
+    async journalMutation({ resource, start }) {
+      events.push(`journal:${resource.id}`)
+      return start()
+    },
+    async adminApi() {
+      throw new Error('P0_TEST_ADMIN_NOT_EXPECTED')
+    },
+    async query() {
+      throw new Error('P0_TEST_DB_NOT_EXPECTED')
+    }
+  })
+
+  assert.deepEqual(await capabilities.services.ensureProfile('FUNDING_ONLY'), {
+    phase: 'funding',
+    profile: 'FUNDING_ONLY',
+    attempt: 2,
+    segmentName: 'fx_p0_user_e2e_funding_2',
+    databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2',
+    restartCount: 0
+  })
+  assert.equal(
+    JSON.stringify(await capabilities.services.ensureProfile('FUNDING_ONLY')).includes(
+      'fixture-password'
+    ),
+    false
+  )
+  await assert.rejects(
+    capabilities.services.ensureProfile('ORDER_TRIGGER'),
+    /P0_ACTIVE_PROFILE_MISMATCH/
+  )
+  events.length = 0
+
+  const restarted = await capabilities.services.restartBackend(async () => {
+    events.push('downtime')
+    assert.equal(prepared.activeBackend, undefined)
+  })
+  assert.equal(restarted.pid, 7101)
+  assert.equal(prepared.activeBackend, restarted)
+  assert.equal(prepared.activeProfileRuntime.restartCount, 1)
+  assert.deepEqual(events, [
+    'stop:7100',
+    'free:18086',
+    'downtime',
+    'journal:backend:funding:2:FUNDING_ONLY:restart:1',
+    'start:FUNDING_ONLY:jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2',
+    'health:7101',
+    'business:7101',
+    'database:fx_p0_user_e2e_funding_2:jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_2'
+  ])
+
+  await assert.rejects(
+    capabilities.services.restartBackend({
+      async duringDowntime() {
+        events.push('downtime-failed')
+        throw new Error('INJECTED_DOWNTIME_FAILURE')
+      }
+    }),
+    /INJECTED_DOWNTIME_FAILURE/
+  )
+  assert.equal(prepared.activeBackend.pid, 7102)
+  assert.equal(prepared.activeProfileRuntime.restartCount, 2)
+
+  await capabilities.services.assertOwnedPorts()
+  assert.deepEqual(events.slice(-4), [
+    'health:7102',
+    'business:7102',
+    'frontend:7201:http://127.0.0.1:5199',
+    'frontend:7202:http://127.0.0.1:5200'
+  ])
+})
+
+test('default P0 runtime fixtures snapshot and restore Admin and scoped position mutations', async () => {
+  assert.equal(typeof smokeContracts.createP0CaseRuntimeCapabilities, 'function')
+  const page = { id: 'admin-page' }
+  const providers = [
+    { id: 'provider-binance', code: 'binance' },
+    { id: 'provider-okx', code: 'okx' }
+  ]
+  const symbols = [{ id: 'symbol-btc', symbol: 'BTCUSDT' }]
+  const bindings = [
+    {
+      id: 'binding-binance',
+      symbolId: 'symbol-btc',
+      providerId: 'provider-binance',
+      providerInstrumentId: 'instrument-binance',
+      providerSymbol: 'BTCUSDT',
+      priority: 10,
+      enabled: true,
+      configJson: '{}'
+    },
+    {
+      id: 'binding-okx',
+      symbolId: 'symbol-btc',
+      providerId: 'provider-okx',
+      providerInstrumentId: 'instrument-okx',
+      providerSymbol: 'BTC-USDT',
+      priority: 20,
+      enabled: false,
+      configJson: '{}'
+    }
+  ]
+  const originalBindings = structuredClone(bindings)
+  let funding = {
+    symbolId: 'symbol-btc',
+    symbol: 'BTCUSDT',
+    fundingSourcePriority: ['BINANCE', 'OKX', 'FIXED'],
+    fixedFundingRate: '0.0001',
+    fixedFundingIntervalMinutes: 480,
+    fundingStaleSeconds: 90
+  }
+  const originalFunding = structuredClone(funding)
+  const overrides = new Map()
+  const calls = []
+  const prepared = {
+    authorityState: { authorityBundleFixture: 'PASS' },
+    activeProfileRuntime: {
+      phase: 'funding',
+      profile: 'FUNDING_ONLY',
+      attempt: 1,
+      segmentName: 'fx_p0_user_e2e_funding_fixture_1',
+      databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_funding_fixture_1',
+      environment: {},
+      restartCount: 0
+    }
+  }
+  let openedAt = '2026-07-23T00:00:00.000000Z'
+  const positionId = '11111111-1111-4111-8111-111111111111'
+  const accountId = '22222222-2222-4222-8222-222222222222'
+  const capabilities = smokeContracts.createP0CaseRuntimeCapabilities({
+    prepared,
+    guard() {},
+    processManager: {},
+    infrastructure: {},
+    async journalMutation() {
+      throw new Error('P0_TEST_JOURNAL_NOT_EXPECTED')
+    },
+    async verifyActiveDatabase() {},
+    async adminApi(receivedPage, path, request = {}) {
+      assert.equal(receivedPage, page)
+      const method = request.method ?? 'GET'
+      calls.push({ method, path, body: structuredClone(request.body) })
+      if (path === '/api/admin/market/data-providers') return structuredClone(providers)
+      if (path === '/api/admin/market/symbols?page=0&size=2000') {
+        return { content: structuredClone(symbols) }
+      }
+      if (path === '/api/admin/market/symbols/symbol-btc/provider-bindings'
+        && method === 'GET') {
+        return structuredClone(bindings)
+      }
+      if (path.startsWith('/api/admin/market/symbols/symbol-btc/provider-bindings/')
+        && method === 'PUT') {
+        const id = path.split('/').at(-1)
+        const target = bindings.find((binding) => binding.id === id)
+        Object.assign(target, request.body)
+        return structuredClone(target)
+      }
+      if (path === '/api/admin/market/symbols/symbol-btc/funding-config'
+        && method === 'GET') {
+        return structuredClone(funding)
+      }
+      if (path === '/api/admin/market/symbols/symbol-btc/funding-config'
+        && method === 'PUT') {
+        funding = { ...funding, ...request.body }
+        delete funding.reason
+        return structuredClone(funding)
+      }
+      if (path === '/api/admin/market/test-control/overrides' && method === 'POST') {
+        overrides.set(request.body.symbol, structuredClone(request.body))
+        return structuredClone(request.body)
+      }
+      if (path.startsWith('/api/admin/market/test-control/overrides/')
+        && method === 'DELETE') {
+        overrides.delete(decodeURIComponent(path.split('/').at(-1)))
+        return null
+      }
+      throw new Error(`P0_TEST_ADMIN_ROUTE_UNEXPECTED: ${method} ${path}`)
+    },
+    async query(sql) {
+      calls.push({ method: 'SQL', path: sql })
+      if (/SET opened_at =/.test(sql)) {
+        const target = sql.match(/SET opened_at = '([^']+)'::timestamptz/)?.[1]
+        assert(target)
+        openedAt = target
+        return JSON.stringify({ count: 1, openedAt })
+      }
+      if (/SELECT json_build_object\(\s*'count'/.test(sql)) {
+        return JSON.stringify({ count: 1, openedAt })
+      }
+      throw new Error('P0_TEST_SQL_UNEXPECTED')
+    }
+  })
+
+  const override = await capabilities.fixtures.marketOverride(page, {
+    symbol: 'BTCUSDT',
+    bid: '40000.00',
+    ask: '40000.01',
+    ttl: 'PT2M'
+  })
+  const secondOverride = await capabilities.fixtures.marketOverride(page, {
+    symbol: 'ETHUSDT',
+    bid: '2000.00',
+    ask: '2000.01',
+    ttl: 'PT2M'
+  })
+  assert.equal(overrides.get('BTCUSDT').bid, '40000.00')
+  assert.equal(prepared.p0FixtureCleanupRegistry.length, 2)
+  assert.deepEqual(
+    await smokeContracts.restoreP0CaseFixtures(prepared),
+    { status: 'PASS', restored: 2 }
+  )
+  assert.equal(prepared.p0FixtureCleanupRegistry.length, 0)
+  await override.restore()
+  await secondOverride.restore()
+  assert.equal(overrides.has('BTCUSDT'), false)
+  assert.deepEqual(
+    calls
+      .filter(({ method, path }) => (
+        method === 'DELETE'
+        && path.startsWith('/api/admin/market/test-control/overrides/')
+      ))
+      .map(({ path }) => path.split('/').at(-1)),
+    ['ETHUSDT', 'BTCUSDT']
+  )
+
+  prepared.authorityState.authorityBundleFixture = 'BLOCKED'
+  await assert.rejects(
+    capabilities.fixtures.marketOverride(page, {
+      symbol: 'BTCUSDT',
+      bid: '41000.00',
+      ask: '41000.01'
+    }),
+    /P0_AUTHORITY_BUNDLE_FIXTURE_REQUIRED/
+  )
+  overrides.set('BTCUSDT', { symbol: 'BTCUSDT' })
+  await capabilities.fixtures.marketOverride(page, {
+    symbol: 'BTCUSDT',
+    action: 'CLEAR'
+  })
+  assert.equal(overrides.has('BTCUSDT'), false)
+  prepared.authorityState.authorityBundleFixture = 'PASS'
+
+  const providerFixture = await capabilities.fixtures.providerBindings(page, {
+    symbols: ['BTCUSDT'],
+    enabledProviders: ['okx']
+  })
+  assert.deepEqual(
+    bindings.map(({ id, enabled }) => ({ id, enabled })),
+    [
+      { id: 'binding-binance', enabled: false },
+      { id: 'binding-okx', enabled: true }
+    ]
+  )
+  await providerFixture.restore()
+  await providerFixture.restore()
+  assert.deepEqual(bindings, originalBindings)
+  assert.equal(prepared.p0FixtureCleanupRegistry.length, 0)
+  const unavailableProviders = await capabilities.fixtures.providerBindings(page, {
+    symbols: ['BTCUSDT'],
+    enabledProviders: []
+  })
+  assert.equal(bindings.every(({ enabled }) => enabled === false), true)
+  await unavailableProviders.restore()
+  assert.deepEqual(bindings, originalBindings)
+
+  const fundingFixture = await capabilities.fixtures.fundingConfig(page, {
+    symbol: 'BTCUSDT',
+    fundingSourcePriority: ['FIXED'],
+    fixedFundingRate: '-0.0002',
+    fixedFundingIntervalMinutes: 1,
+    fundingStaleSeconds: 5,
+    reason: 'P0 funding fixture'
+  })
+  assert.equal(funding.fixedFundingRate, '-0.0002')
+  await fundingFixture.restore()
+  await fundingFixture.restore()
+  assert.deepEqual(funding, originalFunding)
+  assert.equal(prepared.p0FixtureCleanupRegistry.length, 0)
+
+  const positionFixture = await capabilities.fixtures.positionTime({
+    accountId,
+    positionId,
+    openedAt: '2026-07-22T23:00:00.000Z'
+  })
+  assert.equal(openedAt, '2026-07-22T23:00:00.000Z')
+  await positionFixture.restore()
+  await positionFixture.restore()
+  assert.equal(openedAt, '2026-07-23T00:00:00.000000Z')
+  assert.equal(prepared.p0FixtureCleanupRegistry.length, 0)
+  assert(
+    calls
+      .filter(({ method }) => method === 'SQL')
+      .every(({ path }) => path.includes(accountId) && path.includes(positionId)),
+    'position fixture SQL must stay scoped to the exact account and position'
+  )
+  await assert.rejects(
+    capabilities.fixtures.kline(),
+    /P0_RUNTIME_OPERATION_REQUIRED: kline/
+  )
+})
+
+test('default P0 browser launch journals native identity before readiness', async (t) => {
+  const artifactBase = mkdtempSync(join(tmpdir(), 'p0-owned-browser-journal-'))
+  t.after(() => rmSync(artifactBase, { recursive: true, force: true }))
+  const runId = 'p0-owned-browser-journal-a1'
+  const runToken = 'p0-owned-browser-journal-owner-token-a1'
+  const matrixDatabase = 'fx_p0_user_e2e_browser_matrix_1'
+  const control = await smokeContracts.createControlManifest({
+    artifactBase,
+    runId,
+    runToken,
+    mode: 'discovery',
+    selection: {
+      caseIds: ['AUTH-01'],
+      phases: [],
+      profiles: [],
+      viewports: []
+    },
+    database: {
+      canonical: 'fx_p0_user_e2e_browser_canonical_1',
+      matrix: matrixDatabase
+    }
+  })
+  const states = []
+  const browser = {
+    pid: 43121,
+    processIdentity: {
+      pid: 43121,
+      startedAt: '2026-07-23T14:00:00.000Z',
+      processFingerprint: `sha256:${'b'.repeat(64)}`
+    },
+    async close() {}
+  }
+  const ownership = () => JSON.parse(readFileSync(control.ownershipPath, 'utf8'))
+  const dependencies = smokeContracts.createDefaultP0Dependencies({
+    artifactBase,
+    inheritedEnv: {},
+    postgres: { queryDatabase() { throw new Error('P0_TEST_DB_NOT_EXPECTED') } },
+    p0Ui: {
+      async launchBrowser({ onSpawn }) {
+        states.push(ownership().journal.resources.at(-1)?.state)
+        await onSpawn(browser)
+        states.push(ownership().journal.resources.at(-1)?.state)
+        return browser
+      }
+    }
+  })
+  const context = dependencies.createP0Context({
+    artifactBase,
+    ownerToken: runToken,
+    ownerId: control.ownerId,
+    matrixDatabase,
+    identity: { commit: 'c'.repeat(40) },
+    runRoot: control.runRoot
+  }, {
+    runId,
+    mode: 'discovery'
+  })
+
+  assert.equal(await context.ui.launchBrowser(), browser)
+  assert.deepEqual(states, ['PLANNED', 'STARTED'])
+  const resource = ownership().journal.resources.at(-1)
+  assert.equal(resource.type, 'process')
+  assert.equal(resource.id, 'browser:1')
+  assert.equal(resource.live, true)
+  assert.equal(resource.state, 'STARTED')
+  assert.equal(resource.pid, browser.pid)
+  assert.equal(resource.processFingerprint, browser.processIdentity.processFingerprint)
+})
+
+test('AUTH-02 fails closed when a login cycle changes account continuity', async () => {
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-02')
+  const beforeSnapshot = authAccountSnapshot({
+    accountId: '11111111-1111-4111-8111-111111111111'
+  })
+  const afterSnapshot = structuredClone(beforeSnapshot)
+  afterSnapshot.wallets[0].available = 49999
+  afterSnapshot.trades.push({ id: 'unexpected-trade' })
+  const snapshots = [beforeSnapshot, afterSnapshot]
+  const page = authEvidencePage('AUTH-02')
+  const context = {
+    run: authRun('p0-auth-02-continuity-a1'),
+    userFactory() {
+      return { email: 'member@example.test', password: 'Password123!' }
+    },
+    ui: {
+      async launchBrowser() { return { async close() {} } },
+      async createEvidencePage() { return page },
+      async loginViaUi(_page, _credentials, options = {}) {
+        return options.expectFailure
+          ? { authenticated: false, requestRef: 'wrong-password' }
+          : { authenticated: true, requestRef: 'login' }
+      },
+      async logoutViaUi() { return { requestRef: 'logout' } },
+      async openTradePanel() {},
+      async submitOrderViaUi() {
+        return { loginRequired: true, requestRef: null }
+      },
+      async followLoginPromptViaUi() {
+        return {
+          path: '/login',
+          redirect: '/trade/perpetual/BTCUSDT-PERP'
+        }
+      }
+    },
+    api: {
+      async snapshotAccount() { return snapshots.shift() }
+    },
+    db: {
+      async assertDedicatedDatabase() {
+        return 'fx_p0_user_e2e_auth_02_continuity_a1'
+      },
+      async snapshotTradingRows() {
+        return {
+          database: 'fx_p0_user_e2e_auth_02_continuity_a1',
+          activeDemoAccounts: 1,
+          orders: 0,
+          trades: 0,
+          openPositions: 0,
+          fundingSettlements: 0
+        }
+      }
+    },
+    evidence: authEvidenceSink()
+  }
+
+  await assert.rejects(
+    p0CoreContracts.runAuth02(context, definition),
+    /AUTH-02 session continuity/
+  )
+})
+
+test('AUTH-03 fails closed when USER_B owns trading rows in the active database', async () => {
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-03')
+  const accountA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const accountB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  const database = 'fx_p0_user_e2e_auth_03_isolation_a1'
+  const context = auth03Context({
+    accountA,
+    accountB,
+    database,
+    dbB: {
+      database,
+      activeDemoAccounts: 1,
+      orders: 0,
+      trades: 1,
+      openPositions: 0,
+      fundingSettlements: 0
+    }
+  })
+
+  await assert.rejects(
+    p0CoreContracts.runAuth03(context, definition),
+    /AUTH-03 USER_B database isolation/
+  )
+})
+
+test('AUTH-03 fails closed when USER_B Trades UI renders another user row', async () => {
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-03')
+  const accountA = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const accountB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+  const database = 'fx_p0_user_e2e_auth_03_ui_isolation_a1'
+  const context = auth03Context({
+    accountA,
+    accountB,
+    database,
+    uiBRows: {
+      '/orders': [0, 0, 1],
+      '/positions': [0, 0]
+    },
+    dbB: {
+      database,
+      activeDemoAccounts: 1,
+      orders: 0,
+      trades: 0,
+      openPositions: 0,
+      fundingSettlements: 0
+    }
+  })
+
+  await assert.rejects(
+    p0CoreContracts.runAuth03(context, definition),
+    /AUTH-03 USER_B UI isolation requires zero TRADES rows/
+  )
+})
+
+test('AUTH fragments satisfy the merge contract and hash every checkpoint screenshot', async (t) => {
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'p0-auth-fragment-contract-'))
+  t.after(() => rmSync(artifactRoot, { recursive: true, force: true }))
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-01')
+  let persisted
+  let screenshotSequence = 0
+  const page = {
+    p0Options: { webBaseUrl: 'http://127.0.0.1:5199' },
+    async navigate() {},
+    async waitForFunction() {},
+    async evaluate() { return 1 },
+    async send(method) {
+      if (method === 'Page.captureScreenshot') {
+        screenshotSequence += 1
+        return {
+          data: Buffer.from(`auth-checkpoint-${screenshotSequence}`).toString('base64')
+        }
+      }
+      return {}
+    },
+    assertEvidenceClean() {},
+    snapshotEvidence() {
+      return {
+        networkEvidence: [],
+        eventEvidence: [],
+        consoleErrors: []
+      }
+    },
+    async close() {}
+  }
+  const accountSnapshot = {
+    account: {
+      id: '11111111-1111-4111-8111-111111111111',
+      accountType: 'DEMO',
+      status: 'ACTIVE'
+    },
+    wallets: [{
+      walletType: 'SPOT',
+      asset: 'USDT',
+      total: 50000,
+      available: 50000,
+      locked: 0
+    }],
+    summary: {
+      balance: 50000,
+      equity: 50000,
+      freeMargin: 50000,
+      usedMargin: 0
+    },
+    settings: {
+      positionMode: 'ONE_WAY',
+      symbols: [{
+        symbol: 'BTCUSDT-PERP',
+        marginMode: 'CROSS',
+        leverage: 10,
+        quantityUnit: 'BASE'
+      }]
+    },
+    orders: [],
+    trades: [],
+    positions: [],
+    fundingSettlements: []
+  }
+  const dbSnapshot = {
+    activeDemoAccounts: 1,
+    orders: 0,
+    trades: 0,
+    openPositions: 0,
+    fundingSettlements: 0
+  }
+  const context = {
+    run: {
+      runId: 'p0-auth-fragment-contract-a1',
+      commit: 'a'.repeat(40),
+      artifactRoot
+    },
+    userFactory() {
+      return { email: 'member@example.test', password: 'Password123!' }
+    },
+    ui: {
+      async launchBrowser() { return { async close() {} } },
+      async createEvidencePage() { return page },
+      async registerViaUi() { return { requestRef: '101.1' } },
+      async openTradePanel() {}
+    },
+    api: {
+      async snapshotAccount() { return accountSnapshot },
+      async snapshotMarket() { return { quote: { last: 60000 } } }
+    },
+    db: {
+      async assertDedicatedDatabase() { return 'fx_p0_user_e2e_auth_fragment_a1' },
+      async snapshotTradingRows() { return dbSnapshot }
+    },
+    evidence: {
+      captureCheckpoint: smokeContracts.captureCheckpoint,
+      writeCaseResultAtomic(_path, result) { persisted = result }
+    }
+  }
+
+  const result = await p0CoreContracts.runAuth01(context, definition, {
+    attempt: 2,
+    profileAttempt: 3
+  })
+  assert.equal(result.schemaVersion, 1)
+  assert.equal(result.attempt, 2)
+  assert.equal(result.scopeComplete, true)
+  assert.equal(Number.isFinite(result.durationMs) && result.durationMs >= 0, true)
+  assert.deepEqual(Object.keys(result.artifactHashes).toSorted(), [
+    'AUTH-01/before.png',
+    'AUTH-01/final.png',
+    'AUTH-01/submitted.png'
+  ])
+  for (const [path, hash] of Object.entries(result.artifactHashes)) {
+    const bytes = readFileSync(join(artifactRoot, ...path.split('/')))
+    const expected = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+    assert.equal(hash, expected)
+  }
+  assert.deepEqual(result.subruns, [{
+    ...definition.requiredSubruns[0],
+    status: 'PASS',
+    attempt: 2,
+    profileAttempt: 3,
+    durationMs: result.durationMs,
+    artifactHashes: result.artifactHashes
+  }])
+  assert.equal(persisted, result)
+  assert.doesNotThrow(() => smokeContracts.mergeP0CaseFragments({
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }, [result]))
+})
+
+test('AUTH failure fragments retain the formal terminal fields', async () => {
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-01')
+  let persisted
+  let persistedPath
+  const context = {
+    run: {
+      runId: 'p0-auth-failure-fragment-a1',
+      commit: 'b'.repeat(40),
+      artifactRoot: resolve(tmpdir(), 'p0-auth-failure-fragment-a1')
+    },
+    userFactory() {
+      return { email: 'member@example.test', password: 'Password123!' }
+    },
+    ui: {
+      async launchBrowser() { throw new Error('AUTH_BROWSER_START_FAILED') }
+    },
+    evidence: {
+      writeCaseResultAtomic(path, result) {
+        persistedPath = path
+        persisted = result
+      }
+    }
+  }
+
+  await assert.rejects(
+    p0CoreContracts.runAuth01(context, definition, {
+      attempt: 4,
+      profileAttempt: 5
+    }),
+    /AUTH_BROWSER_START_FAILED/
+  )
+  assert.equal(persisted.schemaVersion, 1)
+  assert.equal(persisted.attempt, 4)
+  assert.equal(persisted.scopeComplete, true)
+  assert.equal(Number.isFinite(persisted.durationMs) && persisted.durationMs >= 0, true)
+  assert.deepEqual(persisted.artifactHashes, {})
+  assert.deepEqual(persisted.subruns, [{
+    ...definition.requiredSubruns[0],
+    status: 'FAIL',
+    attempt: 4,
+    profileAttempt: 5,
+    durationMs: persisted.durationMs,
+    artifactHashes: {}
+  }])
+  assert.equal(
+    persistedPath,
+    join(context.run.artifactRoot, 'AUTH-01', 'result.json')
+  )
+})
+
+function authRun(runId) {
+  return {
+    runId,
+    commit: 'a'.repeat(40),
+    artifactRoot: resolve(tmpdir(), runId)
+  }
+}
+
+function authEvidencePage(role) {
+  return {
+    role,
+    p0Options: { webBaseUrl: 'http://127.0.0.1:5199' },
+    async navigate() {},
+    async waitForFunction() {},
+    async evaluate() { return false },
+    assertEvidenceClean() {},
+    async close() {}
+  }
+}
+
+function authEvidenceSink() {
+  return {
+    async captureCheckpoint(_context, name) {
+      return {
+        name,
+        artifactHashes: {},
+        uiEvidence: [],
+        networkEvidence: [],
+        eventEvidence: []
+      }
+    },
+    writeCaseResultAtomic() {}
+  }
+}
+
+function authAccountSnapshot({
+  accountId,
+  orders = [],
+  trades = [],
+  positions = [],
+  fundingSettlements = []
+}) {
+  return {
+    accounts: [],
+    activeDemoAccounts: [],
+    account: {
+      id: accountId,
+      accountType: 'DEMO',
+      status: 'ACTIVE'
+    },
+    wallets: [{
+      walletType: 'SPOT',
+      asset: 'USDT',
+      total: 50000,
+      available: 50000,
+      locked: 0
+    }],
+    summary: {
+      balance: 50000,
+      equity: 50000,
+      freeMargin: 50000,
+      usedMargin: 0
+    },
+    settings: {
+      positionMode: 'ONE_WAY',
+      symbols: [{
+        symbol: 'BTCUSDT-PERP',
+        marginMode: 'CROSS',
+        leverage: 10,
+        quantityUnit: 'BASE'
+      }]
+    },
+    orders,
+    trades,
+    positions,
+    fundingSettlements
+  }
+}
+
+function auth03Context({
+  accountA,
+  accountB,
+  database,
+  dbB,
+  uiBRows = {
+    '/orders': [0, 0, 0],
+    '/positions': [0, 0]
+  }
+}) {
+  const pageA = authEvidencePage('AUTH-03-A')
+  const pageB = authEvidencePage('AUTH-03-B')
+  pageB.evaluate = async (fn, ...args) => {
+    if (fn.name === 'clickIsolationTab') return true
+    if (fn.name === 'readIsolationTable') {
+      const [route, view, index] = args
+      const dataRows = uiBRows[route][index]
+      return {
+        route,
+        view,
+        dataRows,
+        emptyRows: dataRows === 0 ? 1 : 0
+      }
+    }
+    if (fn.name === 'readIsolationWallet') {
+      return {
+        route: '/wallet',
+        balance: '50000',
+        freeMargin: '50000',
+        leaked: false
+      }
+    }
+    return false
+  }
+  const browserA = { role: 'AUTH-03-A', async close() {} }
+  const browserB = { role: 'AUTH-03-B', async close() {} }
+  const browsers = [browserA, browserB]
+  const initialA = authAccountSnapshot({ accountId: accountA })
+  const afterA = authAccountSnapshot({
+    accountId: accountA,
+    orders: [{ id: 'market-a' }, { id: 'limit-a' }],
+    trades: [{ id: 'trade-a' }]
+  })
+  const snapshotByPage = new Map([
+    [pageA, [initialA, afterA]],
+    [pageB, [
+      authAccountSnapshot({ accountId: accountB }),
+      authAccountSnapshot({ accountId: accountB })
+    ]]
+  ])
+  return {
+    run: authRun('p0-auth-03-isolation-a1'),
+    userFactory(role) {
+      return {
+        email: `${role.toLowerCase()}@example.test`,
+        password: 'Password123!'
+      }
+    },
+    ui: {
+      async launchBrowser() { return browsers.shift() },
+      async createEvidencePage(browser) {
+        return browser.role === 'AUTH-03-A' ? pageA : pageB
+      },
+      async registerViaUi(page) { return { requestRef: `register-${page.role}` } },
+      async logoutViaUi(page) { return { requestRef: `logout-${page.role}` } },
+      async loginViaUi(page) { return { requestRef: `login-${page.role}` } },
+      async openTradePanel() {},
+      async submitOrderViaUi(_page, order) {
+        return { requestRef: `submit-${order.orderType.toLowerCase()}` }
+      },
+      async cancelAllOrdersViaUi() { return { requestRef: 'cancel-all' } }
+    },
+    api: {
+      async snapshotAccount(page) {
+        return snapshotByPage.get(page).shift()
+      },
+      async snapshotMarket() {
+        return { quote: { bid: 60000 } }
+      },
+      async user() {
+        const error = new Error('forbidden')
+        error.status = 403
+        error.code = 'ACCOUNT_ACCESS_DENIED'
+        throw error
+      }
+    },
+    db: {
+      async assertDedicatedDatabase() { return database },
+      async snapshotTradingRows(accountId) {
+        if (accountId === accountB) return dbB
+        return {
+          database,
+          activeDemoAccounts: 1,
+          orders: 2,
+          trades: 1,
+          openPositions: 0,
+          fundingSettlements: 0
+        }
+      }
+    },
+    events: {
+      async waitForStompEvent() {},
+      snapshotFrames() { return [] },
+      async probeForbiddenSubscription() {
+        return { status: 'REJECTED' }
+      }
+    },
+    evidence: authEvidenceSink()
+  }
+}
 
 test('dispatch and phase counting ignore inherited values', async () => {
   const casesUrl = new URL('./p0-user-trading-cases.mjs', import.meta.url).href
@@ -1419,7 +3500,7 @@ test('database ownership is strictly quoted read back and required before alter 
     { type: 'read', database: segmentName },
     {
       type: 'sql',
-      sql: `DROP DATABASE "${segmentName}"`,
+      sql: `DROP DATABASE "${segmentName}" WITH (FORCE)`,
       options: { sensitive: false }
     }
   ])
@@ -2802,15 +4883,24 @@ test('default phase engine restarts the owned backend for each planned profile b
         return exactP0ReportPhaseEvidence(context, plan)
       }
     },
-    async dispatchCase(definition) {
+    async dispatchCase(definition, context) {
       assert.equal(activeProfile, definition.requiredSubruns[0].profile)
       events.push(`dispatch:${activeProfile}:${definition.id}`)
-      return {
-        id: definition.id,
-        status: 'PASS',
-        scopeComplete: true,
-        subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      const entry = {
+        async restore() {
+          events.push(`restore:${activeProfile}:${definition.id}`)
+          context.p0FixtureCleanupRegistry.splice(
+            context.p0FixtureCleanupRegistry.indexOf(entry),
+            1
+          )
+        }
       }
+      context.p0FixtureCleanupRegistry = [entry]
+      return formalP0CaseFragment(
+        definition,
+        definition.requiredSubruns,
+        { scopeComplete: true }
+      )
     },
     handlers: Object.create(null),
     async writeReport() { return { status: 'TEST' } },
@@ -2818,31 +4908,800 @@ test('default phase engine restarts the owned backend for each planned profile b
   }
 
   await smokeContracts.runP0Suite(options, dependencies)
-  assert.deepEqual(events, Object.keys(expectedWorkers).flatMap((profile) => [
-    `stop:${profile}`,
-    `free:${profile}:18086`,
-    `start:${profile}:${expectedWorkers[profile]}`,
-    `health:${profile}`,
-    `business:${profile}`,
-    `database:${profile}`,
-    `dispatch:${profile}:${expectedCase[profile]}`
-  ]))
+  assert.deepEqual(events, [
+    'stop:UI_CORE',
+    'free:UI_CORE:18086',
+    `start:UI_CORE:${expectedWorkers.UI_CORE}`,
+    'health:UI_CORE',
+    'business:UI_CORE',
+    'database:UI_CORE',
+    ...Object.keys(expectedWorkers).flatMap((profile) => [
+      `stop:${profile}`,
+      `free:${profile}:18086`,
+      `start:${profile}:${expectedWorkers[profile]}`,
+      `health:${profile}`,
+      `business:${profile}`,
+      `database:${profile}`,
+      `dispatch:${profile}:${expectedCase[profile]}`,
+      `restore:${profile}:${expectedCase[profile]}`
+    ])
+  ])
 })
 
-test('default authority phase fails closed when no concrete authority operation exists', async () => {
-  const runFullyFakeAuthorityPhase = async (operation, context, plan) => {
-    if (typeof operation !== 'function') {
-      throw new Error('P0_AUTHORITY_OPERATION_REQUIRED')
+test('authority bundle evidence is complete, fail-closed, and separates fixture verdict', () => {
+  assert.equal(typeof smokeContracts.evaluateAuthorityBundleEvidence, 'function')
+  assert.equal(typeof smokeContracts.runAuthorityBundleGate, 'function')
+  const passingChecks = smokeContracts.AUTHORITY_BUNDLE_REQUIRED_CHECKS.map((id) => ({
+    id,
+    status: 'PASS'
+  }))
+
+  assert.deepEqual(
+    smokeContracts.evaluateAuthorityBundleEvidence({
+      checks: passingChecks,
+      cleanup: { status: 'PASS' }
+    }),
+    {
+      status: 'PASS',
+      authorityBundleFixture: 'PASS',
+      checks: passingChecks,
+      cleanup: { status: 'PASS' }
     }
-    return operation(context, plan)
-  }
-  await assert.rejects(
-    runFullyFakeAuthorityPhase(undefined, {}, {}),
-    /P0_AUTHORITY_OPERATION_REQUIRED/
   )
 
-  const evidence = { status: 'PASS', source: 'injected-authority-operation' }
-  assert.equal(await runFullyFakeAuthorityPhase(async () => evidence, {}, {}), evidence)
+  const comparisonFailure = passingChecks.map((check) => (
+    check.id === 'controlled-perp-risk'
+      ? { ...check, status: 'FAIL', reason: 'maintenance mismatch' }
+      : check
+  ))
+  assert.deepEqual(
+    smokeContracts.evaluateAuthorityBundleEvidence({
+      checks: comparisonFailure,
+      cleanup: { status: 'PASS' }
+    }).authorityBundleFixture,
+    'BLOCKED',
+    'a fully executed comparison failure is evidence, not a matrix-wide exception'
+  )
+
+  assert.throws(
+    () => smokeContracts.evaluateAuthorityBundleEvidence({
+      checks: passingChecks.slice(1),
+      cleanup: { status: 'PASS' }
+    }),
+    /P0_AUTHORITY_EVIDENCE_INCOMPLETE/
+  )
+  assert.throws(
+    () => smokeContracts.evaluateAuthorityBundleEvidence({
+      checks: passingChecks,
+      cleanup: { status: 'FAIL' }
+    }),
+    /P0_AUTHORITY_CLEANUP_FAILED/
+  )
+})
+
+test('authority baseline fill and Perp risk checks use independent market evidence', () => {
+  const quote = {
+    symbol: 'BTCUSDT',
+    bid: '99',
+    ask: '100',
+    providerCode: 'binance',
+    sourceMode: 'PUBLIC_EXTERNAL'
+  }
+  const expectedFill = financialOracles.marketFillOracle({
+    productType: 'CRYPTO_SPOT',
+    side: 'BUY',
+    bid: quote.bid,
+    ask: quote.ask
+  })
+  const fillProbe = {
+    trade: {
+      id: '11111111-1111-4111-8111-111111111111',
+      orderId: '22222222-2222-4222-8222-222222222222',
+      symbol: quote.symbol,
+      productType: 'CRYPTO_SPOT',
+      side: 'BUY',
+      lots: '1',
+      price: expectedFill.filledPrice,
+      realizedPnl: '0',
+      fee: '0.050005',
+      feeAsset: 'BTC',
+      liquidityRole: 'TAKER',
+      providerCode: quote.providerCode,
+      sourceMode: quote.sourceMode
+    }
+  }
+  assert.equal(
+    smokeContracts.authorityFillCheck(fillProbe, quote, BTC_RULES, 'CRYPTO_SPOT').pass,
+    true
+  )
+  assert.equal(
+    smokeContracts.authorityFillCheck({
+      trade: { ...fillProbe.trade, price: '101' }
+    }, quote, BTC_RULES, 'CRYPTO_SPOT').pass,
+    false,
+    'a filled order at the wrong authority price must block the fixture'
+  )
+
+  const position = {
+    id: '33333333-3333-4333-8333-333333333333',
+    symbol: 'BTCUSDT-PERP',
+    side: 'LONG',
+    productType: 'LINEAR_PERP',
+    positionMode: 'ONE_WAY',
+    positionSide: 'LONG',
+    marginMode: 'CROSS',
+    leverage: '10',
+    lots: '0.001',
+    openPrice: '100',
+    markPrice: '110',
+    floatingPnl: '0.01000000',
+    marginHeld: '0.01000000',
+    maintenanceMargin: '0.00055000',
+    maintenanceMarginRate: '0.005',
+    status: 'OPEN'
+  }
+  const riskProbe = {
+    position,
+    snapshot: {
+      summary: {
+        balance: '50000',
+        equity: '50000.01',
+        usedMargin: '0.01000000',
+        freeMargin: '50000',
+        openFloatingPnl: '0.01000000',
+        maintenanceMargin: '0.00055000'
+      }
+    }
+  }
+  const reference = { symbol: position.symbol, mark: '110' }
+  const risk = smokeContracts.authorityPerpRiskCheck(
+    riskProbe,
+    reference,
+    { ...BTC_RULES, stepSize: '0.001', minQty: '0.001' }
+  )
+  assert.equal(risk.markPass, true)
+  assert.equal(risk.riskPass, true)
+  assert.equal(
+    smokeContracts.authorityPerpRiskCheck(
+      { ...riskProbe, position: { ...position, markPrice: '111' } },
+      reference,
+      { ...BTC_RULES, stepSize: '0.001', minQty: '0.001' }
+    ).markPass,
+    false,
+    'position mark must be compared with the independent reference mark'
+  )
+  assert.equal(
+    smokeContracts.authorityPerpRiskCheck({
+      ...riskProbe,
+      snapshot: {
+        summary: { ...riskProbe.snapshot.summary, openFloatingPnl: '0.02000000' }
+      }
+    }, reference, { ...BTC_RULES, stepSize: '0.001', minQty: '0.001' }).riskPass,
+    false,
+    'account summary UPL must agree with the independent position oracle'
+  )
+
+  const gateSource = smokeContracts.runAuthorityBundleGate.toString()
+  assert.match(gateSource, /baselineSpotFill\.pass/)
+  assert.match(gateSource, /baselinePerpFill\.pass/)
+  assert.match(
+    gateSource,
+    /authorityPerpRiskCheck\(\s*baselinePerpProbe,\s*baselineReference,/,
+    'the baseline gate must not replace the independent reference mark with position evidence'
+  )
+})
+
+function authorityGateContractContext({
+  wrongControlledSpotFill = false,
+  staleRestoredUi = false,
+  browserCloseFailure = false
+} = {}) {
+  const baseline = {
+    BTCUSDT: {
+      symbol: 'BTCUSDT',
+      bid: '50000',
+      ask: '50010',
+      providerCode: 'binance',
+      providerSymbol: 'BTCUSDT',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      stale: false
+    },
+    'BTCUSDT-PERP': {
+      symbol: 'BTCUSDT-PERP',
+      bid: '60000',
+      ask: '60010',
+      markPrice: '60005',
+      providerCode: 'binance-usdm',
+      providerSymbol: 'BTCUSDT',
+      sourceMode: 'PUBLIC_EXTERNAL',
+      stale: false
+    }
+  }
+  const overrides = new Map()
+  const lastOverrides = new Map()
+  const adminCleanupCalls = []
+  let restoredAfterOverride = false
+  let sequence = 0
+  let spotBuyCount = 0
+  let persisted
+  const nextId = () => (
+    `00000000-0000-4000-8000-${String(++sequence).padStart(12, '0')}`
+  )
+  const account = {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    accountType: 'DEMO',
+    status: 'ACTIVE'
+  }
+  const state = {
+    account,
+    wallets: [
+      {
+        walletType: 'SPOT',
+        asset: 'USDT',
+        total: '50000',
+        available: '50000',
+        locked: '0'
+      },
+      {
+        walletType: 'SPOT',
+        asset: 'BTC',
+        total: '0',
+        available: '0',
+        locked: '0'
+      }
+    ],
+    summary: {
+      balance: '50000',
+      equity: '50000',
+      usedMargin: '0',
+      freeMargin: '50000',
+      openFloatingPnl: '0',
+      maintenanceMargin: '0'
+    },
+    settings: {},
+    orders: [],
+    trades: [],
+    positions: [],
+    fundingSettlements: []
+  }
+  const market = (symbol) => structuredClone(overrides.get(symbol) ?? baseline[symbol])
+  const reference = () => {
+    const quote = market('BTCUSDT-PERP')
+    return {
+      ...quote,
+      mark: quote.markPrice,
+      index: quote.markPrice
+    }
+  }
+  const snapshotAccount = () => {
+    const snapshot = structuredClone(state)
+    const btcWallet = snapshot.wallets.find(({ walletType, asset }) => (
+      walletType === 'SPOT' && asset === 'BTC'
+    ))
+    const spotPositions = Number(btcWallet?.available) > 0
+      ? [{
+          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          symbol: 'BTCUSDT',
+          productType: 'CRYPTO_SPOT',
+          lots: btcWallet.available,
+          quantity: btcWallet.available,
+          status: 'OPEN'
+        }]
+      : []
+    return {
+      accounts: [structuredClone(account)],
+      activeDemoAccounts: [structuredClone(account)],
+      ...snapshot,
+      positions: [...snapshot.positions, ...spotPositions]
+    }
+  }
+  const resetPerpSummary = () => {
+    state.summary = {
+      balance: '50000',
+      equity: '50000',
+      usedMargin: '0',
+      freeMargin: '50000',
+      openFloatingPnl: '0',
+      maintenanceMargin: '0'
+    }
+  }
+  const page = (role) => ({
+    role,
+    target: null,
+    p0Options: {
+      webBaseUrl: 'http://127.0.0.1:5199',
+      adminBaseUrl: 'http://127.0.0.1:5200'
+    },
+    async navigate(url) {
+      if (url.includes('/trade/spot/')) this.target = { product: 'spot', symbol: 'BTCUSDT' }
+      if (url.includes('/trade/perpetual/')) {
+        this.target = { product: 'perpetual', symbol: 'BTCUSDT-PERP' }
+      }
+    },
+    async waitForFunction() {},
+    async evaluate() {
+      if (!this.target) return null
+      const symbol = this.target.symbol
+      const visible = staleRestoredUi
+        && restoredAfterOverride
+        && !overrides.has(symbol)
+        ? lastOverrides.get(symbol)
+        : market(symbol)
+      return { bid: visible.bid, ask: visible.ask }
+    },
+    assertEvidenceClean() {},
+    async close() {}
+  })
+  const userPage = page('user')
+  const adminPage = page('admin')
+  const context = {
+    run: {
+      runId: 'p0-authority-direct-contract-a1',
+      commit: 'a'.repeat(40),
+      artifactRoot: resolve(tmpdir(), 'p0-authority-direct-contract-a1')
+    },
+    authority: {
+      status: 'PENDING',
+      authorityBundleFixture: 'BLOCKED'
+    },
+    userFactory() {
+      return { email: 'authority@example.test', password: 'Password123!' }
+    },
+    ui: {
+      async launchBrowser() {
+        return {
+          async close() {
+            if (browserCloseFailure) throw new Error('AUTHORITY_BROWSER_CLOSE_FAILED')
+          }
+        }
+      },
+      async createEvidencePage(_browser, { caseId }) {
+        return caseId === 'authority-admin' ? adminPage : userPage
+      },
+      async registerViaUi() { return { requestRef: '101.1' } },
+      async loginAdminViaUi() { return { requestRef: '102.1' } },
+      async openTradePanel(targetPage, target) {
+        targetPage.target = target
+      },
+      async submitOrderViaUi(targetPage, order) {
+        const target = targetPage.target
+        const quote = market(target.symbol)
+        const productType = target.product === 'spot' ? 'CRYPTO_SPOT' : 'LINEAR_PERP'
+        const expected = financialOracles.marketFillOracle({
+          productType,
+          side: order.side,
+          bid: quote.bid,
+          ask: quote.ask
+        })
+        if (target.product === 'spot' && order.side === 'BUY') spotBuyCount += 1
+        const price = wrongControlledSpotFill
+          && target.product === 'spot'
+          && order.side === 'BUY'
+          && spotBuyCount === 2
+          ? String(Number(expected.filledPrice) + 100)
+          : expected.filledPrice
+        const orderId = nextId()
+        const tradeId = nextId()
+        state.orders.push({
+          id: orderId,
+          symbol: target.symbol,
+          orderType: 'MARKET',
+          status: 'FILLED'
+        })
+        state.trades.push({
+          id: tradeId,
+          orderId,
+          symbol: target.symbol,
+          productType,
+          positionSide: target.product === 'spot' ? 'BOTH' : 'LONG',
+          marginMode: target.product === 'spot' ? 'CASH' : 'CROSS',
+          side: order.side,
+          lots: target.product === 'spot' && order.side === 'SELL'
+            ? String(order.amount)
+            : '0.001',
+          price,
+          realizedPnl: '0',
+          fee: '0.0001',
+          feeAsset: target.product === 'spot' ? 'BTC' : 'USDT',
+          liquidityRole: 'TAKER',
+          providerCode: quote.providerCode,
+          providerSymbol: quote.providerSymbol,
+          sourceMode: quote.sourceMode,
+          executedAt: '2026-07-23T00:00:00.000Z'
+        })
+        if (target.product === 'spot') {
+          const wallet = state.wallets.find(({ asset }) => asset === 'BTC')
+          const nextAvailable = order.side === 'BUY'
+            ? Number(wallet.available) + 0.0009995
+            : Number(wallet.available) - Number(order.amount)
+          wallet.available = Math.max(0, nextAvailable).toFixed(8)
+          wallet.total = wallet.available
+        } else if (order.side === 'BUY') {
+          const currentReference = reference()
+          const first = financialOracles.perpPositionOracle({
+            side: 'LONG',
+            quantity: '0.001',
+            entryPrice: price,
+            markPrice: currentReference.mark,
+            leverage: '10',
+            positionMargin: '1',
+            maintenanceMarginRate: '0.005',
+            rules: { ...BTC_RULES, stepSize: '0.001', minQty: '0.001' }
+          })
+          const oracle = financialOracles.perpPositionOracle({
+            side: 'LONG',
+            quantity: '0.001',
+            entryPrice: price,
+            markPrice: currentReference.mark,
+            leverage: '10',
+            positionMargin: first.initialMargin,
+            maintenanceMarginRate: '0.005',
+            rules: { ...BTC_RULES, stepSize: '0.001', minQty: '0.001' }
+          })
+          state.positions = [{
+            id: nextId(),
+            symbol: target.symbol,
+            side: 'LONG',
+            productType,
+            positionMode: 'ONE_WAY',
+            positionSide: 'LONG',
+            marginMode: 'CROSS',
+            leverage: '10',
+            lots: '0.001',
+            openPrice: price,
+            markPrice: currentReference.mark,
+            floatingPnl: oracle.unrealizedPnl,
+            marginHeld: oracle.initialMargin,
+            maintenanceMargin: oracle.maintenanceMargin,
+            maintenanceMarginRate: '0.005',
+            status: 'OPEN'
+          }]
+          state.summary = {
+            balance: '50000',
+            equity: String(50000 + Number(oracle.unrealizedPnl)),
+            usedMargin: oracle.initialMargin,
+            freeMargin: String(
+              50000 - Number(oracle.initialMargin) + Number(oracle.unrealizedPnl)
+            ),
+            openFloatingPnl: oracle.unrealizedPnl,
+            maintenanceMargin: oracle.maintenanceMargin
+          }
+        } else {
+          state.positions = []
+          resetPerpSummary()
+        }
+        return { requestRef: `${sequence}.1` }
+      },
+      async cancelAllOrdersViaUi() {
+        return { requestRef: '199.1' }
+      }
+    },
+    api: {
+      async snapshotAccount() {
+        return snapshotAccount()
+      },
+      async snapshotMarket(symbol) {
+        return { quote: market(symbol) }
+      },
+      async user(_page, path) {
+        if (path.endsWith('/rules')) {
+          return {
+            ...BTC_RULES,
+            stepSize: path.includes('PERP') ? '0.001' : BTC_RULES.stepSize,
+            minQty: path.includes('PERP') ? '0.001' : BTC_RULES.minQty,
+            minNotional: '1'
+          }
+        }
+        if (path.includes('/perpetuals/')) return reference()
+        throw new Error(`UNEXPECTED_AUTHORITY_USER_PATH: ${path}`)
+      },
+      async admin(_page, path, request) {
+        if (request.method === 'POST'
+          && path === `/api/admin/accounts/${account.id}/force-cleanup`) {
+          adminCleanupCalls.push({ path, body: structuredClone(request.body) })
+          state.positions = []
+          resetPerpSummary()
+          return { items: [] }
+        }
+        if (request.method === 'POST'
+          && path === `/api/admin/accounts/${account.id}/demo-reset`) {
+          adminCleanupCalls.push({ path, body: structuredClone(request.body) })
+          const btcWallet = state.wallets.find(({ walletType, asset }) => (
+            walletType === 'SPOT' && asset === 'BTC'
+          ))
+          btcWallet.available = '0'
+          btcWallet.total = '0'
+          btcWallet.locked = '0'
+          state.positions = []
+          resetPerpSummary()
+          return { demoGeneration: 2 }
+        }
+        if (request.method === 'DELETE') {
+          const symbol = decodeURIComponent(path.split('/').at(-1))
+          if (overrides.has(symbol)) restoredAfterOverride = true
+          overrides.delete(symbol)
+          return { status: 'PASS' }
+        }
+        if (request.method === 'POST') {
+          const body = request.body
+          const baselineQuote = baseline[body.symbol]
+          const quote = {
+            ...baselineQuote,
+            bid: body.bid,
+            ask: body.ask,
+            ...(body.symbol.endsWith('-PERP')
+              ? {
+                  markPrice: String(
+                    (Number(body.bid) + Number(body.ask)) / 2
+                  )
+                }
+              : {})
+          }
+          overrides.set(body.symbol, quote)
+          lastOverrides.set(body.symbol, structuredClone(quote))
+          return structuredClone(quote)
+        }
+        throw new Error(`UNEXPECTED_AUTHORITY_ADMIN_PATH: ${path}`)
+      }
+    },
+    db: {
+      async assertDedicatedDatabase() {
+        return 'fx_p0_user_e2e_authority_direct_a1'
+      },
+      async snapshotTradingRows() {
+        return {
+          database: 'fx_p0_user_e2e_authority_direct_a1',
+          orders: state.orders.length,
+          trades: state.trades.length,
+          openPositions: state.positions.length
+        }
+      }
+    },
+    evidence: {
+      async captureCheckpoint(_checkpointContext, name, scope) {
+        return {
+          name,
+          artifactHashes: {},
+          uiEvidence: [],
+          networkEvidence: [],
+          eventEvidence: [],
+          apiEvidence: typeof scope.apiEvidence === 'function'
+            ? await scope.apiEvidence()
+            : scope.apiEvidence ?? [],
+          dbEvidence: typeof scope.dbEvidence === 'function'
+            ? await scope.dbEvidence()
+            : scope.dbEvidence ?? [],
+          oracleEvidence: typeof scope.oracleEvidence === 'function'
+            ? await scope.oracleEvidence()
+            : scope.oracleEvidence ?? []
+        }
+      },
+      writeCaseResultAtomic(_path, result) {
+        persisted = result
+      }
+    }
+  }
+  return {
+    context,
+    persisted: () => persisted,
+    adminCleanupCalls: () => structuredClone(adminCleanupCalls),
+    snapshotAccount
+  }
+}
+
+test('runAuthorityBundleGate directly proves PASS, BLOCKED, and cleanup failure', async () => {
+  const adminCredentials = {
+    email: 'admin@example.test',
+    password: 'AdminPassword123!'
+  }
+  const passing = authorityGateContractContext()
+  const pass = await smokeContracts.runAuthorityBundleGate(passing.context, {
+    adminCredentials
+  })
+  assert.equal(pass.authorityBundleFixture, 'PASS')
+  assert.equal(passing.persisted(), pass)
+  assert.deepEqual(
+    passing.adminCleanupCalls().map(({ path }) => path),
+    [
+      '/api/admin/accounts/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/force-cleanup',
+      '/api/admin/accounts/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/demo-reset'
+    ]
+  )
+  assert.equal(
+    passing.snapshotAccount().positions.filter(({ status }) => status === 'OPEN').length,
+    0
+  )
+
+  const wrongFill = authorityGateContractContext({ wrongControlledSpotFill: true })
+  const blockedFill = await smokeContracts.runAuthorityBundleGate(wrongFill.context, {
+    adminCredentials
+  })
+  assert.equal(blockedFill.authorityBundleFixture, 'BLOCKED')
+  assert.equal(
+    blockedFill.checks.find(({ id }) => id === 'controlled-spot-fill').status,
+    'FAIL'
+  )
+
+  const staleRestore = authorityGateContractContext({ staleRestoredUi: true })
+  const blockedRestore = await smokeContracts.runAuthorityBundleGate(staleRestore.context, {
+    adminCredentials
+  })
+  assert.equal(blockedRestore.authorityBundleFixture, 'BLOCKED')
+  assert.equal(
+    blockedRestore.checks.find(({ id }) => id === 'restored-spot-provider').status,
+    'FAIL'
+  )
+
+  const cleanupFailure = authorityGateContractContext({ browserCloseFailure: true })
+  await assert.rejects(
+    smokeContracts.runAuthorityBundleGate(cleanupFailure.context, { adminCredentials }),
+    /P0_AUTHORITY_BROWSER_CLEANUP_FAILED|P0_AUTHORITY_CLEANUP_FAILED/
+  )
+})
+
+test('authority checkpoints retain independent oracle evidence without a browser page', async (t) => {
+  const artifactRoot = mkdtempSync(join(tmpdir(), 'p0-authority-oracle-checkpoint-'))
+  t.after(() => rmSync(artifactRoot, { recursive: true, force: true }))
+  const oracleEvidence = [{
+    symbol: 'BTCUSDT-PERP',
+    markPrice: '60005.00000000',
+    floatingPnl: '1.23450000',
+    maintenanceMargin: '0.30002500'
+  }]
+  const checkpoint = await smokeContracts.captureCheckpoint(
+    { run: { artifactRoot } },
+    'controlled-risk',
+    {
+      caseId: 'authority',
+      oracleEvidence: async () => oracleEvidence
+    }
+  )
+
+  assert.deepEqual(checkpoint.oracleEvidence, oracleEvidence)
+  assert.deepEqual(checkpoint.uiEvidence, [])
+  assert.deepEqual(checkpoint.artifactHashes, {})
+})
+
+test('a complete authority fixture BLOCKED remains control PASS and does not abort matrix phases', async () => {
+  const controlResults = []
+  const phases = []
+  await smokeContracts.executeP0PlanPhases({
+    plan: { phases: ['authority', 'ui-core'] },
+    context: {},
+    controlResults,
+    operations: {
+      async runAuthority() {
+        phases.push('authority')
+        return {
+          status: 'PASS',
+          authorityBundleFixture: 'BLOCKED',
+          checks: [{ id: 'controlled-perp-risk', status: 'FAIL' }]
+        }
+      },
+      async runMatrixPhase(phase) {
+        phases.push(phase)
+      }
+    }
+  })
+
+  assert.deepEqual(phases, ['authority', 'ui-core'])
+  assert.equal(controlResults[0].status, 'PASS')
+  assert.equal(controlResults[0].evidence.authorityBundleFixture, 'BLOCKED')
+})
+
+test('authority fixture BLOCKED blocks only declared dependent subruns and executes the rest', async () => {
+  const blockedAuthority = {
+    status: 'COMPLETE',
+    authorityBundleFixture: 'BLOCKED'
+  }
+  const wholeCase = P0_CASES.find(({ id }) => id === 'SPOT-05')
+  const independent = P0_CASES.find(({ id }) => id === 'SPOT-01')
+  assert.deepEqual(
+    smokeContracts.authorityBlockedSubruns(
+      wholeCase,
+      wholeCase.requiredSubruns,
+      blockedAuthority
+    ),
+    wholeCase.requiredSubruns
+  )
+  assert.deepEqual(
+    smokeContracts.authorityBlockedSubruns(
+      independent,
+      independent.requiredSubruns,
+      blockedAuthority
+    ),
+    []
+  )
+
+  const options = p0CaseContracts.parseP0Cli([
+    '--suite=p0',
+    '--phase=selected',
+    '--case=PERP-01',
+    '--run-id=p0-authority-subrun-block-a1'
+  ])
+  const dispatched = []
+  const caseAuthority = {
+    status: 'PENDING',
+    authorityBundleFixture: 'BLOCKED'
+  }
+  let persisted
+  let execution
+  await smokeContracts.runP0Suite(options, {
+    installSignalHandlers() { return () => {} },
+    async initializeOwnership() {
+      return {
+        runRoot: resolve(tmpdir(), options.runId),
+        options,
+        ownerId: 'b'.repeat(64),
+        matrixDatabase: 'fx_p0_user_e2e_authority_subrun_block_a1',
+        databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_authority_subrun_block_a1',
+        inheritedEnv: {},
+        caseResults: []
+      }
+    },
+    createP0Context(prepared) {
+      return {
+        run: { artifactRoot: prepared.runRoot },
+        authority: caseAuthority,
+        evidence: {
+          writeCaseResultAtomic(_path, result) {
+            persisted = result
+          }
+        }
+      }
+    },
+    phaseOperations: {
+      async runPreflight() {
+        return { id: 'AUTH-01', status: 'PASS' }
+      },
+      async runAuthority() {
+        return {
+          status: 'PASS',
+          authorityBundleFixture: 'BLOCKED',
+          checks: [{ id: 'controlled-perp-risk', status: 'FAIL' }]
+        }
+      },
+      async writeReport(context, plan) {
+        return exactP0ReportPhaseEvidence(context, plan)
+      }
+    },
+    async dispatchCase(definition) {
+      dispatched.push(definition.requiredSubruns.map(({ id }) => id))
+      return formalP0CaseFragment(definition, definition.requiredSubruns)
+    },
+    handlers: Object.create(null),
+    async writeReport(value) {
+      execution = value
+      return { status: 'TEST' }
+    },
+    async cleanup() {
+      return { status: 'CLEANED' }
+    }
+  })
+
+  assert.deepEqual(dispatched, [['desktop-core']])
+  const result = execution.caseResults[0]
+  assert.equal(persisted, result)
+  assert.equal(result.id, 'PERP-01')
+  assert.equal(result.status, 'BLOCKED')
+  assert.equal(result.authorityBundleFixture, 'BLOCKED')
+  assert.equal(
+    result.failureOrBlocker.reasonCode,
+    'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+  )
+  assert.deepEqual(
+    result.subruns.map(({ id, status }) => ({ id, status })),
+    [
+      { id: 'desktop-core', status: 'PASS' },
+      { id: 'desktop-target-mark', status: 'BLOCKED' }
+    ]
+  )
+  assert.equal(
+    result.subruns[1].failureOrBlocker.reasonCode,
+    'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+  )
+  assert.equal(caseAuthority.status, 'COMPLETE')
+  assert.equal(caseAuthority.authorityBundleFixture, 'BLOCKED')
 })
 
 test('P0 planner intersects phase case profile and viewport into one effective subrun selection', () => {
@@ -2919,7 +5778,12 @@ test('filtered P0 report accepts only selected subruns with scopeComplete false 
     id: 'SOURCE-03',
     status: 'PASS',
     scopeComplete: false,
-    subruns: selectedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+    subruns: selectedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+    financialCalculation: {
+      status: 'PASS',
+      checks: [{ kind: 'TEST_EVIDENCE' }]
+    },
+    cleanup: { status: 'PASS' }
   }
   const runRoot = join(root, options.runId)
   mkdirSync(runRoot, { recursive: true })
@@ -2945,7 +5809,10 @@ test('filtered P0 report accepts only selected subruns with scopeComplete false 
   })
 
   assert.equal(report.verdict, 'PARTIAL_PASS')
-  assert.deepEqual(report.caseResults, [caseResult])
+  assert.deepEqual(
+    report.caseResults,
+    redactNetworkEntry({ cases: [caseResult] }).cases
+  )
   assert.equal(JSON.parse(readFileSync(join(runRoot, 'report.json'), 'utf8')).verdict, 'PARTIAL_PASS')
 })
 
@@ -3069,7 +5936,7 @@ test('managed backend receives verified compose credentials and exact database i
       if (match) { databases.get(match[1]).ownerMarker = match[2]; return }
       match = sql.match(/^ALTER DATABASE "([a-z0-9_]+)" SET timezone TO 'UTC'$/)
       if (match) { databases.get(match[1]).timezone = 'UTC'; return }
-      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)"$/)
+      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)" WITH \(FORCE\)$/)
       if (match) { databases.delete(match[1]); return }
       throw new Error(`UNEXPECTED_SQL: ${sql}`)
     },
@@ -3274,12 +6141,11 @@ test('managed backend receives verified compose credentials and exact database i
     },
     dispatchCase: async (definition) => {
       events.push(`dispatch:${definition.id}`)
-      return {
-        id: definition.id,
-        status: 'PASS',
-        scopeComplete: true,
-        subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
-      }
+      return formalP0CaseFragment(
+        definition,
+        definition.requiredSubruns,
+        { scopeComplete: true }
+      )
     },
     handlers: Object.create(null),
     async writeReport() { return { status: 'TEST' } },
@@ -3432,16 +6298,24 @@ test('standalone canonical owns snapshots restores and releases Redis exactly on
   assert.equal(completedText.includes('before-perp'), false)
 })
 
-test('canonical backend uses MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED and never the obsolete key', () => {
+test('canonical backend binds its admin login and provider-sync configuration', () => {
   assert.equal(typeof smokeContracts.buildCanonicalBackendEnvironment, 'function')
   const environment = smokeContracts.buildCanonicalBackendEnvironment({
     databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_platform_smoke_review1',
     inheritedEnv: {
       PATH: 'trusted-path',
+      ADMIN_SMOKE_EMAIL: 'canonical-admin@example.invalid',
+      ADMIN_SMOKE_PASSWORD: 'canonical-admin-password',
+      ADMIN_BOOTSTRAP_ENABLED: 'false',
+      ADMIN_BOOTSTRAP_EMAIL: 'poisoned-admin@example.invalid',
+      ADMIN_BOOTSTRAP_PASSWORD: 'poisoned-admin-password',
       PROVIDER_INSTRUMENT_SYNC_ENABLED: 'true',
       MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED: 'true'
     }
   })
+  assert.equal(environment.ADMIN_BOOTSTRAP_ENABLED, 'true')
+  assert.equal(environment.ADMIN_BOOTSTRAP_EMAIL, 'canonical-admin@example.invalid')
+  assert.equal(environment.ADMIN_BOOTSTRAP_PASSWORD, 'canonical-admin-password')
   assert.equal(environment.MARKET_PROVIDER_INSTRUMENT_SYNC_ENABLED, 'false')
   assert.equal(Object.hasOwn(environment, 'PROVIDER_INSTRUMENT_SYNC_ENABLED'), false)
   assert.equal(environment.PATH, 'trusted-path')
@@ -3508,16 +6382,22 @@ test('Windows local command adapter executes trusted npm and Maven shims without
   assert.equal(typeof smokeContracts.normalizeLocalCommandDescriptor, 'function')
   assert.equal(typeof smokeContracts.runLocalCommand, 'function')
   if (process.platform !== 'win32') {
+    const poisonedPath = join(tmpdir(), 'p0-poisoned-launcher-path')
     const normalized = smokeContracts.normalizeLocalCommandDescriptor({
       command: process.execPath,
       args: ['--version'],
       cwd: process.cwd(),
-      env: process.env,
+      env: { ...process.env, PATH: poisonedPath },
       shell: true
     })
     assert.equal(normalized.command, process.execPath)
     assert.deepEqual(normalized.args, ['--version'])
     assert.equal(normalized.shell, false)
+    assert.notEqual(normalized.env.PATH, poisonedPath)
+    assert.equal(
+      normalized.env.PATH.split(delimiter).includes(dirname(realpathSync(process.execPath))),
+      true
+    )
     return
   }
 
@@ -3702,7 +6582,12 @@ test('P0 report derives verdict from aggregate evidence and persists canonical m
       id: croppedDefinition.id,
       status: 'PASS',
       scopeComplete: false,
-      subruns: selectedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      subruns: selectedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+      financialCalculation: {
+        status: 'PASS',
+        checks: [{ kind: 'TEST_EVIDENCE' }]
+      },
+      cleanup: { status: 'PASS' }
     }],
     planVerdict: 'PASS'
   })
@@ -4532,18 +7417,18 @@ test('same P0 phase increments backend attempt database for every profile activa
       }
     },
     async dispatchCase(definition) {
-      return {
-        id: definition.id,
-        status: 'PASS',
-        scopeComplete: true,
-        subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
-      }
+      return formalP0CaseFragment(
+        definition,
+        definition.requiredSubruns,
+        { scopeComplete: true }
+      )
     },
     async writeReport(execution) { return { verdict: execution.plan.verdict } },
     async cleanup() { return { status: 'CLEANED' } }
   })
   assert.equal(preparedAttempt, null)
   assert.deepEqual(attempts, [
+    { phase: 'authority', attempt: 1, profile: 'UI_CORE' },
     { phase: 'source', attempt: 1, profile: 'UI_CORE' },
     { phase: 'source', attempt: 2, profile: 'ORDER_TRIGGER' },
     { phase: 'source', attempt: 3, profile: 'FUNDING_ONLY' },
@@ -4598,7 +7483,7 @@ test('cleanup recovers every planned database from the active journal', async (t
         return state ? { segmentName, ownerMarker: state.ownerMarker } : null
       },
       async executeAdminSql(sql) {
-        const match = sql.match(/^DROP DATABASE "([a-z0-9_]+)"$/)
+        const match = sql.match(/^DROP DATABASE "([a-z0-9_]+)" WITH \(FORCE\)$/)
         if (!match) throw new Error(`UNEXPECTED_SQL: ${sql}`)
         databases.delete(match[1])
       }
@@ -5277,11 +8162,9 @@ test('hard kill cleanup terminates journaled processes before requiring redis re
     dependencies.cleanup(undefined, {}, { runId }),
     /P0_REDIS_SNAPSHOT_MISSING/
   )
-  assert.deepEqual(events, [
-    'process:inspect',
-    'process:terminate',
-    'process:memory-stop'
-  ])
+  assert.deepEqual(events, process.platform === 'win32'
+    ? ['process:inspect', 'process:terminate', 'process:memory-stop']
+    : ['process:memory-stop', 'process:inspect', 'process:terminate'])
   assert.equal(existsSync(control.ownershipPath), true)
 })
 
@@ -5514,6 +8397,59 @@ test('CLEANED atomically replaces ACTIVE without a raw ownership deletion window
   assert.equal(existsSync(join(control.runRoot, 'control', 'cleaned.json')), false)
 })
 
+test('cleanup is a no-op only after prepare fails before the run root exists', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-pre-control-cleanup-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const artifactBase = join(root, 'artifacts')
+  const runId = 'p0-pre-control-cleanup-a1'
+  const dependencies = smokeContracts.createDefaultP0Dependencies({
+    artifactBase,
+    inheritedEnv: {},
+    redis: {},
+    processManager: {},
+    infrastructure: {},
+    postgres: {}
+  })
+  const options = { suite: 'p0', mode: 'discovery', phase: 'all', runId }
+  const preparationFailure = new Error('P0_PREPARE_SENTINEL')
+
+  await assert.rejects(
+    smokeContracts.executeP0SuiteLifecycle({
+      options,
+      operations: {
+        installSignalHandlers() { return async () => {} },
+        async prepare() { throw preparationFailure },
+        async execute() { assert.fail('execute must not run') },
+        async writeReport() { assert.fail('report must not run') },
+        cleanup(prepared, details) {
+          return dependencies.cleanup(prepared, details, options)
+        }
+      }
+    }),
+    (error) => error === preparationFailure && !(error instanceof AggregateError)
+  )
+
+  assert.deepEqual(await dependencies.cleanup(undefined, {
+    error: preparationFailure
+  }, options), {
+    status: 'NOT_STARTED'
+  })
+  assert.equal(existsSync(join(artifactBase, runId)), false)
+  await assert.rejects(
+    dependencies.cleanup(undefined, {}, options),
+    /P0_CONTROL_MISSING/
+  )
+
+  const partialRunId = 'p0-pre-control-partial-a1'
+  mkdirSync(join(artifactBase, partialRunId), { recursive: true })
+  await assert.rejects(
+    dependencies.cleanup(undefined, {
+      error: preparationFailure
+    }, { ...options, runId: partialRunId }),
+    /P0_CONTROL_MISSING/
+  )
+})
+
 test('cleanup rejects missing forged or unsafe authoritative control state', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-s2-authoritative-control-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -5593,7 +8529,9 @@ test('cleanup rejects missing forged or unsafe authoritative control state', asy
   )
 })
 
-test('Windows local toolchain ignores PATH SystemRoot WINDIR COMSPEC and shim overrides', (t) => {
+test('Windows local toolchain ignores PATH SystemRoot WINDIR COMSPEC and shim overrides', {
+  skip: process.platform !== 'win32'
+}, (t) => {
   assert.equal(typeof smokeContracts.resolveTrustedLocalToolchain, 'function')
   const root = mkdtempSync(join(tmpdir(), 'p0-s3-poisoned-toolchain-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -5732,7 +8670,35 @@ test('recovery never terminates a reused PID without the same native process han
   )
 })
 
-test('multi-profile cases dispatch profile slices and merge exact subrun evidence once', async () => {
+function formalP0CaseFragment(definition, subruns, {
+  status = 'PASS',
+  subrunStatus = status,
+  schemaVersion = 1,
+  attempt = 1,
+  durationMs = 1,
+  scopeComplete = true,
+  artifactHashes
+} = {}) {
+  const resolvedHashes = artifactHashes ?? Object.fromEntries(subruns.map((subrun) => [
+    `subruns/${subrun.id}/result.json`,
+    `sha256:${createHash('sha256').update(`${definition.id}:${subrun.id}:${attempt}`).digest('hex')}`
+  ]))
+  return {
+    schemaVersion,
+    id: definition.id,
+    status,
+    attempt,
+    durationMs,
+    scopeComplete,
+    subruns: subruns.map((subrun) => ({
+      ...subrun,
+      status: typeof subrunStatus === 'function' ? subrunStatus(subrun) : subrunStatus
+    })),
+    artifactHashes: resolvedHashes
+  }
+}
+
+test('multi-profile cases persist one canonical merged result after exact subrun dispatch', async (t) => {
   const options = p0CaseContracts.parseP0Cli([
     '--suite=p0',
     '--run-id=p0-s4-multi-profile-slice-a1',
@@ -5745,12 +8711,62 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
   const expectedProfiles = [...new Set(entry.selectedSubruns.map(({ profile }) => profile))]
   const dispatches = []
   const fragments = []
+  const canonicalDuringDispatch = []
   let activeProfile = null
+  const runRoot = mkdtempSync(join(tmpdir(), 'p0-s4-multi-profile-slice-'))
+  t.after(() => rmSync(runRoot, { recursive: true, force: true }))
+  const page = {
+    assertEvidenceClean() {},
+    async send(method) {
+      assert.equal(method, 'Page.captureScreenshot')
+      return { data: Buffer.from(`checkpoint:${activeProfile}`).toString('base64') }
+    },
+    snapshotEvidence() {
+      return { networkEvidence: [], eventEvidence: [] }
+    }
+  }
+  const p0Context = {
+    run: { artifactRoot: runRoot },
+    evidence: {
+      captureCheckpoint: smokeContracts.captureCheckpoint,
+      writeCaseResultAtomic
+    }
+  }
+  const handlers = {
+    async [entry.definition.handlerId](context, definition, details) {
+      assert.equal(definition.id, entry.id)
+      assert.equal(definition.requiredSubruns.length > 0, true)
+      assert.equal(definition.requiredSubruns.every(({ profile }) => (
+        profile === activeProfile
+      )), true)
+      dispatches.push(activeProfile)
+      assert.equal(details.profileAttempt, dispatches.length)
+      const checkpoint = await context.evidence.captureCheckpoint(context, 'final', {
+        caseId: definition.id,
+        pages: [page]
+      })
+      const fragment = formalP0CaseFragment(
+        definition,
+        definition.requiredSubruns,
+        {
+          durationMs: definition.requiredSubruns.length,
+          artifactHashes: checkpoint.artifactHashes
+        }
+      )
+      context.evidence.writeCaseResultAtomic(
+        join(runRoot, definition.id, 'result.json'),
+        fragment
+      )
+      canonicalDuringDispatch.push(existsSync(join(runRoot, definition.id, 'result.json')))
+      fragments.push(fragment)
+      return fragment
+    }
+  }
   const dependencies = {
     installSignalHandlers() { return () => {} },
     async initializeOwnership() {
       return {
-        runRoot: resolve(tmpdir(), options.runId),
+        runRoot,
         options,
         ownerToken: 'p0-s4-multi-profile-owner-token-a1',
         ownerId: 'a'.repeat(64),
@@ -5760,6 +8776,7 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
         caseResults: []
       }
     },
+    createP0Context() { return p0Context },
     phaseOperations: {
       async runPreflight() { return { id: 'AUTH-01', status: 'PASS' } },
       async runAuthority() { return { id: 'AUTH-03', status: 'PASS' } },
@@ -5773,21 +8790,7 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
         return exactP0ReportPhaseEvidence(context, plan)
       }
     },
-    async dispatchCase(definition) {
-      assert.equal(definition.id, entry.id)
-      assert.equal(definition.requiredSubruns.length > 0, true)
-      assert.equal(definition.requiredSubruns.every(({ profile }) => profile === activeProfile), true)
-      dispatches.push(activeProfile)
-      const fragment = {
-        id: definition.id,
-        status: 'PASS',
-        scopeComplete: false,
-        subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
-      }
-      fragments.push(fragment)
-      return fragment
-    },
-    handlers: Object.create(null),
+    handlers,
     async writeReport(execution) { return { caseResults: execution.caseResults } },
     async cleanup() { return { status: 'CLEANED' } }
   }
@@ -5797,11 +8800,36 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
   assert.equal(completed.execution.caseResults.length, 1)
   const merged = completed.execution.caseResults[0]
   assert.equal(merged.id, entry.id)
+  assert.equal(merged.schemaVersion, 1)
   assert.equal(merged.status, 'PASS')
+  assert.equal(merged.attempt, 1)
+  assert.equal(merged.durationMs, entry.selectedSubruns.length)
   assert.equal(merged.scopeComplete, !entry.cropped)
+  assert.equal(
+    Object.keys(merged.artifactHashes).length,
+    entry.selectedSubruns.length
+  )
   assert.deepEqual(
     merged.subruns.map(({ id }) => id),
     entry.selectedSubruns.map(({ id }) => id)
+  )
+  assert.deepEqual(canonicalDuringDispatch, expectedProfiles.map(() => false))
+  assert.deepEqual(
+    readdirSync(join(runRoot, entry.id, 'fragments')).toSorted(),
+    expectedProfiles.map((profile, index) => `${profile}-${index + 1}.json`).toSorted()
+  )
+  assert.deepEqual(
+    Object.keys(merged.artifactHashes).toSorted(),
+    entry.selectedSubruns.map((subrun, index) => (
+      `${entry.id}/final-${subrun.id}-p${index + 1}.png`
+    )).toSorted()
+  )
+  const canonicalPath = join(runRoot, entry.id, 'result.json')
+  const expectedCanonicalPath = join(runRoot, 'expected-canonical.json')
+  writeCaseResultAtomic(expectedCanonicalPath, merged)
+  assert.equal(
+    readFileSync(canonicalPath, 'utf8'),
+    readFileSync(expectedCanonicalPath, 'utf8')
   )
   assert.equal(typeof smokeContracts.mergeP0CaseFragments, 'function')
   assert.throws(
@@ -5813,11 +8841,525 @@ test('multi-profile cases dispatch profile slices and merge exact subrun evidenc
     /P0_CASE_FRAGMENT_DUPLICATE/
   )
   assert.throws(
-    () => smokeContracts.mergeP0CaseFragments(entry, [{
-      id: entry.id,
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      formalP0CaseFragment(entry.definition, [{
+        id: 'unexpected-subrun',
+        profile: 'UI_CORE',
+        viewport: 'desktop'
+      }])
+    ]),
+    /P0_CASE_FRAGMENT_UNEXPECTED/
+  )
+})
+
+test('multi-profile authority BLOCKED persists one canonical result with blocker provenance', async (t) => {
+  const options = p0CaseContracts.parseP0Cli([
+    '--suite=p0',
+    '--run-id=p0-authority-blocked-multi-profile-a1',
+    '--phase=selected',
+    '--case=SOURCE-03'
+  ])
+  const runRoot = mkdtempSync(join(tmpdir(), 'p0-authority-blocked-multi-profile-'))
+  t.after(() => rmSync(runRoot, { recursive: true, force: true }))
+  const definition = P0_CASES.find(({ id }) => id === 'SOURCE-03')
+  const dispatchedProfiles = []
+  const caseAuthority = {
+    status: 'PENDING',
+    authorityBundleFixture: 'BLOCKED'
+  }
+  let activeProfile
+  const result = await smokeContracts.runP0Suite(options, {
+    installSignalHandlers() { return () => {} },
+    async initializeOwnership() {
+      return {
+        runRoot,
+        options,
+        ownerId: 'e'.repeat(64),
+        identity: { commit: RUN_STATE_COMMIT_A },
+        matrixDatabase: 'fx_p0_user_e2e_authority_blocked_multi_profile_a1',
+        databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_authority_blocked_multi_profile_a1',
+        inheritedEnv: {},
+        authorityState: caseAuthority,
+        caseResults: []
+      }
+    },
+    createP0Context() {
+      return {
+        run: {
+          artifactRoot: runRoot,
+          commit: RUN_STATE_COMMIT_A
+        },
+        authority: caseAuthority,
+        evidence: {
+          captureCheckpoint: smokeContracts.captureCheckpoint,
+          writeCaseResultAtomic
+        }
+      }
+    },
+    phaseOperations: {
+      async runPreflight() { return { id: 'AUTH-01', status: 'PASS' } },
+      async runAuthority() {
+        return {
+          status: 'PASS',
+          authorityBundleFixture: 'BLOCKED',
+          checks: [{ id: 'controlled-perp-risk', status: 'FAIL' }]
+        }
+      },
+      async stopProfileBackend() { activeProfile = undefined },
+      async assertProfilePortFree() {},
+      async startProfileBackend({ profile }) {
+        activeProfile = profile
+        return { profile }
+      },
+      async waitForProfileHealth() {},
+      async waitForProfileBusinessEndpoint() {},
+      async verifyProfileDatabaseIdentity() {},
+      async writeReport(context, plan) {
+        return exactP0ReportPhaseEvidence(context, plan)
+      }
+    },
+    async dispatchCase(receivedDefinition, _context, _handlers, details) {
+      dispatchedProfiles.push(activeProfile)
+      const startedAt = `2026-07-23T00:00:0${details.profileAttempt}.000Z`
+      return {
+        ...formalP0CaseFragment(
+          receivedDefinition,
+          receivedDefinition.requiredSubruns,
+          { durationMs: receivedDefinition.requiredSubruns.length }
+        ),
+        commit: RUN_STATE_COMMIT_A,
+        profile: activeProfile,
+        viewport: 'desktop',
+        startedAt,
+        finishedAt: startedAt,
+        preconditions: [{ status: 'PASS' }],
+        userActions: [],
+        fixtureActions: [],
+        authorityBundleFixture: 'BLOCKED',
+        contractProbes: [],
+        replayProbes: [],
+        checkpoints: [],
+        financialCalculation: { status: 'PASS' },
+        uiEvidence: [],
+        networkEvidence: [],
+        apiEvidence: [],
+        dbEvidence: [],
+        eventEvidence: [],
+        oracleEvidence: [],
+        consoleErrors: [],
+        cleanup: { status: 'PASS' }
+      }
+    },
+    handlers: Object.create(null),
+    async writeReport(execution) {
+      return { caseResults: execution.caseResults }
+    },
+    async cleanup() { return { status: 'CLEANED' } }
+  })
+
+  assert.deepEqual(dispatchedProfiles, ['UI_CORE', 'FUNDING_ONLY'])
+  const canonical = result.execution.caseResults[0]
+  assert.equal(canonical.id, definition.id)
+  assert.equal(canonical.status, 'BLOCKED')
+  assert.equal(canonical.authorityBundleFixture, 'BLOCKED')
+  assert.equal(
+    canonical.failureOrBlocker.reasonCode,
+    'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+  )
+  assert.deepEqual(
+    canonical.subruns.map(({ id, status }) => ({ id, status })),
+    definition.requiredSubruns.map((subrun) => ({
+      id: subrun.id,
+      status: ['desktop-trigger-order-trigger', 'desktop-liquidation'].includes(subrun.id)
+        ? 'BLOCKED'
+        : 'PASS'
+    }))
+  )
+  const persisted = JSON.parse(
+    readFileSync(join(runRoot, definition.id, 'result.json'), 'utf8')
+  )
+  assert.equal(persisted.status, 'BLOCKED')
+  assert.equal(persisted.authorityBundleFixture, 'BLOCKED')
+  assert.equal(
+    persisted.failureOrBlocker.reasonCode,
+    'AUTHORITY_BUNDLE_FIXTURE_MISSING'
+  )
+  assert.deepEqual(
+    persisted.subruns.map(({ id, status }) => ({ id, status })),
+    canonical.subruns.map(({ id, status }) => ({ id, status }))
+  )
+})
+
+test('formal case fragment merge preserves evidence and terminal status priority', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const entry = {
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }
+  const [core, target] = definition.requiredSubruns
+  const mergeStatuses = (leftStatus, rightStatus) => smokeContracts.mergeP0CaseFragments(
+    entry,
+    [
+      formalP0CaseFragment(definition, [{ ...core, checkpoint: 'core-evidence' }], {
+        status: leftStatus,
+        durationMs: 7
+      }),
+      formalP0CaseFragment(definition, [target], {
+        status: rightStatus,
+        durationMs: 11
+      })
+    ]
+  )
+
+  const blocked = mergeStatuses('PASS', 'BLOCKED')
+  assert.equal(blocked.status, 'BLOCKED')
+  assert.equal(blocked.schemaVersion, 1)
+  assert.equal(blocked.attempt, 1)
+  assert.equal(blocked.durationMs, 18)
+  assert.equal(blocked.scopeComplete, true)
+  assert.equal(blocked.subruns[0].checkpoint, 'core-evidence')
+  assert.deepEqual(
+    Object.keys(blocked.artifactHashes).toSorted(),
+    definition.requiredSubruns
+      .map(({ id }) => `subruns/${id}/result.json`)
+      .toSorted()
+  )
+
+  assert.equal(mergeStatuses('BLOCKED', 'INVALID_TEST').status, 'INVALID_TEST')
+  assert.equal(mergeStatuses('INVALID_TEST', 'FAIL').status, 'FAIL')
+
+  const failed = smokeContracts.mergeP0CaseFragments(entry, [
+    formalP0CaseFragment(definition, [core]),
+    {
+      ...formalP0CaseFragment(definition, [target], { status: 'FAIL' }),
+      failureOrBlocker: {
+        status: 'FAIL',
+        reason: 'existing formal case failure'
+      }
+    }
+  ])
+  assert.deepEqual(failed.failureOrBlocker, {
+    status: 'FAIL',
+    reason: 'existing formal case failure'
+  })
+
+  const cropped = smokeContracts.mergeP0CaseFragments(
+    { ...entry, selectedSubruns: [core], cropped: true },
+    [formalP0CaseFragment(definition, [core], { scopeComplete: true })]
+  )
+  assert.equal(cropped.scopeComplete, false)
+})
+
+test('formal case fragment merge retains unified evidence and explicit hashes on disk', (t) => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const [core, target] = definition.requiredSubruns
+  const entry = {
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }
+  const directory = mkdtempSync(join(tmpdir(), 'p0-merged-case-evidence-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const startedAt = '2026-07-23T00:00:00.000Z'
+  const middleAt = '2026-07-23T00:00:01.000Z'
+  const finishedAt = '2026-07-23T00:00:02.000Z'
+  const fragment = (subrun, suffix, from, to) => ({
+    ...formalP0CaseFragment(definition, [subrun]),
+    commit: RUN_STATE_COMMIT_A,
+    database: 'fx_p0_user_e2e_perp_01_a1',
+    profile: subrun.profile,
+    viewport: subrun.viewport,
+    startedAt: from,
+    finishedAt: to,
+    preconditions: [{ status: 'PASS', subrunId: subrun.id }],
+    userActions: [{
+      action: `submit-${suffix}`,
+      requestRef: `${suffix}.1`,
+      subrunId: subrun.id
+    }],
+    fixtureActions: [],
+    contractProbes: [{ status: 'PASS', subrunId: subrun.id }],
+    replayProbes: [],
+    checkpoints: [{ status: 'PASS', subrunId: subrun.id }],
+    financialCalculation: {
       status: 'PASS',
-      subruns: [{ id: 'unexpected-subrun', profile: 'UI_CORE', viewport: 'desktop', status: 'PASS' }]
-    }]),
+      subrunId: subrun.id,
+      amount: suffix === 'core' ? '1.25000000' : '2.50000000'
+    },
+    uiEvidence: [{ status: 'OBSERVED', subrunId: subrun.id }],
+    networkEvidence: [{
+      method: 'POST',
+      url: 'http://127.0.0.1:18086/api/trading/orders',
+      status: 200,
+      requestId: `${suffix}.1`,
+      subrunId: subrun.id
+    }],
+    apiEvidence: [{ status: 'OBSERVED', subrunId: subrun.id }],
+    dbEvidence: [{ status: 'OBSERVED', subrunId: subrun.id }],
+    eventEvidence: [{ status: 'OBSERVED', subrunId: subrun.id }],
+    consoleErrors: [],
+    cleanup: { status: 'PASS' }
+  })
+  const merged = smokeContracts.mergeP0CaseFragments(entry, [
+    fragment(core, 'core', startedAt, middleAt),
+    fragment(target, 'target', middleAt, finishedAt)
+  ])
+
+  assert.equal(merged.commit, RUN_STATE_COMMIT_A)
+  assert.equal(merged.database, 'fx_p0_user_e2e_perp_01_a1')
+  assert.equal(merged.profile, 'UI_CORE')
+  assert.equal(merged.viewport, 'desktop')
+  assert.equal(merged.startedAt, startedAt)
+  assert.equal(merged.finishedAt, finishedAt)
+  for (const field of [
+    'preconditions',
+    'userActions',
+    'contractProbes',
+    'checkpoints',
+    'uiEvidence',
+    'networkEvidence',
+    'apiEvidence',
+    'dbEvidence',
+    'eventEvidence'
+  ]) {
+    assert.equal(merged[field].length, 2, field)
+  }
+  assert.deepEqual(merged.fixtureActions, [])
+  assert.deepEqual(merged.replayProbes, [])
+  assert.deepEqual(merged.consoleErrors, [])
+  assert.equal(merged.financialCalculation.status, 'PASS')
+  assert.equal(merged.financialCalculation.checks.length, 2)
+  assert.deepEqual(merged.cleanup, { status: 'PASS' })
+
+  const path = join(directory, 'result.json')
+  writeCaseResultAtomic(path, merged)
+  const persisted = JSON.parse(readFileSync(path, 'utf8'))
+  assert.deepEqual(persisted.artifactHashes, merged.artifactHashes)
+  assert.equal(persisted.userActions.length, 2)
+  assert.equal(persisted.financialCalculation.status, 'PASS')
+  assert.equal(persisted.financialCalculation.checks.length, 2)
+})
+
+test('formal case fragment merge rejects metadata and artifact hash collisions', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const [core, target] = definition.requiredSubruns
+  const entry = {
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }
+  const sharedPath = 'subruns/shared/result.json'
+  const sharedHash = `sha256:${'a'.repeat(64)}`
+  const first = formalP0CaseFragment(definition, [core], {
+    artifactHashes: { [sharedPath]: sharedHash }
+  })
+
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      first,
+      formalP0CaseFragment(definition, [target], {
+        artifactHashes: { [sharedPath]: sharedHash }
+      })
+    ]),
+    /P0_CASE_FRAGMENT_HASH_DUPLICATE/
+  )
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      first,
+      formalP0CaseFragment(definition, [target], {
+        artifactHashes: { [sharedPath]: `sha256:${'b'.repeat(64)}` }
+      })
+    ]),
+    /P0_CASE_FRAGMENT_HASH_CONFLICT/
+  )
+
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      first,
+      formalP0CaseFragment(definition, [target], { attempt: 2 })
+    ]),
+    /P0_CASE_FRAGMENT_METADATA_CONFLICT/
+  )
+
+  for (const [label, patch] of [
+    ['duration', { durationMs: -1 }],
+    ['scope', { scopeComplete: 'false' }],
+    ['hash', { artifactHashes: { bad: 'not-a-sha256' } }]
+  ]) {
+    assert.throws(
+      () => smokeContracts.mergeP0CaseFragments(entry, [
+        formalP0CaseFragment(definition, [core], patch),
+        formalP0CaseFragment(definition, [target])
+      ]),
+      /P0_CASE_FRAGMENT_UNEXPECTED/,
+      label
+    )
+  }
+})
+
+test('formal case fragment merge rejects unsupported schema versions', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      id: definition.id,
+      definition,
+      selectedSubruns: definition.requiredSubruns,
+      cropped: false
+    }, definition.requiredSubruns.map((subrun) => (
+      formalP0CaseFragment(definition, [subrun], { schemaVersion: 999 })
+    ))),
+    /P0_CASE_FRAGMENT_UNEXPECTED/
+  )
+})
+
+test('formal case fragment merge rejects incomplete fragment scope', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const [core, target] = definition.requiredSubruns
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      id: definition.id,
+      definition,
+      selectedSubruns: definition.requiredSubruns,
+      cropped: false
+    }, [
+      formalP0CaseFragment(definition, [core], { scopeComplete: false }),
+      formalP0CaseFragment(definition, [target])
+    ]),
+    /P0_CASE_FRAGMENT_UNEXPECTED/
+  )
+})
+
+test('formal case fragment merge rejects unsafe artifact paths', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const [core, target] = definition.requiredSubruns
+  const entry = {
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }
+  const hash = `sha256:${'a'.repeat(64)}`
+  for (const [label, path] of [
+    ['absolute', '/tmp/result.json'],
+    ['drive-absolute', 'C:/tmp/result.json'],
+    ['dot-segment', 'subruns/./result.json'],
+    ['parent-segment', 'subruns/../result.json'],
+    ['backslash', 'subruns\\core\\result.json'],
+    ['empty-segment', 'subruns//result.json'],
+    ['control-character', 'subruns/\u0000/result.json']
+  ]) {
+    assert.throws(
+      () => smokeContracts.mergeP0CaseFragments(entry, [
+        formalP0CaseFragment(definition, [core], {
+          artifactHashes: { [path]: hash }
+        }),
+        formalP0CaseFragment(definition, [target])
+      ]),
+      /P0_CASE_FRAGMENT_UNEXPECTED/,
+      label
+    )
+  }
+})
+
+test('formal case fragment merge rejects incomplete definitions and accessor or prototype forgery', () => {
+  const definition = P0_CASES.find(({ id }) => id === 'PERP-01')
+  const [core, target] = definition.requiredSubruns
+  const entry = {
+    id: definition.id,
+    definition,
+    selectedSubruns: definition.requiredSubruns,
+    cropped: false
+  }
+  const fragments = [
+    formalP0CaseFragment(definition, [core]),
+    formalP0CaseFragment(definition, [target])
+  ]
+
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      ...entry,
+      definition: {
+        ...definition,
+        requiredSubruns: [core, core]
+      }
+    }, fragments),
+    /P0_CASE_FRAGMENT_INCOMPLETE/
+  )
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      ...entry,
+      selectedSubruns: [core]
+    }, [fragments[0]]),
+    /P0_CASE_FRAGMENT_INCOMPLETE/
+  )
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      ...entry,
+      selectedSubruns: [{ ...core, profile: 'ORDER_TRIGGER' }, target]
+    }, fragments),
+    /P0_CASE_FRAGMENT_INCOMPLETE/
+  )
+
+  let definitionGetterCalls = 0
+  const getterDefinition = { ...definition }
+  Object.defineProperty(getterDefinition, 'requiredSubruns', {
+    enumerable: true,
+    get() {
+      definitionGetterCalls += 1
+      return definition.requiredSubruns
+    }
+  })
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments({
+      ...entry,
+      definition: getterDefinition
+    }, fragments),
+    /P0_CASE_FRAGMENT_INCOMPLETE/
+  )
+  assert.equal(definitionGetterCalls, 0)
+
+  let statusGetterCalls = 0
+  const getterFragment = formalP0CaseFragment(definition, [core])
+  Object.defineProperty(getterFragment, 'status', {
+    enumerable: true,
+    get() {
+      statusGetterCalls += 1
+      return 'PASS'
+    }
+  })
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      getterFragment,
+      fragments[1]
+    ]),
+    /P0_CASE_FRAGMENT_UNEXPECTED/
+  )
+  assert.equal(statusGetterCalls, 0)
+
+  const inheritedStatus = Object.create({ status: 'PASS' })
+  Object.assign(inheritedStatus, formalP0CaseFragment(definition, [core]))
+  delete inheritedStatus.status
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      inheritedStatus,
+      fragments[1]
+    ]),
+    /P0_CASE_FRAGMENT_UNEXPECTED/
+  )
+
+  const inheritedSubrun = Object.create(core)
+  inheritedSubrun.status = 'PASS'
+  const forgedSubrunFragment = formalP0CaseFragment(definition, [core])
+  forgedSubrunFragment.subruns = [inheritedSubrun]
+  assert.throws(
+    () => smokeContracts.mergeP0CaseFragments(entry, [
+      forgedSubrunFragment,
+      fragments[1]
+    ]),
     /P0_CASE_FRAGMENT_UNEXPECTED/
   )
 })
@@ -6191,6 +9733,92 @@ test('canonical child is singular argless and cleaned before authority and matri
   ])
 })
 
+test('authority phase owns an isolated UI_CORE database and backend before its gate', async () => {
+  const events = []
+  const context = {
+    runId: 'p0-authority-owned-profile-a1',
+    ownerId: 'a'.repeat(64),
+    matrixDatabase: 'fx_p0_user_e2e_authority_fallback_a1',
+    databaseUrl: 'jdbc:postgresql://127.0.0.1:5432/fx_p0_user_e2e_authority_fallback_a1',
+    inheritedEnv: {
+      ADMIN_BOOTSTRAP_ENABLED: 'false',
+      ADMIN_BOOTSTRAP_EMAIL: 'poison@example.com',
+      ADMIN_BOOTSTRAP_PASSWORD: 'poison'
+    }
+  }
+  const authorityDatabase = 'fx_p0_user_e2e_authority_owned_a1'
+  await smokeContracts.executeP0PlanPhases({
+    plan: { phases: ['authority'] },
+    context,
+    operations: {
+      async stopProfileBackend(_context, profile) {
+        events.push(`stop:${profile}`)
+      },
+      async assertProfilePortFree(port, _context, profile) {
+        events.push(`free:${profile}:${port}`)
+      },
+      async prepareProfileDatabase({ phase, attempt }) {
+        assert.equal(phase, 'authority')
+        assert.equal(attempt, 1)
+        events.push('database:prepare')
+        return {
+          segmentName: authorityDatabase,
+          databaseUrl: `jdbc:postgresql://127.0.0.1:5432/${authorityDatabase}`
+        }
+      },
+      async startProfileBackend({ phase, profile, attempt, databaseUrl, environment }) {
+        assert.equal(phase, 'authority')
+        assert.equal(profile, 'UI_CORE')
+        assert.equal(attempt, 1)
+        assert.equal(databaseUrl.endsWith(`/${authorityDatabase}`), true)
+        assert.equal(environment.TRADING_PENDING_ORDER_EXECUTION_ENABLED, 'false')
+        assert.equal(environment.TRADING_PROTECTIVE_ORDER_EXECUTION_ENABLED, 'false')
+        assert.equal(environment.TRADING_FUNDING_ENABLED, 'false')
+        assert.equal(environment.TRADING_LIQUIDATION_ENABLED, 'false')
+        assert.equal(environment.ADMIN_BOOTSTRAP_ENABLED, 'true')
+        assert.match(environment.ADMIN_BOOTSTRAP_EMAIL, /^p0-authority-/)
+        assert.notEqual(environment.ADMIN_BOOTSTRAP_EMAIL, 'poison@example.com')
+        assert.notEqual(environment.ADMIN_BOOTSTRAP_PASSWORD, 'poison')
+        events.push('backend:start')
+        return { profile, databaseUrl }
+      },
+      async waitForProfileHealth() {
+        events.push('backend:health')
+      },
+      async waitForProfileBusinessEndpoint() {
+        events.push('backend:business')
+      },
+      async verifyProfileDatabaseIdentity() {
+        events.push('database:verify')
+      },
+      async ensureParentFrontends() {
+        assert.equal(context.activeDatabaseSegment, authorityDatabase)
+        events.push('frontends')
+      },
+      async runAuthority(received) {
+        assert.equal(received.activeDatabaseSegment, authorityDatabase)
+        events.push('gate')
+        return {
+          status: 'PASS',
+          authorityBundleFixture: 'PASS'
+        }
+      }
+    }
+  })
+
+  assert.deepEqual(events, [
+    'stop:UI_CORE',
+    'free:UI_CORE:18086',
+    'database:prepare',
+    'backend:start',
+    'backend:health',
+    'backend:business',
+    'database:verify',
+    'frontends',
+    'gate'
+  ])
+})
+
 test('managed preflight runs exact gates invocation scoped IT and owned OpenAPI lifecycle', async () => {
   assert.equal(typeof smokeContracts.runP0Preflight, 'function')
   const root = resolve(tmpdir(), 'p0-preflight-contract')
@@ -6237,7 +9865,7 @@ test('managed preflight runs exact gates invocation scoped IT and owned OpenAPI 
     status: 'PASS',
     invocationStartedAt,
     gates: 12,
-    itClasses: 14,
+    itClasses: 15,
     guardClasses: 6
   })
   assert.deepEqual(commands.map(({ id }) => id), [
@@ -6275,10 +9903,16 @@ test('managed preflight runs exact gates invocation scoped IT and owned OpenAPI 
     'DemoTradingConcurrencyIT',
     'PerpetualPositionConcurrencyIT',
     'ProtectionOrderConcurrencyIT',
-    'FundingLiquidationConcurrencyIT'
+    'FundingLiquidationConcurrencyIT',
+    'DepthPendingExecutionPostgresIT'
   ]
   const itCommand = commands.find(({ id }) => id === 'database-concurrency-it')
-  assert.deepEqual(itCommand.args, [`-Dtest=${itClasses.join(',')}`, 'test'])
+  assert.deepEqual(itCommand.args, [
+    '-Dapi.version=1.44',
+    `-Dtest=${itClasses.join(',')}`,
+    'test'
+  ])
+  assert.equal(itCommand.env.DATABASE_PASSWORD, 'database-it-non-secret-password')
   const surefire = commands.find(({ id }) => id === 'surefire-gate')
   assert.equal(surefire.command, process.execPath)
   assert.ok(surefire.args.includes(`--classes=${itClasses.join(',')}`))
@@ -6398,7 +10032,11 @@ test('P0 lifecycle cleans exactly once on signal gate case and report failures',
       },
       async prepare() { successEvents.push('prepare'); return { prepared: true } },
       async execute() { successEvents.push('execute'); return { executed: true } },
-      async writeReport() { successEvents.push('report'); return { verdict: 'PASS' } },
+      async writeReport(_execution, _prepared, details) {
+        successEvents.push('report')
+        assert.deepEqual(details.cleanup, { status: 'CLEANED' })
+        return { verdict: 'PASS' }
+      },
       async cleanup() { successEvents.push('cleanup'); return { status: 'CLEANED' } }
     }
   })
@@ -6411,8 +10049,8 @@ test('P0 lifecycle cleans exactly once on signal gate case and report failures',
     'signals:install',
     'prepare',
     'execute',
-    'report',
     'cleanup',
+    'report',
     'signals:remove'
   ])
 
@@ -6498,8 +10136,9 @@ test('P0 entry connects ownership phases dispatch report and exactly once cleanu
       return { id: definition.id, status: 'TEST_SENTINEL' }
     },
     handlers: Object.create(null),
-    async writeReport(execution, prepared) {
+    async writeReport(execution, prepared, details) {
       events.push(`report:${prepared.caseResults.length}`)
+      assert.deepEqual(details.cleanup, { status: 'CLEANED' })
       return { verdict: execution.plan.verdict }
     },
     async cleanup() {
@@ -6521,8 +10160,8 @@ test('P0 entry connects ownership phases dispatch report and exactly once cleanu
   assert.ok(events.indexOf('canonical-cleanup') < events.indexOf('authority'))
   assert.ok(events.indexOf('authority') < events.indexOf('case:AUTH-01'))
   assert.ok(events.indexOf('case:UI-02') < events.indexOf('report-phase'))
-  assert.ok(events.indexOf('report-phase') < events.indexOf('report:60'))
-  assert.ok(events.indexOf('report:60') < events.indexOf('cleanup'))
+  assert.ok(events.indexOf('report-phase') < events.indexOf('cleanup'))
+  assert.ok(events.indexOf('cleanup') < events.indexOf('report:60'))
   assert.equal(events.at(-1), 'signals:remove')
 
   let failedCleanupCalls = 0
@@ -6562,6 +10201,10 @@ test('default P0 dependency factory wires local adapters and main injects it', a
   )
   assert.doesNotMatch(smokeSource, /P0_LOCAL_ADAPTER_REQUIRED|P0_SUITE_NOT_IMPLEMENTED/)
   assert.doesNotMatch(smokeSource, /\b(?:FLUSHDB|FLUSHALL)\b|request\(\['KEYS'/)
+  assert.match(
+    smokeSource,
+    /gateOutput: join\(context\.runRoot, 'preflight', 'surefire-details\.json'\)/
+  )
 
   const root = mkdtempSync(join(tmpdir(), 'p0-default-factory-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -6643,7 +10286,7 @@ test('default P0 dependency factory wires local adapters and main injects it', a
         databases.get(match[1]).timezone = 'UTC'
         return
       }
-      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)"$/)
+      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)" WITH \(FORCE\)$/)
       if (match) {
         databases.delete(match[1])
         return
@@ -6668,6 +10311,13 @@ test('default P0 dependency factory wires local adapters and main injects it', a
     }
   }
   const infrastructure = {
+    async inspectDockerDaemon() {
+      return {
+        endpoint: process.platform === 'win32'
+          ? 'npipe:////./pipe/docker_engine'
+          : 'unix:///var/run/docker.sock'
+      }
+    },
     async verifyComposePort({ hostPort }) {
       events.push(`safety:compose:${hostPort}`)
       return true
@@ -6690,6 +10340,24 @@ test('default P0 dependency factory wires local adapters and main injects it', a
   }
   const canonicalInvocations = []
   const processManager = {
+    async startOwnedFrontend(surface) {
+      events.push(`frontend:start:${surface}`)
+      const pid = surface === 'web' ? 5153 : 5154
+      return {
+        pid,
+        processIdentity: {
+          pid,
+          startedAt: `fixture-process-${pid}`,
+          processFingerprint: `sha256:${'8'.repeat(64)}`
+        }
+      }
+    },
+    async waitForFrontend(frontend) {
+      events.push(`frontend:ready:${frontend.pid}`)
+    },
+    async stopOwnedFrontend(frontend) {
+      events.push(`frontend:stop:${frontend?.pid ?? 'none'}`)
+    },
     async startOwnedBackend({ environment }) {
       events.push(`backend:start:${environment.EXECUTION_MODE}`)
       return {
@@ -6724,6 +10392,7 @@ test('default P0 dependency factory wires local adapters and main injects it', a
           processFingerprint: `sha256:${'6'.repeat(64)}`
         }
       })
+      redisState.set(redisKey, { value: 'during-canonical', expiresAtMs: null })
       mkdirSync(invocation.env.USDT_DEMO_SMOKE_ARTIFACTS, { recursive: true })
       writeFileSync(
         join(invocation.env.USDT_DEMO_SMOKE_ARTIFACTS, 'report.json'),
@@ -6783,10 +10452,12 @@ test('default P0 dependency factory wires local adapters and main injects it', a
     runAuthority: async () => ({ status: 'PASS', source: 'default-factory-fixture' }),
     writePhaseReport: async (context, plan) => exactP0ReportPhaseEvidence(context, plan),
     dispatchCase: async (definition) => ({
-      id: definition.id,
-      status: 'PASS',
-      scopeComplete: true,
-      subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      ...formalP0CaseFragment(definition, definition.requiredSubruns),
+      financialCalculation: {
+        status: 'PASS',
+        checks: [{ status: 'PASS' }]
+      },
+      cleanup: { status: 'PASS' }
     })
   })
   for (const name of [
@@ -6812,8 +10483,13 @@ test('default P0 dependency factory wires local adapters and main injects it', a
     assert.equal(existsSync(join(root, 'artifacts')), false)
   } else {
     const completed = await smokeContracts.runP0Suite(options, dependencies)
-    assert.equal(completed.report.verdict, 'PASS')
+    assert.equal(
+      completed.report.verdict,
+      'PASS',
+      JSON.stringify(completed.report, null, 2)
+    )
     assert.equal(completed.cleanup.status, 'CLEANED')
+    assert.equal(completed.cleanup.restored, 10)
     assert.equal(canonicalInvocations.length, 1)
     assert.deepEqual(canonicalInvocations[0].args, [
       fileURLToPath(new URL('./smoke-usdt-demo-browser.mjs', import.meta.url))
@@ -6830,6 +10506,12 @@ test('default P0 dependency factory wires local adapters and main injects it', a
       expiresAtMs: 1_900_000_000_000
     })
     assert.equal(redisState.has('p0:e2e:owner'), false)
+    const redisRecovery = JSON.parse(readFileSync(
+      join(root, 'artifacts', options.runId, 'control', 'redis.json'),
+      'utf8'
+    ))
+    assert.equal(redisRecovery.touchedKeys.length, 10)
+    assert.equal(redisRecovery.touchedKeys.includes(redisKey), true)
     const cleaned = JSON.parse(readFileSync(
       join(root, 'artifacts', options.runId, 'control', 'ownership.json'),
       'utf8'
@@ -6899,7 +10581,7 @@ test('canonical child consumes parent database ownership and enforces marker cle
         databases.get(match[1]).timezone = 'UTC'
         return
       }
-      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)"$/)
+      match = sql.match(/^DROP DATABASE "([a-z0-9_]+)" WITH \(FORCE\)$/)
       if (match) {
         databases.delete(match[1])
         return
@@ -8223,7 +11905,8 @@ test('typed P0 gate evidence round-trips verdict modes timestamps and backend cl
     'DemoTradingConcurrencyIT',
     'PerpetualPositionConcurrencyIT',
     'ProtectionOrderConcurrencyIT',
-    'FundingLiquidationConcurrencyIT'
+    'FundingLiquidationConcurrencyIT',
+    'DepthPendingExecutionPostgresIT'
   ]
   const invocationStartedAt = '2026-07-15T00:00:00.000Z'
   const suites = expectedClasses.map((className, index) => ({
@@ -8368,7 +12051,7 @@ test('typed domain fields reject null while structural null remains safe', (t) =
       enabled: false
     },
     checks: [
-      { authorityBundleFixture: 'FAIL' },
+      { authorityBundleFixture: 'BLOCKED' },
       { authorityBundleFixture: 'OUTSIDE_CONTRACT' }
     ]
   }
@@ -8406,7 +12089,7 @@ test('typed domain fields reject null while structural null remains safe', (t) =
       amount: '1.2500',
       enabled: false
     })
-    assert.deepEqual(safe.checks, [{ authorityBundleFixture: 'FAIL' }, {}])
+    assert.deepEqual(safe.checks, [{ authorityBundleFixture: 'BLOCKED' }, {}])
   }
 })
 
@@ -8419,6 +12102,8 @@ test('positive evidence schema preserves unified case records', (t) => {
   const record = {
     id: 'AUTH-01',
     status: 'BLOCKED',
+    attempt: 2,
+    durationMs: 150,
     commit: RUN_STATE_COMMIT_A,
     database: 'p0-demo-database-01',
     user: 'p0-user-01',
@@ -8430,7 +12115,7 @@ test('positive evidence schema preserves unified case records', (t) => {
     preconditions: [{ status: 'PASS' }],
     userActions: [{ status: 'PASS', note: 'clicked-order-submit' }],
     fixtureActions: [{ status: 'PASS' }],
-    authorityBundleFixture: 'FAIL',
+    authorityBundleFixture: 'BLOCKED',
     contractProbes: [{ status: 'PASS' }],
     replayProbes: [{ id: 'AUTH-01', status: 'PASS' }],
     checkpoints: [{ status: 'PASS' }],
@@ -8443,15 +12128,26 @@ test('positive evidence schema preserves unified case records', (t) => {
     consoleErrors: [],
     cleanup: { status: 'PASS' },
     failureOrBlocker: { status: 'BLOCKED', reason: 'CLI_INTERNAL_ERROR' },
+    subruns: [{
+      id: 'desktop-ui-core',
+      profile: 'UI_CORE',
+      viewport: 'desktop',
+      status: 'BLOCKED',
+      attempt: 2,
+      profileAttempt: 3,
+      durationMs: 150
+    }],
     [unknownContainer]: { status: 'PASS' },
     apiToken: credentialMarker
   }
   const expectedFields = [
-    'id', 'status', 'commit', 'database', 'user', 'account', 'profile', 'viewport',
+    'id', 'status', 'attempt', 'durationMs', 'commit', 'database', 'user', 'account',
+    'profile', 'viewport',
     'startedAt', 'finishedAt', 'preconditions', 'userActions', 'fixtureActions',
     'authorityBundleFixture', 'contractProbes', 'replayProbes', 'checkpoints',
     'financialCalculation', 'uiEvidence', 'networkEvidence', 'apiEvidence',
-    'dbEvidence', 'eventEvidence', 'consoleErrors', 'cleanup', 'failureOrBlocker'
+    'dbEvidence', 'eventEvidence', 'consoleErrors', 'cleanup', 'failureOrBlocker',
+    'subruns'
   ]
   const original = structuredClone(record)
 
@@ -8466,7 +12162,12 @@ test('positive evidence schema preserves unified case records', (t) => {
     for (const field of expectedFields) assert.equal(Object.hasOwn(safe, field), true, field)
     assert.equal(safe.startedAt, record.startedAt)
     assert.equal(safe.finishedAt, record.finishedAt)
-    assert.equal(safe.authorityBundleFixture, 'FAIL')
+    assert.equal(safe.attempt, record.attempt)
+    assert.equal(safe.durationMs, record.durationMs)
+    assert.equal(safe.subruns[0].attempt, record.subruns[0].attempt)
+    assert.equal(safe.subruns[0].profileAttempt, record.subruns[0].profileAttempt)
+    assert.equal(safe.subruns[0].durationMs, record.subruns[0].durationMs)
+    assert.equal(safe.authorityBundleFixture, 'BLOCKED')
     assert.deepEqual(safe.financialCalculation, { amount: '1.2500' })
     assert.equal(Object.hasOwn(safe, unknownContainer), false)
     assert.deepEqual(safe[persistenceDigest(unknownContainer)], { status: 'PASS' })
@@ -10458,7 +14159,12 @@ test('run state ignores inherited identity registry and selection fields', (t) =
           subruns: definition.requiredSubruns.map((subrun) => ({
             ...subrun,
             status: 'PASS'
-          }))
+          })),
+          financialCalculation: {
+            status: 'PASS',
+            checks: [{ kind: 'TEST_EVIDENCE' }]
+          },
+          cleanup: { status: 'PASS' }
         }
       ]))
       const baseState = {
@@ -10667,7 +14373,12 @@ function passingCase(definition) {
     id: definition.id,
     status: 'PASS',
     scopeComplete: true,
-    subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+    subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+    financialCalculation: {
+      status: 'PASS',
+      checks: [{ kind: 'TEST_EVIDENCE' }]
+    },
+    cleanup: { status: 'PASS' }
   }
 }
 
@@ -11352,7 +15063,12 @@ test('resume ignores inherited case evidence on malformed cases containers', () 
         subruns: first.requiredSubruns.map((subrun) => ({
           ...subrun,
           status: 'PASS'
-        }))
+        })),
+        financialCalculation: {
+          status: 'PASS',
+          checks: [{ kind: 'TEST_EVIDENCE' }]
+        },
+        cleanup: { status: 'PASS' }
       }
       const selection = { caseIds: [first.id] }
       const state = (cases) => ({
@@ -11473,7 +15189,12 @@ test('resume rejects boxed scalar result and subrun evidence', () => {
         subruns: [{
           ...required,
           status: 'PASS'
-        }]
+        }],
+        financialCalculation: {
+          status: 'PASS',
+          checks: [{ kind: 'TEST_EVIDENCE' }]
+        },
+        cleanup: { status: 'PASS' }
       }
       const selection = { caseIds: [definition.id] }
       const state = (cases) => ({
@@ -11629,7 +15350,12 @@ test('resume rejects scalar root state without prototype callbacks', () => {
         subruns: definition.requiredSubruns.map((subrun) => ({
           ...subrun,
           status: 'PASS'
-        }))
+        })),
+        financialCalculation: {
+          status: 'PASS',
+          checks: [{ kind: 'TEST_EVIDENCE' }]
+        },
+        cleanup: { status: 'PASS' }
       }
       const validState = {
         definitions: P0_CASES,
@@ -11764,7 +15490,12 @@ test('prototype inheritance cannot forge aggregate or resume evidence', () => {
         subruns: definition.requiredSubruns.map((subrun) => ({
           ...subrun,
           status: 'PASS'
-        }))
+        })),
+        financialCalculation: {
+          status: 'PASS',
+          checks: [{ kind: 'TEST_EVIDENCE' }]
+        },
+        cleanup: { status: 'PASS' }
       })
       const allCases = Object.fromEntries(P0_CASES.map((definition) => [
         definition.id,
@@ -12364,7 +16095,12 @@ function passingSelectedCase(definition, selection) {
     id: definition.id,
     status: 'PASS',
     scopeComplete: !selection.profiles?.length && !selection.viewports?.length,
-    subruns: subruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+    subruns: subruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+    financialCalculation: {
+      status: 'PASS',
+      checks: [{ kind: 'TEST_EVIDENCE' }]
+    },
+    cleanup: { status: 'PASS' }
   }
 }
 
@@ -12699,7 +16435,12 @@ test('filtered successful evidence is PARTIAL_PASS and never terminal PASS', () 
       id: definition.id,
       status: 'PASS',
       scopeComplete: false,
-      subruns: selected.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      subruns: selected.map((subrun) => ({ ...subrun, status: 'PASS' })),
+      financialCalculation: {
+        status: 'PASS',
+        checks: [{ kind: 'TEST_EVIDENCE' }]
+      },
+      cleanup: { status: 'PASS' }
     }]
   )
 
@@ -12728,7 +16469,12 @@ test('cropped scope requires exact false while case selection requires true', ()
     const result = {
       id: croppedDefinition.id,
       status: 'PASS',
-      subruns: croppedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      subruns: croppedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+      financialCalculation: {
+        status: 'PASS',
+        checks: [{ kind: 'TEST_EVIDENCE' }]
+      },
+      cleanup: { status: 'PASS' }
     }
     if (Object.hasOwn(variant, 'scopeComplete')) result.scopeComplete = variant.scopeComplete
     const report = aggregateReport(
@@ -12743,7 +16489,12 @@ test('cropped scope requires exact false while case selection requires true', ()
       id: croppedDefinition.id,
       status: 'PASS',
       scopeComplete: false,
-      subruns: croppedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      subruns: croppedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+      financialCalculation: {
+        status: 'PASS',
+        checks: [{ kind: 'TEST_EVIDENCE' }]
+      },
+      cleanup: { status: 'PASS' }
     }]
   )
 
@@ -13563,6 +17314,40 @@ test('Surefire parser accepts one fresh exact suite for every requested class', 
   assert.deepEqual(parsed.totals, { tests: 3, skipped: 0, failures: 0, errors: 0 })
 })
 
+test('Surefire parser requires all four DEPTH pending PostgreSQL boundary scenarios', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-surefire-depth-pending-count-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const startedAt = new Date(Date.now() - 5_000)
+  const incompleteDirectory = join(root, 'three-of-four')
+  writeSurefireSuite(incompleteDirectory, 'TEST-depth-pending.xml', {
+    name: 'com.fxplatform.trading.service.DepthPendingExecutionPostgresIT',
+    tests: 3
+  })
+
+  assert.throws(
+    () => parseSurefireReports(
+      incompleteDirectory,
+      ['DepthPendingExecutionPostgresIT'],
+      startedAt
+    ),
+    /^Error: SUREFIRE_INVALID_SUITE: DepthPendingExecutionPostgresIT$/
+  )
+
+  const completeDirectory = join(root, 'four-of-four')
+  writeSurefireSuite(completeDirectory, 'TEST-depth-pending.xml', {
+    name: 'com.fxplatform.trading.service.DepthPendingExecutionPostgresIT',
+    tests: 4
+  })
+  const parsed = parseSurefireReports(
+    completeDirectory,
+    ['DepthPendingExecutionPostgresIT'],
+    startedAt
+  )
+
+  assert.equal(parsed.status, 'PASS')
+  assert.deepEqual(parsed.totals, { tests: 4, skipped: 0, failures: 0, errors: 0 })
+})
+
 test('Surefire parser rejects missing, duplicate and stale exact suites', (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-surefire-invalid-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -14265,7 +18050,7 @@ test('strict artifact CLI writes failure through the supplied lexical alias afte
 
   assert.equal(existsSync(redirectMarker), true, execution.stderr)
   assert.equal(readFileSync(redirectMarker, 'utf8'), 'redirected')
-  assert.equal(realpathSync(lexicalOutput), realpathSync(secondTarget))
+  assert.equal(JSON.parse(readFileSync(secondTarget, 'utf8')).status, 'FAIL')
   assert.equal(execution.status, 1)
   assert.equal(execution.stderr.includes(marker), false)
   assert.equal(JSON.parse(readFileSync(lexicalOutput, 'utf8')).status, 'FAIL')
@@ -16085,7 +19870,9 @@ test('default phase boundaries propagate the execution signal and isolate prefli
   ]) assert.ok(observed.includes(required), required)
 })
 
-test('Windows P0 requires a verified process tree provider before the first mutation', async (t) => {
+test('Windows P0 requires a verified process tree provider before the first mutation', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
   assert.equal(typeof smokeContracts.assertP0ProcessTreeCapability, 'function')
   const root = mkdtempSync(join(tmpdir(), 'p0-review1-s9-windows-capability-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -16139,7 +19926,9 @@ test('Windows P0 requires a verified process tree provider before the first muta
   )
 })
 
-test('Windows same-session cleanup never claims process-tree recovery from direct child kill', async (t) => {
+test('Windows same-session cleanup never claims process-tree recovery from direct child kill', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-review1-s9-direct-child-tree-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const child = new EventEmitter()
@@ -17346,7 +21135,7 @@ test('default cleanup revalidates persisted compose and container identity befor
       fixture.persistedIdentity.postgres.id,
       fixture.persistedIdentity.postgres.id
     ],
-    dropSql: `DROP DATABASE "${fixture.database}";\n`,
+    dropSql: `DROP DATABASE "${fixture.database}" WITH (FORCE);\n`,
     redisCommands: expectedRedisTransactions.flat(),
     redisBindings: Array.from(
       { length: expectedRedisTransactions.flat().length },
@@ -19192,6 +22981,52 @@ test('default report phase emits nonempty typed evidence or fails closed', async
     label,
     error: 'P0_REPORT_PHASE_RESULT_INVALID'
   })))
+})
+
+test('default dependencies provide built-in typed report boundary evidence', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'p0-review1-s10-default-report-writer-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const runId = 'p0-review1-s10-default-report-writer-a1'
+  const ownerToken = 'p0-review1-s10-default-report-writer-owner-token-a1'
+  const ownerId = createHash('sha256').update(ownerToken).digest('hex')
+  const runRoot = join(root, runId)
+  const moduleUrl = new URL(
+    `./smoke-usdt-demo-browser.mjs?default-report-writer=${Date.now()}`,
+    import.meta.url
+  ).href
+  const source = `
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    const contracts = await import(${JSON.stringify(moduleUrl)})
+    const dependencies = contracts.createDefaultP0Dependencies({
+      artifactBase: ${JSON.stringify(root)},
+      inheritedEnv: {}
+    })
+    const result = await dependencies.phaseOperations.writeReport(
+      {
+        runRoot: ${JSON.stringify(runRoot)},
+        ownerId: ${JSON.stringify(ownerId)},
+        options: { runId: ${JSON.stringify(runId)} }
+      },
+      { scope: 'CONTROL' }
+    )
+    process.stdout.write(JSON.stringify(result))
+  `
+  const child = spawnSync(process.execPath, ['--input-type=module', '--eval', source], {
+    encoding: 'utf8'
+  })
+
+  assert.equal(child.status, 0, child.stderr)
+  assert.deepEqual(JSON.parse(child.stdout), {
+    status: 'PASS',
+    kind: 'P0_REPORT_BOUNDARY',
+    scope: 'CONTROL',
+    finalWriter: 'PENDING',
+    identity: {
+      runId,
+      ownerId,
+      reportPath: join(runRoot, 'report.json')
+    }
+  })
 })
 
 function createS11ReportPhaseBoundaryFixture(t, label) {

@@ -10,6 +10,11 @@ const generated = readFileSync(
 const pathEntries = [...generated.matchAll(/^    "([^"]+)": \{\r?\n([\s\S]*?)^    \};/gm)]
   .map(([, path, body]) => ({ path, body }))
 
+const operationsSource = generated.split('export interface operations {', 2)[1]
+assert.ok(operationsSource, 'generated operations interface is missing')
+const operationEntries = [...operationsSource.matchAll(/^    ([^:\r\n]+): \{\r?\n([\s\S]*?)^    \};/gm)]
+  .map(([, operation, body]) => ({ operation: operation.replaceAll('"', '').trim(), body }))
+
 function requireEndpoint(method, expectedPath) {
   const entry = pathEntries.find(({ path }) => path === expectedPath)
 
@@ -32,6 +37,22 @@ function schemaBody(name) {
   const body = generated.match(new RegExp(`^        ${name}: \\{([\\s\\S]*?)^        \\};`, 'm'))?.[1]
   assert.ok(body, `OpenAPI schema is missing: ${name}`)
   return body
+}
+
+function requireOperationResponse(operation, body, status, description) {
+  const escapedDescription = description.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const response = body.match(new RegExp(
+    `^            /\\*\\* @description ${escapedDescription} \\*\\/\\r?\\n`
+      + `            ${status}: \\{([\\s\\S]*?)^            \\};`,
+    'm'
+  ))?.[1]
+
+  assert.ok(response, `${operation} must document ${status} ${description}`)
+  assert.match(
+    response,
+    /components\["schemas"\]\["ApiResponseVoid"\]/,
+    `${operation} ${status} must use ApiResponseVoid`
+  )
 }
 
 describe('P0 trading OpenAPI contract', () => {
@@ -135,6 +156,8 @@ describe('P0 trading OpenAPI contract', () => {
       'MARKET',
       'LIMIT',
       'STOP_MARKET',
+      'STOP_LIMIT',
+      'TRAILING_STOP_MARKET',
       'RECEIVED',
       'VALIDATING',
       'ACCEPTED',
@@ -171,6 +194,8 @@ describe('P0 trading OpenAPI contract', () => {
       'LAST_PRICE',
       'MARK_PRICE',
       'GTC',
+      'IOC',
+      'FOK',
       'MAKER',
       'TAKER'
     ]) {
@@ -186,9 +211,37 @@ describe('P0 trading OpenAPI contract', () => {
     assert.ok(orderType, 'CreateOrderRequest.orderType is missing')
     assert.deepEqual(
       [...orderType.matchAll(/"([^"]+)"/g)].map(([, value]) => value).sort(),
-      ['LIMIT', 'MARKET', 'STOP_MARKET'],
-      'CreateOrderRequest.orderType must expose exactly MARKET, LIMIT, and STOP_MARKET'
+      ['LIMIT', 'MARKET', 'STOP_LIMIT', 'STOP_MARKET', 'TRAILING_STOP_MARKET'],
+      'CreateOrderRequest.orderType must expose the complete advanced-order vocabulary'
     )
+
+    const timeInForce = createOrder.match(/timeInForce:\s*([^;]+);/)?.[1]
+    assert.ok(timeInForce, 'CreateOrderRequest.timeInForce is missing')
+    assert.deepEqual(
+      [...timeInForce.matchAll(/"([^"]+)"/g)].map(([, value]) => value).sort(),
+      ['FOK', 'GTC', 'IOC'],
+      'CreateOrderRequest.timeInForce must expose GTC, IOC, and FOK'
+    )
+    assert.match(createOrder, /postOnly: boolean;/)
+    assert.match(createOrder, /activationPrice\?: number;/)
+    assert.match(createOrder, /trailingDelta\?: number;/)
+    assert.match(createOrder, /trailingRate\?: number;/)
+
+    const orderResponse = schemaBody('OrderResponse')
+    assert.match(orderResponse, /timeInForce\?: "GTC" \| "IOC" \| "FOK";/)
+    assert.match(orderResponse, /postOnly\?: boolean;/)
+    assert.match(orderResponse, /activationPrice\?: number;/)
+    assert.match(orderResponse, /trailingDelta\?: number;/)
+    assert.match(orderResponse, /trailingRate\?: number;/)
+    assert.match(orderResponse, /trailingExtreme\?: number;/)
+  })
+
+  it('documents business-rule and execution-unavailable error responses', () => {
+    assert.equal(operationEntries.length, 166, 'generated operation inventory changed unexpectedly')
+    for (const { operation, body } of operationEntries) {
+      requireOperationResponse(operation, body, 400, 'Business rule violation')
+      requireOperationResponse(operation, body, 503, 'Execution service unavailable')
+    }
   })
 
   it('preserves the canonical perpetual symbol and forbids its stripped spelling', () => {

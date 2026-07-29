@@ -13,7 +13,6 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.concurrent.ThreadLocalRandom;
 import lombok.RequiredArgsConstructor;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -39,7 +38,6 @@ public class HomeCountersService {
     );
   }
 
-  @Scheduled(fixedDelayString = "${home.counters.users-growth-ms:1000}")
   public void growUsersCounter() {
     homeCounterRepository.increment(USERS_COUNTER_KEY, ThreadLocalRandom.current().nextLong(1, 10));
   }

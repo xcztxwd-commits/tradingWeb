@@ -2,8 +2,14 @@ package com.fxplatform.trading.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
+import com.fxplatform.execution.DemoBookLevel;
+import com.fxplatform.execution.DemoExecutionPolicy;
+import com.fxplatform.execution.DemoMatchingMode;
 import com.fxplatform.execution.ExecutableMarketSnapshot;
 import com.fxplatform.execution.FullFillCoordinator;
 import com.fxplatform.market.model.MarketSourceMode;
@@ -11,12 +17,16 @@ import com.fxplatform.market.model.ProductType;
 import com.fxplatform.trading.entity.AccountSymbolSettingEntity;
 import com.fxplatform.trading.entity.PositionEntity;
 import com.fxplatform.trading.enums.MarginMode;
+import com.fxplatform.trading.enums.LiquidityRole;
 import com.fxplatform.trading.enums.OrderSide;
 import com.fxplatform.trading.enums.OrderType;
 import com.fxplatform.trading.enums.PositionMode;
 import com.fxplatform.trading.enums.PositionSide;
 import com.fxplatform.trading.enums.PositionStatus;
+import com.fxplatform.trading.enums.TimeInForce;
+import com.fxplatform.trading.repository.TradeRepository;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -28,9 +38,181 @@ class PerpetualOrderRiskServiceTest {
 
   private static final String SYMBOL = "BTCUSDT-PERP";
   private static final Instant NOW = Instant.parse("2026-07-12T08:00:00Z");
+  private static final UUID ACCOUNT_ID = UUID.fromString(
+      "00000000-0000-0000-0000-000000000901");
 
   private final PerpetualOrderRiskService service = new PerpetualOrderRiskService(
       new FullFillCoordinator(request -> null, Clock.fixed(NOW, ZoneOffset.UTC)));
+
+  @Test
+  void depthRiskBindingCannotBeConstructedByCallers() {
+    assertThat(PerpetualOrderRiskService.RiskBinding.class.getConstructors()).isEmpty();
+    assertThat(DepthOrderExecutionService.RiskPricingAuthority.class.getConstructors()).isEmpty();
+  }
+
+  @Test
+  void exactPlanPricingRejectsUnsafeIsolatedCloseAndRawPricingCannotBeConsumed() {
+    DemoExecutionPolicy policy = new DemoExecutionPolicy(
+        DemoMatchingMode.DEPTH,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        decimal("0.001"),
+        decimal("0.0001"),
+        List.of(new DemoBookLevel(decimal("80"), decimal("1"))),
+        List.of(),
+        null);
+    DepthOrderExecutionService depthService = new DepthOrderExecutionService(
+        () -> policy,
+        mock(TradeRepository.class),
+        mock(OrderFillService.class),
+        mock(OrderEventService.class),
+        Clock.fixed(NOW, ZoneOffset.UTC));
+    ExecutableMarketSnapshot snapshot = snapshot("80", "100", "100");
+    DepthOrderExecutionService.DepthMatchPlan plan = depthService.prepare(
+        policy,
+        SYMBOL,
+        ProductType.LINEAR_PERP,
+        OrderSide.SELL,
+        OrderType.MARKET,
+        TimeInForce.GTC,
+        decimal("1"),
+        null,
+        false,
+        LiquidityRole.TAKER,
+        snapshot);
+    AccountSymbolSettingEntity isolated = setting(10, MarginMode.ISOLATED);
+    PositionEntity longPosition = position(
+        PositionMode.ONE_WAY, PositionSide.BOTH, OrderSide.BUY, "1");
+    longPosition.setMarginHeld(decimal("5"));
+
+    PerpetualOrderRiskService.OrderRisk favorablyPriced = service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        isolated,
+        List.of(longPosition),
+        OrderSide.SELL,
+        PositionSide.BOTH,
+        true,
+        OrderType.MARKET,
+        decimal("1"),
+        null,
+        snapshot,
+        decimal("0.005"),
+        new PerpetualRiskPricing(decimal("100"), decimal("100"), BigDecimal.ZERO));
+    PerpetualOrderRiskService.DepthPlanningAuthority authority =
+        new PerpetualOrderRiskService.DepthPlanningAuthority(
+            ACCOUNT_ID,
+            PositionMode.ONE_WAY,
+            PositionSide.BOTH,
+            MarginMode.ISOLATED,
+            10,
+            true,
+            decimal("0.005"));
+
+    assertThatThrownBy(() -> depthService.planPerpetual(
+        authority, favorablyPriced, BigDecimal.ZERO, plan))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("authority");
+    assertCode(ErrorCode.MARGIN_REDUCTION_UNSAFE, () -> service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        isolated,
+        List.of(longPosition),
+        OrderSide.SELL,
+        PositionSide.BOTH,
+        true,
+        OrderType.MARKET,
+        decimal("1"),
+        null,
+        snapshot,
+        decimal("0.005"),
+        depthService.perpetualRiskPricing(plan)));
+  }
+
+  @Test
+  void exactPlanPricingFlowsFromPrepareThroughRiskEvaluationIntoHoldPlanning() {
+    DemoExecutionPolicy policy = new DemoExecutionPolicy(
+        DemoMatchingMode.DEPTH,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        decimal("0.001"),
+        decimal("0.0001"),
+        List.of(),
+        List.of(new DemoBookLevel(decimal("100"), decimal("1"))),
+        null);
+    DepthOrderExecutionService depthService = new DepthOrderExecutionService(
+        () -> policy,
+        mock(TradeRepository.class),
+        mock(OrderFillService.class),
+        mock(OrderEventService.class),
+        Clock.fixed(NOW, ZoneOffset.UTC));
+    ExecutableMarketSnapshot snapshot = snapshot("100", "100", "100");
+    DepthOrderExecutionService.DepthMatchPlan plan = depthService.prepare(
+        policy,
+        SYMBOL,
+        ProductType.LINEAR_PERP,
+        OrderSide.BUY,
+        OrderType.STOP_MARKET,
+        OrderType.MARKET,
+        TimeInForce.GTC,
+        decimal("1"),
+        null,
+        false,
+        LiquidityRole.TAKER,
+        snapshot);
+    AccountSymbolSettingEntity cross = setting(10, MarginMode.CROSS);
+    PerpetualOrderRiskService.OrderRisk risk = service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        cross,
+        List.of(),
+        OrderSide.BUY,
+        PositionSide.BOTH,
+        false,
+        OrderType.STOP_MARKET,
+        decimal("1"),
+        null,
+        snapshot,
+        decimal("0.005"),
+        depthService.perpetualRiskPricing(plan));
+    PerpetualOrderRiskService.DepthPlanningAuthority authority =
+        new PerpetualOrderRiskService.DepthPlanningAuthority(
+            ACCOUNT_ID,
+            PositionMode.ONE_WAY,
+            PositionSide.BOTH,
+            MarginMode.CROSS,
+            10,
+            false,
+            decimal("0.005"));
+
+    DepthOrderExecutionService.DepthHoldPlan holdPlan = depthService.planPerpetual(
+        authority, risk, BigDecimal.ZERO, plan);
+
+    assertThat(risk.openingBase()).isEqualByComparingTo("1");
+    assertThat(risk.closingBase()).isEqualByComparingTo("0");
+    assertThat(plan.sourceOrderType()).isEqualTo(OrderType.STOP_MARKET);
+    assertThat(holdPlan.initialHold()).isEqualByComparingTo("10");
+    assertThat(holdPlan.holdAfterEachFill())
+        .singleElement()
+        .satisfies(hold -> assertThat(hold).isEqualByComparingTo("0"));
+  }
+
+  @Test
+  void rejectsARelevantLockedPositionOwnedByAnotherAccountBeforeClassification() {
+    AccountSymbolSettingEntity lockedSetting = setting(10, MarginMode.CROSS);
+    PositionEntity foreignPosition = position(
+        PositionMode.ONE_WAY, PositionSide.BOTH, OrderSide.BUY, "1");
+    foreignPosition.setAccountId(UUID.fromString(
+        "00000000-0000-0000-0000-000000000902"));
+
+    assertCode("POSITION_ACCOUNT_MISMATCH", () -> evaluate(
+        PositionMode.ONE_WAY,
+        lockedSetting,
+        List.of(foreignPosition),
+        OrderSide.SELL,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        "1",
+        null));
+  }
 
   @Test
   void oneWayClassifiesOpeningClosingAndNonReduceReversal() {
@@ -516,6 +698,361 @@ class PerpetualOrderRiskServiceTest {
     assertThat(zeroMarginClose.isolatedHoldCapacity()).isGreaterThan(decimal("98"));
   }
 
+  @Test
+  void depthOpeningUsesExplicitWorstPriceInsteadOfSimpleTopOfBookProjection() {
+    PerpetualOrderRiskService.OrderRisk risk = service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.CROSS),
+        List.of(),
+        OrderSide.BUY,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        decimal("2"),
+        null,
+        snapshot(),
+        decimal("0.005"),
+        new PerpetualRiskPricing(decimal("120"), decimal("80"), decimal("0.001")));
+
+    assertThat(risk.closingBase()).isEqualByComparingTo("0");
+    assertThat(risk.openingBase()).isEqualByComparingTo("2");
+    assertThat(risk.worstPrice()).isEqualByComparingTo("120.00000000");
+    assertThat(risk.openingInitialMargin()).isEqualByComparingTo("24.00000000");
+    assertThat(risk.feeBuffer()).isEqualByComparingTo("0.24000000");
+    assertThat(risk.holdAmount()).isEqualByComparingTo("24.24000000");
+    assertThat(risk.worstPrice()).isNotEqualByComparingTo("101.01010000");
+    assertThat(risk.binding().accountId()).isNotNull();
+    assertThat(risk.binding().symbol()).isEqualTo(SYMBOL);
+    assertThat(risk.binding().side()).isEqualTo(OrderSide.BUY);
+    assertThat(risk.binding().baseQuantity()).isEqualByComparingTo("2");
+    assertThat(risk.binding().snapshotAsOf()).isEqualTo(snapshot().asOf());
+  }
+
+  @Test
+  void wallClockRiskAuthorityRejectsValidationMarkedFutureSnapshots() {
+    Instant virtualTime = Instant.parse("2030-01-01T00:00:01Z");
+    ExecutableMarketSnapshot validation = snapshotWithAuthority(
+        snapshot(),
+        "validation",
+        MarketSourceMode.LOCAL_SIMULATED,
+        virtualTime,
+        virtualTime.plusSeconds(60));
+
+    assertCode("MARKET_DATA_STALE", () -> service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.CROSS),
+        List.of(),
+        OrderSide.BUY,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        decimal("1"),
+        null,
+        validation,
+        decimal("0.005"),
+        new PerpetualRiskPricing(decimal("120"), decimal("80"), decimal("0.001"))));
+  }
+
+  @Test
+  void depthRiskDelegatesFreshnessToTheFullFillTimeAuthority() {
+    FullFillCoordinator freshness = mock(FullFillCoordinator.class);
+    PerpetualOrderRiskService delegated = new PerpetualOrderRiskService(freshness);
+    ExecutableMarketSnapshot snapshot = snapshot();
+
+    delegated.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.CROSS),
+        List.of(),
+        OrderSide.BUY,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        decimal("1"),
+        null,
+        snapshot,
+        decimal("0.005"),
+        new PerpetualRiskPricing(decimal("120"), decimal("80"), decimal("0.001")));
+
+    verify(freshness).requireFresh(snapshot);
+  }
+
+  @Test
+  void depthLongCloseUsesExplicitAdversePriceAndExplicitFeePrice() {
+    PositionEntity longPosition = position(
+        PositionMode.ONE_WAY, PositionSide.BOTH, OrderSide.BUY, "1");
+
+    PerpetualOrderRiskService.OrderRisk risk = service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.CROSS),
+        List.of(longPosition),
+        OrderSide.SELL,
+        PositionSide.BOTH,
+        true,
+        OrderType.MARKET,
+        decimal("1"),
+        null,
+        snapshot(),
+        decimal("0.005"),
+        new PerpetualRiskPricing(decimal("120"), decimal("80"), decimal("0.001")));
+
+    assertThat(risk.closingBase()).isEqualByComparingTo("1");
+    assertThat(risk.openingBase()).isEqualByComparingTo("0");
+    assertThat(risk.closeWorstPrice()).isEqualByComparingTo("80.00000000");
+    assertThat(risk.openingInitialMargin()).isEqualByComparingTo("0.00000000");
+    assertThat(risk.adverseCloseLoss()).isEqualByComparingTo("20.00000000");
+    assertThat(risk.feeBuffer()).isEqualByComparingTo("0.12000000");
+    assertThat(risk.holdAmount()).isEqualByComparingTo("20.12000000");
+  }
+
+  @Test
+  void depthOneWayReversalCombinesExplicitOpeningCloseAndFeeRisk() {
+    PositionEntity longPosition = position(
+        PositionMode.ONE_WAY, PositionSide.BOTH, OrderSide.BUY, "1");
+
+    PerpetualOrderRiskService.OrderRisk risk = service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.CROSS),
+        List.of(longPosition),
+        OrderSide.SELL,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        decimal("3"),
+        null,
+        snapshot(),
+        decimal("0.005"),
+        new PerpetualRiskPricing(decimal("120"), decimal("80"), decimal("0.001")));
+
+    assertThat(risk.closingBase()).isEqualByComparingTo("1");
+    assertThat(risk.openingBase()).isEqualByComparingTo("2");
+    assertThat(risk.worstPrice()).isEqualByComparingTo("120.00000000");
+    assertThat(risk.closeWorstPrice()).isEqualByComparingTo("80.00000000");
+    assertThat(risk.openingInitialMargin()).isEqualByComparingTo("24.00000000");
+    assertThat(risk.adverseCloseLoss()).isEqualByComparingTo("20.00000000");
+    assertThat(risk.feeBuffer()).isEqualByComparingTo("0.36000000");
+    assertThat(risk.holdAmount()).isEqualByComparingTo("44.36000000");
+  }
+
+  @Test
+  void depthClosePreservesTenDecimalPriceBeforeCalculatingAdverseLoss() {
+    PositionEntity longPosition = position(
+        PositionMode.ONE_WAY,
+        PositionSide.BOTH,
+        OrderSide.BUY,
+        "99999999.9999");
+
+    PerpetualOrderRiskService.OrderRisk risk = service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.CROSS),
+        List.of(longPosition),
+        OrderSide.SELL,
+        PositionSide.BOTH,
+        true,
+        OrderType.MARKET,
+        decimal("99999999.9999"),
+        null,
+        snapshot(),
+        decimal("0.005"),
+        new PerpetualRiskPricing(
+            decimal("100"),
+            decimal("99.9999999951"),
+            BigDecimal.ZERO));
+
+    assertThat(risk.closeWorstPrice()).isEqualByComparingTo("99.9999999951");
+    assertThat(risk.adverseCloseLoss()).isEqualByComparingTo("0.49000000");
+    assertThat(risk.holdAmount()).isEqualByComparingTo("0.49000000");
+  }
+
+  @Test
+  void isolatedDepthCloseAllowsAnExplicitZeroFeeRate() {
+    PositionEntity longPosition = position(
+        PositionMode.ONE_WAY, PositionSide.BOTH, OrderSide.BUY, "1");
+
+    PerpetualOrderRiskService.OrderRisk risk = service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.ISOLATED),
+        List.of(longPosition),
+        OrderSide.SELL,
+        PositionSide.BOTH,
+        true,
+        OrderType.MARKET,
+        decimal("1"),
+        null,
+        snapshot(),
+        decimal("0.005"),
+        new PerpetualRiskPricing(
+            decimal("100"),
+            decimal("100"),
+            BigDecimal.ZERO));
+
+    assertThat(risk.feeBuffer()).isEqualByComparingTo("0.00000000");
+    assertThat(risk.adverseCloseLoss()).isEqualByComparingTo("0.00000000");
+    assertThat(risk.holdAmount()).isEqualByComparingTo("0.00000000");
+  }
+
+  @Test
+  void depthPricingFailsClosedWhenExplicitPricesExceedNumeric24_10() {
+    assertCode("INVALID_INSTRUMENT_RULES", () -> evaluateDepthWithPricing(
+        new PerpetualRiskPricing(
+            decimal("100000000000000"),
+            decimal("80"),
+            decimal("0.001"))));
+    assertCode("INVALID_INSTRUMENT_RULES", () -> evaluateDepthWithPricing(
+        new PerpetualRiskPricing(
+            decimal("120"),
+            decimal("80.00000000001"),
+            decimal("0.001"))));
+  }
+
+  @Test
+  void depthRiskFailsClosedWhenProjectedHoldExceedsNumeric24_8() {
+    String nearMaximumNotionalPrice = "99999999.9999999999";
+
+    assertCode(ErrorCode.ORDER_HOLD_INVALID, () -> service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(1, MarginMode.CROSS),
+        List.of(),
+        OrderSide.BUY,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        decimal("99999999.9999"),
+        null,
+        snapshot(
+            nearMaximumNotionalPrice,
+            nearMaximumNotionalPrice,
+            nearMaximumNotionalPrice),
+        decimal("0.005"),
+        new PerpetualRiskPricing(
+            decimal(nearMaximumNotionalPrice),
+            decimal(nearMaximumNotionalPrice),
+            decimal("0.001"))));
+  }
+
+  @Test
+  void depthPricingFailsClosedForNonpositivePricesAndInvalidFeeRate() {
+    assertThatThrownBy(() -> evaluateDepthWithPricing(
+        new PerpetualRiskPricing(BigDecimal.ZERO, decimal("80"), decimal("0.001"))))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("INVALID_INSTRUMENT_RULES"));
+    assertThatThrownBy(() -> evaluateDepthWithPricing(
+        new PerpetualRiskPricing(decimal("120"), BigDecimal.ZERO, decimal("0.001"))))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("INVALID_INSTRUMENT_RULES"));
+    assertThatThrownBy(() -> evaluateDepthWithPricing(
+        new PerpetualRiskPricing(decimal("120"), decimal("80"), BigDecimal.ONE)))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("INVALID_INSTRUMENT_RULES"));
+  }
+
+  @Test
+  void depthPricingFailsClosedWhenFeeRateExceedsNumeric18Scale8() {
+    assertCode("INVALID_INSTRUMENT_RULES", () -> evaluateDepthWithPricing(
+        new PerpetualRiskPricing(
+            decimal("120"),
+            decimal("80"),
+            decimal("0.000000001"))));
+  }
+
+  @Test
+  void depthRiskFailsClosedWhenMaintenanceRateExceedsNumeric18Scale8() {
+    assertCode("INVALID_INSTRUMENT_RULES", () -> service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.CROSS),
+        List.of(),
+        OrderSide.BUY,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        decimal("1"),
+        null,
+        snapshot(),
+        decimal("0.000000001"),
+        new PerpetualRiskPricing(decimal("120"), decimal("80"), decimal("0.001"))));
+  }
+
+  @Test
+  void depthPricingRejectsMinimumScaleAsAControlledBusinessError() {
+    BigDecimal minimumScale = new BigDecimal(BigInteger.TEN, Integer.MIN_VALUE);
+
+    assertCode("INVALID_INSTRUMENT_RULES", () -> evaluateDepthWithPricing(
+        new PerpetualRiskPricing(minimumScale, decimal("80"), decimal("0.001"))));
+  }
+
+  @Test
+  void depthRiskRejectsCanonicalQuantityOutsideNumeric12Scale4() {
+    assertCode("INVALID_INSTRUMENT_RULES", () -> service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.CROSS),
+        List.of(),
+        OrderSide.BUY,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        decimal("1.00001"),
+        null,
+        snapshot(),
+        decimal("0.005"),
+        new PerpetualRiskPricing(decimal("120"), decimal("80"), decimal("0.001"))));
+  }
+
+  @Test
+  void depthRiskRejectsSnapshotMarkOutsideNumeric24Scale10() {
+    assertCode("INVALID_INSTRUMENT_RULES", () -> service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.CROSS),
+        List.of(),
+        OrderSide.BUY,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        decimal("1"),
+        null,
+        snapshot("99", "101", "100000000000000"),
+        decimal("0.005"),
+        new PerpetualRiskPricing(decimal("120"), decimal("80"), decimal("0.001"))));
+  }
+
+  @Test
+  void depthRiskRejectsPositionNotionalOutsideNumeric24Scale8() {
+    String maximumPrice = "99999999999999.9999999999";
+
+    assertCode("INVALID_INSTRUMENT_RULES", () -> service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(Integer.MAX_VALUE, MarginMode.CROSS),
+        List.of(),
+        OrderSide.BUY,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        decimal("99999999.9999"),
+        null,
+        snapshot(maximumPrice, maximumPrice, maximumPrice),
+        decimal("0.005"),
+        new PerpetualRiskPricing(
+            decimal(maximumPrice),
+            decimal(maximumPrice),
+            BigDecimal.ZERO)));
+  }
+
+  private PerpetualOrderRiskService.OrderRisk evaluateDepthWithPricing(
+      PerpetualRiskPricing pricing
+  ) {
+    return service.evaluateDepth(
+        PositionMode.ONE_WAY,
+        setting(10, MarginMode.CROSS),
+        List.of(),
+        OrderSide.BUY,
+        PositionSide.BOTH,
+        false,
+        OrderType.MARKET,
+        decimal("1"),
+        null,
+        snapshot(),
+        decimal("0.005"),
+        pricing);
+  }
+
   private PerpetualOrderRiskService.OrderRisk evaluate(
       PositionMode positionMode,
       AccountSymbolSettingEntity setting,
@@ -568,7 +1105,7 @@ class PerpetualOrderRiskServiceTest {
 
   private static AccountSymbolSettingEntity setting(int leverage, MarginMode marginMode) {
     AccountSymbolSettingEntity setting = new AccountSymbolSettingEntity();
-    setting.setAccountId(UUID.randomUUID());
+    setting.setAccountId(ACCOUNT_ID);
     setting.setSymbol(SYMBOL);
     setting.setLeverage(leverage);
     setting.setMarginMode(marginMode);
@@ -583,7 +1120,7 @@ class PerpetualOrderRiskServiceTest {
   ) {
     PositionEntity position = new PositionEntity();
     position.setId(UUID.randomUUID());
-    position.setAccountId(UUID.randomUUID());
+    position.setAccountId(ACCOUNT_ID);
     position.setSymbol(SYMBOL);
     position.setProductType(ProductType.LINEAR_PERP);
     position.setPositionMode(positionMode);
@@ -624,6 +1161,28 @@ class PerpetualOrderRiskServiceTest {
         decimal(mark),
         NOW.minusSeconds(1),
         NOW.plusSeconds(30));
+  }
+
+  private static ExecutableMarketSnapshot snapshotWithAuthority(
+      ExecutableMarketSnapshot source,
+      String providerCode,
+      MarketSourceMode sourceMode,
+      Instant asOf,
+      Instant expiresAt
+  ) {
+    return new ExecutableMarketSnapshot(
+        source.platformSymbol(),
+        source.productType(),
+        providerCode,
+        source.providerSymbol(),
+        sourceMode,
+        source.bid(),
+        source.ask(),
+        source.last(),
+        source.mark(),
+        source.index(),
+        asOf,
+        expiresAt);
   }
 
   private static BigDecimal decimal(String value) {

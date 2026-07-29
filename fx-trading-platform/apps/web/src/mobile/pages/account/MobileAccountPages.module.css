@@ -1,0 +1,21 @@
+.root {
+  min-width: 0;
+}
+
+.dataCollection {
+  min-width: 0;
+}
+
+.pagination {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  color: var(--user-muted);
+  font-size: 12px;
+}
+
+.pagination > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}

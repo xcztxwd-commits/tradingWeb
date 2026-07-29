@@ -31,6 +31,11 @@ public class OrderEntityFactory {
     order.setQuantityUnit(command.quantityUnit());
     order.setMarginMode(command.marginMode());
     order.setPositionSide(command.positionSide());
+    order.setTimeInForce(command.timeInForce());
+    order.setPostOnly(command.postOnly());
+    order.setActivationPrice(command.activationPrice());
+    order.setTrailingDelta(command.trailingDelta());
+    order.setTrailingRate(command.trailingRate());
     order.setReduceOnly(command.reduceOnly());
     order.setTriggerPrice(command.triggerPrice());
     order.setTriggerPriceType(command.triggerPriceType());

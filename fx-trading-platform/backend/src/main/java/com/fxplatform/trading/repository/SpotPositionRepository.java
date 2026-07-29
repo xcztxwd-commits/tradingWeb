@@ -14,6 +14,11 @@ import org.apache.ibatis.annotations.Select;
 
 public interface SpotPositionRepository extends FxBaseMapper<SpotPositionEntity> {
 
+  default long countByAccountId(UUID accountId) {
+    return selectCount(new LambdaQueryWrapper<SpotPositionEntity>()
+        .eq(SpotPositionEntity::getAccountId, accountId));
+  }
+
   default List<SpotPositionEntity> findAllByIds(Collection<UUID> ids) {
     if (ids == null || ids.isEmpty()) {
       return List.of();

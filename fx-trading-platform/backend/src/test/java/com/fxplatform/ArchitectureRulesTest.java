@@ -37,7 +37,11 @@ class ArchitectureRulesTest {
     assertThat(adapter).doesNotContain("QuoteService");
     assertThat(adapter).doesNotContain("SymbolRepository");
     assertThat(adapter).doesNotContain("FEE_RATE");
-    assertThat(coordinator).contains("MAKER_FEE_RATE", "TAKER_FEE_RATE", "SLIPPAGE_RATE");
+    assertThat(coordinator).contains(
+        "DemoExecutionPolicyProvider",
+        "policy.makerFeeRate()",
+        "policy.takerFeeRate()",
+        "policy.slippageRate()");
     assertThat(transactionExecutor).contains("Propagation.REQUIRES_NEW");
   }
 
@@ -317,12 +321,52 @@ class ArchitectureRulesTest {
   }
 
   @Test
+  void orderReplayMigrationPersistsTheOriginalRequestFingerprint() throws Exception {
+    String migration = Files.readString(Path.of(
+        "src/main/resources/db/migration/V53__order_request_fingerprint.sql"));
+
+    assertThat(migration).contains("ALTER TABLE trading.orders");
+    assertThat(migration).contains("request_fingerprint CHAR(64)");
+  }
+
+  @Test
+  void clientOrderIdUniquenessOnlyCoversActiveOrders() throws Exception {
+    String migration = Files.readString(Path.of(
+        "src/main/resources/db/migration/V55__active_client_order_id_uniqueness.sql"));
+
+    assertThat(migration).contains(
+        "DROP INDEX IF EXISTS trading.ux_orders_user_account_client_order_id",
+        "CREATE UNIQUE INDEX ux_orders_user_account_client_order_id",
+        "WHERE client_order_id IS NOT NULL",
+        "status IN (",
+        "'RECEIVED'",
+        "'VALIDATING'",
+        "'ACCEPTED'",
+        "'PENDING_ACTIVATION'",
+        "'PENDING'",
+        "'WORKING'",
+        "'PARTIALLY_FILLED'",
+        "'CANCEL_PENDING'");
+    assertThat(migration).doesNotContain(
+        "'FILLED'",
+        "'CANCELED'",
+        "'CANCELLED'",
+        "'REJECTED'",
+        "'EXPIRED'",
+        "'FAILED'");
+  }
+
+  @Test
   void advancedDemoExecutionIsDisabledByDefault() throws Exception {
     String application = Files.readString(Path.of("src/main/resources/application.yml"));
     String pendingService = Files.readString(Path.of(
         "src/main/java/com/fxplatform/trading/service/PendingOrderExecutionService.java"));
+    String pendingScheduler = Files.readString(Path.of(
+        "src/main/java/com/fxplatform/trading/service/PendingOrderExecutionScheduler.java"));
     String protectiveService = Files.readString(Path.of(
         "src/main/java/com/fxplatform/trading/service/ProtectiveOrderExecutionService.java"));
+    String protectiveScheduler = Files.readString(Path.of(
+        "src/main/java/com/fxplatform/trading/service/ProtectiveOrderExecutionScheduler.java"));
     String liquidationScheduler = Files.readString(Path.of(
         "src/main/java/com/fxplatform/trading/service/LiquidationScanScheduler.java"));
 
@@ -330,8 +374,14 @@ class ArchitectureRulesTest {
     assertThat(application).contains("protective-order-execution-enabled: ${TRADING_PROTECTIVE_ORDER_EXECUTION_ENABLED:false}");
     assertThat(application).contains("enabled: ${TRADING_LIQUIDATION_ENABLED:false}");
     assertThat(application).contains("scan-interval-ms: ${TRADING_LIQUIDATION_SCAN_INTERVAL_MS:60000}");
-    assertThat(pendingService).contains("ConditionalOnProperty");
-    assertThat(protectiveService).contains("ConditionalOnProperty");
+    assertThat(pendingService).doesNotContain("ConditionalOnProperty");
+    assertThat(pendingService).doesNotContain("@Scheduled");
+    assertThat(pendingScheduler).contains("ConditionalOnProperty");
+    assertThat(pendingScheduler).contains("@Scheduled");
+    assertThat(protectiveService).doesNotContain("ConditionalOnProperty");
+    assertThat(protectiveService).doesNotContain("@Scheduled");
+    assertThat(protectiveScheduler).contains("ConditionalOnProperty");
+    assertThat(protectiveScheduler).contains("@Scheduled");
     assertThat(liquidationScheduler).contains("ConditionalOnProperty");
     assertThat(liquidationScheduler).contains("trading.liquidation.scan-interval-ms");
   }

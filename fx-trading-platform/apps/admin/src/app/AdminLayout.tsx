@@ -38,7 +38,12 @@ import { useLocation } from 'react-router-dom'
 
 import { adminMenuGroups, findAdminMenuItem } from './adminMenu'
 import { logoutAdminAuth } from '../services/authApi'
-import { clearAdminToken, getAdminRefreshToken, getAdminToken } from '../services/adminToken'
+import {
+  clearAdminToken,
+  getAdminRefreshToken,
+  getAdminToken,
+  hasAdminAuthority
+} from '../services/adminToken'
 
 type RouteTab = {
   to: string
@@ -140,10 +145,18 @@ export function AdminLayout() {
                   <GroupIcon size={16} />
                   {!collapsed ? <span>{group.label}</span> : null}
                 </div>
-                {group.items.map((item) => {
+                {group.items.filter(
+                  (item) => !item.authority || hasAdminAuthority(item.authority)
+                ).map((item) => {
                   const ItemIcon = iconFor(item.icon)
                   return (
-                    <NavLink key={item.to} to={item.to} className="admin-nav-link" title={item.label}>
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      end={item.to === '/content/popup-campaigns'}
+                      className="admin-nav-link"
+                      title={item.label}
+                    >
                       <ItemIcon size={16} />
                       {!collapsed ? <span>{item.label}</span> : null}
                     </NavLink>

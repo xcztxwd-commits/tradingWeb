@@ -1,0 +1,80 @@
+.protection-form {
+  grid-template-columns: repeat(2, minmax(170px, 1fr)) auto;
+}
+
+.protection-form__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 10px;
+  color: var(--user-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.protection-form__summary span,
+.protection-form__summary strong,
+.protection-form__input,
+.protection-form__input small,
+.protection-form__hint,
+.protection-form__error {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.protection-form__summary span,
+.protection-form__summary strong,
+.protection-form__input small {
+  margin-right: 0;
+}
+
+.protection-form__summary strong {
+  color: var(--user-text);
+  font-size: 13px;
+}
+
+.protection-form__input {
+  min-width: 0;
+}
+
+.protection-form__hint {
+  margin-top: 8px;
+}
+
+.protection-form__input small {
+  color: var(--user-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.protection-form__error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--user-danger);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 18px;
+}
+
+.protection-form__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+
+  .protection-form__actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .protection-form__actions > button {
+    width: 100%;
+  }
+}
+[data-platform-view='mobile'] .positions-page {
+  --table-action-min-height: 44px;
+  --user-form-columns: 1fr;
+  --user-toolbar-columns: 1fr;
+}

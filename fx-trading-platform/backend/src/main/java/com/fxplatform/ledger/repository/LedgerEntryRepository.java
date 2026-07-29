@@ -23,7 +23,7 @@ public interface LedgerEntryRepository extends FxBaseMapper<LedgerEntryEntity> {
       query.eq(LedgerEntryEntity::getOperationType, operationType);
     }
     return selectPage(page, query
-        .orderByDesc(LedgerEntryEntity::getCreatedAt)
+        .orderByDesc(LedgerEntryEntity::getSequenceNo)
         .orderByDesc(LedgerEntryEntity::getId));
   }
 
@@ -46,7 +46,8 @@ public interface LedgerEntryRepository extends FxBaseMapper<LedgerEntryEntity> {
   default List<LedgerEntryEntity> findByAccountIdOrderByCreatedAtDesc(UUID accountId) {
     return selectList(new LambdaQueryWrapper<LedgerEntryEntity>()
         .eq(LedgerEntryEntity::getAccountId, accountId)
-        .orderByDesc(LedgerEntryEntity::getCreatedAt));
+        .orderByDesc(LedgerEntryEntity::getSequenceNo)
+        .orderByDesc(LedgerEntryEntity::getId));
   }
 
   default List<LedgerEntryEntity> findByReference(
@@ -58,7 +59,7 @@ public interface LedgerEntryRepository extends FxBaseMapper<LedgerEntryEntity> {
         .eq(LedgerEntryEntity::getAccountId, accountId)
         .eq(LedgerEntryEntity::getReferenceType, referenceType)
         .eq(LedgerEntryEntity::getReferenceId, referenceId)
-        .orderByAsc(LedgerEntryEntity::getCreatedAt)
+        .orderByAsc(LedgerEntryEntity::getSequenceNo)
         .orderByAsc(LedgerEntryEntity::getId));
   }
 }

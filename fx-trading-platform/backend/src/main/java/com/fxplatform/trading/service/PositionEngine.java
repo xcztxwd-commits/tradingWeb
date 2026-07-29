@@ -37,6 +37,12 @@ public class PositionEngine {
 
   private static final int PRICE_SCALE = 8;
   private static final int INTERNAL_SCALE = 18;
+  private static final int LOT_COLUMN_PRECISION = 12;
+  private static final int LOT_COLUMN_SCALE = 4;
+  private static final int PRICE_COLUMN_PRECISION = 24;
+  private static final int PRICE_COLUMN_SCALE = 10;
+  private static final int MONEY_COLUMN_PRECISION = 24;
+  private static final int MONEY_COLUMN_SCALE = 8;
   private static final String DEFAULT_MARGIN_DESCRIPTION = "Position margin held";
 
   private final PositionRepository positionRepository;
@@ -116,6 +122,28 @@ public class PositionEngine {
       int executionLeverage,
       String marginDescription
   ) {
+    return applyPerpetualFill(
+        account,
+        order,
+        fill,
+        symbolProfile,
+        authorityMark,
+        executionLeverage,
+        orZero(order == null ? null : order.getHoldAmount()),
+        marginDescription);
+  }
+
+  /** Applies one canonical BASE Linear Perpetual fill with an explicit consumed order-hold slice. */
+  public PositionUpdateResult applyPerpetualFill(
+      TradingAccountEntity account,
+      OrderEntity order,
+      ExecutionResult fill,
+      InstrumentProfile symbolProfile,
+      BigDecimal authorityMark,
+      int executionLeverage,
+      BigDecimal consumedOrderHold,
+      String marginDescription
+  ) {
     if (symbolProfile == null || symbolProfile.kind() != InstrumentKind.LINEAR_PERPETUAL) {
       throw new BusinessException(
           "PRODUCT_NOT_ALLOWED",
@@ -128,6 +156,7 @@ public class PositionEngine {
         symbolProfile,
         authorityMark,
         executionLeverage,
+        consumedOrderHold,
         marginDescription);
     return applyAuthorityLinearPerpetualFill(account, order, context);
   }
@@ -137,6 +166,12 @@ public class PositionEngine {
       OrderEntity order,
       FillContext fill
   ) {
+    requireAuthorityPrice(
+        fill.price(),
+        "Perpetual fill price exceeds NUMERIC(24,10)");
+    requireAuthorityPrice(
+        fill.authorityMark(),
+        "Perpetual authority mark exceeds NUMERIC(24,10)");
     validatePerpetualSlot(fill);
     PositionEntity existing = positionRepository.findOpenPerpetualSlotForUpdate(
         account.getId(),
@@ -262,26 +297,44 @@ public class PositionEngine {
       OrderEntity order,
       FillContext fill
   ) {
-    PositionEntity opened = openPosition(fill);
     PerpetualSnapshot snapshot = authoritySnapshot(
-        opened.getSide(),
+        fill.side(),
         fill.quantity(),
         fill.price(),
         fill.authorityMark(),
         fill.leverage(),
         fill.profile());
-    applyAuthoritySnapshot(opened, snapshot, snapshot.initialMargin());
     requireCoveredHold(fill.orderHold(), snapshot.initialMargin().add(fill.fee()));
-    PositionEntity saved = positionRepository.save(opened);
-
-    applyAuthorityAccountState(
+    AuthorityAccountState accountState = projectAuthorityAccountState(
         account,
         fill,
         BigDecimal.ZERO,
         snapshot.initialMargin(),
         BigDecimal.ZERO,
         snapshot.upl(),
+        BigDecimal.ZERO,
         BigDecimal.ZERO);
+    validateAuthorityPositionState(new AuthorityPositionState(
+        fill.quantity(),
+        fill.price(),
+        snapshot.markPrice(),
+        fill.stopLoss(),
+        fill.takeProfit(),
+        snapshot.upl(),
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        snapshot.initialMargin(),
+        snapshot.markNotional(),
+        snapshot.initialMargin(),
+        snapshot.maintenanceMargin(),
+        snapshot.markPrice()));
+    validateAuthorityLedgerAmounts(fill.orderHold(), snapshot.initialMargin(), fill.fee());
+
+    PositionEntity opened = openPosition(fill);
+    applyAuthoritySnapshot(opened, snapshot, snapshot.initialMargin());
+    PositionEntity saved = positionRepository.save(opened);
+    applyAuthorityAccountState(account, accountState);
     return authorityResult(
         saved,
         order,
@@ -335,6 +388,32 @@ public class PositionEngine {
     requireCoveredHold(
         fill.orderHold(),
         openingMargin.add(fill.fee()));
+    AuthorityAccountState accountState = projectAuthorityAccountState(
+        account,
+        fill,
+        oldMargin,
+        newMargin,
+        oldUpl,
+        snapshot.upl(),
+        BigDecimal.ZERO,
+        BigDecimal.ZERO);
+    validateAuthorityPositionState(new AuthorityPositionState(
+        newQuantity,
+        newEntry,
+        snapshot.markPrice(),
+        existing.getStopLoss(),
+        existing.getTakeProfit(),
+        snapshot.upl(),
+        orZero(existing.getRealizedPnl()),
+        orZero(existing.getFundingPnl()),
+        orZero(existing.getFinancingAccrued()),
+        newMargin,
+        snapshot.markNotional(),
+        snapshot.initialMargin(),
+        snapshot.maintenanceMargin(),
+        snapshot.markPrice()));
+    validateAuthorityLedgerAmounts(
+        fill.orderHold(), newMargin.subtract(oldMargin), fill.fee());
 
     existing.setLots(newQuantity);
     existing.setOpenPrice(newEntry);
@@ -342,14 +421,7 @@ public class PositionEngine {
     applyAuthoritySnapshot(existing, snapshot, newMargin);
     incrementVersion(existing);
     PositionEntity saved = positionRepository.save(existing);
-    applyAuthorityAccountState(
-        account,
-        fill,
-        oldMargin,
-        newMargin,
-        oldUpl,
-        snapshot.upl(),
-        BigDecimal.ZERO);
+    applyAuthorityAccountState(account, accountState);
     return authorityResult(
         saved,
         order,
@@ -389,6 +461,37 @@ public class PositionEngine {
     }
 
     if (remainingQuantity.compareTo(BigDecimal.ZERO) == 0) {
+      BigDecimal nextRealized = orZero(existing.getRealizedPnl()).add(realized);
+      BigDecimal nextFunding = fill.marginMode() == MarginMode.ISOLATED
+          ? BigDecimal.ZERO.setScale(PRICE_SCALE, RoundingMode.HALF_UP)
+          : oldFunding;
+      AuthorityAccountState accountState = projectAuthorityAccountState(
+          account,
+          fill,
+          oldMargin,
+          BigDecimal.ZERO,
+          oldUpl,
+          BigDecimal.ZERO,
+          realized,
+          fundingRealized);
+      validateAuthorityPositionState(new AuthorityPositionState(
+          existing.getLots(),
+          existing.getOpenPrice(),
+          fill.authorityMark(),
+          existing.getStopLoss(),
+          existing.getTakeProfit(),
+          BigDecimal.ZERO,
+          nextRealized,
+          nextFunding,
+          orZero(existing.getFinancingAccrued()),
+          BigDecimal.ZERO,
+          BigDecimal.ZERO,
+          BigDecimal.ZERO,
+          BigDecimal.ZERO,
+          fill.authorityMark()));
+      validateAuthorityLedgerAmounts(
+          fill.orderHold(), oldMargin, realized, fundingRealized, fill.fee());
+
       closePosition(existing, fill.price(), fill.filledAt(), realized);
       if (fill.marginMode() == MarginMode.ISOLATED) {
         existing.setFundingPnl(BigDecimal.ZERO.setScale(PRICE_SCALE, RoundingMode.HALF_UP));
@@ -397,14 +500,7 @@ public class PositionEngine {
       existing.setCurrentPrice(fill.authorityMark());
       incrementVersion(existing);
       positionRepository.save(existing);
-      applyAuthorityAccountState(
-          account,
-          fill,
-          oldMargin,
-          BigDecimal.ZERO,
-          oldUpl,
-          BigDecimal.ZERO,
-          realized.add(fundingRealized));
+      applyAuthorityAccountState(account, accountState);
       return withFundingRealization(authorityResult(
           existing,
           order,
@@ -426,23 +522,46 @@ public class PositionEngine {
         fill.authorityMark(),
         fill.leverage(),
         fill.profile());
-    existing.setLots(remainingQuantity);
-    existing.setRealizedPnl(orZero(existing.getRealizedPnl()).add(realized));
-    if (fill.marginMode() == MarginMode.ISOLATED) {
-      existing.setFundingPnl(oldFunding.subtract(fundingRealized)
-          .setScale(PRICE_SCALE, RoundingMode.HALF_UP));
-    }
-    applyAuthoritySnapshot(existing, snapshot, newMargin);
-    incrementVersion(existing);
-    PositionEntity saved = positionRepository.save(existing);
-    applyAuthorityAccountState(
+    BigDecimal nextRealized = orZero(existing.getRealizedPnl()).add(realized);
+    BigDecimal nextFunding = fill.marginMode() == MarginMode.ISOLATED
+        ? oldFunding.subtract(fundingRealized).setScale(PRICE_SCALE, RoundingMode.HALF_UP)
+        : oldFunding;
+    AuthorityAccountState accountState = projectAuthorityAccountState(
         account,
         fill,
         oldMargin,
         newMargin,
         oldUpl,
         snapshot.upl(),
-        realized.add(fundingRealized));
+        realized,
+        fundingRealized);
+    validateAuthorityPositionState(new AuthorityPositionState(
+        remainingQuantity,
+        existing.getOpenPrice(),
+        snapshot.markPrice(),
+        existing.getStopLoss(),
+        existing.getTakeProfit(),
+        snapshot.upl(),
+        nextRealized,
+        nextFunding,
+        orZero(existing.getFinancingAccrued()),
+        newMargin,
+        snapshot.markNotional(),
+        snapshot.initialMargin(),
+        snapshot.maintenanceMargin(),
+        snapshot.markPrice()));
+    validateAuthorityLedgerAmounts(
+        fill.orderHold(), oldMargin.subtract(newMargin), realized, fundingRealized, fill.fee());
+
+    existing.setLots(remainingQuantity);
+    existing.setRealizedPnl(nextRealized);
+    if (fill.marginMode() == MarginMode.ISOLATED) {
+      existing.setFundingPnl(nextFunding);
+    }
+    applyAuthoritySnapshot(existing, snapshot, newMargin);
+    incrementVersion(existing);
+    PositionEntity saved = positionRepository.save(existing);
+    applyAuthorityAccountState(account, accountState);
     return withFundingRealization(authorityResult(
         saved,
         order,
@@ -466,6 +585,9 @@ public class PositionEngine {
     BigDecimal newQuantity = abs(fill.quantity()).subtract(oldQuantity);
     BigDecimal oldMargin = orZero(existing.getMarginHeld());
     BigDecimal oldUpl = orZero(existing.getFloatingPnl());
+    BigDecimal fundingRealized = fill.marginMode() == MarginMode.ISOLATED
+        ? orZero(existing.getFundingPnl())
+        : BigDecimal.ZERO;
     BigDecimal realized = realizedPnl(existing, oldQuantity, fill.price(), fill.profile());
     PerpetualSnapshot snapshot = authoritySnapshot(
         fill.side(),
@@ -479,8 +601,56 @@ public class PositionEngine {
         snapshot.initialMargin()
             .add(adverseCloseLoss(existing, oldQuantity, fill.price(), fill.authorityMark()))
             .add(fill.fee()));
+    BigDecimal nextClosedRealized = orZero(existing.getRealizedPnl()).add(realized);
+    BigDecimal nextClosedFunding = fill.marginMode() == MarginMode.ISOLATED
+        ? BigDecimal.ZERO.setScale(PRICE_SCALE, RoundingMode.HALF_UP)
+        : orZero(existing.getFundingPnl());
+    AuthorityAccountState accountState = projectAuthorityAccountState(
+        account,
+        fill,
+        oldMargin,
+        snapshot.initialMargin(),
+        oldUpl,
+        snapshot.upl(),
+        realized,
+        fundingRealized);
+    validateAuthorityPositionState(new AuthorityPositionState(
+        existing.getLots(),
+        existing.getOpenPrice(),
+        fill.authorityMark(),
+        existing.getStopLoss(),
+        existing.getTakeProfit(),
+        BigDecimal.ZERO,
+        nextClosedRealized,
+        nextClosedFunding,
+        orZero(existing.getFinancingAccrued()),
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        fill.authorityMark()));
+    validateAuthorityPositionState(new AuthorityPositionState(
+        newQuantity,
+        fill.price(),
+        snapshot.markPrice(),
+        fill.stopLoss(),
+        fill.takeProfit(),
+        snapshot.upl(),
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        BigDecimal.ZERO,
+        snapshot.initialMargin(),
+        snapshot.markNotional(),
+        snapshot.initialMargin(),
+        snapshot.maintenanceMargin(),
+        snapshot.markPrice()));
+    validateAuthorityLedgerAmounts(
+        fill.orderHold(), oldMargin, snapshot.initialMargin(), realized, fundingRealized, fill.fee());
 
     closePosition(existing, fill.price(), fill.filledAt(), realized);
+    if (fill.marginMode() == MarginMode.ISOLATED) {
+      existing.setFundingPnl(BigDecimal.ZERO.setScale(PRICE_SCALE, RoundingMode.HALF_UP));
+    }
     existing.setMarkPrice(fill.authorityMark());
     existing.setCurrentPrice(fill.authorityMark());
     incrementVersion(existing);
@@ -489,14 +659,7 @@ public class PositionEngine {
     PositionEntity opened = openPosition(remainder);
     applyAuthoritySnapshot(opened, snapshot, snapshot.initialMargin());
     PositionEntity saved = positionRepository.save(opened);
-    applyAuthorityAccountState(
-        account,
-        fill,
-        oldMargin,
-        snapshot.initialMargin(),
-        oldUpl,
-        snapshot.upl(),
-        realized);
+    applyAuthorityAccountState(account, accountState);
     List<PerpetualLedgerEffect> ledgerEffects = new ArrayList<>();
     addOrderReleaseEffect(ledgerEffects, fill.orderHold(), order);
     addMarginReleaseEffect(ledgerEffects, oldMargin, existing);
@@ -506,7 +669,10 @@ public class PositionEngine {
         saved,
         "Reversed position margin held");
     addTradePnlEffect(ledgerEffects, realized, existing);
-    return new PositionUpdateResult(saved, realized, List.copyOf(ledgerEffects))
+    return withFundingRealization(
+        new PositionUpdateResult(saved, realized, List.copyOf(ledgerEffects)),
+        fundingRealized,
+        existing)
         .withReduction(existing.getId(), oldQuantity, BigDecimal.ZERO);
   }
 
@@ -866,7 +1032,7 @@ public class PositionEngine {
         margin.markNotional(),
         margin.initialMargin(),
         margin.maintenanceMargin(),
-        authorityMark.setScale(PRICE_SCALE, RoundingMode.HALF_UP),
+        authorityMark.setScale(PRICE_COLUMN_SCALE, RoundingMode.HALF_UP),
         upl);
   }
 
@@ -922,17 +1088,19 @@ public class PositionEngine {
         .setScale(PRICE_SCALE, RoundingMode.HALF_UP);
   }
 
-  private void applyAuthorityAccountState(
+  private AuthorityAccountState projectAuthorityAccountState(
       TradingAccountEntity account,
       FillContext fill,
       BigDecimal oldMargin,
       BigDecimal newMargin,
       BigDecimal oldUpl,
       BigDecimal newUpl,
-      BigDecimal realized
+      BigDecimal realized,
+      BigDecimal fundingRealized
   ) {
     BigDecimal marginDelta = orZero(newMargin).subtract(orZero(oldMargin));
     BigDecimal uplDelta = orZero(newUpl).subtract(orZero(oldUpl));
+    BigDecimal balanceDelta = orZero(realized).add(orZero(fundingRealized));
     BigDecimal nextUsed = orZero(account.getUsedMargin())
         .add(marginDelta)
         .subtract(fill.orderHold());
@@ -941,9 +1109,6 @@ public class PositionEngine {
           "ORDER_HOLD_INVALID",
           "Perpetual order hold exceeds reconciled used margin");
     }
-    account.setUsedMargin(nextUsed.setScale(PRICE_SCALE, RoundingMode.HALF_UP));
-    account.setBalance(orZero(account.getBalance()).add(realized));
-    account.setEquity(accountEquity(account).add(realized).add(uplDelta));
     BigDecimal crossUplDelta = fill.marginMode() == MarginMode.CROSS
         ? uplDelta
         : BigDecimal.ZERO;
@@ -952,12 +1117,145 @@ public class PositionEngine {
     BigDecimal externalHoldRelease = isolatedPositionBackedHold
         ? BigDecimal.ZERO
         : fill.orderHold();
-    account.setFreeMargin(orZero(account.getFreeMargin())
-        .add(externalHoldRelease)
-        .subtract(marginDelta)
-        .add(realized)
-        .add(crossUplDelta));
+    AuthorityAccountState state = new AuthorityAccountState(
+        orZero(account.getBalance()).add(balanceDelta),
+        accountEquity(account).add(orZero(realized)).add(uplDelta),
+        nextUsed.setScale(PRICE_SCALE, RoundingMode.HALF_UP),
+        orZero(account.getFreeMargin())
+            .add(externalHoldRelease)
+            .subtract(marginDelta)
+            .add(balanceDelta)
+            .add(crossUplDelta),
+        account.getMarginLevel());
+    validateAuthorityAccountState(state);
+    validateAuthorityPostFeeAccountState(state, fill.fee());
+    return state;
+  }
+
+  private void applyAuthorityAccountState(
+      TradingAccountEntity account,
+      AuthorityAccountState state
+  ) {
+    account.setBalance(state.balance());
+    account.setEquity(state.equity());
+    account.setUsedMargin(state.usedMargin());
+    account.setFreeMargin(state.freeMargin());
     saveAccount(account);
+  }
+
+  private void validateAuthorityAccountState(AuthorityAccountState state) {
+    requireAuthorityMoney(state.balance(), "Perpetual account balance exceeds NUMERIC(24,8)");
+    requireAuthorityMoney(state.equity(), "Perpetual account equity exceeds NUMERIC(24,8)");
+    requireAuthorityMoney(state.usedMargin(), "Perpetual account used margin exceeds NUMERIC(24,8)");
+    requireAuthorityMoney(state.freeMargin(), "Perpetual account free margin exceeds NUMERIC(24,8)");
+    if (state.marginLevel() != null) {
+      requireAuthorityMoney(
+          state.marginLevel(),
+          "Perpetual account margin level exceeds NUMERIC(24,8)");
+    }
+  }
+
+  private void validateAuthorityPostFeeAccountState(
+      AuthorityAccountState state,
+      BigDecimal fee
+  ) {
+    if (orZero(fee).compareTo(BigDecimal.ZERO) <= 0) {
+      return;
+    }
+    validateAuthorityAccountState(new AuthorityAccountState(
+        state.balance().subtract(fee),
+        state.equity().subtract(fee),
+        state.usedMargin(),
+        state.freeMargin().subtract(fee),
+        state.marginLevel()));
+  }
+
+  private void validateAuthorityPositionState(AuthorityPositionState state) {
+    requireAuthorityNumeric(
+        state.lots(),
+        LOT_COLUMN_PRECISION,
+        LOT_COLUMN_SCALE,
+        "Perpetual position lots exceed NUMERIC(12,4)");
+    requireAuthorityPrice(state.openPrice(), "Perpetual position open price exceeds NUMERIC(24,10)");
+    requireAuthorityPrice(
+        state.currentPrice(),
+        "Perpetual position current price exceeds NUMERIC(24,10)");
+    requireOptionalAuthorityPrice(
+        state.stopLoss(),
+        "Perpetual position stop loss exceeds NUMERIC(24,10)");
+    requireOptionalAuthorityPrice(
+        state.takeProfit(),
+        "Perpetual position take profit exceeds NUMERIC(24,10)");
+    requireAuthorityMoney(
+        state.floatingPnl(),
+        "Perpetual position floating PnL exceeds NUMERIC(24,8)");
+    requireAuthorityMoney(
+        state.realizedPnl(),
+        "Perpetual position realized PnL exceeds NUMERIC(24,8)");
+    requireAuthorityMoney(
+        state.fundingPnl(),
+        "Perpetual position funding PnL exceeds NUMERIC(24,8)");
+    requireAuthorityMoney(
+        state.financingAccrued(),
+        "Perpetual position financing exceeds NUMERIC(24,8)");
+    requireAuthorityMoney(
+        state.marginHeld(),
+        "Perpetual position margin held exceeds NUMERIC(24,8)");
+    requireAuthorityMoney(
+        state.notional(),
+        "Perpetual position notional exceeds NUMERIC(24,8)");
+    requireAuthorityMoney(
+        state.initialMargin(),
+        "Perpetual position initial margin exceeds NUMERIC(24,8)");
+    requireAuthorityMoney(
+        state.maintenanceMargin(),
+        "Perpetual position maintenance margin exceeds NUMERIC(24,8)");
+    requireAuthorityPrice(
+        state.markPrice(),
+        "Perpetual position mark price exceeds NUMERIC(24,10)");
+  }
+
+  private void validateAuthorityLedgerAmounts(BigDecimal... amounts) {
+    for (BigDecimal amount : amounts) {
+      requireAuthorityMoney(amount, "Perpetual ledger amount exceeds NUMERIC(24,8)");
+    }
+  }
+
+  private void requireOptionalAuthorityPrice(BigDecimal value, String message) {
+    if (value != null) {
+      requireAuthorityPrice(value, message);
+    }
+  }
+
+  private void requireAuthorityPrice(BigDecimal value, String message) {
+    requireAuthorityNumeric(value, PRICE_COLUMN_PRECISION, PRICE_COLUMN_SCALE, message);
+  }
+
+  private void requireAuthorityMoney(BigDecimal value, String message) {
+    requireAuthorityNumeric(value, MONEY_COLUMN_PRECISION, MONEY_COLUMN_SCALE, message);
+  }
+
+  private void requireAuthorityNumeric(
+      BigDecimal value,
+      int precision,
+      int scale,
+      String message
+  ) {
+    if (value == null || !isExactlyRepresentableAsNumeric(value, precision, scale)) {
+      throw new BusinessException("INVALID_DEPTH_FILL", message);
+    }
+  }
+
+  private boolean isExactlyRepresentableAsNumeric(
+      BigDecimal value,
+      int precision,
+      int scale
+  ) {
+    try {
+      return value.setScale(scale, RoundingMode.UNNECESSARY).precision() <= precision;
+    } catch (ArithmeticException exception) {
+      return false;
+    }
   }
 
   private PositionUpdateResult authorityResult(
@@ -1209,6 +1507,33 @@ public class PositionEngine {
   ) {
   }
 
+  private record AuthorityAccountState(
+      BigDecimal balance,
+      BigDecimal equity,
+      BigDecimal usedMargin,
+      BigDecimal freeMargin,
+      BigDecimal marginLevel
+  ) {
+  }
+
+  private record AuthorityPositionState(
+      BigDecimal lots,
+      BigDecimal openPrice,
+      BigDecimal currentPrice,
+      BigDecimal stopLoss,
+      BigDecimal takeProfit,
+      BigDecimal floatingPnl,
+      BigDecimal realizedPnl,
+      BigDecimal fundingPnl,
+      BigDecimal financingAccrued,
+      BigDecimal marginHeld,
+      BigDecimal notional,
+      BigDecimal initialMargin,
+      BigDecimal maintenanceMargin,
+      BigDecimal markPrice
+  ) {
+  }
+
   public record FillContext(
       java.util.UUID accountId,
       String symbol,
@@ -1275,6 +1600,7 @@ public class PositionEngine {
         InstrumentProfile profile,
         BigDecimal authorityMark,
         int executionLeverage,
+        BigDecimal consumedOrderHold,
         String marginDescription
     ) {
       requireNettable(profile.kind());
@@ -1302,6 +1628,11 @@ public class PositionEngine {
             "INVALID_INSTRUMENT_RULES",
             "Locked Perpetual execution leverage must be positive");
       }
+      if (consumedOrderHold == null || consumedOrderHold.compareTo(BigDecimal.ZERO) < 0) {
+        throw new BusinessException(
+            "ORDER_HOLD_INVALID",
+            "Consumed Perpetual order hold must not be negative");
+      }
       return new FillContext(
           account.getId(),
           normalizeSymbol(order.getSymbol()),
@@ -1316,7 +1647,7 @@ public class PositionEngine {
           orZero(fill.fee()),
           fill.filledAt(),
           executionLeverage,
-          orZero(order.getHoldAmount()),
+          consumedOrderHold,
           order.getParentPositionId(),
           order.getStopLoss(),
           order.getTakeProfit(),

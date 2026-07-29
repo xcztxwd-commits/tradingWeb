@@ -1,17 +1,31 @@
-import type { ReactNode } from 'react'
-import { useEffect, useMemo, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-import { Link, NavLink, useLocation } from 'react-router-dom'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import {
+  getCriticalDialogOpen,
+  subscribeDialogOverlay,
+  useTheme
+} from '@fx-platform/ui'
 
-import { LanguageSwitcher } from '../components/LanguageSwitcher'
-import { TopbarToolIcon } from '../components/TopbarToolIcon'
-import { useTheme } from '../design-system/theme/ThemeProvider'
-import { authSessionChangedEvent, readStoredAuthToken } from '../features/trading-session/tradingSessionStorage'
-import { getSessionStatus } from '../services/authApi'
-import { AccountUserMenu } from './components/AccountUserMenu'
-import { TradingNavMenu } from './components/TradingNavMenu'
-import { authRoutes, authenticatedNavItems, guestNavItems, mobileNavItems, type AppNavItem } from './navigation'
-import { resolveMobileTradingPath } from './tradingRoutes'
+import {
+  authSessionChangedEvent,
+  clearStoredAuthToken,
+  createEngagementApiClient,
+  engagementUpdateSubscription,
+  getSessionStatus,
+  readStoredAuthToken
+} from '@fx-platform/frontend-core'
+import { createAppEngagementRuntime } from '../engagement/appEngagementRuntime'
+import { resolveEngagementPageKey } from '../engagement/engagementNavigation'
+import { MobileShellChrome } from '../mobile/shell/MobileShellChrome'
+import { PcShellChrome } from '../pc/shell/PcShellChrome'
+import { MessageCenterRuntimeProvider } from '../routes/messages/MessageCenterRuntime'
+import { EngagementPopup } from '../shared-widgets/engagement/EngagementPopup'
+import { useDeviceClass } from './device/DeviceClassProvider'
+import { PlatformView } from './platform/PlatformView'
+import { authenticatedNavItems, guestNavItems } from './navigation'
+import type { ShellChromeModel } from './shell/shellChromeModel'
+import { getShellRouteFlags } from './shell/shellRouteModel'
+import styles from './AppShell.module.css'
 
 type AppShellProps = {
   children: ReactNode
@@ -19,18 +33,50 @@ type AppShellProps = {
 
 export function AppShell({ children }: AppShellProps) {
   const location = useLocation()
-  const isTerminalRoute = /^\/trade\/(spot|perpetual)(?:\/|$)/.test(location.pathname)
-  const isAuthRoute = authRoutes.includes(location.pathname as (typeof authRoutes)[number])
+  const navigate = useNavigate()
+  const deviceClass = useDeviceClass()
+  const { isTerminalRoute, isAuthRoute } = getShellRouteFlags(location.pathname)
   const { currentTheme, toggleTheme } = useTheme()
+  const [accessToken, setAccessToken] = useState(() => readStoredAuthToken())
   const [session, setSession] = useState(() => ({
-    authenticated: Boolean(readStoredAuthToken()),
+    authenticated: Boolean(accessToken),
     email: null as string | null
   }))
+  const [engagement] = useState(() => createAppEngagementRuntime({
+    api: createEngagementApiClient(),
+    updates: engagementUpdateSubscription,
+    onUnauthorized: () => {
+      clearStoredAuthToken()
+      setAccessToken(null)
+      setSession({ authenticated: false, email: null })
+    }
+  }))
+  const popupSnapshot = useSyncExternalStore(
+    engagement.popup.subscribe,
+    engagement.popup.getSnapshot,
+    engagement.popup.getSnapshot
+  )
+  const messageSnapshot = useSyncExternalStore(
+    engagement.messages.subscribe,
+    engagement.messages.getSnapshot,
+    engagement.messages.getSnapshot
+  )
+  const criticalDialogOpen = useSyncExternalStore(
+    subscribeDialogOverlay,
+    getCriticalDialogOpen,
+    () => false
+  )
+  const pageKey = resolveEngagementPageKey(location.pathname)
+  const engagementEnabled = Boolean(
+    accessToken && session.authenticated && pageKey && !isAuthRoute
+  )
+  const engagementToken = engagementEnabled ? accessToken : null
 
   useEffect(() => {
     let active = true
     const refreshSession = () => {
       const token = readStoredAuthToken()
+      setAccessToken(token)
       if (!token) {
         setSession({ authenticated: false, email: null })
         return
@@ -43,7 +89,9 @@ export function AppShell({ children }: AppShellProps) {
           setSession({ authenticated: status.authenticated, email: status.email })
         })
         .catch(() => {
-          if (active && readStoredAuthToken() === token) setSession((current) => ({ ...current, authenticated: true }))
+          if (active && readStoredAuthToken() === token) {
+            setSession((current) => ({ ...current, authenticated: true }))
+          }
         })
     }
 
@@ -53,117 +101,83 @@ export function AppShell({ children }: AppShellProps) {
       active = false
       window.removeEventListener(authSessionChangedEvent, refreshSession)
     }
-  }, [location.pathname])
+  }, [])
 
-  const handleLogout = () => {
+  useLayoutEffect(() => {
+    void engagement.criticalModalChanged(engagementEnabled && getCriticalDialogOpen())
+  }, [criticalDialogOpen, engagement, engagementEnabled])
+
+  useEffect(() => {
+    if (!engagementToken || !pageKey) {
+      engagement.logout()
+      return undefined
+    }
+    return engagement.connect({
+      accessToken: engagementToken,
+      pageKey,
+      deviceClass: deviceClass === 'pc' ? 'PC' : 'MOBILE'
+    })
+    // Route and device changes have independent effects below; this lease follows authentication only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engagement, engagementToken])
+
+  useEffect(() => {
+    if (engagementToken && pageKey) void engagement.routeChanged(pageKey)
+  }, [engagement, engagementToken, pageKey])
+
+  useEffect(() => {
+    if (engagementToken) engagement.resize(deviceClass === 'pc' ? 'PC' : 'MOBILE')
+  }, [deviceClass, engagement, engagementToken])
+
+  useEffect(() => {
+    if (!engagementToken) return undefined
+    const handleFocus = () => { void engagement.windowFocused() }
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [engagement, engagementToken])
+
+  const handleLogout = useCallback(() => {
+    setAccessToken(null)
     setSession({ authenticated: false, email: null })
+  }, [])
+  const navItems = useMemo(
+    () => session.authenticated ? authenticatedNavItems : guestNavItems,
+    [session.authenticated]
+  )
+  const chromeModel: ShellChromeModel = {
+    authenticated: session.authenticated,
+    email: session.email,
+    isAuthRoute,
+    unreadCount: messageSnapshot.unreadCount,
+    recentMessages: messageSnapshot.recent,
+    messageSummaryLoading: messageSnapshot.summaryLoading,
+    navItems,
+    pathname: location.pathname,
+    themeColorScheme: currentTheme.colorScheme,
+    onLogout: handleLogout,
+    onToggleTheme: toggleTheme
   }
 
-  const navItems = useMemo(() => (session.authenticated ? authenticatedNavItems : guestNavItems), [session.authenticated])
-
   return (
-    <div className={`app-shell${isTerminalRoute ? ' app-shell--terminal' : ''}${isAuthRoute ? ' app-shell--auth' : ''}`}>
-      <header className="app-topbar">
-        <Link className="app-brand" to="/" aria-label="FX Trader 首页">
-          <span className="app-brand__mark">FX</span>
-          <span>FX Trader</span>
-        </Link>
-
-        <nav className="app-topbar__nav" aria-label="Primary navigation">
-          {navItems.map((item) => (
-            <TopNavLink key={item.to} item={item} pathname={location.pathname} />
-          ))}
-          <TradingNavMenu />
-        </nav>
-
-        <div className="app-topbar__actions">
-          <div className="app-topbar__utility-cluster" aria-label="Quick tools">
-            <button type="button" className="app-topbar__icon" aria-label="Search">
-              <TopbarToolIcon name="search" />
-            </button>
-            {session.authenticated ? (
-              <>
-                <AccountUserMenu email={session.email} onLogout={handleLogout} />
-                <Link className="app-topbar__icon" to="/wallet" aria-label="Wallet">
-                  <TopbarToolIcon name="wallet" />
-                </Link>
-              </>
-            ) : (
-              <>
-                <Link className="app-topbar__ghost" to="/login">
-                  登录
-                </Link>
-                <Link className="app-topbar__primary" to="/register">
-                  注册
-                </Link>
-              </>
-            )}
-            <button type="button" className="app-topbar__icon" aria-label="Notifications">
-              <TopbarToolIcon name="bell" />
-            </button>
-            <button type="button" className="app-topbar__icon" aria-label="Customer support">
-              <TopbarToolIcon name="support" />
-            </button>
-            <button type="button" className="app-topbar__icon" aria-label="Download">
-              <TopbarToolIcon name="download" />
-            </button>
-            <LanguageSwitcher compact />
-            <button
-              type="button"
-              className="app-topbar__icon app-topbar__theme"
-              aria-label="Switch theme"
-              aria-pressed={currentTheme.colorScheme === 'light'}
-              title={currentTheme.colorScheme === 'light' ? 'Switch to dark style' : 'Switch to minimal white style'}
-              onClick={toggleTheme}
-            >
-              <TopbarToolIcon name="moon" />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="main-region">{children}</main>
-
-      <nav className="mobile-tabs" aria-label="Mobile navigation">
-        {mobileNavItems.map((item) => (
-          <MobileNavLink key={item.to} item={item} pathname={location.pathname} />
-        ))}
-      </nav>
-    </div>
-  )
-}
-
-function TopNavLink({ item, pathname }: { item: AppNavItem; pathname: string }) {
-  const { t } = useTranslation()
-
-  return (
-    <NavLink
-      end={item.to === '/'}
-      to={item.to}
-      className={({ isActive }) => `app-topbar__link${isActive || isConfiguredNavPathActive(item, pathname) ? ' active' : ''}`}
+    <MessageCenterRuntimeProvider
+      runtime={engagement.messages}
+      authenticated={session.authenticated}
     >
-      <span>{t(item.labelKey)}</span>
-    </NavLink>
+      <div className={[styles.root, isTerminalRoute && styles.terminal, isAuthRoute && styles.auth].filter(Boolean).join(' ')}>
+        <PlatformView
+          model={chromeModel}
+          pc={PcShellChrome}
+          mobile={MobileShellChrome}
+          fallback={null}
+        />
+        <main className={styles.mainRegion}>{children}</main>
+        {engagementEnabled && <EngagementPopup
+          snapshot={popupSnapshot}
+          actions={engagement.popup}
+          labels={{ close: 'Close', optOut: "Don't show again" }}
+          navigate={navigate}
+        />}
+      </div>
+    </MessageCenterRuntimeProvider>
   )
-}
-
-function MobileNavLink({ item, pathname }: { item: AppNavItem; pathname: string }) {
-  const { t } = useTranslation()
-  const tradeClassName = item.to.startsWith('/trade/') ? ' mobile-tab--trade' : ''
-  const target = item.to.startsWith('/trade/') ? resolveMobileTradingPath(pathname) : item.to
-
-  return (
-    <NavLink
-      end={target === '/'}
-      to={target}
-      className={({ isActive }) => `mobile-tab${tradeClassName}${isActive || isConfiguredNavPathActive(item, pathname) ? ' active' : ''}`}
-    >
-      <item.icon size={19} aria-hidden="true" />
-      <span>{t(item.labelKey)}</span>
-    </NavLink>
-  )
-}
-
-function isConfiguredNavPathActive(item: AppNavItem, pathname: string) {
-  return item.activePaths?.some((path) => pathname === path || pathname.startsWith(`${path}/`)) ?? false
 }

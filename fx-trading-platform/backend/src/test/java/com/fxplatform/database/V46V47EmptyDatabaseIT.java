@@ -75,7 +75,7 @@ class V46V47EmptyDatabaseIT {
   @Test
   void emptyDatabaseMigratesToV47WithExactSchemaAndTradableProducts() {
     try (PostgreSQLContainer<?> postgres = PostgresMigrationTestSupport.startPostgresOrAbort()) {
-      PostgresMigrationTestSupport.migrate(postgres, null);
+      PostgresMigrationTestSupport.migrate(postgres, "47");
       JdbcTemplate jdbc = PostgresMigrationTestSupport.jdbc(postgres);
 
       assertColumns(jdbc, "core", "trading_accounts", Set.of(

@@ -459,26 +459,14 @@ Add /api/market/perpetuals/{symbol}/reference and sourceMode/providerCode/asOf/e
 
 **Files:**
 - Create: backend/src/main/java/com/fxplatform/execution/ExecutableMarketSnapshot.java
-- Create: backend/src/main/java/com/fxplatform/execution/FullFillExecutionPath.java
 - Create: backend/src/main/java/com/fxplatform/execution/FullFillRequest.java
 - Create: backend/src/main/java/com/fxplatform/execution/FullFillResult.java
 - Create: backend/src/main/java/com/fxplatform/execution/FullFillCoordinator.java
-- Modify: backend/src/main/java/com/fxplatform/common/exception/ErrorCode.java
 - Modify: backend/src/main/java/com/fxplatform/execution/SimulatedExecutionAdapter.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/OrderFillService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/OrderService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/PendingOrderExecutionService.java
-- Modify: backend/src/main/java/com/fxplatform/trading/service/SpotSettlementService.java
-- Modify: backend/src/main/java/com/fxplatform/trading/service/TradingTransactionExecutor.java
-- Test: backend/src/test/java/com/fxplatform/ArchitectureRulesTest.java
-- Test: backend/src/test/java/com/fxplatform/common/exception/ErrorCodeContractTest.java
 - Test: backend/src/test/java/com/fxplatform/execution/FullFillCoordinatorTest.java
-- Test: backend/src/test/java/com/fxplatform/execution/SimulatedExecutionAdapterFeeTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/service/OrderFillServiceTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/service/OrderServiceTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/service/PendingOrderExecutionServiceTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/service/SpotSettlementServiceTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/service/TradingTransactionExecutorTest.java
 - Test: backend/src/test/java/com/fxplatform/trading/service/TradingWorkflowRegressionProtectionTest.java
 
 **Interfaces:**
@@ -487,121 +475,44 @@ Add /api/market/perpetuals/{symbol}/reference and sourceMode/providerCode/asOf/e
 
     FullFillResult execute(FullFillRequest request, ExecutableMarketSnapshot snapshot)
 
-- ExecutableMarketSnapshot is an immutable projection of one Task 4 whole bundle and carries:
-
-    platformSymbol, productType, providerCode, providerSymbol, sourceMode,
-    bid, ask, last, mark, index, asOf, expiresAt
-
-- FullFillRequest explicitly identifies one execution path so maker/taker is never inferred
-  after the fact: `MARKET`, `IMMEDIATE_LIMIT`, `RESTING_LIMIT`, or
-  `TRIGGERED_STOP_MARKET`. It carries the canonical requested base quantity.
-
-- FullFillResult is the single canonical all-or-nothing result and carries:
-
-    filledPrice, filledAt, filledQuantity, remainingQuantity=0,
-    feeRate, fee, feeAsset, liquidityRole, slippage,
-    sourceMode, providerCode, providerSymbol, asOf, expiresAt
-
-**Transaction and retry boundary:**
-
-- Resolve a complete fresh bundle before any account/wallet/position/order lock and before the local mutation transaction.
-- TradingTransactionExecutor uses `Propagation.REQUIRES_NEW`; inside it lock in the existing deterministic order, reload mutable state, then validate the snapshot symbol and `now < expiresAt` immediately before the first repository/wallet/ledger write.
-- If lock waiting makes the snapshot stale, roll back with zero writes. The caller may make at most two total attempts (one initial attempt plus one transaction-external re-resolution); after that return `MARKET_DATA_STALE`. Other business failures are not retried.
-- Never perform an external provider call while holding a trading mutation lock.
-- Every pending candidate runs in its own transaction; one failed/stale candidate remains PENDING with its hold intact and must not prevent later candidates from being processed.
-
-**Task boundary:**
-
-- This task centralizes fill calculation, metadata, full-fill validation and transaction ownership for existing immediate/pending paths.
-- Task 6 owns the public Spot quantity-unit contract, immediate marketable LIMIT/STOP_MARKET creation behavior, complete hold calculation and OCO. Its PendingOrderExecutionProcessor reuses the Task 5 `REQUIRES_NEW` executor and only adds order/group locking; it must not create a second transaction policy. Do not partially implement or claim those features here.
-
 - [ ] **Step 1: Write RED price/fee matrix**
 
 Assert exact BigDecimal results for:
 
     MARKET BUY ask*(1+0.0001), taker 0.0005
     MARKET SELL bid*(1-0.0001), taker
-    immediate LIMIT BUY min(ask, limit), SELL max(bid, limit), taker
-    resting GTC LIMIT BUY min(ask, limit), SELL max(bid, limit), maker 0.0002
+    immediate LIMIT uses best-or-limit and taker
+    resting LIMIT uses best-or-limit and maker 0.0002
     STOP_MARKET uses trigger snapshot then MARKET price
-
-Assert fee asset and amount:
-
-    Spot BUY fee = baseQuantity*rate, feeAsset=base asset
-    Spot SELL fee = baseQuantity*fillPrice*rate, feeAsset=USDT
-    Linear Perp fee = baseQuantity*fillPrice*rate, feeAsset=USDT
-
-Assert FullFillResult, Order and Trade retain the same `liquidityRole`, `fee` and
-`feeAsset`; Trade additionally retains `sourceMode` and `providerCode`. Exactly one Trade is
-written per fill. Do not add source columns to Order: V46 intentionally stores execution
-source only on Trade.
 
 - [ ] **Step 2: Write RED no-partial invariant**
 
-Pass fake adapter results with filledQuantity lower than requested base quantity, greater than it,
-null, or with non-zero remainingQuantity. Expected in every case:
+Pass a fake adapter result with filledQuantity != quantity. Expected:
 
     BusinessException("PARTIAL_FILL_NOT_SUPPORTED")
     no Order/Trade/Wallet/Position/Ledger mutation
-
-Validate this before OrderFillService performs its first save, and keep a final defensive
-check there against `order.baseQuantity` (falling back only for pre-Task-6 legacy orders).
-Add the stable code to ErrorCode and its contract test. Update existing tests that accepted PARTIALLY_FILLED to expect
-rejection; do not delete the historical enum because legacy rows remain readable.
 
 - [ ] **Step 3: Write RED lock-wait freshness test**
 
 Resolve a valid snapshot, block on the account lock until expiresAt passes, then release the lock. Assert the coordinator makes zero mutation with the expired snapshot and the caller retries outside the transaction with a newly resolved whole bundle (or returns MARKET_DATA_STALE when no fresh candidate exists).
 
-Also cover symbol/product mismatch, missing Spot bid/ask/last, missing Perp bid/ask/last/mark/index, first-attempt expiry
-followed by one fresh retry, and retry exhaustion. All invalid snapshot cases must make zero
-repository, wallet, position and ledger writes.
+- [ ] **Step 4: Run RED**
 
-- [ ] **Step 4: Write RED pending isolation and concurrency tests**
+    & $mvn -f backend/pom.xml "-Dtest=FullFillCoordinatorTest,TradingWorkflowRegressionProtectionTest" test
 
-Assert:
+- [ ] **Step 5: Implement coordinator**
 
-    each candidate resolves its whole bundle outside the transaction
-    PENDING/trigger/freshness are rechecked after locks
-    stale or failed candidate remains PENDING and retains its hold
-    failure of candidate N does not prevent candidate N+1 from filling
-    two concurrent workers create at most one Trade for one order
-    waiting GTC LIMIT is persisted as maker; immediate LIMIT is taker
-    TradingTransactionExecutor is annotated REQUIRES_NEW
+The coordinator computes price, fee rate, liquidity role and slippage once, then calls OrderFillService. Pending and MARKET paths must no longer duplicate fee math.
 
-- [ ] **Step 5: Run RED**
-
-    & $mvn -f backend/pom.xml "-Dtest=FullFillCoordinatorTest,SimulatedExecutionAdapterFeeTest,OrderFillServiceTest,OrderServiceTest,PendingOrderExecutionServiceTest,SpotSettlementServiceTest,TradingWorkflowRegressionProtectionTest" test
-
-- [ ] **Step 6: Implement coordinator and make the adapter quantity-only**
-
-The coordinator is the sole price, fee rate, fee asset, liquidity role, slippage and source-metadata authority, then calls OrderFillService. Pending and MARKET paths must no longer duplicate that math. FullFillExecutionPath supplies the role decision explicitly. SimulatedExecutionAdapter must not call QuoteService or calculate fees/prices; it may only return or validate an explicit full requested quantity with zero remaining quantity for the DEMO execution intent.
-
-- [ ] **Step 7: Persist one complete Order/Trade fill**
-
-Before the first mutation, reject every non-full adapter/coordinator result. On success set
-Order to FILLED (never write PARTIALLY_FILLED), write exactly one Trade, and copy productType,
-positionSide, marginMode, fee, feeAsset and liquidityRole to both records; copy sourceMode and
-providerCode to Trade only, matching the V46 schema. Spot
-settlement consumes the explicit canonical fee amount/asset instead of deriving a rate;
-reuse PositionEngine and the existing wallet/ledger services.
-
-- [ ] **Step 8: Move network resolution outside transaction and isolate pending orders**
-
-Remove the outer createOrder transaction only where needed so whole-bundle resolution occurs
-before locks, then enter TradingTransactionExecutor for the mutation. Keep cancel/modify
-transactions unchanged. Recheck account, wallets/positions, order state, trigger condition and
-snapshot freshness after locking. Catch failures per pending candidate so the batch continues.
+- [ ] **Step 6: Make each pending order its own transaction**
 
 The scheduler loop must invoke a separate transactional worker per order so one failure cannot roll back the batch.
 
-- [ ] **Step 9: Run GREEN**
+- [ ] **Step 7: Run GREEN**
 
-    & $mvn -f backend/pom.xml "-Dtest=ArchitectureRulesTest,ErrorCodeContractTest,FullFillCoordinatorTest,SimulatedExecutionAdapterFeeTest,OrderFillServiceTest,OrderServiceTest,PendingOrderExecutionServiceTest,SpotSettlementServiceTest,TradingTransactionExecutorTest,TradingWorkflowRegressionProtectionTest" test
+    & $mvn -f backend/pom.xml "-Dtest=FullFillCoordinatorTest,SimulatedExecutionAdapterFeeTest,OrderFillServiceTest,PendingOrderExecutionServiceTest,TradingWorkflowRegressionProtectionTest" test
 
-    & $mvn -f backend/pom.xml test
-
-- [ ] **Step 10: Commit**
+- [ ] **Step 8: Commit**
 
     git add backend/src/main backend/src/test
     git commit -m "refactor: unify demo full-fill execution"
@@ -610,22 +521,14 @@ The scheduler loop must invoke a separate transactional worker per order so one 
 
 **Files:**
 - Create: backend/src/main/java/com/fxplatform/trading/dto/request/CreateOcoOrderRequest.java
-- Create: backend/src/main/java/com/fxplatform/trading/dto/response/OcoOrderGroupResponse.java
+- Create: backend/src/main/java/com/fxplatform/trading/dto/response/OcoOrderResponse.java
 - Create: backend/src/main/java/com/fxplatform/trading/service/QuantityConversionService.java
 - Create: backend/src/main/java/com/fxplatform/trading/service/OrderHoldCalculator.java
 - Create: backend/src/main/java/com/fxplatform/trading/service/OcoOrderService.java
 - Create: backend/src/main/java/com/fxplatform/trading/service/PendingOrderExecutionProcessor.java
-- Modify: backend/src/main/java/com/fxplatform/trading/dto/request/CreateOrderRequest.java
-- Modify: backend/src/main/java/com/fxplatform/trading/service/OrderCommand.java
-- Modify: backend/src/main/java/com/fxplatform/trading/service/OrderCommandFactory.java
-- Modify: backend/src/main/java/com/fxplatform/trading/service/OrderEntityFactory.java
-- Modify: backend/src/main/java/com/fxplatform/trading/service/OrderResponseMapper.java
-- Modify: backend/src/main/java/com/fxplatform/execution/FullFillCoordinator.java
 - Modify: backend/src/main/java/com/fxplatform/risk/service/RiskCheckService.java
-- Modify: backend/src/main/java/com/fxplatform/risk/service/InstrumentRulesEngine.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/OrderService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/PendingOrderExecutionService.java
-- Modify: backend/src/main/java/com/fxplatform/trading/service/OrderFillService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/service/SpotSettlementService.java
 - Modify: backend/src/main/java/com/fxplatform/wallet/service/WalletService.java
 - Modify: backend/src/main/java/com/fxplatform/trading/repository/OrderRepository.java
@@ -634,83 +537,48 @@ The scheduler loop must invoke a separate transactional worker per order so one 
 - Test: backend/src/test/java/com/fxplatform/trading/service/OrderHoldCalculatorTest.java
 - Test: backend/src/test/java/com/fxplatform/trading/service/OcoOrderServiceTest.java
 - Test: backend/src/test/java/com/fxplatform/trading/service/SpotSettlementServiceTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/dto/request/CreateOrderRequestTest.java
-- Test: backend/src/test/java/com/fxplatform/risk/service/InstrumentRulesEngineTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/service/OrderServiceTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/service/PendingOrderExecutionProcessorTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/service/OrderResponseMapperTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/controller/TradingControllerTest.java
-- Test: backend/src/test/java/com/fxplatform/trading/service/Task6PostgresSpotIT.java
 
 **Interfaces:**
-- Spot MARKET BUY consumes a QUOTE USDT budget; its public quantity/unit and
-  `originalQuantity` remain QUOTE, while the backend converts it from the same whole bundle
-  to a step-rounded-down canonical `baseQuantity` before rules and execution. MARKET SELL
-  consumes BASE.
-- LIMIT, STOP_MARKET and both OCO legs consume BASE. Spot persists `CASH`, `BOTH`, GTC and
-  `reduceOnly=false`; reject CONTRACTS, legacy STOP and attached protections.
-- Immediate marketable LIMIT is taker; resting GTC LIMIT is maker. STOP_MARKET uses last for
-  triggering and bid/ask plus slippage for filling, never the trigger price.
-- OCO is two rows in `trading.orders` with one `contingencyGroupId`. Both rows reference the
-  same `holdOwnerOrderId`; only the owner row stores a positive hold. Filling one leg atomically
-  cancels the other, and canceling either leg cancels the group and releases once.
-- Reuse V46/V47; Task 6 adds no table or Flyway migration.
+- Spot MARKET BUY consumes QUOTE USDT budget; MARKET SELL consumes BASE quantity.
+- LIMIT, STOP_MARKET and both OCO legs consume BASE quantity.
+- OCO is two rows in trading.orders with one contingencyGroupId and one holdOwnerOrderId.
 
 - [ ] **Step 1: Write RED quantity and hold tests**
 
 Cover:
 
-    MARKET BUY public contract and originalQuantity stay QUOTE; backend execution is canonical BASE
+    MARKET BUY QUOTE budget is not converted on the client contract
     MARKET SELL, LIMIT, STOP_MARKET and OCO use BASE
-    conversion rounds BASE down to the aggregated instrument step and leaves quote dust available
-    LIMIT BUY hold uses limit price; STOP BUY uses max(trigger, ask) plus slippage; BUY OCO takes max
-    SELL hold is one base quantity; quote holds round upward at wallet scale
-    tick/step/min/max/min-notional come from InstrumentRulesEngine provider-first aggregation
-    P0 Spot makes no QuoteService call and uses one whole bundle per attempt
+    BUY hold includes worst-case spend; SELL hold is base quantity
+    tick/step/min notional come from market.symbols
 
 - [ ] **Step 2: Write RED Spot fee tests**
 
-Assert BUY receives base minus 0.05% taker or 0.02% maker fee with feeAsset=base; SELL receives USDT minus fee with feeAsset=USDT. Assert wallet total=available+locked after every path.
+Assert BUY receives the full filled base quantity while gross quote plus the 0.05% taker or 0.02% maker fee is debited in USDT without exceeding the submitted quote budget; SELL receives USDT minus its USDT fee. Assert wallet total=available+locked after every path.
 
 - [ ] **Step 3: Write RED immediate-limit and pending tests**
 
     BUY limit >= current ask => immediate full fill
     SELL limit <= current bid => immediate full fill
     otherwise PENDING
-    STOP_MARKET uses last price trigger and market execution price
-    already-triggered STOP_MARKET fills immediately; otherwise it stays PENDING
+    STOP_MARKET uses last price trigger
     cancelled pending order releases hold exactly once
-    snapshot stale after lock wait rolls back and re-resolves outside the transaction at most once
 
 - [ ] **Step 4: Write RED OCO matrix**
 
-Cover BUY and SELL price validation, one shared hold/owner, non-owner-leg settlement,
-one-leg-fill-cancels-other, manual cancel cancels the group, ordinary single-leg modify rejection,
-replay/concurrent replay returns one group, fill-vs-cancel rollback safety, and concurrent leg
-triggers create at most one Trade.
+Cover BUY and SELL price validation, one shared hold, one-leg-fill-cancels-other, manual cancel cancels group, replay returns same group, and concurrent leg triggers create at most one Trade.
 
 - [ ] **Step 5: Run RED**
 
-    & $mvn -f backend/pom.xml "-Dtest=CreateOrderRequestTest,QuantityConversionServiceTest,OrderHoldCalculatorTest,InstrumentRulesEngineTest,OrderServiceTest,SpotSettlementServiceTest,OcoOrderServiceTest,PendingOrderExecutionProcessorTest,PendingOrderExecutionServiceTest,OrderResponseMapperTest,TradingControllerTest" test
+    & $mvn -f backend/pom.xml "-Dtest=QuantityConversionServiceTest,OrderHoldCalculatorTest,SpotSettlementServiceTest,OcoOrderServiceTest,PendingOrderExecutionServiceTest" test
 
 - [ ] **Step 6: Implement Spot semantics**
 
-Perform hold and order creation in one account/wallet transaction. Resolve each whole bundle
-outside locks. `PendingOrderExecutionProcessor` defines no second transaction policy; it invokes
-the Task 5 `TradingTransactionExecutor` (`REQUIRES_NEW`) once per candidate. Use account -> sorted
-wallet -> Spot position -> UUID-sorted group-order locks. Recheck status, peer, trigger and freshness
-after locks; claim winner, cancel peer, consume/release the shared hold and fill in one transaction.
-Do not duplicate Task 5 pricing or fee constants; expose a side-effect-free projection from the
-shared policy if conversion/hold calculation requires it.
+Perform hold and order creation in one account/wallet transaction. PendingOrderExecutionProcessor uses REQUIRES_NEW per order. OCO group claim and peer cancellation occur under ordered row locks.
 
 - [ ] **Step 7: Run GREEN and wallet regression**
 
-    & $mvn -f backend/pom.xml "-Dtest=CreateOrderRequestTest,QuantityConversionServiceTest,OrderHoldCalculatorTest,InstrumentRulesEngineTest,OrderServiceTest,SpotSettlementServiceTest,OcoOrderServiceTest,PendingOrderExecutionProcessorTest,PendingOrderExecutionServiceTest,OrderResponseMapperTest,TradingControllerTest,WalletServiceTest,SpotPositionServiceTest,WalletReconciliationServiceTest" test
-
-Run `Task6PostgresSpotIT` explicitly for concurrent group create/fill/cancel, failure rollback,
-non-owner hold consumption, stale lock wait and balance invariants. If Docker is unavailable,
-record the exact skips and do not claim PostgreSQL behavior passed. Then run the full backend suite
-and static-check that P0 Spot has no QuoteService dependency or new PARTIALLY_FILLED write.
+    & $mvn -f backend/pom.xml "-Dtest=QuantityConversionServiceTest,OrderHoldCalculatorTest,SpotSettlementServiceTest,OcoOrderServiceTest,PendingOrderExecutionServiceTest,WalletServiceTest,SpotPositionServiceTest,WalletReconciliationServiceTest" test
 
 - [ ] **Step 8: Commit**
 

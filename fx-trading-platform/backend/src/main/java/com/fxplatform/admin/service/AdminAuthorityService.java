@@ -12,6 +12,7 @@ import com.fxplatform.admin.repository.AdminRoleMenuPermissionRepository;
 import com.fxplatform.admin.repository.AdminRoleRepository;
 import com.fxplatform.admin.repository.AdminUserRoleRepository;
 import com.fxplatform.auth.entity.UserEntity;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -40,10 +41,14 @@ public class AdminAuthorityService {
       return List.copyOf(authorities);
     }
 
-    List<UUID> roleIds = enabledRoleIds(user.getId());
-    if (roleIds.isEmpty()) {
+    List<AdminRoleEntity> roles = enabledRoles(user.getId());
+    if (roles.isEmpty()) {
       return List.copyOf(authorities);
     }
+    roles.forEach(role -> addRoleAuthority(authorities, role));
+    List<UUID> roleIds = roles.stream()
+        .map(AdminRoleEntity::getId)
+        .toList();
     List<AdminRoleMenuPermissionEntity> permissions = enabledPermissions(roleIds);
     if (permissions.isEmpty()) {
       return List.copyOf(authorities);
@@ -54,13 +59,14 @@ public class AdminAuthorityService {
       if (menu == null) {
         continue;
       }
-      add(authorities, menu.getPermissionKey());
-      buttonAuthorities(permission.getButtons()).forEach(value -> add(authorities, value));
+      addPermissionAuthority(authorities, menu.getPermissionKey());
+      buttonAuthorities(permission.getButtons())
+          .forEach(value -> addPermissionAuthority(authorities, value));
     }
     return List.copyOf(authorities);
   }
 
-  private List<UUID> enabledRoleIds(UUID userId) {
+  private List<AdminRoleEntity> enabledRoles(UUID userId) {
     List<UUID> assignedRoleIds = userRoleRepository.selectList(new LambdaQueryWrapper<AdminUserRoleEntity>()
             .eq(AdminUserRoleEntity::getUserId, userId))
         .stream()
@@ -71,15 +77,25 @@ public class AdminAuthorityService {
     if (assignedRoleIds.isEmpty()) {
       return List.of();
     }
-    Set<UUID> activeRoleIds = roleRepository.selectList(new LambdaQueryWrapper<AdminRoleEntity>()
-            .in(AdminRoleEntity::getId, assignedRoleIds)
-            .eq(AdminRoleEntity::getEnabled, true))
-        .stream()
-        .map(AdminRoleEntity::getId)
-        .collect(LinkedHashSet::new, Set::add, Set::addAll);
-    return assignedRoleIds.stream()
-        .filter(activeRoleIds::contains)
-        .toList();
+    Set<UUID> assignedRoleIdSet = new LinkedHashSet<>(assignedRoleIds);
+    Map<UUID, AdminRoleEntity> enabledRolesById = new LinkedHashMap<>();
+    for (AdminRoleEntity role : roleRepository.selectList(new LambdaQueryWrapper<AdminRoleEntity>()
+        .in(AdminRoleEntity::getId, assignedRoleIds)
+        .eq(AdminRoleEntity::getEnabled, true))) {
+      if (role.getId() != null
+          && assignedRoleIdSet.contains(role.getId())
+          && Boolean.TRUE.equals(role.getEnabled())) {
+        enabledRolesById.putIfAbsent(role.getId(), role);
+      }
+    }
+    List<AdminRoleEntity> roles = new ArrayList<>();
+    for (UUID roleId : assignedRoleIds) {
+      AdminRoleEntity role = enabledRolesById.get(roleId);
+      if (role != null) {
+        roles.add(role);
+      }
+    }
+    return List.copyOf(roles);
   }
 
   private List<AdminRoleMenuPermissionEntity> enabledPermissions(List<UUID> roleIds) {
@@ -124,5 +140,32 @@ public class AdminAuthorityService {
     if (StrUtil.isNotBlank(authority)) {
       authorities.add(authority.trim());
     }
+  }
+
+  private void addRoleAuthority(
+      LinkedHashSet<String> authorities,
+      AdminRoleEntity role
+  ) {
+    if (StrUtil.isBlank(role.getRoleCode())) {
+      return;
+    }
+    String authority = role.getRoleCode().trim();
+    if (AdminPermissionCatalog.SUPER_ADMIN.equals(authority)
+        && (!AdminPermissionCatalog.SUPER_ADMIN_ROLE_ID.equals(role.getId())
+            || !Boolean.TRUE.equals(role.getSystemManaged()))) {
+      return;
+    }
+    add(authorities, authority);
+  }
+
+  private void addPermissionAuthority(
+      LinkedHashSet<String> authorities,
+      String authority
+  ) {
+    if (StrUtil.isNotBlank(authority)
+        && AdminPermissionCatalog.SUPER_ADMIN.equals(authority.trim())) {
+      return;
+    }
+    add(authorities, authority);
   }
 }

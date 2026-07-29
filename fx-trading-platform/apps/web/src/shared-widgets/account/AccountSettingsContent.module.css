@@ -1,0 +1,335 @@
+.page {
+  --theme-switcher-heading: var(--user-text);
+  --theme-switcher-muted: var(--user-muted);
+  --theme-switcher-text: var(--user-muted);
+  --theme-switcher-text-strong: var(--user-text);
+  --theme-switcher-border: var(--user-border);
+  --theme-switcher-accent-border: var(--user-primary);
+  --theme-switcher-surface: var(--user-surface-soft);
+  --theme-switcher-surface-active: var(--user-surface);
+  --theme-switcher-focus: color-mix(in srgb, var(--user-accent) 24%, transparent);
+  --theme-switcher-radius: 7px;
+  background: var(--user-page-bg);
+  color: var(--user-text);
+}
+
+.header {
+  border-top-color: var(--user-accent);
+}
+
+.header span {
+  color: var(--user-primary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.settingsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.persistHint {
+  margin: 0 0 14px;
+  border: 1px solid color-mix(in srgb, var(--user-accent) 36%, var(--user-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--user-accent) 9%, var(--user-surface));
+  color: var(--user-primary);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.surface {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid var(--user-border);
+  border-radius: 8px;
+  background: var(--user-surface);
+  padding: 14px;
+  box-shadow: 0 1px 2px var(--theme-shadow-soft);
+}
+
+.surfaceHeader {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--user-border);
+}
+
+.surfaceIcon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--user-border);
+  border-radius: 8px;
+  background: var(--user-surface-soft);
+  color: var(--user-primary);
+}
+
+.surfaceHeader h2 {
+  margin: 0;
+  color: var(--user-text);
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.surfaceHeader p {
+  margin: 2px 0 0;
+  color: var(--user-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.preferenceList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.preferenceList div,
+.securityEntry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  border: 1px solid var(--user-border);
+  border-radius: 8px;
+  background: var(--user-surface-soft);
+  padding: 10px 12px;
+}
+
+.preferenceList dt {
+  color: var(--user-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.preferenceList dd {
+  margin: 0;
+  color: var(--user-text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.preferenceControls {
+  display: grid;
+  gap: 10px;
+}
+
+.selectControl,
+.switchControl,
+.segmentedControl {
+  min-width: 0;
+  border: 1px solid var(--user-border);
+  border-radius: 8px;
+  background: var(--user-surface-soft);
+  padding: 10px 12px;
+}
+
+.selectControl {
+  display: grid;
+  gap: 7px;
+}
+
+.selectControl span,
+.segmentedControl legend {
+  color: var(--user-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.selectControl select {
+  min-height: 38px;
+  width: 100%;
+  border: 1px solid var(--user-border-strong);
+  border-radius: 7px;
+  background: var(--user-surface);
+  color: var(--user-text);
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.selectControl select:focus-visible {
+  border-color: var(--user-accent);
+  outline: 2px solid color-mix(in srgb, var(--user-accent) 24%, transparent);
+  outline-offset: 2px;
+}
+
+.switchControl {
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: auto 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.switchControl input {
+  inline-size: 1px;
+  block-size: 1px;
+  opacity: 0;
+}
+
+.switchVisual {
+  width: 36px;
+  height: 22px;
+  border: 1px solid var(--user-border-strong);
+  border-radius: 999px;
+  background: var(--user-surface);
+  position: relative;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.switchVisual::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--user-muted);
+  transition:
+    background-color 150ms ease,
+    transform 150ms ease;
+}
+
+.switchControl input:checked + .switchVisual {
+  border-color: var(--user-primary);
+  background: var(--user-primary);
+}
+
+.switchControl input:checked + .switchVisual::after {
+  background: var(--user-surface);
+  transform: translateX(14px);
+}
+
+.switchControl input:focus-visible + .switchVisual {
+  outline: 2px solid color-mix(in srgb, var(--user-accent) 24%, transparent);
+  outline-offset: 2px;
+}
+
+.switchControl strong,
+.switchControl small {
+  display: block;
+}
+
+.switchControl strong {
+  color: var(--user-text);
+  font-size: 13px;
+}
+
+.switchControl small {
+  margin-top: 2px;
+  color: var(--user-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.segmentedControl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.segmentGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.segmentGroup button {
+  min-height: 34px;
+  border: 1px solid var(--user-border-strong);
+  border-radius: 7px;
+  background: var(--user-surface);
+  color: var(--user-muted);
+  cursor: pointer;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.segmentGroup button:hover,
+.segmentGroup button:focus-visible,
+.segmentActive {
+  border-color: var(--user-primary);
+  color: var(--user-primary);
+  outline: 0;
+}
+
+.segmentActive {
+  background: var(--user-surface-soft);
+}
+
+.securityEntry {
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+}
+
+.securityEntry strong,
+.securityEntry span {
+  display: block;
+}
+
+.securityEntry strong {
+  color: var(--user-text);
+  font-size: 14px;
+}
+
+.securityEntry span {
+  margin-top: 2px;
+  color: var(--user-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.linkGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.linkGrid a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--user-border);
+  border-radius: 8px;
+  background: var(--user-surface-soft);
+  color: var(--user-text);
+  font-size: 13px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.linkGrid a:hover,
+.linkGrid a:focus-visible {
+  border-color: var(--user-primary);
+  color: var(--user-primary);
+  outline: 0;
+}
+
+[data-platform-view="mobile"] .settingsGrid {
+  grid-template-columns: 1fr;
+}
+
+[data-platform-view="mobile"] .surfaceHeader,
+[data-platform-view="mobile"] .securityEntry,
+[data-platform-view="mobile"] .linkGrid {
+  grid-template-columns: 1fr;
+}
+
+[data-platform-view="mobile"] .securityEntry {
+  align-items: stretch;
+}

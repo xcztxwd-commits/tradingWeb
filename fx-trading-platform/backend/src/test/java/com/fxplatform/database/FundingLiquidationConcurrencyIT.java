@@ -35,6 +35,7 @@ import com.fxplatform.trading.service.OrderService;
 import com.fxplatform.trading.service.SystemCloseOrderService;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -161,18 +162,19 @@ class FundingLiquidationConcurrencyIT {
     assertThat(count("""
         SELECT count(*) FROM trading.funding_settlements
         WHERE position_id = ? AND funding_time = ?
-        """, positionId, rate.getFundingTime())).isEqualTo(1);
+        """, positionId, Timestamp.from(rate.getFundingTime()))).isEqualTo(1);
     assertThat(count("""
         SELECT count(*) FROM ledger.ledger_entries l
         JOIN trading.funding_settlements s ON s.id = l.reference_id
         WHERE s.position_id = ? AND s.funding_time = ?
           AND l.reference_type = 'FUNDING_SETTLEMENT'
           AND l.operation_type = 'FUNDING_FEE'
-        """, positionId, rate.getFundingTime())).isEqualTo(1);
+        """, positionId, Timestamp.from(rate.getFundingTime()))).isEqualTo(1);
     assertThat(decimal("""
         SELECT amount FROM trading.funding_settlements
         WHERE position_id = ? AND funding_time = ?
-        """, positionId, rate.getFundingTime())).isEqualByComparingTo("-0.10000000");
+        """, positionId, Timestamp.from(rate.getFundingTime())))
+        .isEqualByComparingTo("-0.10000000");
     assertThat(decimal("SELECT balance FROM core.trading_accounts WHERE id = ?", fixture.accountId()))
         .isEqualByComparingTo(balanceBefore.subtract(new BigDecimal("0.10000000")));
     assertThat(decimal("SELECT funding_pnl FROM trading.positions WHERE id = ?", positionId))
@@ -253,14 +255,14 @@ class FundingLiquidationConcurrencyIT {
     long settlementCount = count("""
         SELECT count(*) FROM trading.funding_settlements
         WHERE position_id = ? AND funding_time = ?
-        """, positionId, rate.getFundingTime());
+        """, positionId, Timestamp.from(rate.getFundingTime()));
     long fundingLedgerCount = count("""
         SELECT count(*) FROM ledger.ledger_entries l
         JOIN trading.funding_settlements s ON s.id = l.reference_id
         WHERE s.position_id = ? AND s.funding_time = ?
           AND l.reference_type = 'FUNDING_SETTLEMENT'
           AND l.operation_type = 'FUNDING_FEE'
-        """, positionId, rate.getFundingTime());
+        """, positionId, Timestamp.from(rate.getFundingTime()));
 
     assertThat(string("SELECT status FROM trading.positions WHERE id = ?", positionId))
         .isEqualTo("CLOSED");
@@ -346,7 +348,7 @@ class FundingLiquidationConcurrencyIT {
     assertThat(count("""
         SELECT count(*) FROM trading.funding_settlements
         WHERE position_id = ? AND funding_time = ?
-        """, positionId, fundingTime)).isEqualTo(1);
+        """, positionId, Timestamp.from(fundingTime))).isEqualTo(1);
   }
 
   @Test
@@ -478,7 +480,7 @@ class FundingLiquidationConcurrencyIT {
           ?, ?, ?, ?, ?, 0.001, -0.1, 'USDT', 'BOTH', 'CROSS', 100,
           'task17-direct', 49999.9, 0, 0
         )
-        """, settlementId, positionId, accountId, SYMBOL, fundingTime);
+        """, settlementId, positionId, accountId, SYMBOL, Timestamp.from(fundingTime));
   }
 
   private FundingRateEntity fundingRate(Instant fundingTime) {

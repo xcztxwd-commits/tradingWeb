@@ -1,0 +1,152 @@
+.workspace {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: max(1120px, calc(100vh + 440px));
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.grid,
+.split {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.grid {
+  overflow: visible;
+}
+
+.split {
+  display: grid;
+}
+
+.row,
+.column {
+  min-width: 0;
+  min-height: 0;
+}
+
+.panelFrame {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.bottomTerminal {
+  min-width: 0;
+  min-height: 80px;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 8px;
+}
+
+.panelShell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.panelContent {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  display: grid;
+}
+
+.dragHandle {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 11;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--trading-border-strong);
+  border-radius: 5px;
+  background: var(--trading-surface-2);
+  color: var(--trading-muted);
+  cursor: grab;
+  opacity: 0.68;
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.panelFrame:hover .dragHandle,
+.dragHandle:focus-visible {
+  opacity: 1;
+}
+
+.dragHandle:hover,
+.dragHandle:focus-visible {
+  border-color: var(--trading-accent-border);
+  color: var(--trading-accent);
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.tradePanel .dragHandle {
+  display: none;
+}
+
+.dropIndicator {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  background: var(--trading-accent-soft);
+  box-shadow: inset 0 0 0 1px var(--trading-accent-border);
+}
+
+.top {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 26%;
+}
+
+.right {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 26%;
+}
+
+.bottom {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 26%;
+}
+
+.left {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 26%;
+}
+
+.watchlistPanel,
+.headerPanel,
+.chartPanel,
+.marketPanel,
+.tradePanel,
+.accountPanel {
+  min-width: 0;
+  min-height: 0;
+}
+
+.tradePanel .panelShell,
+.tradePanel .panelContent {
+  height: auto;
+  overflow: visible;
+}

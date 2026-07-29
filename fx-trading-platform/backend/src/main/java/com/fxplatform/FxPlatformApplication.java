@@ -4,6 +4,7 @@ import com.fxplatform.admin.service.AdminBootstrapProperties;
 import com.fxplatform.execution.ExecutionProperties;
 import com.fxplatform.market.realtime.MarketRealtimeProperties;
 import com.fxplatform.market.realtime.MarketTestControlProperties;
+import com.fxplatform.tradinglab.report.TradingLabReportProperties;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,7 +24,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
     AdminBootstrapProperties.class,
     ExecutionProperties.class,
     MarketRealtimeProperties.class,
-    MarketTestControlProperties.class
+    MarketTestControlProperties.class,
+    TradingLabReportProperties.class
 })
 @SpringBootApplication
 @MapperScan("com.fxplatform.**.repository")

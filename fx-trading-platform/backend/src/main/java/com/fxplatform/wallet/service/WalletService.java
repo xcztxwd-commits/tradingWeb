@@ -1,6 +1,7 @@
 package com.fxplatform.wallet.service;
 
 import com.fxplatform.common.exception.BusinessException;
+import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.wallet.entity.AssetLedgerEntryEntity;
 import com.fxplatform.wallet.entity.WalletBalanceEntity;
 import com.fxplatform.wallet.enums.AssetLedgerEntryType;
@@ -86,6 +87,78 @@ public class WalletService {
         "DEMO_RESET",
         requestId,
         description);
+    return balance;
+  }
+
+  /**
+   * Sets one validation Spot balance to an absolute target and appends its delta to the asset
+   * ledger. The caller must already hold the validation account lock; this method keeps the
+   * wallet row and ledger mutation inside the caller's transaction.
+   */
+  @Transactional
+  public WalletBalanceEntity setValidationSeedTarget(
+      UUID accountId,
+      WalletType walletType,
+      String asset,
+      BigDecimal target,
+      BigDecimal expectedDelta,
+      UUID seedId
+  ) {
+    if (accountId == null || walletType != WalletType.SPOT || seedId == null) {
+      throw new BusinessException(
+          "VALIDATION_SEED_INVALID",
+          "Validation seed requires a Spot wallet, account id and seed id");
+    }
+    String normalizedAsset = normalizeAsset(asset);
+    BigDecimal normalizedTarget = exactValidationMoney(target, false);
+    BigDecimal normalizedExpectedDelta = exactValidationMoney(expectedDelta, true);
+    WalletBalanceEntity balance = getOrCreateBalance(accountId, walletType, normalizedAsset);
+    AssetLedgerEntryEntity existing = findExistingOperation(
+        balance,
+        AssetLedgerEntryType.VALIDATION_SEED.name(),
+        "VALIDATION_SEED",
+        seedId);
+    if (existing != null) {
+      if (!AssetLedgerEntryType.VALIDATION_SEED.name().equals(existing.getEntryType())
+          || !AssetLedgerEntryType.VALIDATION_SEED.name().equals(existing.getOperationType())
+          || existing.getAmount() == null
+          || existing.getBalanceAfter() == null
+          || existing.getAmount().compareTo(normalizedExpectedDelta) != 0
+          || existing.getBalanceAfter().compareTo(normalizedTarget) != 0
+          || balance.getTotal() == null
+          || balance.getAvailable() == null
+          || balance.getLocked() == null
+          || balance.getTotal().compareTo(normalizedTarget) != 0
+          || balance.getAvailable().compareTo(normalizedTarget) != 0
+          || balance.getLocked().compareTo(BigDecimal.ZERO) != 0) {
+        throw new BusinessException(
+            "VALIDATION_SEED_CONFLICT",
+            "Existing validation seed wallet operation does not match the requested target");
+      }
+      return balance;
+    }
+
+    BigDecimal currentTotal = exactValidationMoney(balance.getTotal(), false);
+    BigDecimal currentAvailable = exactValidationMoney(balance.getAvailable(), false);
+    BigDecimal currentLocked = exactValidationMoney(balance.getLocked(), false);
+    if (currentLocked.signum() != 0
+        || currentTotal.compareTo(currentAvailable.add(currentLocked)) != 0
+        || normalizedTarget.subtract(currentTotal).compareTo(normalizedExpectedDelta) != 0) {
+      throw new BusinessException(
+          "VALIDATION_SEED_CONFLICT",
+          "Validation seed wallet state changed after the pristine snapshot");
+    }
+
+    balance.setTotal(normalizedTarget);
+    balance.setAvailable(normalizedTarget);
+    balance.setLocked(BigDecimal.ZERO.setScale(MONEY_SCALE, RoundingMode.UNNECESSARY));
+    persist(
+        balance,
+        normalizedExpectedDelta,
+        AssetLedgerEntryType.VALIDATION_SEED.name(),
+        "VALIDATION_SEED",
+        seedId,
+        "Set validation initial Spot balance");
     return balance;
   }
 
@@ -314,7 +387,7 @@ public class WalletService {
     if (findExistingOperation(balance, entryType, referenceType, referenceId) != null) {
       return balance;
     }
-    ensureEnough(balance.getAvailable(), normalizedAmount, "AVAILABLE_BALANCE_NOT_ENOUGH",
+    ensureEnough(balance.getAvailable(), normalizedAmount, ErrorCode.INSUFFICIENT_BALANCE,
         "Available balance is not enough");
     balance.setTotal(scale(balance.getTotal().subtract(normalizedAmount)));
     balance.setAvailable(scale(balance.getAvailable().subtract(normalizedAmount)));
@@ -379,7 +452,7 @@ public class WalletService {
     if (findExistingOperation(balance, entryType, referenceType, referenceId) != null) {
       return balance;
     }
-    ensureEnough(balance.getAvailable(), normalizedAmount, "AVAILABLE_BALANCE_NOT_ENOUGH",
+    ensureEnough(balance.getAvailable(), normalizedAmount, ErrorCode.INSUFFICIENT_BALANCE,
         "Available balance is not enough");
     balance.setAvailable(scale(balance.getAvailable().subtract(normalizedAmount)));
     balance.setLocked(scale(balance.getLocked().add(normalizedAmount)));
@@ -601,6 +674,26 @@ public class WalletService {
 
   private static BigDecimal scale(BigDecimal value) {
     return value.setScale(MONEY_SCALE, RoundingMode.HALF_UP);
+  }
+
+  private static BigDecimal exactValidationMoney(BigDecimal value, boolean signed) {
+    if (value == null || (!signed && value.signum() < 0) || value.scale() > MONEY_SCALE) {
+      throw new BusinessException("VALIDATION_SEED_INVALID", "Validation seed amount is invalid");
+    }
+    try {
+      BigDecimal normalized = value.setScale(MONEY_SCALE, RoundingMode.UNNECESSARY);
+      if (normalized.precision() > 24) {
+        throw new BusinessException(
+            "VALIDATION_SEED_INVALID",
+            "Validation seed amount exceeds NUMERIC(24,8)");
+      }
+      return normalized;
+    } catch (ArithmeticException ex) {
+      throw new BusinessException(
+          "VALIDATION_SEED_INVALID",
+          "Validation seed amount precision is invalid",
+          ex);
+    }
   }
 
   private static void ensureEnough(

@@ -7,23 +7,23 @@ const assetsDir = join(projectRoot, 'apps/web/dist/assets')
 
 const budgets = [
   {
-    label: 'TradingPage JS',
-    pattern: /^TradingPage-.*\.js$/,
+    label: 'TradingRoute + PcTradingTerminal JS',
+    patterns: [/^TradingRoute-.*\.js$/, /^PcTradingTerminal-.*\.js$/],
     maxBytes: 380_000
   },
   {
     label: 'MobileTradingTerminal JS',
-    pattern: /^MobileTradingTerminal-.*\.js$/,
+    patterns: [/^MobileTradingTerminal-.*\.js$/],
     maxBytes: 20_000
   },
   {
     label: 'IndicatorSettingsModal JS',
-    pattern: /^IndicatorSettingsModal-.*\.js$/,
+    patterns: [/^IndicatorSettingsModal-.*\.js$/],
     maxBytes: 20_000
   },
   {
     label: 'ChartDrawingToolbar JS',
-    pattern: /^ChartDrawingToolbar-.*\.js$/,
+    patterns: [/^ChartDrawingToolbar-.*\.js$/],
     maxBytes: 80_000
   }
 ]
@@ -37,23 +37,25 @@ const failures = []
 const report = []
 
 for (const budget of budgets) {
-  const matches = files.filter((file) => budget.pattern.test(file))
-  if (matches.length === 0) {
-    failures.push(`Missing required chunk: ${budget.label}`)
-    continue
+  const matchedFiles = []
+  for (const pattern of budget.patterns) {
+    const matches = files.filter((file) => pattern.test(file))
+    if (matches.length === 0) {
+      failures.push(`Missing required chunk for ${budget.label}: ${pattern}`)
+    }
+    matchedFiles.push(...matches)
   }
 
-  for (const file of matches) {
-    const size = statSync(join(assetsDir, file)).size
-    report.push({ label: budget.label, file, size, maxBytes: budget.maxBytes })
-    if (size > budget.maxBytes) {
-      failures.push(`${budget.label} is ${size} bytes, expected <= ${budget.maxBytes} bytes (${file})`)
-    }
+  const uniqueFiles = [...new Set(matchedFiles)]
+  const size = uniqueFiles.reduce((total, file) => total + statSync(join(assetsDir, file)).size, 0)
+  report.push({ label: budget.label, files: uniqueFiles, size, maxBytes: budget.maxBytes })
+  if (uniqueFiles.length > 0 && size > budget.maxBytes) {
+    failures.push(`${budget.label} is ${size} bytes, expected <= ${budget.maxBytes} bytes (${uniqueFiles.join(', ')})`)
   }
 }
 
 for (const item of report) {
-  console.log(`${item.label}: ${item.size}/${item.maxBytes} bytes (${item.file})`)
+  console.log(`${item.label}: ${item.size}/${item.maxBytes} bytes (${item.files.join(', ') || 'missing'})`)
 }
 
 if (failures.length > 0) {

@@ -50,7 +50,6 @@ const jaJP = {
     loadingData: 'データを読み込み中。',
     loadFailed: '読み込みに失敗しました',
     empty: 'データがありません',
-    placeholderPageMessage: 'このページの業務入口は予約済みです。今後、対応データと表を追加します。',
     loginRequired: 'ログインが必要です',
     goLogin: 'ログインへ',
     previousPage: '前へ',
@@ -683,6 +682,8 @@ const jaJP = {
     timelineFilled: '約定',
     timelineCanceled: '取消',
     cancel: '注文取消',
+    cancelConfirm: 'この注文をキャンセルしますか？',
+    cancelConfirmBody: '現在の {{symbol}} 注文のキャンセルを確認してください。',
     modify: '変更',
     modifyOrder: '注文変更',
     cancelUnavailable: '現在の注文は取消できません。',
@@ -828,6 +829,12 @@ const jaJP = {
     }
   },
   assets: {
+    transferAmountInvalid: '0 より大きい振替金額を入力してください。',
+    transferBalanceInsufficient: '振替金額は振替元の利用可能残高以下にしてください。',
+    transferCompleted: '{{amount}} USDT を振替しました（{{direction}}）。',
+    transferFailed: '{{message}}',
+    resetCompleted: 'Demo アカウントをリセットしました。',
+    resetFailed: '{{message}}',
     walletTitle: '資産',
     walletSummary: '資産概要、入金入口、出金入口、資金履歴、アドレス帳入口を管理します。現在はシミュレーション資金台帳です。',
     loginMessage: 'ログインするとシミュレーション資金台帳の確認と入出金申請ができます。',
@@ -1187,6 +1194,7 @@ const jaJP = {
     }
   },
   account: {
+    dataUnavailable: '{{message}}',
     title: 'マイページ',
     summary: 'モバイル向けのアカウント入口。資産、セキュリティ、設定へアクセスできます。',
     entryTitle: 'アカウント入口',

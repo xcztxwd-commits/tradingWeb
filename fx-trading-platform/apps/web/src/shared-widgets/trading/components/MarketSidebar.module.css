@@ -1,0 +1,252 @@
+.sidebar {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 52px auto auto minmax(0, 1fr);
+  border: 1px solid var(--trading-border);
+  border-radius: 8px;
+  background: var(--trading-surface);
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 13px;
+  border-bottom: 1px solid var(--trading-border);
+}
+
+.header h2 {
+  margin: 0;
+  color: var(--trading-heading);
+  font-size: 14px;
+}
+
+.header span {
+  color: var(--trading-subtle);
+  font-size: 12px;
+}
+
+.search {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px;
+  border: 1px solid var(--trading-border-strong);
+  border-radius: 6px;
+  background: var(--trading-surface-2);
+  color: var(--trading-subtle);
+  padding: 0 10px;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.search:focus-within {
+  border-color: var(--trading-accent-border);
+  background: var(--trading-field-bg);
+  box-shadow: none;
+}
+
+.search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--trading-heading);
+  font-size: 13px;
+}
+
+[data-platform-view='mobile'] .search input {
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.search input::placeholder {
+  color: var(--trading-faint);
+}
+
+.tabs {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 0 10px 10px;
+  scrollbar-width: none;
+}
+
+.tabs button {
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--trading-muted);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 120ms ease;
+}
+
+.tabs button:hover {
+  border-color: var(--trading-border-strong);
+  color: var(--trading-text-strong);
+}
+
+.tabs button:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
+}
+
+.tabs button:active {
+  transform: scale(0.97);
+}
+
+.tabs .activeTab {
+  border-color: transparent;
+  border-bottom-color: var(--trading-accent);
+  background: transparent;
+  color: var(--trading-text-strong);
+}
+
+.list {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-color: var(--trading-border-strong) transparent;
+}
+
+.row {
+  position: relative;
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 1fr 30px;
+  border-top: 1px solid var(--trading-border-soft);
+  background: var(--trading-surface);
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.row:hover {
+  background: var(--trading-surface-3);
+}
+
+.selected {
+  background: var(--theme-overlay-subtle);
+  border-color: var(--trading-border-soft);
+  box-shadow: inset 2px 0 0 var(--trading-accent);
+}
+
+.rowMain {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 0 0 0 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rowMain:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: -2px;
+  box-shadow: inset 0 0 0 1px var(--trading-accent-border);
+}
+
+.symbolCell,
+.priceCell {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.symbolLine {
+  color: var(--trading-heading);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.symbolCell small {
+  color: var(--trading-subtle);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.priceCell {
+  justify-items: end;
+}
+
+.priceCell strong {
+  color: var(--trading-text);
+  font-size: 13px;
+}
+
+.priceCell small {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.star {
+  width: 28px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--trading-faint);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    transform 120ms ease,
+    filter 140ms ease;
+}
+
+.star:hover,
+.starActive {
+  color: var(--trading-accent);
+}
+
+.star:focus-visible {
+  outline: 2px solid var(--trading-accent-border);
+  outline-offset: -3px;
+  color: var(--trading-accent);
+}
+
+.star:active {
+  transform: scale(0.94);
+}
+
+.positive {
+  color: var(--trading-buy-strong) !important;
+}
+
+.negative {
+  color: var(--trading-sell-strong) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search,
+  .tabs button,
+  .row,
+  .star {
+    transition: none;
+  }
+}

@@ -10,13 +10,28 @@ const limits = [
   [resolve(repoRoot, 'src/Chart.ts'), 'src/Chart.ts', 1450],
   [resolve(repoRoot, 'src/common/EventHandler.ts'), 'src/common/EventHandler.ts', 1000],
   [
-    resolve(platformRoot, 'apps/web/src/pages/trading/TradingPage.tsx'),
-    'fx-trading-platform/apps/web/src/pages/trading/TradingPage.tsx',
+    resolve(platformRoot, 'apps/web/src/routes/trading/useTradingRouteController.ts'),
+    'fx-trading-platform/apps/web/src/routes/trading/useTradingRouteController.ts',
     330
   ],
   [
-    resolve(platformRoot, 'apps/web/src/features/trading/components/TradePanel.tsx'),
-    'fx-trading-platform/apps/web/src/features/trading/components/TradePanel.tsx',
+    resolve(platformRoot, 'apps/web/src/pc/pages/trading/PcTradingTerminal.tsx'),
+    'fx-trading-platform/apps/web/src/pc/pages/trading/PcTradingTerminal.tsx',
+    330
+  ],
+  [
+    resolve(platformRoot, 'apps/web/src/mobile/pages/trading/MobileTradingTerminal.tsx'),
+    'fx-trading-platform/apps/web/src/mobile/pages/trading/MobileTradingTerminal.tsx',
+    230
+  ],
+  [
+    resolve(platformRoot, 'apps/web/src/shared-widgets/trading/order-form/useTradePanelController.ts'),
+    'fx-trading-platform/apps/web/src/shared-widgets/trading/order-form/useTradePanelController.ts',
+    330
+  ],
+  [
+    resolve(platformRoot, 'apps/web/src/shared-widgets/trading/order-form/TradePanel.tsx'),
+    'fx-trading-platform/apps/web/src/shared-widgets/trading/order-form/TradePanel.tsx',
     230
   ],
   [

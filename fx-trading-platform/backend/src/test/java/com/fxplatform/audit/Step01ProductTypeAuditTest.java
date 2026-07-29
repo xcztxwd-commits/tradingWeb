@@ -72,9 +72,9 @@ class Step01ProductTypeAuditTest {
         "apps",
         "web",
         "src",
-        "features",
+        "shared-widgets",
         "trading",
-        "components",
+        "order-form",
         "tradePanelMarket.ts"));
 
     assertThat(tradePanelMarket)

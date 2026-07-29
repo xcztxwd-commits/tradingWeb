@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 @Component
-@Profile("!dev & !test")
+@Profile("!dev & !test & !scenario-it")
 public class ProductionSecuritySettingsValidator implements ApplicationRunner {
 
   private static final String DEFAULT_JWT_SECRET = "change_me_to_long_random_secret_at_least_32_chars";

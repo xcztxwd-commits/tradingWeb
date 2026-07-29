@@ -44,3 +44,7 @@ export const mobileNavItems: AppNavItem[] = [
     ]
   }
 ]
+
+export function isConfiguredNavPathActive(item: AppNavItem, pathname: string) {
+  return item.activePaths?.some((path) => pathname === path || pathname.startsWith(`${path}/`)) ?? false
+}

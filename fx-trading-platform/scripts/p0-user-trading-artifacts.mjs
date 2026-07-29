@@ -357,7 +357,7 @@ const DOMAIN_ENUM_FIELDS = new Map([
   ['producttype', new Set(['FX_MARGIN', 'CRYPTO_SPOT', 'LINEAR_PERP', 'INVERSE_PERP'])],
   ['instrumenttype', new Set(['FX_MARGIN', 'CRYPTO_SPOT', 'LINEAR_PERP', 'INVERSE_PERP'])],
   ['accounttype', new Set(['DEMO', 'LIVE'])],
-  ['authoritybundlefixture', new Set(['PASS', 'FAIL'])],
+  ['authoritybundlefixture', new Set(['PASS', 'BLOCKED'])],
   ['feeasset', ASSET_VALUES],
   ['asset', ASSET_VALUES],
   ['currency', ASSET_VALUES],
@@ -435,9 +435,12 @@ const DECIMAL_FIELDS = new Set([
 ])
 const INTEGER_FIELDS = new Set([
   'adllevel',
+  'attempt',
+  'durationms',
   'errors',
   'failures',
   'leverage',
+  'profileattempt',
   'skipped',
   'slot',
   'tests',
@@ -476,7 +479,11 @@ const P0_SUREFIRE_CLASSES = new Set([
   'DemoTradingConcurrencyIT',
   'PerpetualPositionConcurrencyIT',
   'ProtectionOrderConcurrencyIT',
-  'FundingLiquidationConcurrencyIT'
+  'FundingLiquidationConcurrencyIT',
+  'DepthPendingExecutionPostgresIT'
+])
+const P0_SUREFIRE_REQUIRED_TEST_COUNTS = new Map([
+  ['DepthPendingExecutionPostgresIT', 4]
 ])
 const SCALAR_ARRAY_FIELDS = new Map([
   ['caseids', 'caseid'],
@@ -492,6 +499,8 @@ const INVALID_HEADER_VALUE = /[\u0000-\u0008\u000a-\u001f\u007f]/
 const RAW_HTTP_REQUEST_TARGET_FIELDS = new Set(['endpoint', 'url'])
 const RAW_HTTP_REQUEST_DETAIL_FIELDS = new Set(['headers', 'body', 'data', 'postdata', 'payload'])
 const NETWORK_REQUEST_BODY_FIELDS = new Set(['body', 'postdata', 'payload'])
+const ARTIFACT_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/
+const CANONICAL_ARTIFACT_PATH = /^(?!\/)(?![A-Za-z]:)(?!.*\\)(?!.*(?:^|\/)\.{1,2}(?:\/|$))[^\/\u0000-\u001f\u007f]+(?:\/[^\/\u0000-\u001f\u007f]+)*$/
 const XML_WHITESPACE = /[ \t\r\n]/
 const XML_WHITESPACE_ONLY = /^[ \t\r\n]*$/
 // Filesystem timestamp rounding can put a freshly written report slightly ahead of wall time.
@@ -514,6 +523,7 @@ const CONTRACT_STRUCTURAL_FIELDS = new Set([
   'action',
   'apievidence',
   'arbitraryevidence',
+  'artifacthashes',
   'blocker',
   'cases',
   'catalog',
@@ -556,12 +566,14 @@ const CONTRACT_STRUCTURAL_FIELDS = new Set([
   'modifiedat',
   'nested',
   'networkevidence',
+  'oracleevidence',
   'note',
   'ordinary',
   'order',
   'orderstatuses',
   'ordertypes',
   'origins',
+  'oracleevidence',
   'outcome',
   'position',
   'positionsides',
@@ -820,6 +832,7 @@ function redactValue(value, key = '') {
     return undefined
   }
   if (semanticKey === 'definitions') return sanitizeDefinitions(value)
+  if (semanticKey === 'artifacthashes') return sanitizeArtifactHashes(value)
   if (RUN_STATE_IDENTITY_KEYS.has(semanticKey)) {
     return sanitizeRunStateIdentity(semanticKey, value)
   }
@@ -874,6 +887,18 @@ function redactValue(value, key = '') {
     defineOwnData(redacted, 'value', REDACTED)
   }
   return redacted
+}
+
+function sanitizeArtifactHashes(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const sanitized = ownDataDictionary()
+  for (const [path, hash] of Object.entries(value)) {
+    if (!CANONICAL_ARTIFACT_PATH.test(path)
+      || typeof hash !== 'string'
+      || !ARTIFACT_HASH_PATTERN.test(hash)) return undefined
+    defineOwnData(sanitized, path, hash)
+  }
+  return sanitized
 }
 
 export function redactNetworkEntry(entry) {
@@ -1525,7 +1550,8 @@ function coversRequiredSubruns(result, definition) {
   if (!result || typeof result !== 'object' || Array.isArray(result)
     || ownDataDescriptor(result, 'id')?.value !== definition.id
     || ownDataDescriptor(result, 'status')?.value !== 'PASS'
-    || ownDataDescriptor(result, 'scopeComplete')?.value !== true) return false
+    || ownDataDescriptor(result, 'scopeComplete')?.value !== true
+    || !completePassEvidence(result, definition)) return false
   const subruns = ownDataDescriptor(result, 'subruns')?.value
   if (!Array.isArray(subruns) || subruns.length !== definition.requiredSubruns.length) {
     return false
@@ -1655,6 +1681,23 @@ function validAggregateResultScalars(result) {
   ))
 }
 
+function completePassEvidence(result, definition) {
+  const cleanup = ownDataDescriptor(result, 'cleanup')?.value
+  const financialCalculation = ownDataDescriptor(result, 'financialCalculation')?.value
+  const checks = ownDataDescriptor(financialCalculation, 'checks')?.value
+  if (!cleanup || typeof cleanup !== 'object' || Array.isArray(cleanup)
+    || ownDataDescriptor(cleanup, 'status')?.value !== 'PASS'
+    || !financialCalculation
+    || typeof financialCalculation !== 'object'
+    || Array.isArray(financialCalculation)
+    || ownDataDescriptor(financialCalculation, 'status')?.value !== 'PASS'
+    || !Array.isArray(checks)) {
+    return false
+  }
+  return !/^(?:SPOT|PERP|PROT|BATCH|WALLET|LIFE|FUND|LIQ)-/.test(definition.id)
+    || checks.length > 0
+}
+
 export function aggregateReport(state, results) {
   let stateSnapshot
   let resultsSnapshot
@@ -1733,6 +1776,10 @@ export function aggregateReport(state, results) {
       || (!subrunsFiltered && result.scopeComplete !== true)
       || (subrunsFiltered && result.scopeComplete !== false)) {
       issues.push(`INCOMPLETE_MATRIX: ${definition.id}`)
+      continue
+    }
+    if (!completePassEvidence(result, definition)) {
+      issues.push(`INCOMPLETE_EVIDENCE: ${definition.id}`)
       continue
     }
     counts.PASS += 1
@@ -2092,7 +2139,9 @@ export function parseSurefireReports(reportDir, expectedClasses, invocationStart
       throw new Error(`SUREFIRE_FUTURE_REPORT: ${className}`)
     }
     const suite = matches[0]
+    const requiredTestCount = P0_SUREFIRE_REQUIRED_TEST_COUNTS.get(className)
     if (!Number.isSafeInteger(suite.tests) || suite.tests <= 0
+      || (requiredTestCount !== undefined && suite.tests !== requiredTestCount)
       || suite.testcaseCount !== suite.tests
       || suite.skipped !== 0 || suite.failures !== 0 || suite.errors !== 0
       || Object.values(suite.outcomeElements).some((count) => count > 0)) {

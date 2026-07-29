@@ -17,6 +17,7 @@ import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.exception.ErrorCode;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.DemoExecutionGuard;
+import com.fxplatform.execution.ExecutableMarketSnapshot;
 import com.fxplatform.execution.FullFillCoordinator;
 import com.fxplatform.market.model.CandleRequest;
 import com.fxplatform.market.model.MarketSourceMode;
@@ -48,6 +49,7 @@ import com.fxplatform.trading.repository.PositionRepository;
 import com.fxplatform.wallet.repository.WalletBalanceRepository;
 import com.fxplatform.wallet.service.WalletService;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -97,6 +99,7 @@ class Task10PostgresProtectionIT {
   @Autowired DemoAccountLifecycleService lifecycleService;
   @Autowired OrderService orderService;
   @Autowired SystemCloseOrderService systemCloseOrderService;
+  @Autowired TrailingStopService trailingStopService;
   @Autowired ProtectionOrderService protectionOrderService;
   @Autowired TradingSettingsService settingsService;
   @Autowired OrderRepository orderRepository;
@@ -234,7 +237,7 @@ class Task10PostgresProtectionIT {
     assertDecimal("0.00000000", "SELECT initial_margin FROM trading.positions WHERE id = ?", positionId);
     assertDecimal("0.00000000", "SELECT maintenance_margin FROM trading.positions WHERE id = ?", positionId);
     assertDecimal("0.00000000", "SELECT notional FROM trading.positions WHERE id = ?", positionId);
-    assertDecimal("98.99010000", "SELECT mark_price FROM trading.positions WHERE id = ?", positionId);
+    assertDecimal("100.0000000000", "SELECT mark_price FROM trading.positions WHERE id = ?", positionId);
     assertDecimal("-2.02000000", "SELECT realized_pnl FROM trading.positions WHERE id = ?", positionId);
     assertThat(count("""
         SELECT count(*) FROM trading.orders
@@ -261,7 +264,7 @@ class Task10PostgresProtectionIT {
           AND operation_type = 'MARGIN_RELEASE'
         """, fixture.accountId(), positionId)).isEqualTo(1);
     assertAccount(
-        fixture, "49997.88000000", "49997.88000000", "0.00000000", "49997.88000000");
+        fixture, "49997.87999990", "49997.87999990", "0.00000000", "49997.87999990");
   }
 
   @Test
@@ -522,9 +525,18 @@ class Task10PostgresProtectionIT {
 
     stubBundle(bundle("119", "121", "90", "120"));
     assertThat(protectiveService().executeProtectiveOrders()).isEqualTo(1);
-    BigDecimal makerHold = decimal(
+    assertDecimal("0.06050000",
         "SELECT hold_amount FROM trading.orders WHERE id = ?", makerProtection.id());
-    assertThat(makerHold).isPositive();
+    assertThat(count("""
+        SELECT count(*) FROM ledger.ledger_entries
+        WHERE account_id = ? AND reference_type = 'ORDER' AND reference_id = ?
+          AND operation_type = 'ORDER_HOLD'
+        """, makerFixture.accountId(), makerProtection.id())).isEqualTo(1);
+    assertDecimal("0.06050000", """
+        SELECT amount FROM ledger.ledger_entries
+        WHERE account_id = ? AND reference_type = 'ORDER' AND reference_id = ?
+          AND operation_type = 'ORDER_HOLD'
+        """, makerFixture.accountId(), makerProtection.id());
     assertThat(string("SELECT status FROM trading.orders WHERE id = ?", makerProtection.id()))
         .isEqualTo("PENDING");
     assertThat(string("SELECT order_type FROM trading.orders WHERE id = ?", makerProtection.id()))
@@ -540,10 +552,28 @@ class Task10PostgresProtectionIT {
     assertThat(string("SELECT status FROM trading.orders WHERE id = ?", makerProtection.id()))
         .isEqualTo("FILLED");
     assertDecimal("0.00000000", "SELECT hold_amount FROM trading.orders WHERE id = ?", makerProtection.id());
-    assertDecimal("121.00000000", "SELECT price FROM trading.trades WHERE order_id = ?", makerProtection.id());
+    assertDecimal("122.00000000", "SELECT price FROM trading.trades WHERE order_id = ?", makerProtection.id());
     assertThat(string("SELECT liquidity_role FROM trading.trades WHERE order_id = ?", makerProtection.id()))
         .isEqualTo("MAKER");
-    assertSingleOrderRelease(makerFixture.accountId(), makerProtection.id(), makerHold);
+    assertThat(count("""
+        SELECT count(*) FROM ledger.ledger_entries
+        WHERE account_id = ? AND reference_type = 'ORDER' AND reference_id = ?
+          AND operation_type = 'ORDER_HOLD'
+        """, makerFixture.accountId(), makerProtection.id())).isEqualTo(2);
+    assertDecimal("0.00050000", """
+        SELECT amount FROM ledger.ledger_entries
+        WHERE account_id = ? AND reference_type = 'ORDER' AND reference_id = ?
+          AND operation_type = 'ORDER_HOLD'
+        ORDER BY sequence_no DESC
+        LIMIT 1
+        """, makerFixture.accountId(), makerProtection.id());
+    assertDecimal("0.06100000", """
+        SELECT sum(amount) FROM ledger.ledger_entries
+        WHERE account_id = ? AND reference_type = 'ORDER' AND reference_id = ?
+          AND operation_type = 'ORDER_HOLD'
+        """, makerFixture.accountId(), makerProtection.id());
+    assertSingleOrderRelease(
+        makerFixture.accountId(), makerProtection.id(), new BigDecimal("0.06100000"));
 
     Fixture cancelFixture = createFixture("limit-cancel");
     stubBundle(bundle("99", "101", "100", "100"));
@@ -769,6 +799,291 @@ class Task10PostgresProtectionIT {
         """, raceFixture.accountId());
   }
 
+  @Test
+  void concurrentTrailingCreationReplaysSameFingerprintAfterAccountLock() throws Exception {
+    Fixture fixture = createFixture("trailing-create-replay");
+    PerpetualMarketBundle market = bundle("99", "101", "100", "100");
+    stubBundle(market);
+    createOrder(
+        fixture, OrderSide.BUY, OrderType.MARKET, "1", null, null,
+        PositionSide.BOTH, MarginMode.CROSS, false, List.of());
+    CreateOrderRequest request = trailingRequest(
+        fixture, "task10-trailing-concurrent-replay", "5", null);
+    CyclicBarrier outerLookupBarrier = new CyclicBarrier(2);
+    stubBundleAtOuterLookupBarrier(market, outerLookupBarrier);
+
+    ExecutorService workers = Executors.newFixedThreadPool(2);
+    Future<OrderResponse> left = workers.submit(
+        () -> orderService.createOrder(fixture.principal(), request));
+    Future<OrderResponse> right = workers.submit(
+        () -> orderService.createOrder(fixture.principal(), request));
+    OrderResponse first;
+    OrderResponse second;
+    try {
+      first = left.get(30, SECONDS);
+      second = right.get(30, SECONDS);
+    } finally {
+      workers.shutdownNow();
+    }
+
+    assertThat(first.id()).isEqualTo(second.id());
+    assertThat(count("""
+        SELECT count(*) FROM trading.orders
+        WHERE account_id = ? AND idempotency_key = ?
+          AND order_type = 'TRAILING_STOP_MARKET'
+          AND status = 'PENDING_ACTIVATION'
+        """, fixture.accountId(), request.idempotencyKey())).isEqualTo(1);
+    assertThat(string("SELECT request_fingerprint FROM trading.orders WHERE id = ?", first.id()))
+        .isEqualTo(OrderRequestFingerprint.calculate(request));
+  }
+
+  @Test
+  void concurrentTrailingCreationRejectsChangedFingerprintAfterAccountLock() throws Exception {
+    Fixture fixture = createFixture("trailing-create-conflict");
+    PerpetualMarketBundle market = bundle("99", "101", "100", "100");
+    stubBundle(market);
+    createOrder(
+        fixture, OrderSide.BUY, OrderType.MARKET, "1", null, null,
+        PositionSide.BOTH, MarginMode.CROSS, false, List.of());
+    String key = "task10-trailing-concurrent-conflict";
+    CreateOrderRequest original = trailingRequest(fixture, key, null, "0.0500000000");
+    CreateOrderRequest changed = trailingRequest(fixture, key, null, "0.0600000000");
+    CyclicBarrier outerLookupBarrier = new CyclicBarrier(2);
+    stubBundleAtOuterLookupBarrier(market, outerLookupBarrier);
+
+    ExecutorService workers = Executors.newFixedThreadPool(2);
+    Future<CreateAttempt> left = workers.submit(
+        () -> createAttempt(fixture, original));
+    Future<CreateAttempt> right = workers.submit(
+        () -> createAttempt(fixture, changed));
+    List<CreateAttempt> attempts;
+    try {
+      attempts = List.of(left.get(30, SECONDS), right.get(30, SECONDS));
+    } finally {
+      workers.shutdownNow();
+    }
+
+    assertThat(attempts).filteredOn(attempt -> attempt.orderId() != null).hasSize(1);
+    assertThat(attempts).filteredOn(attempt -> ErrorCode.DUPLICATE_CLIENT_ORDER_ID
+        .equals(attempt.errorCode())).hasSize(1);
+    assertThat(count("""
+        SELECT count(*) FROM trading.orders
+        WHERE account_id = ? AND idempotency_key = ?
+          AND order_type = 'TRAILING_STOP_MARKET'
+        """, fixture.accountId(), key)).isEqualTo(1);
+    assertThat(string("""
+        SELECT request_fingerprint FROM trading.orders
+        WHERE account_id = ? AND idempotency_key = ?
+        """, fixture.accountId(), key)).isIn(
+            OrderRequestFingerprint.calculate(original),
+            OrderRequestFingerprint.calculate(changed));
+  }
+
+  @Test
+  void trailingTriggerWidthMigrationRoundTripsExpandedFirstTickThreshold() {
+    assertThat(jdbcTemplate.queryForObject("""
+        SELECT numeric_precision FROM information_schema.columns
+        WHERE table_schema = 'trading' AND table_name = 'orders'
+          AND column_name = 'trigger_price'
+        """, Integer.class)).isEqualTo(31);
+    assertThat(jdbcTemplate.queryForObject("""
+        SELECT numeric_scale FROM information_schema.columns
+        WHERE table_schema = 'trading' AND table_name = 'orders'
+          AND column_name = 'trigger_price'
+        """, Integer.class)).isEqualTo(10);
+
+    Fixture fixture = createFixture("trailing-expanded-trigger-width");
+    stubBundle(bundle("99", "101", "100", "100"));
+    createOrder(
+        fixture, OrderSide.BUY, OrderType.MARKET, "1", null, null,
+        PositionSide.BOTH, MarginMode.CROSS, false, List.of());
+    OrderResponse carrier = orderService.createOrder(
+        fixture.principal(),
+        trailingRequest(
+            fixture,
+            "task10-trailing-expanded-trigger-width",
+            "100000000000050",
+            null));
+
+    ExecutableMarketSnapshot firstTick = ExecutableMarketSnapshot.from(
+        bundle("0.5", "1.5", "1", "1"));
+    assertThat(trailingStopService.onTick(firstTick)).isZero();
+    assertDecimal(
+        "-100000000000049.0000000000",
+        "SELECT trigger_price FROM trading.orders WHERE id = ?",
+        carrier.id());
+
+    BigDecimal nineteenIntegerDigits =
+        new BigDecimal("2000000000000000000.0000000000");
+    assertThat(jdbcTemplate.update(
+        "UPDATE trading.orders SET trigger_price = ? WHERE id = ?",
+        nineteenIntegerDigits,
+        carrier.id())).isEqualTo(1);
+    BigDecimal stored = decimal(
+        "SELECT trigger_price FROM trading.orders WHERE id = ?", carrier.id());
+    assertThat(stored).isEqualByComparingTo(nineteenIntegerDigits);
+    assertThat(stored.scale()).isEqualTo(10);
+
+    Fixture staticFixture = createFixture("static-trigger-width-boundary");
+    stubBundle(bundle("99", "101", "100", "100"));
+    createOrder(
+        staticFixture, OrderSide.BUY, OrderType.MARKET, "1", null, null,
+        PositionSide.BOTH, MarginMode.CROSS, false, List.of());
+    UUID positionId = openPositionId(staticFixture.accountId(), PositionSide.BOTH);
+    OrderResponse staticProtection = createProtection(
+        staticFixture,
+        positionId,
+        ProtectionType.STOP_LOSS,
+        "0.2500",
+        "90",
+        TriggerExecutionType.MARKET,
+        null);
+    assertThatThrownBy(() -> jdbcTemplate.update(
+        "UPDATE trading.orders SET trigger_price = ? WHERE id = ?",
+        nineteenIntegerDigits,
+        staticProtection.id()))
+        .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    assertDecimal(
+        "90.0000000000",
+        "SELECT trigger_price FROM trading.orders WHERE id = ?",
+        staticProtection.id());
+  }
+
+  @Test
+  void trailingMapperCasHasOneWinnerAndDirectionalScale10RoundTrips() throws Exception {
+    BigDecimal extreme = new BigDecimal("100.1234567890");
+    BigDecimal rate = new BigDecimal("0.1234567890");
+
+    Fixture sellFixture = createFixture("trailing-cas-sell");
+    stubBundle(bundle("99", "101", "100", "100"));
+    createOrder(
+        sellFixture, OrderSide.BUY, OrderType.MARKET, "1", null, null,
+        PositionSide.BOTH, MarginMode.CROSS, false, List.of());
+    OrderResponse sell = orderService.createOrder(
+        sellFixture.principal(),
+        trailingRequest(sellFixture, "task10-trailing-cas-sell", null, rate.toPlainString()));
+    BigDecimal sellExact = extreme.multiply(BigDecimal.ONE.subtract(rate));
+    BigDecimal sellFloor = sellExact.setScale(10, RoundingMode.FLOOR);
+    assertThat(sellExact.scale()).isGreaterThan(10);
+
+    Fixture buyFixture = createFixture("trailing-cas-buy");
+    stubBundle(bundle("99", "101", "100", "100"));
+    createOrder(
+        buyFixture, OrderSide.SELL, OrderType.MARKET, "1", null, null,
+        PositionSide.BOTH, MarginMode.CROSS, false, List.of());
+    OrderResponse buy = orderService.createOrder(
+        buyFixture.principal(),
+        trailingRequest(buyFixture, "task10-trailing-cas-buy", null, rate.toPlainString()));
+    BigDecimal buyExact = extreme.multiply(BigDecimal.ONE.add(rate));
+    BigDecimal buyCeiling = buyExact.setScale(10, RoundingMode.CEILING);
+    assertThat(buyExact.scale()).isGreaterThan(10);
+
+    ExecutableMarketSnapshot precisionTick = ExecutableMarketSnapshot.from(
+        bundle("99", "101", extreme.toPlainString(), extreme.toPlainString()));
+    assertThat(trailingStopService.onTick(precisionTick)).isZero();
+    assertTrailingCasRoundTrip(sell.id(), 1L, extreme, sellFloor);
+    assertTrailingCasRoundTrip(buy.id(), 1L, extreme, buyCeiling);
+
+    assertThat(raceTrailingCas(sell.id(), 1L, extreme, sellFloor))
+        .containsExactlyInAnyOrder(0, 1);
+    assertTrailingCasRoundTrip(sell.id(), 2L, extreme, sellFloor);
+    assertThat(raceTrailingCas(buy.id(), 1L, extreme, buyCeiling))
+        .containsExactlyInAnyOrder(0, 1);
+    assertTrailingCasRoundTrip(buy.id(), 2L, extreme, buyCeiling);
+  }
+
+  @Test
+  void concurrentTrailingTickClosesAndReplaysFinanciallyExactlyOnce() throws Exception {
+    Fixture fixture = createFixture("trailing-trigger-once");
+    stubBundle(bundle("99", "101", "100", "100"));
+    createOrder(
+        fixture, OrderSide.BUY, OrderType.MARKET, "1", null, null,
+        PositionSide.BOTH, MarginMode.CROSS, false, List.of());
+    UUID positionId = openPositionId(fixture.accountId(), PositionSide.BOTH);
+    OrderResponse carrier = orderService.createOrder(
+        fixture.principal(),
+        trailingRequest(fixture, "task10-trailing-trigger-once", "5", null));
+    WalletSnapshot walletBeforeTrigger = walletSnapshot(fixture.accountId());
+    long assetLedgerBeforeTrigger = count(
+        "SELECT count(*) FROM ledger.asset_ledger_entries WHERE account_id = ?",
+        fixture.accountId());
+
+    ExecutableMarketSnapshot activation = ExecutableMarketSnapshot.from(
+        bundle("109", "111", "110", "110"));
+    assertThat(trailingStopService.onTick(activation)).isZero();
+    assertDecimal("110.000000000000", "SELECT trailing_extreme FROM trading.orders WHERE id = ?",
+        carrier.id());
+    assertDecimal("105.0000000000", "SELECT trigger_price FROM trading.orders WHERE id = ?",
+        carrier.id());
+    assertThat(longValue("SELECT version FROM trading.orders WHERE id = ?", carrier.id()))
+        .isEqualTo(1L);
+
+    ExecutableMarketSnapshot trigger = ExecutableMarketSnapshot.from(
+        bundle("104", "106", "105", "105"));
+    CyclicBarrier start = new CyclicBarrier(3);
+    ExecutorService workers = Executors.newFixedThreadPool(2);
+    Future<Integer> left = workers.submit(() -> {
+      start.await(10, SECONDS);
+      return trailingStopService.onTick(trigger);
+    });
+    Future<Integer> right = workers.submit(() -> {
+      start.await(10, SECONDS);
+      return trailingStopService.onTick(trigger);
+    });
+    start.await(10, SECONDS);
+    List<Integer> results;
+    try {
+      results = List.of(left.get(30, SECONDS), right.get(30, SECONDS));
+    } finally {
+      workers.shutdownNow();
+    }
+
+    assertThat(results).allMatch(result -> result == 0 || result == 1);
+    assertThat(results.stream().mapToInt(Integer::intValue).sum()).isGreaterThanOrEqualTo(1);
+    assertThat(string("SELECT status FROM trading.orders WHERE id = ?", carrier.id()))
+        .isEqualTo("FILLED");
+    assertThat(string("SELECT order_type FROM trading.orders WHERE id = ?", carrier.id()))
+        .isEqualTo("MARKET");
+    assertThat(count("SELECT count(*) FROM trading.trades WHERE order_id = ?", carrier.id()))
+        .isEqualTo(1);
+    UUID closeTradeId = uuid("SELECT id FROM trading.trades WHERE order_id = ?", carrier.id());
+    assertThat(count("""
+        SELECT count(*) FROM trading.order_events
+        WHERE order_id = ? AND event_type = 'PROTECTION_TRIGGERED'
+        """, carrier.id())).isEqualTo(1);
+    assertThat(count("""
+        SELECT count(*) FROM trading.order_events
+        WHERE order_id = ? AND event_type = 'ORDER_FILLED'
+        """, carrier.id())).isEqualTo(1);
+    assertThat(string("SELECT status FROM trading.positions WHERE id = ?", positionId))
+        .isEqualTo("CLOSED");
+    assertDecimal("0.00000000", "SELECT margin_held FROM trading.positions WHERE id = ?", positionId);
+    assertDecimal("0.00000000", "SELECT notional FROM trading.positions WHERE id = ?", positionId);
+    assertThat(count("""
+        SELECT count(*) FROM ledger.ledger_entries
+        WHERE account_id = ? AND reference_type = 'POSITION' AND reference_id = ?
+          AND operation_type = 'MARGIN_RELEASE'
+        """, fixture.accountId(), positionId)).isEqualTo(1);
+    assertThat(count("""
+        SELECT count(*) FROM ledger.ledger_entries
+        WHERE account_id = ? AND reference_type = 'POSITION' AND reference_id = ?
+          AND operation_type = 'TRADE_PNL'
+        """, fixture.accountId(), positionId)).isEqualTo(1);
+    assertThat(count("""
+        SELECT count(*) FROM ledger.ledger_entries
+        WHERE account_id = ? AND reference_type = 'TRADE' AND reference_id = ?
+          AND operation_type = 'TRADE_FEE'
+        """, fixture.accountId(), closeTradeId)).isEqualTo(1);
+    assertThat(walletSnapshot(fixture.accountId())).isEqualTo(walletBeforeTrigger);
+    assertThat(count("SELECT count(*) FROM ledger.asset_ledger_entries WHERE account_id = ?",
+        fixture.accountId())).isEqualTo(assetLedgerBeforeTrigger);
+
+    FinancialSnapshot settled = financialSnapshot(fixture.accountId(), positionId, carrier.id());
+    assertThat(trailingStopService.onTick(trigger)).isZero();
+    assertThat(financialSnapshot(fixture.accountId(), positionId, carrier.id()))
+        .isEqualTo(settled);
+  }
+
   private PendingOrderExecutionService pendingService() {
     return new PendingOrderExecutionService(
         orderRepository,
@@ -856,6 +1171,100 @@ class Task10PostgresProtectionIT {
             protections));
   }
 
+  private CreateOrderRequest trailingRequest(
+      Fixture fixture,
+      String key,
+      String trailingDelta,
+      String trailingRate
+  ) {
+    return new CreateOrderRequest(
+        fixture.accountId(),
+        SYMBOL,
+        trailingSide(fixture.accountId()),
+        OrderType.TRAILING_STOP_MARKET,
+        null,
+        null,
+        null,
+        null,
+        key,
+        key,
+        BigDecimal.ONE,
+        null,
+        10,
+        PositionSide.BOTH,
+        QuantityUnit.BASE,
+        MarginMode.CROSS,
+        null,
+        null,
+        true,
+        List.of(),
+        com.fxplatform.trading.enums.TimeInForce.GTC,
+        false,
+        null,
+        trailingDelta == null ? null : new BigDecimal(trailingDelta),
+        trailingRate == null ? null : new BigDecimal(trailingRate));
+  }
+
+  private OrderSide trailingSide(UUID accountId) {
+    String openSide = string("""
+        SELECT side FROM trading.positions
+        WHERE account_id = ? AND symbol = ? AND status = 'OPEN'
+        """, accountId, SYMBOL);
+    return "BUY".equals(openSide) ? OrderSide.SELL : OrderSide.BUY;
+  }
+
+  private CreateAttempt createAttempt(Fixture fixture, CreateOrderRequest request) {
+    try {
+      return new CreateAttempt(
+          orderService.createOrder(fixture.principal(), request).id(),
+          null);
+    } catch (BusinessException exception) {
+      return new CreateAttempt(null, exception.getCode());
+    }
+  }
+
+  private List<Integer> raceTrailingCas(
+      UUID orderId,
+      long expectedVersion,
+      BigDecimal nextExtreme,
+      BigDecimal triggerPrice
+  ) throws Exception {
+    CyclicBarrier start = new CyclicBarrier(3);
+    ExecutorService workers = Executors.newFixedThreadPool(2);
+    Future<Integer> left = workers.submit(() -> {
+      start.await(10, SECONDS);
+      return orderRepository.updateTrailingState(
+          orderId, expectedVersion, nextExtreme, triggerPrice);
+    });
+    Future<Integer> right = workers.submit(() -> {
+      start.await(10, SECONDS);
+      return orderRepository.updateTrailingState(
+          orderId, expectedVersion, nextExtreme, triggerPrice);
+    });
+    start.await(10, SECONDS);
+    try {
+      return List.of(left.get(30, SECONDS), right.get(30, SECONDS));
+    } finally {
+      workers.shutdownNow();
+    }
+  }
+
+  private void assertTrailingCasRoundTrip(
+      UUID orderId,
+      long expectedVersion,
+      BigDecimal expectedExtreme,
+      BigDecimal expectedTrigger
+  ) {
+    assertThat(longValue("SELECT version FROM trading.orders WHERE id = ?", orderId))
+        .isEqualTo(expectedVersion);
+    assertThat(decimal("SELECT trailing_extreme FROM trading.orders WHERE id = ?", orderId))
+        .isEqualByComparingTo(expectedExtreme);
+    BigDecimal storedTrigger = decimal(
+        "SELECT trigger_price FROM trading.orders WHERE id = ?", orderId);
+    assertThat(storedTrigger.scale()).isEqualTo(10);
+    assertThat(storedTrigger).isEqualByComparingTo(expectedTrigger);
+  }
+
   private OrderResponse createProtection(
       Fixture fixture,
       UUID positionId,
@@ -907,6 +1316,18 @@ class Task10PostgresProtectionIT {
     reset(marketBundleResolver);
     when(marketBundleResolver.resolvePerp(eq(SYMBOL), any(CandleRequest.class)))
         .thenReturn(market);
+  }
+
+  private void stubBundleAtOuterLookupBarrier(
+      PerpetualMarketBundle market,
+      CyclicBarrier outerLookupBarrier
+  ) {
+    reset(marketBundleResolver);
+    when(marketBundleResolver.resolvePerp(eq(SYMBOL), any(CandleRequest.class)))
+        .thenAnswer(invocation -> {
+          outerLookupBarrier.await(10, SECONDS);
+          return market;
+        });
   }
 
   private PerpetualMarketBundle bundle(String bid, String ask, String last, String mark) {
@@ -971,6 +1392,84 @@ class Task10PostgresProtectionIT {
         count("SELECT count(*) FROM ledger.ledger_entries WHERE account_id = ?", accountId),
         accountState(accountId),
         positionState(positionId));
+  }
+
+  private FinancialSnapshot financialSnapshot(
+      UUID accountId,
+      UUID positionId,
+      UUID carrierId
+  ) {
+    List<CashLedgerRow> cashLedger = jdbcTemplate.query("""
+        SELECT operation_type, amount, balance_after, reference_type, reference_id, sequence_no
+        FROM ledger.ledger_entries
+        WHERE account_id = ?
+        ORDER BY sequence_no, id
+        """, (rs, rowNum) -> new CashLedgerRow(
+        rs.getString("operation_type"),
+        rs.getBigDecimal("amount"),
+        rs.getBigDecimal("balance_after"),
+        rs.getString("reference_type"),
+        rs.getObject("reference_id", UUID.class),
+        rs.getLong("sequence_no")), accountId);
+    List<TradeRow> trades = jdbcTemplate.query("""
+        SELECT id, order_id, side, lots, price, fee, realized_pnl
+        FROM trading.trades
+        WHERE account_id = ?
+        ORDER BY executed_at, id
+        """, (rs, rowNum) -> new TradeRow(
+        rs.getObject("id", UUID.class),
+        rs.getObject("order_id", UUID.class),
+        rs.getString("side"),
+        rs.getBigDecimal("lots"),
+        rs.getBigDecimal("price"),
+        rs.getBigDecimal("fee"),
+        rs.getBigDecimal("realized_pnl")), accountId);
+    return new FinancialSnapshot(
+        accountState(accountId),
+        positionState(positionId),
+        walletSnapshot(accountId),
+        List.copyOf(cashLedger),
+        List.copyOf(trades),
+        count("SELECT count(*) FROM trading.orders WHERE account_id = ?", accountId),
+        count("SELECT count(*) FROM trading.trades WHERE account_id = ?", accountId),
+        count("""
+            SELECT count(*) FROM trading.order_events
+            WHERE order_id = ? AND event_type = 'PROTECTION_TRIGGERED'
+            """, carrierId),
+        count("""
+            SELECT count(*) FROM trading.order_events
+            WHERE order_id = ? AND event_type = 'ORDER_FILLED'
+            """, carrierId));
+  }
+
+  private WalletSnapshot walletSnapshot(UUID accountId) {
+    List<WalletRow> wallets = jdbcTemplate.query("""
+        SELECT wallet_type, asset, total, available, locked
+        FROM core.wallet_balances
+        WHERE account_id = ?
+        ORDER BY wallet_type, asset
+        """, (rs, rowNum) -> new WalletRow(
+        rs.getString("wallet_type"),
+        rs.getString("asset"),
+        rs.getBigDecimal("total"),
+        rs.getBigDecimal("available"),
+        rs.getBigDecimal("locked")), accountId);
+    List<AssetLedgerRow> assetLedger = jdbcTemplate.query("""
+        SELECT wallet_type, asset, amount, balance_after, operation_type,
+               reference_type, reference_id, sequence_no
+        FROM ledger.asset_ledger_entries
+        WHERE account_id = ?
+        ORDER BY sequence_no, id
+        """, (rs, rowNum) -> new AssetLedgerRow(
+        rs.getString("wallet_type"),
+        rs.getString("asset"),
+        rs.getBigDecimal("amount"),
+        rs.getBigDecimal("balance_after"),
+        rs.getString("operation_type"),
+        rs.getString("reference_type"),
+        rs.getObject("reference_id", UUID.class),
+        rs.getLong("sequence_no")), accountId);
+    return new WalletSnapshot(List.copyOf(wallets), List.copyOf(assetLedger));
   }
 
   private AccountState accountState(UUID accountId) {
@@ -1119,6 +1618,70 @@ class Task10PostgresProtectionIT {
       BigDecimal baseQuantity,
       BigDecimal remainingQuantity,
       long version
+  ) {
+  }
+
+  private record CreateAttempt(UUID orderId, String errorCode) {
+  }
+
+  private record WalletRow(
+      String walletType,
+      String asset,
+      BigDecimal total,
+      BigDecimal available,
+      BigDecimal locked
+  ) {
+  }
+
+  private record AssetLedgerRow(
+      String walletType,
+      String asset,
+      BigDecimal amount,
+      BigDecimal balanceAfter,
+      String operationType,
+      String referenceType,
+      UUID referenceId,
+      long sequenceNo
+  ) {
+  }
+
+  private record WalletSnapshot(
+      List<WalletRow> wallets,
+      List<AssetLedgerRow> assetLedger
+  ) {
+  }
+
+  private record CashLedgerRow(
+      String operationType,
+      BigDecimal amount,
+      BigDecimal balanceAfter,
+      String referenceType,
+      UUID referenceId,
+      long sequenceNo
+  ) {
+  }
+
+  private record TradeRow(
+      UUID id,
+      UUID orderId,
+      String side,
+      BigDecimal lots,
+      BigDecimal price,
+      BigDecimal fee,
+      BigDecimal realizedPnl
+  ) {
+  }
+
+  private record FinancialSnapshot(
+      AccountState account,
+      PositionState position,
+      WalletSnapshot wallet,
+      List<CashLedgerRow> cashLedger,
+      List<TradeRow> tradeRows,
+      long orders,
+      long tradeCount,
+      long protectionTriggered,
+      long orderFilled
   ) {
   }
 }

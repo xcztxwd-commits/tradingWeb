@@ -143,6 +143,19 @@ public class CancelAllOrderService {
         positionId));
   }
 
+  /** Validation-only variant that joins the owning system-step transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void cancelRiskIncreasingSlotStrict(UUID accountId, UUID positionId) {
+    requireId(accountId, "Account id is required");
+    requireId(positionId, "Position id is required");
+    transactionExecutor.executeJoined(() -> cancelLocked(
+        null,
+        accountId,
+        "liquidation-slot:" + positionId,
+        CancellationScope.RISK_INCREASING_SLOT,
+        positionId));
+  }
+
   /** Cancels every active Perpetual order in one position slot after liquidation is confirmed. */
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public void cancelActiveSlot(UUID accountId, UUID positionId) {
@@ -156,10 +169,35 @@ public class CancelAllOrderService {
         positionId));
   }
 
+  /** Validation-only variant that joins the owning system-step transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void cancelActiveSlotStrict(UUID accountId, UUID positionId) {
+    requireId(accountId, "Account id is required");
+    requireId(positionId, "Position id is required");
+    transactionExecutor.executeJoined(() -> cancelLocked(
+        null,
+        accountId,
+        "liquidation-slot-drain:" + positionId,
+        CancellationScope.ACTIVE_SLOT,
+        positionId));
+  }
+
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
   public void cancelActivePerpetual(UUID accountId) {
     requireId(accountId, "Account id is required");
     transactionExecutor.execute(() -> cancelLocked(
+        null,
+        accountId,
+        "liquidation-account:" + accountId,
+        CancellationScope.ACTIVE_LINEAR_PERPETUAL,
+        null));
+  }
+
+  /** Validation-only variant that joins the owning system-step transaction. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void cancelActivePerpetualStrict(UUID accountId) {
+    requireId(accountId, "Account id is required");
+    transactionExecutor.executeJoined(() -> cancelLocked(
         null,
         accountId,
         "liquidation-account:" + accountId,
@@ -205,7 +243,13 @@ public class CancelAllOrderService {
 
     List<OrderEntity> selected = lockedOrders.stream()
         .filter(Objects::nonNull)
-        .sorted(Comparator.comparing(OrderEntity::getId))
+        .sorted(Comparator
+            .comparing(
+                OrderEntity::getClientOrderId,
+                Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(
+                OrderEntity::getId,
+                Comparator.nullsLast(Comparator.naturalOrder())))
         .filter(order -> selectedBy(scope, targetPosition, order))
         .toList();
     validateLockedSnapshot(accountId, scope, selected);
