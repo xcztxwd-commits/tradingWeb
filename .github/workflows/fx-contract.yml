@@ -87,9 +87,14 @@ jobs:
       - name: Start backend
         run: |
           mvn -q -DskipTests -f backend/pom.xml spring-boot:run > backend.log 2>&1 &
-          for attempt in {1..90}; do
+          backend_pid=$!
+          for attempt in {1..180}; do
             if curl -fsS http://localhost:8080/actuator/health > /dev/null; then
               exit 0
+            fi
+            if ! kill -0 "$backend_pid" 2>/dev/null; then
+              cat backend.log
+              exit 1
             fi
             sleep 2
           done
