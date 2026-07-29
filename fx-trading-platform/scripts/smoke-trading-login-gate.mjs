@@ -240,12 +240,10 @@ async function verifyMobileTradeAction({ validToken }) {
   })
   await page.waitForFunction(() => {
     const loginPromptOpen = document.getElementById('trading-login-title') !== null
-    const orderSheetOpen = [...document.querySelectorAll('[aria-hidden="false"]')]
-      .some((element) => {
-        const sheetTitle = element.querySelector('#mobile-order-sheet-title')
-        return sheetTitle !== null && element.querySelector('section[aria-label]') !== null
-      })
-    return orderSheetOpen && !loginPromptOpen
+    const orderSheet = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
+    if (!(orderSheet instanceof HTMLElement)) return false
+    const rect = orderSheet.getBoundingClientRect()
+    return rect.width > 0 && rect.height > 0 && !loginPromptOpen
   }, 'mobile Trade action opens order sheet')
 
   await page.close()
