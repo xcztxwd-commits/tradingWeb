@@ -12,7 +12,7 @@ export function PcDataCollection<T extends object>(props: RouteDataCollectionPro
   const { t } = useTranslation()
   const state = useRouteDataCollection(props.rows, props.pageSize)
   return (
-    <div className="route-data-collection route-data-collection--pc">
+    <div>
       <DataTable
         rows={state.paged.items}
         columns={props.columns}

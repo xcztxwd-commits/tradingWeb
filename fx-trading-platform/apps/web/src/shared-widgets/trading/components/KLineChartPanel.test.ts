@@ -72,6 +72,7 @@ register(
 const { applyAuthoritativeRealtimeQuoteToChart, applyRealtimeQuoteToChart } = await import('./KLineChartPanel.tsx')
 const source = readFileSync(join(currentDir, 'KLineChartPanel.tsx'), 'utf8')
 const chartWorkspaceSource = readFileSync(join(currentDir, 'ChartWorkspace.tsx'), 'utf8')
+const chartThemeSource = readFileSync(join(currentDir, '..', 'chartTheme.ts'), 'utf8')
 const tradingPageSource = [
   readFileSync(join(currentDir, '..', '..', '..', 'routes', 'trading', 'TradingRoute.tsx'), 'utf8'),
   readFileSync(join(currentDir, '..', '..', '..', 'routes', 'trading', 'useTradingRouteController.ts'), 'utf8')
@@ -103,6 +104,10 @@ describe('KLineChartPanel fullscreen control', () => {
 
   it('leaves fullscreen expansion to the outer chart workspace', () => {
     assert.doesNotMatch(styles, /chartPanelExpanded/)
+  })
+
+  it('reserves enough mobile chart height for a 300px candle pane', () => {
+    assert.match(styles, /\[data-platform-view=['"]mobile['"]\]\s+\.klineCanvas\s*\{[^}]*min-height:\s*423px/s)
   })
 })
 
@@ -149,9 +154,9 @@ describe('KLineChartPanel chart instance controls', () => {
     assert.match(source, /chartActionRequest:\s*ChartActionRequest/)
     assert.match(source, /chart\.scrollToRealTime\(160\)/)
     assert.match(source, /const imageBackgroundColor = exportBackgroundColor === defaultChartSettings\.layoutSettings\.background\.color/)
-    assert.match(source, /terminalChartImageBackground\[exportThemeMode\]/)
+    assert.match(source, /chartTheme\.terminalImageBackground\[exportThemeMode\]/)
     assert.match(source, /chart\.getConvertPictureUrl\(true,\s*'png',\s*imageBackgroundColor\)/)
-    assert.match(source, /light:\s*'#ffffff'/)
+    assert.match(chartThemeSource, /terminalImageBackground:\s*\{[\s\S]*dark:\s*'#050505',[\s\S]*light:\s*'#ffffff'[\s\S]*\}/)
     assert.match(source, /downloadChartImage\(/)
     assert.match(source, /const \[chartImagePreview,\s*setChartImagePreview\]/)
     assert.match(source, /setChartImagePreview\(\{\s*imageUrl,\s*symbol:\s*exportSymbol\s*\}\)/)

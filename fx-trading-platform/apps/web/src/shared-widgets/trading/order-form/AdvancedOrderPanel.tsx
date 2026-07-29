@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 
 import { advancedLimitModes, type TradeField, type TradeFormState } from '@fx-platform/frontend-core'
+import styles from './TradePanel.module.css'
 
 type Props = {
   form: TradeFormState
@@ -15,14 +16,14 @@ export function AdvancedOrderPanel({ form, showErrors, fieldErrors, onFieldChang
 
   if (form.strategyType === 'advanced_limit') {
     return (
-      <section className="trade-panel__advanced">
-        <span className="trade-panel__mini-title">{t('trading.advancedLimitMode')}</span>
-        <div className="trade-panel__mode-grid">
+      <section className={styles['trade-panel__advanced']}>
+        <span className={styles['trade-panel__mini-title']}>{t('trading.advancedLimitMode')}</span>
+        <div className={styles['trade-panel__mode-grid']}>
           {advancedLimitModes.map((mode) => (
             <button
               key={mode.value}
               type="button"
-              className={form.advancedLimitMode === mode.value ? 'trade-panel__mode--active' : ''}
+              className={form.advancedLimitMode === mode.value ? styles['trade-panel__mode--active'] : ''}
               onClick={() => onFieldChange('advancedLimitMode', mode.value)}
             >
               {t(mode.labelKey)}
@@ -35,8 +36,8 @@ export function AdvancedOrderPanel({ form, showErrors, fieldErrors, onFieldChang
 
   if (form.strategyType === 'trailing_tp_sl') {
     return (
-      <section className="trade-panel__advanced">
-        <span className="trade-panel__mini-title">{t('trading.strategy.trailingTpSl')}</span>
+      <section className={styles['trade-panel__advanced']}>
+        <span className={styles['trade-panel__mini-title']}>{t('trading.strategy.trailingTpSl')}</span>
         <StrategyInput
           label={t('trading.callbackRatio')}
           unit="%"
@@ -56,8 +57,8 @@ export function AdvancedOrderPanel({ form, showErrors, fieldErrors, onFieldChang
 
   if (form.strategyType === 'trigger') {
     return (
-      <section className="trade-panel__advanced">
-        <span className="trade-panel__mini-title">{t('trading.strategy.trigger')}</span>
+      <section className={styles['trade-panel__advanced']}>
+        <span className={styles['trade-panel__mini-title']}>{t('trading.strategy.trigger')}</span>
         <StrategyInput
           label={t('trading.triggerPrice')}
           unit={quoteUnit}
@@ -82,8 +83,8 @@ type StrategyInputProps = {
 
 function StrategyInput({ label, value, unit, error, onChange }: StrategyInputProps) {
   return (
-    <label className={`trade-panel__field ${error ? 'trade-panel__field--invalid' : ''}`}>
-      <span className="trade-panel__control trade-panel__control--compact">
+    <label className={`${styles['trade-panel__field']} ${error ? styles['trade-panel__field--invalid'] : ''}`}>
+      <span className={`${styles['trade-panel__control']} ${styles['trade-panel__control--compact']}`}>
         <input
           aria-label={label}
           inputMode="decimal"
@@ -91,9 +92,9 @@ function StrategyInput({ label, value, unit, error, onChange }: StrategyInputPro
           value={value}
           onChange={(event) => onChange(event.target.value)}
         />
-        {unit ? <span className="trade-panel__unit">{unit}</span> : null}
+        {unit ? <span className={styles['trade-panel__unit']}>{unit}</span> : null}
       </span>
-      {error ? <span className="trade-panel__error">{error}</span> : null}
+      {error ? <span className={styles['trade-panel__error']}>{error}</span> : null}
     </label>
   )
 }

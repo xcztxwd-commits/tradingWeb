@@ -44,6 +44,12 @@ describe('DataTable and DataCardList contracts', () => {
     assert.doesNotMatch(tableSource, /react-i18next/u)
   })
 
+  it('keeps table layout inside the table component instead of a global element reset', () => {
+    assert.match(styles, /\.table\s*\{[^}]*border-collapse:\s*collapse/su)
+    assert.match(styles, /\.table th,\s*\.table td\s*\{[^}]*white-space:\s*nowrap/su)
+    assert.match(styles, /var\(--user-border,\s*var\(--theme-border\)\)/u)
+  })
+
   it('renders the same columns as mobile cards without owning breakpoint selection', () => {
     assert.match(cardSource, /DataViewColumn/u)
     assert.match(cardSource, /<article/u)

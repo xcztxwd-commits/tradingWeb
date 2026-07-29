@@ -1,6 +1,6 @@
 import type { FundOrder, FundOrderPayload, OrderResponse } from '@fx-platform/frontend-core'
 
-import type { ApiErrorView } from '../../components/user-page/userPageModels'
+import type { ApiErrorView } from '../../shared-widgets/data/userPageModels'
 import type { TranslatedAccountData } from '../shared/useTranslatedAccountData'
 import type { AccountRouteMode } from './accountRouteModel'
 import type { SettingsPreferences } from './settingsPreferences'

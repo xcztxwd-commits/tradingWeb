@@ -11,7 +11,33 @@ const pcShellSource = readFileSync(join(currentDir, '..', 'pc', 'shell', 'PcShel
 const mobileShellSource = readFileSync(join(currentDir, '..', 'mobile', 'shell', 'MobileShellChrome.tsx'), 'utf8')
 const shellRouteModelSource = readFileSync(join(currentDir, 'shell', 'shellRouteModel.ts'), 'utf8')
 const appShellSource = [appShellControllerSource, shellRouteModelSource, pcShellSource, mobileShellSource].join('\n')
-const styles = readFileSync(join(currentDir, '..', 'styles.css'), 'utf8')
+const baseStyles = readFileSync(join(currentDir, '..', 'styles.css'), 'utf8')
+const styles = baseStyles
+const appShellStyles = readFileSync(join(currentDir, 'AppShell.module.css'), 'utf8')
+const pcShellStyles = readFileSync(join(currentDir, '..', 'pc', 'shell', 'PcShellChrome.module.css'), 'utf8')
+const mobileShellStyles = readFileSync(join(currentDir, '..', 'mobile', 'shell', 'MobileShellChrome.module.css'), 'utf8')
+const tradingMenuStyles = readFileSync(join(currentDir, 'components', 'TradingNavMenu.module.css'), 'utf8')
+const accountMenuStyles = readFileSync(join(currentDir, 'components', 'AccountUserMenu.module.css'), 'utf8')
+const languageSwitcherStyles = readFileSync(join(currentDir, '..', 'components', 'LanguageSwitcher.module.css'), 'utf8')
+const topbarToolIconStyles = readFileSync(join(currentDir, '..', 'components', 'TopbarToolIcon.module.css'), 'utf8')
+const ownedShellStyles = [
+  appShellStyles,
+  pcShellStyles,
+  mobileShellStyles,
+  tradingMenuStyles,
+  accountMenuStyles,
+  languageSwitcherStyles,
+  topbarToolIconStyles
+].join('\n')
+const ownedShellSources = [
+  appShellControllerSource,
+  pcShellSource,
+  mobileShellSource,
+  readFileSync(join(currentDir, 'components', 'TradingNavMenu.tsx'), 'utf8'),
+  readFileSync(join(currentDir, 'components', 'AccountUserMenu.tsx'), 'utf8'),
+  readFileSync(join(currentDir, '..', 'components', 'LanguageSwitcher.tsx'), 'utf8'),
+  readFileSync(join(currentDir, '..', 'components', 'TopbarToolIcon.tsx'), 'utf8')
+].join('\n')
 const navigationPath = join(currentDir, 'navigation.ts')
 const navigationSource = existsSync(navigationPath) ? readFileSync(navigationPath, 'utf8') : ''
 const mobileTerminalStyles = readFileSync(
@@ -23,6 +49,18 @@ const zhLocale = readFileSync(join(currentDir, '..', 'i18n', 'locales', 'zh-CN.t
 const jaLocale = readFileSync(join(currentDir, '..', 'i18n', 'locales', 'ja-JP.ts'), 'utf8')
 
 describe('prototype-driven app shell and routes', () => {
+  it('keeps shell and route styles owner-local without the legacy application surface', () => {
+    assert.match(appShellControllerSource, /import styles from '\.\/AppShell\.module\.css'/)
+    assert.doesNotMatch(appShellControllerSource, /ApplicationSurfaces\.module\.css/)
+    assert.doesNotMatch(appShellControllerSource, /applicationSurfaceStyles/)
+    assert.doesNotMatch(
+      ownedShellSources,
+      /["'`](?:[^"'`]*\s)?(?:app-shell|main-region|app-brand|app-topbar|trading-nav-menu|account-user-menu|mobile-tabs|mobile-tab|language-switcher|topbar-tool-icon-image)(?:[\s_\-"'`]|$)/
+    )
+    assert.doesNotMatch(ownedShellSources, /["'`] active["'`]/)
+    assert.doesNotMatch(ownedShellStyles, /:global\(/)
+  })
+
   it('keeps the homepage at root and exposes only canonical Spot and Perpetual terminals', () => {
     assert.match(source, /import \{ HomeRoute \} from '\.\.\/routes\/home\/HomeRoute'/)
     assert.match(source, /<Route path="\/" element=\{<HomeRoute \/>\} \/>/)
@@ -65,7 +103,7 @@ describe('prototype-driven app shell and routes', () => {
     assert.match(appShellSource, /AccountUserMenu/)
     assert.match(appShellSource, /useTheme/)
     assert.match(appShellSource, /const \{ currentTheme,\s*toggleTheme \} = useTheme\(\)/)
-    assert.match(appShellSource, /className="app-topbar__icon app-topbar__theme"/)
+    assert.match(pcShellSource, /className=\{styles\.icon\}\s+aria-label="Switch theme"/)
     assert.match(pcShellSource, /aria-pressed=\{model\.themeColorScheme === 'light'\}/)
     assert.match(pcShellSource, /onClick=\{model\.onToggleTheme\}/)
     assert.match(appShellSource, /to="\/login"/)
@@ -76,7 +114,7 @@ describe('prototype-driven app shell and routes', () => {
   })
 
   it('uses the same desktop topbar on home and markets', () => {
-    assert.match(appShellSource, /<Link className="app-brand" to="\/" aria-label="FX Trader 首页">/)
+    assert.match(pcShellSource, /<Link className=\{styles\.brand\} to="\/" aria-label="FX Trader 首页">/)
     assert.doesNotMatch(appShellSource, /isMarketsRoute/)
     assert.doesNotMatch(appShellSource, /MarketsReferenceNav|MarketsReferenceActions/)
     assert.doesNotMatch(appShellSource, /app-topbar--reference|app-brand--reference/)
@@ -90,13 +128,13 @@ describe('prototype-driven app shell and routes', () => {
 
     assert.doesNotMatch(guestNavSource, /to:\s*'\/'/)
     assert.doesNotMatch(authNavSource, /to:\s*'\/'/)
-    assert.match(appShellSource, /<Link className="app-brand" to="\/" aria-label="FX Trader 首页">/)
+    assert.match(pcShellSource, /<Link className=\{styles\.brand\} to="\/" aria-label="FX Trader 首页">/)
     assert.match(mobileNavSource, /to:\s*'\/'/)
   })
 
   it('keeps the home trading dropdown wired only to Spot and Perpetual routes', () => {
     const tradingNavSource = readFileSync(join(currentDir, 'components', 'TradingNavMenu.tsx'), 'utf8')
-    const topbarNavRule = getCssRule(styles, '.app-topbar__nav')
+    const topbarNavRule = getCssRule(pcShellStyles, '.nav')
 
     assert.match(tradingNavSource, /resolveTradingPath/)
     assert.match(tradingNavSource, /onClick=\{\(\) => openProduct\(item\.product\)\}/)
@@ -112,12 +150,12 @@ describe('prototype-driven app shell and routes', () => {
     assert.match(tradingNavSource, /event\.key === 'ArrowDown'/)
     assert.match(topbarNavRule, /overflow:\s*visible/)
     assert.doesNotMatch(topbarNavRule, /overflow-x:\s*auto/)
-    assert.doesNotMatch(styles, /\.app-topbar__nav::-webkit-scrollbar/)
+    assert.doesNotMatch(pcShellStyles, /\.nav::-webkit-scrollbar/)
   })
 
   it('bridges the hover gap between the trading trigger and dropdown panel', () => {
-    const bridgeRule = getCssRule(styles, '.trading-nav-menu:hover::after')
-    const tradingPanelRule = getCssRule(styles, '.trading-nav-menu__panel')
+    const bridgeRule = getCssRule(tradingMenuStyles, '.root:hover::after')
+    const tradingPanelRule = getCssRule(tradingMenuStyles, '.panel')
 
     assert.match(tradingPanelRule, /top:\s*calc\(100% \+ 10px\)/)
     assert.match(bridgeRule, /content:\s*''/)
@@ -141,13 +179,13 @@ describe('prototype-driven app shell and routes', () => {
     assert.match(accountMenuSource, /onLogout:\s*\(\)\s*=>\s*void/)
     assert.match(accountMenuSource, /clearStoredAuthToken\(\)[\s\S]*onLogout\(\)/)
     assert.match(appShellControllerSource, /const handleLogout = useCallback\(\(\) => \{[\s\S]*setSession\(\{ authenticated: false, email: null \}\)/)
-    assert.match(pcShellSource, /<AccountUserMenu email=\{model\.email\} onLogout=\{model\.onLogout\} \/>/)
+    assert.match(pcShellSource, /<AccountUserMenu email=\{model\.email\} onLogout=\{model\.onLogout\} triggerClassName=\{styles\.icon\} \/>/)
   })
 
   it('keeps the account user panel stable across the pointer gap and centered on the profile icon', () => {
     const accountMenuSource = readFileSync(join(currentDir, 'components', 'AccountUserMenu.tsx'), 'utf8')
-    const accountPanelRule = getCssRuleContaining(styles, '.account-user-menu__panel', /position:\s*absolute/)
-    const accountMenuRule = getCssRule(styles, '.account-user-menu')
+    const accountPanelRule = getCssRuleContaining(accountMenuStyles, '.panel', /position:\s*absolute/)
+    const accountMenuRule = getCssRule(accountMenuStyles, '.root')
 
     assert.doesNotMatch(accountMenuSource, /onMouseLeave/)
     assert.match(accountMenuSource, /document\.addEventListener\('pointerdown', handlePointer\)/)
@@ -188,7 +226,8 @@ describe('prototype-driven app shell and routes', () => {
   })
 
   it('uses Binance-like shell tokens with safe-area mobile tabs', () => {
-    assert.match(styles, /--app-top-nav-height:\s*64px/)
+    assert.match(appShellStyles, /^\.root\s*{[^}]*min-width:\s*0[^}]*isolation:\s*isolate/m)
+    assert.match(baseStyles, /--app-top-nav-height:\s*56px/)
     assert.match(styles, /--bn-bg:\s*var\(--theme-background\)/)
     assert.match(styles, /--bn-terminal-bg:\s*var\(--theme-background\)/)
     assert.match(styles, /--bn-surface:\s*var\(--theme-surface\)/)
@@ -196,31 +235,35 @@ describe('prototype-driven app shell and routes', () => {
     assert.match(styles, /--bn-line:\s*var\(--theme-border\)/)
     assert.match(styles, /--bn-text:\s*var\(--theme-text-primary\)/)
     assert.match(styles, /--bn-muted:\s*var\(--theme-text-muted\)/)
-    assert.match(styles, /--color-PrimaryYellow:\s*var\(--theme-primary\)/)
     assert.match(styles, /--color-BtnBg:\s*var\(--theme-primary-hover\)/)
-    assert.match(styles, /--color-BasicBg:\s*var\(--theme-surface\)/)
-    assert.match(styles, /--color-Buy:\s*var\(--theme-buy\)/)
-    assert.match(styles, /--color-Sell:\s*var\(--theme-sell\)/)
+    for (const retiredToken of [
+      '--color-PrimaryYellow', '--color-BasicBg', '--color-SecondaryBg', '--color-PrimaryText',
+      '--color-SecondaryText', '--color-Line', '--color-Buy', '--color-Sell', '--space-2xs',
+      '--space-s', '--space-mm', '--space-xl', '--radii-xl', '--bn-panel-3', '--bn-shadow-soft',
+      '--binance-page-bg', '--binance-surface', '--binance-surface-elevated', '--binance-line'
+    ]) {
+      assert.doesNotMatch(styles, new RegExp(`${escapeRegExp(retiredToken)}\\s*:`))
+    }
     assert.match(styles, /font-family:\s*BinanceNova,\s*Arial/)
     assert.doesNotMatch(styles, /\bInter\b/)
-    assert.match(styles, /\.app-shell\s*{[\s\S]*background:\s*var\(--bn-bg\)/)
-    assert.match(styles, /\.app-shell--terminal\s*{[\s\S]*background:\s*var\(--bn-terminal-bg\)/)
-    assert.match(styles, /\.app-topbar\s*{[\s\S]*background:\s*var\(--bn-bg\)/)
-    assert.doesNotMatch(styles, /(^|\n)\.app-topbar\s*{[^}]*border-bottom\s*:/)
-    assert.match(styles, /\.app-topbar__utility-cluster/)
-    assert.match(styles, /\.app-topbar__primary\s*{[\s\S]*background:\s*var\(--color-BtnBg\)/)
-    assert.match(styles, /\.mobile-tabs\s*{[\s\S]*position:\s*fixed/)
-    assert.match(styles, /\.mobile-tabs\s*{[\s\S]*grid-template-columns:\s*repeat\(5,\s*1fr\)/)
-    assert.match(styles, /\.mobile-tabs\s*{[\s\S]*padding-bottom:\s*env\(safe-area-inset-bottom\)/)
-    assert.match(styles, /\.mobile-tab--trade\s*{[\s\S]*border-radius:\s*50%/)
+    assert.match(appShellStyles, /\.terminal\s*{[^}]*background:\s*var\(--bn-terminal-bg\)/)
+    assert.match(pcShellStyles, /\.root\s*{[^}]*background:\s*var\(--bn-bg\)/)
+    assert.doesNotMatch(pcShellStyles, /border-bottom\s*:/)
+    assert.match(pcShellStyles, /\.utilityCluster/)
+    assert.match(pcShellStyles, /\.primary\s*{[^}]*background:\s*var\(--color-BtnBg\)/)
+    assert.match(mobileShellStyles, /\.root\s*{[\s\S]*position:\s*fixed/)
+    assert.match(mobileShellStyles, /\.root\s*{[\s\S]*grid-template-columns:\s*repeat\(5,\s*1fr\)/)
+    assert.match(mobileShellStyles, /\.root\s*{[\s\S]*padding-bottom:\s*env\(safe-area-inset-bottom\)/)
+    assert.match(mobileShellStyles, /\.trade,[\s\S]*border-radius:\s*0/)
     assert.doesNotMatch(appShellSource, /<item\.icon size=\{17\}/)
-    assert.match(appShellSource, /app-topbar__utility-cluster/)
+    assert.match(pcShellSource, /styles\.utilityCluster/)
   })
 
   it('keeps auth pages chrome-free and terminal route compatible with mobile trading actions', () => {
-    assert.match(styles, /\.app-shell--auth\s*{[\s\S]*grid-template-rows:\s*minmax\(0,\s*1fr\)/)
-    assert.match(styles, /\.app-shell--auth\s+\.app-topbar\s*{[\s\S]*display:\s*none/)
-    assert.match(styles, /\.app-shell--terminal\s+\.main-region\s*{[\s\S]*padding:\s*0/)
+    assert.match(appShellStyles, /\.auth\s*{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\)/)
+    assert.match(pcShellSource, /if \(model\.isAuthRoute\) return null/)
+    assert.match(mobileShellSource, /if \(model\.isAuthRoute\) return null/)
+    assert.match(appShellStyles, /\.terminal \.mainRegion\s*{[^}]*padding:\s*0/)
     assert.match(appShellSource, /\^\\\/trade\\\/\(spot\|perpetual\)/)
     assert.match(appShellSource, /item\.to\.startsWith\('\/trade\/'\)/)
     assert.match(

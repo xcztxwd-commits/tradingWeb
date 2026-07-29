@@ -71,6 +71,10 @@
   min-height: 0;
 }
 
+[data-platform-view='mobile'] .klineCanvas {
+  min-height: 423px;
+}
+
 .canvasWrap {
   position: relative;
   min-width: 0;
@@ -96,7 +100,7 @@
   display: grid;
   place-items: center;
   padding: 12px;
-  background: rgba(0, 0, 0, 0.58);
+  background: var(--theme-overlay-strong);
 }
 
 .imagePreviewDialog {
@@ -110,7 +114,7 @@
   border-radius: 8px;
   background: var(--trading-surface);
   color: var(--trading-text);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 24px 70px var(--theme-shadow-medium);
 }
 
 .imagePreviewHeader,
@@ -210,7 +214,7 @@
 .imagePreviewPrimaryButton {
   border: 1px solid var(--trading-accent-border);
   background: var(--trading-accent);
-  color: #050505;
+  color: var(--theme-text-contrast);
   font-weight: 700;
 }
 
@@ -225,60 +229,60 @@
 }
 
 :global(:root[data-theme='minimal-white']) .imagePreviewDialog {
-  border-color: #d8e0eb;
-  background: #ffffff;
-  color: #475569;
-  box-shadow: 0 24px 70px rgb(15 23 42 / 0.18);
+  border-color: var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast);
+  color: var(--theme-text-muted-on-contrast);
+  box-shadow: 0 24px 70px var(--theme-shadow-soft);
 }
 
 :global(:root[data-theme='minimal-white']) .imagePreviewHeader,
 :global(:root[data-theme='minimal-white']) .imagePreviewActions {
-  border-color: #e6ebf2;
-  background: #ffffff;
+  border-color: var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast);
 }
 
 :global(:root[data-theme='minimal-white']) .imagePreviewHeader strong {
-  color: #111827;
+  color: var(--theme-text-contrast);
 }
 
 :global(:root[data-theme='minimal-white']) .imagePreviewHeader span,
 :global(:root[data-theme='minimal-white']) .imagePreviewCloseButton {
-  color: #64748b;
+  color: var(--theme-text-muted-on-contrast);
 }
 
 :global(:root[data-theme='minimal-white']) .imagePreviewFrame {
-  background: #f8fafc;
+  background: var(--theme-surface-contrast-subtle);
 }
 
 :global(:root[data-theme='minimal-white']) .imagePreviewSecondaryButton {
-  border-color: #cfd8e6;
-  background: #ffffff;
-  color: #334155;
+  border-color: var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast);
+  color: var(--theme-text-contrast);
 }
 
 :global(:root[data-theme='minimal-white']) .imagePreviewPrimaryButton {
-  border-color: #111827;
-  background: #111827;
-  color: #ffffff;
+  border-color: var(--theme-border-inverse);
+  background: var(--theme-surface-inverse);
+  color: var(--theme-text-inverse);
 }
 
 :global(:root[data-theme='minimal-white']) .imagePreviewPrimaryButton svg {
-  color: #ffffff;
+  color: var(--theme-text-inverse);
 }
 
 :global(:root[data-theme='minimal-white']) .imagePreviewSecondaryButton:hover,
 :global(:root[data-theme='minimal-white']) .imagePreviewSecondaryButton:focus-visible,
 :global(:root[data-theme='minimal-white']) .imagePreviewCloseButton:hover,
 :global(:root[data-theme='minimal-white']) .imagePreviewCloseButton:focus-visible {
-  border-color: #bcc8d8;
-  background: #f4f7fb;
-  color: #111827;
+  border-color: var(--theme-border-on-contrast);
+  background: var(--theme-surface-contrast-subtle);
+  color: var(--theme-text-contrast);
 }
 
 :global(:root[data-theme='minimal-white']) .imagePreviewPrimaryButton:hover,
 :global(:root[data-theme='minimal-white']) .imagePreviewPrimaryButton:focus-visible {
-  background: #0f172a;
-  color: #ffffff;
+  background: var(--theme-surface-inverse);
+  color: var(--theme-text-inverse);
   filter: none;
 }
 
@@ -296,7 +300,7 @@
   border: 1px solid var(--trading-border-strong);
   border-radius: 6px;
   background: var(--trading-surface);
-  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.26);
+  box-shadow: 0 12px 26px var(--theme-shadow-medium);
   color: var(--trading-text-strong);
   transform: translateX(-50%);
 }
@@ -397,7 +401,7 @@
   background: var(--trading-surface);
   color: var(--trading-text);
   padding: 10px;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+  box-shadow: 0 18px 42px var(--theme-shadow-medium);
 }
 
 .drawingManagerHeader {

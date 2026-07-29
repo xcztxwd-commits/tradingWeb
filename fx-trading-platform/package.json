@@ -10,6 +10,9 @@
     "contract:ci": "npm run contract:export && npm run contract:check && npm run web:test && npm run web:build && npm run admin:build && npm run smoke:backend",
     "test:frontend-boundaries": "node --test scripts/verify-frontend-boundaries.test.mjs",
     "verify:frontend-boundaries": "node scripts/verify-frontend-boundaries.mjs",
+    "test:frontend-styles": "node --test scripts/verify-frontend-styles.test.mjs",
+    "verify:frontend-styles": "node scripts/verify-frontend-styles.mjs",
+    "test:visual-qa-contract": "node --test scripts/smoke-visual-qa.test.mjs",
     "verify:architecture": "node scripts/verify-architecture.mjs",
     "smoke:backend": "node scripts/smoke-backend.mjs",
     "smoke:business-closed-loop": "node scripts/smoke-business-closed-loop.mjs",
@@ -33,7 +36,7 @@
     "ui:smoke": "node scripts/smoke-ui-primitives.mjs",
     "frontend-core:test": "npm --workspace packages/frontend-core run test",
     "frontend-core:typecheck": "npm --workspace packages/frontend-core run typecheck",
-    "frontend:check": "npm run ui:test && npm run ui:typecheck && npm run frontend-core:test && npm run frontend-core:typecheck && npm run web:test && npm run web:build && npm run verify:frontend-boundaries && npm run verify:architecture && npm run web:bundle-budget && npm run audit:large-files",
+    "frontend:check": "npm run ui:test && npm run ui:typecheck && npm run frontend-core:test && npm run frontend-core:typecheck && npm run web:test && npm run web:build && npm run test:visual-qa-contract && npm run verify:frontend-boundaries && npm run verify:frontend-styles && npm run verify:architecture && npm run web:bundle-budget && npm run audit:large-files",
     "admin:dev": "npm --workspace apps/admin run dev",
     "admin:build": "npm --workspace apps/admin run build"
   },

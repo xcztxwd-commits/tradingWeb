@@ -9,7 +9,7 @@ const projectRoot = resolve(currentDir, '../../../..')
 const componentSource = readFileSync(resolve(currentDir, 'StateSurface.tsx'), 'utf8')
 const componentStyles = readFileSync(resolve(currentDir, 'StateSurface.module.css'), 'utf8')
 const packageIndexSource = readFileSync(resolve(currentDir, '../index.ts'), 'utf8')
-const adapterSource = readFileSync(resolve(projectRoot, 'apps/web/src/components/user-page/PageState.tsx'), 'utf8')
+const consumerSource = readFileSync(resolve(projectRoot, 'apps/web/src/shared-widgets/data/PageState.tsx'), 'utf8')
 
 describe('StateSurface component contract', () => {
   it('owns generic state semantics while all user-facing strings remain explicit props', () => {
@@ -34,11 +34,11 @@ describe('StateSurface component contract', () => {
     assert.doesNotMatch(componentStyles, /:global/u)
   })
 
-  it('is exported publicly and consumed through the translating Web adapter', () => {
+  it('is exported publicly and consumed through the current translating Web adapter', () => {
     assert.match(packageIndexSource, /export \* from '\.\/state-surface\/StateSurface'/u)
-    assert.match(adapterSource, /import \{ StateSurface \} from '@fx-platform\/ui'/u)
-    assert.match(adapterSource, /useTranslation/u)
-    assert.match(adapterSource, /<StateSurface/u)
-    assert.doesNotMatch(adapterSource, /state-panel/u)
+    assert.match(consumerSource, /import \{ StateSurface \} from '@fx-platform\/ui'/u)
+    assert.match(consumerSource, /useTranslation/u)
+    assert.match(consumerSource, /<StateSurface/u)
+    assert.doesNotMatch(consumerSource, /state-panel/u)
   })
 })

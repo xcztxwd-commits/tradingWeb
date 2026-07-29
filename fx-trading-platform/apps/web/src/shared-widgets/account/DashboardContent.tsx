@@ -2,11 +2,16 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { DataViewColumn } from '@fx-platform/ui'
 
-import { ApiErrorState, LoadingState, LoginRequiredState } from '../../components/user-page/PageState'
-import { formatApiError } from '../../components/user-page/userPageModels'
+import { ApiErrorState, LoadingState, LoginRequiredState } from '../data/PageState'
+import { cssModuleClasses as css } from '../data/cssModuleClasses'
+import { formatApiError } from '../data/userPageModels'
 import type { AccountRouteModel } from '../../routes/account/accountRoute.types'
 import type { AccountDataCollectionComponent } from './dataCollection.types'
 import { toNumber, type AccountSummary, type Amount, type LedgerEntry, type OrderResponse, type PositionResponse } from '@fx-platform/frontend-core'
+import surfaceStyles from '../data/UserPageSurface.module.css'
+import accountStyles from './AccountPagesContent.module.css'
+
+const styles = { ...surfaceStyles, ...accountStyles }
 
 export function DashboardContent({ model, DataCollection }: { model: AccountRouteModel; DataCollection: AccountDataCollectionComponent }) {
   const navigate = model.navigateTo
@@ -64,7 +69,7 @@ export function DashboardContent({ model, DataCollection }: { model: AccountRout
 
   if (loginRequired) {
     return (
-      <section className="user-page">
+      <section className={css(styles, "user-page")}>
         <LoginRequiredState
           message={t('dashboard.loginMessage')}
           onLogin={() => navigate('/login?redirect=/dashboard')}
@@ -74,13 +79,13 @@ export function DashboardContent({ model, DataCollection }: { model: AccountRout
   }
 
   return (
-    <section className="user-page">
-      <header className="user-page__header">
+    <section className={css(styles, "user-page")}>
+      <header className={css(styles, "user-page__header")}>
         <div>
           <h1>{t('dashboard.accountOverview')}</h1>
           <p>{t('dashboard.accountOverviewSummary')}</p>
         </div>
-        <button type="button" className="table-action table-action--secondary" onClick={() => void retrySession()}>
+        <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => void retrySession()}>
           {t('common.refresh')}
         </button>
       </header>
@@ -93,7 +98,7 @@ export function DashboardContent({ model, DataCollection }: { model: AccountRout
         />
       ) : null}
 
-      <div className="user-page__metrics">
+      <div className={css(styles, "user-page__metrics")}>
         <Metric label={t('dashboard.equity')} value={formatAmount(account?.equity)} />
         <Metric label={t('assets.balance')} value={formatAmount(account?.balance)} />
         <Metric label={t('dashboard.freeMargin')} value={formatAmount(account?.freeMargin)} />
@@ -104,18 +109,18 @@ export function DashboardContent({ model, DataCollection }: { model: AccountRout
         <Metric label={t('dashboard.pendingOrderCount')} value={pendingOrderCount} />
       </div>
 
-      <div className="dashboard-overview-grid">
-        <section className="user-page__events dashboard-card">
+      <div className={css(styles, "dashboard-overview-grid")}>
+        <section className={css(styles, "user-page__events", "dashboard-card")}>
           <h2>{t('dashboard.assetStructure')}</h2>
           {hasAccountData ? (
-            <div className="asset-structure-list">
+            <div className={css(styles, "asset-structure-list")}>
               {assetStructure.map((item) => (
-                <div key={item.label} className="asset-structure-row">
+                <div key={item.label} className={css(styles, "asset-structure-row")}>
                   <div>
                     <strong>{item.label}</strong>
                     <span>{formatAmountWithCurrency(item.value, account)}</span>
                   </div>
-                  <div className="asset-structure-bar" aria-label={t('dashboard.assetPercent', { label: item.label, percent: item.percent.toFixed(0) })}>
+                  <div className={css(styles, "asset-structure-bar")} aria-label={t('dashboard.assetPercent', { label: item.label, percent: item.percent.toFixed(0) })}>
                     <span style={{ width: `${item.percent}%` }} />
                   </div>
                 </div>
@@ -131,13 +136,13 @@ export function DashboardContent({ model, DataCollection }: { model: AccountRout
           )}
         </section>
 
-        <section className="user-page__events dashboard-card">
+        <section className={css(styles, "user-page__events", "dashboard-card")}>
           <h2>{t('dashboard.riskSummary')}</h2>
-          <div className={`risk-summary risk-summary--${riskSummary.tone}`}>
+          <div className={css(styles, 'risk-summary', `risk-summary--${riskSummary.tone}`)}>
             <strong>{riskSummary.title}</strong>
             <span>{riskSummary.message}</span>
           </div>
-          <div className="dashboard-mini-grid">
+          <div className={css(styles, "dashboard-mini-grid")}>
             <Metric label="Margin Level" value={formatMarginLevel(account?.marginLevel)} />
             <Metric label={t('positions.current')} value={openPositionCount} />
             <Metric label={t('orders.current')} value={pendingOrderCount} />
@@ -152,27 +157,27 @@ export function DashboardContent({ model, DataCollection }: { model: AccountRout
           ) : null}
         </section>
 
-        <section className="user-page__events dashboard-card">
+        <section className={css(styles, "user-page__events", "dashboard-card")}>
           <h2>{t('dashboard.quickActions')}</h2>
-          <div className="quick-action-grid">
-            <button type="button" className="table-action table-action--primary" onClick={() => navigate('/trading')}>
+          <div className={css(styles, "quick-action-grid")}>
+            <button type="button" className={css(styles, "table-action", "table-action--primary")} onClick={() => navigate('/trading')}>
               {t('trading.trade')}
             </button>
-            <button type="button" className="table-action table-action--secondary" onClick={() => navigate('/wallet')}>
+            <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => navigate('/wallet')}>
               {t('assets.deposit')}
             </button>
-            <button type="button" className="table-action table-action--secondary" onClick={() => navigate('/orders')}>
+            <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => navigate('/orders')}>
               {t('dashboard.viewOrders')}
             </button>
-            <button type="button" className="table-action table-action--secondary" onClick={() => navigate('/positions')}>
+            <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={() => navigate('/positions')}>
               {t('dashboard.viewPositions')}
             </button>
           </div>
         </section>
       </div>
 
-      <div className="user-page__split">
-        <section className="user-page__events">
+      <div className={css(styles, "user-page__split")}>
+        <section className={css(styles, "user-page__events")}>
           <h2>{t('dashboard.recentOrders')}</h2>
           <DataCollection
             rows={recentOrders}
@@ -184,7 +189,7 @@ export function DashboardContent({ model, DataCollection }: { model: AccountRout
           />
         </section>
 
-        <section className="user-page__events">
+        <section className={css(styles, "user-page__events")}>
           <h2>{t('dashboard.recentLedger')}</h2>
           <DataCollection
             rows={recentLedgerEntries}
@@ -197,7 +202,7 @@ export function DashboardContent({ model, DataCollection }: { model: AccountRout
         </section>
       </div>
 
-      <section className="user-page__events">
+      <section className={css(styles, "user-page__events")}>
         <h2>{t('positions.current')}</h2>
         <DataCollection
           rows={openPositions}
@@ -222,7 +227,7 @@ function Metric({
   tone?: 'positive' | 'negative'
 }) {
   return (
-    <div className="metric">
+    <div className={css(styles, "metric")}>
       <span>{label}</span>
       <strong className={tone ? `metric__value--${tone}` : undefined}>{value ?? '-'}</strong>
     </div>
@@ -241,12 +246,12 @@ function DashboardNextAction({
   onClick: () => void
 }) {
   return (
-    <div className="dashboard-next-action">
+    <div className={css(styles, "dashboard-next-action")}>
       <div>
         <strong>{title}</strong>
         <span>{message}</span>
       </div>
-      <button type="button" className="table-action table-action--secondary" onClick={onClick}>
+      <button type="button" className={css(styles, "table-action", "table-action--secondary")} onClick={onClick}>
         {label}
       </button>
     </div>
@@ -255,7 +260,7 @@ function DashboardNextAction({
 
 function StatusChip({ status }: { status: string }) {
   const tone = status === 'FILLED' || status === 'OPEN' ? 'positive' : status === 'PENDING' ? 'warning' : ''
-  return <span className={`status-chip${tone ? ` status-chip--${tone}` : ''}`}>{status}</span>
+  return <span className={css(styles, 'status-chip', tone && `status-chip--${tone}`)}>{status}</span>
 }
 
 function sumTodayPnl(entries: LedgerEntry[]) {

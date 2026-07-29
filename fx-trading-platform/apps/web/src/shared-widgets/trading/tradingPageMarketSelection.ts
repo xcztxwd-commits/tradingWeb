@@ -1,13 +1,6 @@
 import { defaultTradingSymbols, tradingProductSymbols, type TradingProduct } from '../../app/tradingRoutes.ts'
 import type { TradingMarket } from '@fx-platform/frontend-core'
 
-type Translate = (key: string, options?: Record<string, unknown>) => string
-
-const defaultTranslate: Translate = (key) => {
-  if (key === 'chart.titleSuffix') return 'K-line chart'
-  return key
-}
-
 export const initialTradingSymbol = defaultTradingSymbols.spot
 
 export function mergeWithLocalTradingMarkets(markets: TradingMarket[]) {
@@ -31,10 +24,6 @@ export function getTradingMarketsForProduct(markets: TradingMarket[], product: T
 export function normalizeTradingSymbol(symbol: string | null) {
   const normalized = symbol?.trim().toUpperCase()
   return normalized || null
-}
-
-export function formatTradingChartTitle(market: TradingMarket, t: Translate = defaultTranslate) {
-  return `${market.base}/${market.quote} ${t('chart.titleSuffix')}`
 }
 
 function createLocalTradingMarkets() {

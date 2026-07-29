@@ -105,7 +105,7 @@
   border-radius: 7px;
   background: var(--trading-surface);
   padding: 5px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.44);
+  box-shadow: 0 18px 48px var(--theme-shadow-medium);
   transform-origin: left top;
   animation: drawingFlyoutIn 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }

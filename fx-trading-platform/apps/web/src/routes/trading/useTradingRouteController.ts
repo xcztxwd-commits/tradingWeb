@@ -24,7 +24,6 @@ import {
   type TradingProduct
 } from '../../app/tradingRoutes'
 import {
-  formatTradingChartTitle,
   getTradingMarketsForProduct,
   mergeWithLocalTradingMarkets
 } from '../../shared-widgets/trading/tradingPageMarketSelection'
@@ -272,7 +271,6 @@ export function useTradingRouteController({ product }: TradingRouteControllerOpt
   const routeModel: TradingRouteModel = {
     accountPanel, accountId, balances,
     chartCallbacks, chartSettings, chartThemeMode, indicators,
-    chartTitle: formatTradingChartTitle(selectedMarketWithRules, t),
     controllerSentinel,
     loginRequired, marketDrawerOpen,
     market: selectedMarketWithRules,

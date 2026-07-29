@@ -1,5 +1,7 @@
 import type { TradingPeriod } from '@fx-platform/frontend-core'
 
+import { chartColorWithOpacity, chartTheme } from './chartTheme.ts'
+
 export type ChartType = 'candle' | 'bar' | 'hlc' | 'line'
 export type LineType = 'solid' | 'dashed'
 export type GridLineMode = 'none' | 'horizontal' | 'vertical' | 'both'
@@ -238,7 +240,7 @@ const p0ChartSymbolKeys = new Set([
 ])
 const p0ChartIntervalValues = new Set<TradingPeriod>(['time', '1s', '1m', '5m', '15m', '1h', '4h', '1d'])
 const movingAveragePeriods = [5, 10, 20, 30, 60, 120]
-const movingAverageColors = ['#ffab2e', '#e83e78', '#4dd0e1', '#f4511e', '#ab47bc', '#66bb6a']
+const movingAverageColors = chartTheme.movingAverageColors
 
 export const allChartIntervals: ChartIntervalOption[] = [
   { value: 'time', label: 'chart.intervals.time' },
@@ -459,10 +461,10 @@ export const defaultIndicatorSettings: IndicatorSettings = {
   weightedMovingAverage: { lines: createDefaultMovingAverageLines() },
   volume: {
     enabled: true,
-    barUpColor: '#16c784',
-    barDownColor: '#ea3943',
-    ma1: { enabled: false, period: 5, color: '#ffab2e' },
-    ma2: { enabled: false, period: 10, color: '#4dd0e1' },
+    barUpColor: chartTheme.palette.volumeUp,
+    barDownColor: chartTheme.palette.volumeDown,
+    ma1: { enabled: false, period: 5, color: chartTheme.movingAverageColors[0] },
+    ma2: { enabled: false, period: 10, color: chartTheme.movingAverageColors[2] },
     opacity: 50
   }
 }
@@ -474,12 +476,12 @@ export const defaultChartSettings: ChartSettings = {
   chartType: 'candle',
   candleStyle: {
     useCustomColors: false,
-    upColor: '#16c784',
-    downColor: '#ea3943',
-    upBorderColor: '#16c784',
-    downBorderColor: '#ea3943',
-    upWickColor: '#16c784',
-    downWickColor: '#ea3943'
+    upColor: chartTheme.palette.volumeUp,
+    downColor: chartTheme.palette.volumeDown,
+    upBorderColor: chartTheme.palette.volumeUp,
+    downBorderColor: chartTheme.palette.volumeDown,
+    upWickColor: chartTheme.palette.volumeUp,
+    downWickColor: chartTheme.palette.volumeDown
   },
   axisSettings: {
     priceScaleMode: 'normal',
@@ -495,18 +497,18 @@ export const defaultChartSettings: ChartSettings = {
     invertedCoordinate: false,
     barSpace: 8,
     latestPriceLineType: 'dashed',
-    latestPriceColor: '#16c784'
+    latestPriceColor: chartTheme.palette.volumeUp
   },
   layoutSettings: {
     clickToEnableInteraction: false,
     background: {
       type: 'solid',
-      color: '#050505'
+      color: chartTheme.palette.ink
     },
     gridLines: 'both',
     crosshair: {
       enabled: true,
-      color: '#8b93a1',
+      color: chartTheme.palette.muted,
       lineType: 'dashed'
     }
   },
@@ -585,11 +587,7 @@ export function getChartTypeStyles(chartType: ChartType) {
     candle: {
       type: chartTypeToCandleType(chartType),
       area: {
-        lineColor: '#f2b84b',
-        backgroundColor: [
-          { offset: 0, color: 'rgba(242, 184, 75, 0.02)' },
-          { offset: 1, color: 'rgba(242, 184, 75, 0.16)' }
-        ]
+        ...chartTheme.area
       }
     }
   }
@@ -935,8 +933,8 @@ function createDefaultIndicatorParameterSetting(option: IndicatorConfigOption, i
     color: movingAverageColors[index % movingAverageColors.length],
     secondaryColor: movingAverageColors[(index + 2) % movingAverageColors.length],
     width: 1,
-    barUpColor: '#16c784',
-    barDownColor: '#ea3943',
+    barUpColor: chartTheme.palette.volumeUp,
+    barDownColor: chartTheme.palette.volumeDown,
     opacity: option.visualStyle === 'bar' ? 64 : 78
   }
 }
@@ -974,9 +972,9 @@ function buildVolumeDescriptor(settings: VolumeIndicatorSettings): IndicatorAppl
           borderStyle: 'solid',
           borderSize: 1,
           borderDashedValue: [2, 2],
-          upColor: colorWithOpacity(settings.barUpColor, settings.opacity),
-          downColor: colorWithOpacity(settings.barDownColor, settings.opacity),
-          noChangeColor: colorWithOpacity('#999999', settings.opacity)
+          upColor: chartColorWithOpacity(settings.barUpColor, settings.opacity),
+          downColor: chartColorWithOpacity(settings.barDownColor, settings.opacity),
+          noChangeColor: chartColorWithOpacity(chartTheme.palette.noChange, settings.opacity)
         }
       ],
       lines: createLineStyles(movingAverageLines)
@@ -1024,9 +1022,9 @@ function createGenericIndicatorStyles(option: IndicatorConfigOption, settings: I
         borderStyle: 'solid',
         borderSize: 1,
         borderDashedValue: [2, 2],
-        upColor: colorWithOpacity(settings.barUpColor, settings.opacity),
-        downColor: colorWithOpacity(settings.barDownColor, settings.opacity),
-        noChangeColor: colorWithOpacity(settings.secondaryColor, settings.opacity)
+        upColor: chartColorWithOpacity(settings.barUpColor, settings.opacity),
+        downColor: chartColorWithOpacity(settings.barDownColor, settings.opacity),
+        noChangeColor: chartColorWithOpacity(settings.secondaryColor, settings.opacity)
       }
     ]
   }
@@ -1035,7 +1033,7 @@ function createGenericIndicatorStyles(option: IndicatorConfigOption, settings: I
 
 function createGenericLineStyles(option: IndicatorConfigOption, settings: IndicatorParameterSettings) {
   const lineCount = Math.max(1, option.lineCount)
-  const colors = [settings.color, settings.secondaryColor, '#4dd0e1', '#ab47bc', '#66bb6a', '#ff7043']
+  const colors = [settings.color, settings.secondaryColor, ...chartTheme.genericIndicatorColors]
   return Array.from({ length: lineCount }, (_, index) => ({
     style: settings.lineType,
     smooth: false,
@@ -1160,17 +1158,6 @@ function normalizeMagnetMode(value: Record<string, unknown>): DrawingMagnetMode 
   if (isDrawingMagnetMode(value.magnetMode)) return value.magnetMode
   if (typeof value.magnet === 'boolean') return value.magnet ? 'weak' : 'none'
   return defaultChartSettings.drawingToolSettings.magnetMode
-}
-
-function colorWithOpacity(color: string, opacity: number) {
-  const alpha = Math.max(0, Math.min(1, opacity / 100))
-  const normalized = color.replace('#', '')
-  if (!/^[0-9a-f]{6}$/i.test(normalized)) return color
-
-  const red = Number.parseInt(normalized.slice(0, 2), 16)
-  const green = Number.parseInt(normalized.slice(2, 4), 16)
-  const blue = Number.parseInt(normalized.slice(4, 6), 16)
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`
 }
 
 function getBrowserStorage(): ChartSettingsStorage | undefined {

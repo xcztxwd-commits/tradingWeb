@@ -141,7 +141,7 @@ describe('frontend dependency boundaries', () => {
     assert.equal(packageJson.scripts['frontend-core:typecheck'], 'npm --workspace packages/frontend-core run typecheck')
     assert.equal(
       packageJson.scripts['frontend:check'],
-      'npm run ui:test && npm run ui:typecheck && npm run frontend-core:test && npm run frontend-core:typecheck && npm run web:test && npm run web:build && npm run verify:frontend-boundaries && npm run verify:architecture && npm run web:bundle-budget && npm run audit:large-files'
+      'npm run ui:test && npm run ui:typecheck && npm run frontend-core:test && npm run frontend-core:typecheck && npm run web:test && npm run web:build && npm run test:visual-qa-contract && npm run verify:frontend-boundaries && npm run verify:frontend-styles && npm run verify:architecture && npm run web:bundle-budget && npm run audit:large-files'
     )
     assert.match(architectureVerifier, /findFrontendBoundaryViolations/u)
     assert.match(architectureVerifier, /Frontend dependency boundary/u)

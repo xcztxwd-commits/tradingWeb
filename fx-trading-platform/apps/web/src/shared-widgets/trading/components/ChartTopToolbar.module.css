@@ -1,13 +1,13 @@
 .toolbar {
-  --chart-bg: var(--trading-surface-2, #050505);
-  --panel-bg: var(--trading-surface, #151515);
-  --panel-bg-light: var(--trading-surface-3, #1f1f1f);
-  --border-color: var(--trading-border, #2b2b2b);
-  --text-primary: var(--trading-text-strong, #f2f2f2);
-  --text-secondary: var(--trading-muted, #999);
-  --green: var(--trading-buy, #16c784);
-  --red: var(--trading-sell, #ea3943);
-  --accent: var(--trading-accent, #ffffff);
+  --chart-bg: var(--trading-surface-2);
+  --panel-bg: var(--trading-surface);
+  --panel-bg-light: var(--trading-surface-3);
+  --border-color: var(--trading-border);
+  --text-primary: var(--trading-text-strong);
+  --text-secondary: var(--trading-muted);
+  --green: var(--trading-buy);
+  --red: var(--trading-sell);
+  --accent: var(--trading-accent);
 
   position: relative;
   width: 100%;
@@ -68,16 +68,16 @@
 .fullscreenButton:focus-visible,
 .actionButton:hover,
 .actionButton:focus-visible {
-  border-color: var(--trading-border-strong, #333);
+  border-color: var(--trading-border-strong);
   background: var(--panel-bg-light);
   color: var(--text-primary);
 }
 
 .fullscreenButton:focus-visible,
 .actionButton:focus-visible {
-  outline: 2px solid var(--trading-accent-border, rgba(255, 255, 255, 0.36));
+  outline: 2px solid var(--trading-accent-border);
   outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--trading-accent-soft, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
 }
 
 .fullscreenButton:active,
@@ -113,7 +113,7 @@
   z-index: 1200;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.36);
+  background: var(--theme-overlay-medium);
   padding: 16px;
 }
 
@@ -124,9 +124,9 @@
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
   border-radius: 4px;
-  background: #ffffff;
-  color: #07133f;
-  box-shadow: 0 22px 58px rgba(0, 0, 0, 0.26);
+  background: var(--theme-surface-contrast);
+  color: var(--theme-text-contrast);
+  box-shadow: 0 22px 58px var(--theme-shadow-medium);
 }
 
 .settingsHeader {
@@ -134,13 +134,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid #e6e9f0;
+  border-bottom: 1px solid var(--theme-border-on-contrast);
   padding: 0 18px 0 26px;
 }
 
 .settingsHeader h2 {
   margin: 0;
-  color: #07133f;
+  color: var(--theme-text-contrast);
   font-size: 16px;
   font-weight: 900;
 }
@@ -153,13 +153,13 @@
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: #07133f;
+  color: var(--theme-text-contrast);
   cursor: pointer;
 }
 
 .settingsHeader button:hover,
 .settingsHeader button:focus-visible {
-  background: #f1f4fb;
+  background: var(--theme-surface-contrast-subtle);
 }
 
 .settingsGrid {
@@ -179,7 +179,7 @@
   grid-template-columns: minmax(88px, 1fr) minmax(96px, 120px);
   align-items: center;
   gap: 14px;
-  color: #07133f;
+  color: var(--theme-text-contrast);
   font-size: 13px;
   font-weight: 700;
 }
@@ -187,10 +187,10 @@
 .settingField select {
   min-width: 0;
   height: 32px;
-  border: 1px solid #dfe3eb;
+  border: 1px solid var(--theme-border-on-contrast);
   border-radius: 0;
-  background: #ffffff;
-  color: #07133f;
+  background: var(--theme-surface-contrast);
+  color: var(--theme-text-contrast);
   padding: 0 30px 0 10px;
   font-size: 13px;
   font-weight: 700;
@@ -200,7 +200,7 @@
 .settingField select:focus-visible,
 .switchInput:focus-visible,
 .resetButton:focus-visible {
-  outline: 2px solid rgba(76, 116, 255, 0.4);
+  outline: 2px solid var(--theme-info-border);
   outline-offset: 2px;
 }
 
@@ -211,7 +211,7 @@
   appearance: none;
   border: 0;
   border-radius: 999px;
-  background: #e8ebf0;
+  background: var(--theme-surface-contrast-subtle);
   cursor: pointer;
   position: relative;
   transition:
@@ -227,13 +227,13 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+  background: var(--theme-surface-contrast);
+  box-shadow: 0 1px 3px var(--theme-shadow-soft);
   transition: transform 140ms ease;
 }
 
 .switchInput:checked {
-  background: #4c74ff;
+  background: var(--theme-info);
 }
 
 .switchInput:checked::after {
@@ -253,8 +253,8 @@
   gap: 6px;
   border: 0;
   border-radius: 0;
-  background: #4c74ff;
-  color: #ffffff;
+  background: var(--theme-info);
+  color: var(--theme-text-inverse);
   padding: 0 16px;
   font-size: 13px;
   font-weight: 900;
@@ -262,7 +262,7 @@
 }
 
 .resetButton:hover {
-  background: #3b63ed;
+  background: var(--theme-info);
 }
 
 .group {
@@ -298,7 +298,7 @@
 
 .group button:hover,
 .jumpForm button:hover {
-  border-color: var(--trading-border-strong, #333);
+  border-color: var(--trading-border-strong);
   background: var(--panel-bg-light);
   color: var(--text-primary);
 }
@@ -306,10 +306,10 @@
 .group button:focus-visible,
 .jumpForm button:focus-visible,
 .intervalGrid button:focus-visible {
-  outline: 2px solid var(--trading-accent-border, rgba(255, 255, 255, 0.36));
+  outline: 2px solid var(--trading-accent-border);
   outline-offset: 2px;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--trading-accent-soft, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
   color: var(--text-primary);
 }
 
@@ -321,7 +321,7 @@
 .group .active,
 .intervalGrid .active {
   border-color: var(--accent);
-  background: var(--trading-accent-soft, rgba(255, 255, 255, 0.09));
+  background: var(--trading-accent-soft);
   color: var(--accent);
 }
 
@@ -351,7 +351,7 @@
   gap: 6px;
   border: 1px solid transparent;
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--theme-overlay-subtle);
   color: var(--text-primary);
   padding: 0 8px;
   font-size: 12px;
@@ -372,16 +372,16 @@
 .priceScaleButton:hover,
 .priceScaleButton:focus-visible,
 .priceScaleButton[aria-expanded='true'] {
-  border-color: var(--trading-border-strong, #333);
+  border-color: var(--trading-border-strong);
   background: var(--panel-bg-light);
   color: var(--text-primary);
 }
 
 .chartTypeButton:focus-visible,
 .priceScaleButton:focus-visible {
-  outline: 2px solid var(--trading-accent-border, rgba(255, 255, 255, 0.36));
+  outline: 2px solid var(--trading-accent-border);
   outline-offset: 2px;
-  box-shadow: 0 0 0 3px var(--trading-accent-soft, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
 }
 
 .chartTypeButton:active,
@@ -398,12 +398,12 @@
   min-width: 128px;
   display: grid;
   gap: 3px;
-  border: 1px solid var(--trading-border-strong, #333);
+  border: 1px solid var(--trading-border-strong);
   border-radius: 6px;
   background: var(--panel-bg);
   color: var(--text-primary);
   padding: 6px;
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 18px 42px var(--theme-shadow-medium);
 }
 
 .priceScaleDropdown {
@@ -450,7 +450,7 @@
 
 .chartTypeOption[aria-checked='true'],
 .priceScaleOption[aria-checked='true'] {
-  background: var(--trading-accent-soft, rgba(255, 255, 255, 0.09));
+  background: var(--trading-accent-soft);
   color: var(--accent);
 }
 
@@ -461,7 +461,7 @@
   height: 6px;
   border-radius: 999px;
   background: currentColor;
-  box-shadow: 0 0 0 3px var(--trading-accent-soft, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 0 0 3px var(--trading-accent-soft);
 }
 
 .iconTextButton {
@@ -477,7 +477,7 @@
   place-items: center;
   border-radius: 999px;
   background: var(--accent);
-  color: var(--trading-accent-text, #050505);
+  color: var(--trading-accent-text);
   padding: 0 5px;
   font-size: 10px;
   font-weight: 900;
@@ -501,7 +501,7 @@
 
 .toggleLabel:hover,
 .jumpForm:hover {
-  border-color: var(--trading-border-strong, #333);
+  border-color: var(--trading-border-strong);
   background: var(--panel-bg-light);
 }
 
@@ -552,12 +552,12 @@
   display: grid;
   gap: 12px;
   overflow: visible;
-  border: 1px solid var(--trading-border-strong, #333);
+  border: 1px solid var(--trading-border-strong);
   border-radius: 6px;
   background: var(--panel-bg);
   color: var(--text-primary);
   padding: 14px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
+  box-shadow: 0 18px 48px var(--theme-shadow-medium);
 }
 
 .intervalDropdown,
@@ -579,12 +579,12 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   overflow-y: auto;
-  border: 1px solid var(--trading-border-strong, #333);
+  border: 1px solid var(--trading-border-strong);
   border-radius: 6px;
   background: var(--panel-bg);
   color: var(--text-primary);
   padding: 12px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
+  box-shadow: 0 18px 48px var(--theme-shadow-medium);
 }
 
 .indicatorMenuGroup {
@@ -653,7 +653,7 @@
 
 .intervalGrid button {
   min-height: 30px;
-  border: 1px solid var(--trading-border-strong, #3a3a3a);
+  border: 1px solid var(--trading-border-strong);
   border-radius: 4px;
   background: transparent;
   color: var(--text-primary);

@@ -90,7 +90,7 @@ describe('bottom account panel tabs', () => {
   })
 
   it('uses the existing table skeleton while account data is still loading', () => {
-    assert.match(source, /import \{ TableSkeleton \} from '\.\/TerminalSkeleton'/)
+    assert.match(source, /import \{ TableSkeleton \} from '\.\.\/\.\.\/\.\.\/components\/loading\/TerminalSkeleton'/)
     assert.match(source, /loading\?: boolean/)
     assert.match(source, /loading = false/)
     assert.match(source, /aria-busy=\{loading\}/)

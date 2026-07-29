@@ -12,7 +12,7 @@ import { BottomAccountContent } from './BottomAccountContent'
 import { BottomAccountBatchAction } from './BottomAccountBatchAction'
 import type { PositionMutationHandler } from './BottomAccountPositionsGrid'
 import styles from './BottomAccountPanel.module.css'
-import { TableSkeleton } from './TerminalSkeleton'
+import { TableSkeleton } from '../../../components/loading/TerminalSkeleton'
 
 type Props = {
   account?: AccountSummary

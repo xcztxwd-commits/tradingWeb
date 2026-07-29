@@ -1,0 +1,17 @@
+.button {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--user-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--user-muted);
+  cursor: pointer;
+}
+
+.button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--user-primary) 34%, transparent);
+  background: color-mix(in srgb, var(--user-primary) 8%, transparent);
+  color: var(--user-primary);
+}

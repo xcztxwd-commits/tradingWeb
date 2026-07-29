@@ -1,6 +1,6 @@
 import type { PositionResponse } from '@fx-platform/frontend-core'
 
-import type { ApiErrorView } from '../../components/user-page/userPageModels'
+import type { ApiErrorView } from '../../shared-widgets/data/userPageModels'
 
 export type PositionView = 'CURRENT' | 'HISTORY'
 export type ProtectionFormValues = { stopLoss: string; takeProfit: string }

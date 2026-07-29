@@ -33,6 +33,7 @@ import {
 import { registerTradingGeneratedIndicators } from '../generatedTradingIndicators'
 import { registerTradingDrawingOverlays } from '../tradingDrawingOverlays'
 import { registerWeightedMovingAverageIndicator } from '../weightedMovingAverageIndicator'
+import { chartColorWithAlpha, chartTheme } from '../chartTheme.ts'
 import { useResizeObserver } from './useResizeObserver'
 import styles from './KLineChartPanel.module.css'
 
@@ -104,8 +105,8 @@ type ChartExportContext = {
 }
 
 const drawingOverlayGroupId = 'trading-page-drawings'
-const drawingOverlayDefaultColor = '#fcd535'
-const drawingOverlayColors = ['#fcd535', '#eaecef', '#2ebd85', '#f6465d', '#5ab6ff']
+const drawingOverlayDefaultColor = chartTheme.palette.accent
+const drawingOverlayColors = chartTheme.drawingOverlayColors
 const drawingOverlayLineSizes = [1, 2, 3] as const
 
 export const KLineChartPanel = memo(function KLineChartPanel({
@@ -247,7 +248,7 @@ export const KLineChartPanel = memo(function KLineChartPanel({
     const chart = init(container)
     chartRef.current = chart
     chart?.setStyles(initialThemeModeRef.current)
-    chart?.setStyles(terminalChartStyles[initialThemeModeRef.current])
+    chart?.setStyles(chartTheme.terminal[initialThemeModeRef.current])
 
     return () => {
       dispose(container)
@@ -282,7 +283,7 @@ export const KLineChartPanel = memo(function KLineChartPanel({
     const chart = chartRef.current
     if (!chart) return
     chart.setStyles(themeMode)
-    chart.setStyles(terminalChartStyles[themeMode])
+    chart.setStyles(chartTheme.terminal[themeMode])
     chart.setStyles(getChartVisualStyles({
       chartType,
       candleStyle,
@@ -317,7 +318,7 @@ export const KLineChartPanel = memo(function KLineChartPanel({
       backgroundColor: exportBackgroundColor
     } = chartExportContextRef.current
     const imageBackgroundColor = exportBackgroundColor === defaultChartSettings.layoutSettings.background.color
-      ? terminalChartImageBackground[exportThemeMode]
+      ? chartTheme.terminalImageBackground[exportThemeMode]
       : exportBackgroundColor
     const imageUrl = chart.getConvertPictureUrl(true, 'png', imageBackgroundColor)
     setChartImagePreview({ imageUrl, symbol: exportSymbol })
@@ -842,13 +843,13 @@ function isTradingCandle(value: unknown): value is TradingCandle {
 }
 
 function buildDrawingOverlayStyles(color: string, lineSize: number) {
-  const fillColor = colorWithAlpha(color, 0.14)
+  const fillColor = chartColorWithAlpha(color, 0.14)
   return {
     point: {
       color,
-      borderColor: colorWithAlpha(color, 0.36),
+      borderColor: chartColorWithAlpha(color, 0.36),
       activeColor: color,
-      activeBorderColor: colorWithAlpha(color, 0.46)
+      activeBorderColor: chartColorWithAlpha(color, 0.46)
     },
     line: {
       color,
@@ -877,7 +878,7 @@ function buildDrawingOverlayStyles(color: string, lineSize: number) {
       size: lineSize
     },
     text: {
-      color: '#050505',
+      color: chartTheme.palette.ink,
       backgroundColor: color,
       borderColor: color,
       borderSize: lineSize
@@ -906,15 +907,6 @@ function getOverlayLineSize(styles: Record<string, unknown> | null | undefined) 
 function getNestedStyleValue(styles: Record<string, unknown> | null | undefined, group: string, key: string) {
   const value = styles?.[group]
   return isRecord(value) ? value[key] : undefined
-}
-
-function colorWithAlpha(color: string, alpha: number) {
-  if (!isHexColor(color)) return color
-  const value = color.slice(1)
-  const red = Number.parseInt(value.slice(0, 2), 16)
-  const green = Number.parseInt(value.slice(2, 4), 16)
-  const blue = Number.parseInt(value.slice(4, 6), 16)
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`
 }
 
 function isHexColor(value: unknown): value is string {
@@ -1072,164 +1064,4 @@ export function applyAuthoritativeRealtimeQuoteToChart(
   const tradingQuote = mapQuoteToTradingQuote(quote, undefined, now)
   if (!tradingQuote.marketSource || tradingQuote.tradable !== true) return null
   return applyRealtimeQuoteToChart(previous, period, tradingQuote.timestamp, tradingQuote.mid)
-}
-
-const terminalChartStyles = {
-  dark: {
-    grid: {
-      show: true,
-      horizontal: { color: '#2b3139', size: 1 },
-      vertical: { color: '#252a32', size: 1 }
-    },
-    candle: {
-      bar: {
-        upColor: '#2ebd85',
-        upBorderColor: '#2ebd85',
-        upWickColor: '#2ebd85',
-        downColor: '#f6465d',
-        downBorderColor: '#f6465d',
-        downWickColor: '#f6465d'
-      },
-      priceMark: {
-        high: { color: '#848e9c' },
-        low: { color: '#848e9c' },
-        last: {
-          upColor: '#2ebd85',
-          downColor: '#f6465d',
-          noChangeColor: '#fcd535'
-        }
-      }
-    },
-    xAxis: {
-      axisLine: { color: '#2b3139' },
-      tickText: { color: '#848e9c' }
-    },
-    yAxis: {
-      axisLine: { color: '#2b3139' },
-      tickText: { color: '#848e9c' }
-    },
-    separator: {
-      color: '#2b3139',
-      size: 1
-    },
-    crosshair: {
-      horizontal: {
-        line: { color: '#5e6673' },
-        text: { backgroundColor: '#2b3139', color: '#eaecef' }
-      },
-      vertical: {
-        line: { color: '#5e6673' },
-        text: { backgroundColor: '#2b3139', color: '#eaecef' }
-      }
-    },
-    overlay: {
-      point: {
-        color: '#fcd535',
-        borderColor: 'rgba(252, 213, 53, 0.36)',
-        activeColor: '#fcd535',
-        activeBorderColor: 'rgba(252, 213, 53, 0.44)'
-      },
-      line: {
-        color: '#fcd535',
-        size: 1,
-        style: 'solid'
-      },
-      rect: {
-        color: 'rgba(252, 213, 53, 0.14)',
-        borderColor: '#fcd535',
-        borderSize: 1
-      },
-      polygon: {
-        color: 'rgba(252, 213, 53, 0.12)',
-        borderColor: '#fcd535',
-        borderSize: 1
-      },
-      text: {
-        color: '#050505',
-        backgroundColor: '#fcd535',
-        borderColor: '#fcd535'
-      }
-    }
-  },
-  light: {
-    grid: {
-      show: true,
-      horizontal: { color: '#e8edf4', size: 1 },
-      vertical: { color: '#f1f4f8', size: 1 }
-    },
-    candle: {
-      bar: {
-        upColor: '#047857',
-        upBorderColor: '#047857',
-        upWickColor: '#047857',
-        downColor: '#be123c',
-        downBorderColor: '#be123c',
-        downWickColor: '#be123c'
-      },
-      priceMark: {
-        high: { color: '#475569' },
-        low: { color: '#475569' },
-        last: {
-          upColor: '#047857',
-          downColor: '#be123c',
-          noChangeColor: '#111827'
-        }
-      }
-    },
-    xAxis: {
-      axisLine: { color: '#dde4ee' },
-      tickText: { color: '#667085' }
-    },
-    yAxis: {
-      axisLine: { color: '#dde4ee' },
-      tickText: { color: '#667085' }
-    },
-    separator: {
-      color: '#dde4ee',
-      size: 1
-    },
-    crosshair: {
-      horizontal: {
-        line: { color: '#9aa4b2' },
-        text: { backgroundColor: '#111827', color: '#ffffff' }
-      },
-      vertical: {
-        line: { color: '#9aa4b2' },
-        text: { backgroundColor: '#111827', color: '#ffffff' }
-      }
-    },
-    overlay: {
-      point: {
-        color: '#111827',
-        borderColor: 'rgba(17, 24, 39, 0.28)',
-        activeColor: '#111827',
-        activeBorderColor: 'rgba(17, 24, 39, 0.42)'
-      },
-      line: {
-        color: '#111827',
-        size: 1,
-        style: 'solid'
-      },
-      rect: {
-        color: 'rgba(17, 24, 39, 0.09)',
-        borderColor: '#111827',
-        borderSize: 1
-      },
-      polygon: {
-        color: 'rgba(17, 24, 39, 0.08)',
-        borderColor: '#111827',
-        borderSize: 1
-      },
-      text: {
-        color: '#ffffff',
-        backgroundColor: '#111827',
-        borderColor: '#111827'
-      }
-    }
-  }
-}
-
-const terminalChartImageBackground = {
-  dark: defaultChartSettings.layoutSettings.background.color,
-  light: '#ffffff'
 }

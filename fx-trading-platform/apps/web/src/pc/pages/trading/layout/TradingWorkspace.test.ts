@@ -118,18 +118,13 @@ describe('TradingWorkspace OKX-style terminal structure', () => {
     assert.match(styles, /\.workspace\s*{[\s\S]*height:\s*max\(1120px,\s*calc\(100vh \+ 440px\)\)/)
   })
 
-  it('renders a collapsed mobile chart toggle before showing chart content', () => {
-    assert.match(source, /chartTitle:\s*string/)
-    assert.match(source, /mobileChartOpen,\s*setMobileChartOpen\]\s*=\s*useState\(false\)/)
-    assert.match(source, /mobileChartToggle/)
-    assert.match(source, /aria-expanded=\{mobileChartOpen\}/)
-    assert.match(source, /setMobileChartOpen\(\(open\)\s*=>\s*!open\)/)
-    assert.match(source, /chartContent/)
-    assert.match(source, /mobileChartCollapsed/)
-    assert.match(styles, /\.mobileChartToggle\s*{[\s\S]*display:\s*none/)
-    assert.match(styles, /\.chartPanel\.mobileChartCollapsed\s+\.chartContent\s*{\s*display:\s*none;\s*}/)
-    assert.match(styles, /\.chartPanel\.mobileChartCollapsed\s*{[\s\S]*min-height:\s*42px/)
-    assert.match(styles, /\.chartPanel\.mobileChartExpanded\s*{[\s\S]*min-height:\s*52vh/)
+  it('keeps mobile breakpoint layout out of the desktop workspace styles', () => {
+    assert.doesNotMatch(source, /mobileChart|Chevron(?:Down|Up)|chartTitle|chartContent/)
+    assert.doesNotMatch(styles, /@media/)
+    assert.doesNotMatch(styles, /display:\s*contents/)
+    assert.doesNotMatch(styles, /\.mobileChart(?:Collapsed|Expanded)/)
+    assert.doesNotMatch(styles, /\.mobileChartToggle/)
+    assert.doesNotMatch(styles, /:global\(\.trade-panel/)
   })
 
   it('keeps layout actions external so workspace controls do not take a chart row', () => {
@@ -141,19 +136,4 @@ describe('TradingWorkspace OKX-style terminal structure', () => {
     assert.doesNotMatch(styles, /\.presetButton/)
   })
 
-  it('places mobile trade and order book side by side before the chart', () => {
-    assert.match(styles, /\.split\s*{[\s\S]*display:\s*contents/)
-    assert.match(styles, /\.grid\s*{[\s\S]*grid-template-columns:\s*minmax\(0,\s*54%\)\s*minmax\(0,\s*46%\)/)
-    assert.match(styles, /\.tradePanel\s*{[\s\S]*order:\s*1/)
-    assert.match(styles, /\.marketPanel\s*{[\s\S]*order:\s*2/)
-    assert.match(styles, /\.chartPanel\s*{[\s\S]*order:\s*3[\s\S]*grid-column:\s*1\s*\/\s*-1/)
-    assert.match(styles, /\.accountPanel\s*{[\s\S]*order:\s*4[\s\S]*grid-column:\s*1\s*\/\s*-1/)
-  })
-
-  it('compresses the mobile order form so the order book enters the first screen', () => {
-    assert.match(styles, /\.tradePanel,\s*\.marketPanel\s*{[\s\S]*height:\s*clamp\(500px,\s*66vh,\s*590px\)/)
-    assert.match(styles, /\.tradePanel\s+:global\(\.trade-panel__top-tabs\)\s*{\s*display:\s*none;\s*}/)
-    assert.match(styles, /\.tradePanel\s+:global\(\.trade-panel__tpsl\),\s*\.tradePanel\s+:global\(\.trade-panel__advanced\),\s*\.tradePanel\s+:global\(\.trade-panel__best-line\),\s*\.tradePanel\s+:global\(\.trade-panel__notice\)\s*{[\s\S]*display:\s*none/)
-    assert.match(styles, /\.tradePanel\s+:global\(\.trade-panel\)\s*{[\s\S]*gap:\s*7px[\s\S]*padding:\s*8px/)
-  })
 })

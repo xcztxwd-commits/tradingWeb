@@ -50,7 +50,6 @@ const zhCN = {
     loadingData: '正在加载数据。',
     loadFailed: '加载失败',
     empty: '暂无数据',
-    placeholderPageMessage: '该页面的业务入口已预留，后续会补齐对应数据和表格。',
     loginRequired: '需要登录',
     goLogin: '前往登录',
     previousPage: '上一页',

@@ -31,7 +31,7 @@ describe('PlatformView', () => {
     )
 
     assert.ok(appShellSource.indexOf('const [session, setSession]') < appShellSource.indexOf('<PlatformView'))
-    assert.match(appShellSource, /<PlatformView[\s\S]*\/>[\s\S]*<main className="main-region">\{children\}<\/main>/)
+    assert.match(appShellSource, /<PlatformView[\s\S]*\/>[\s\S]*<main className=\{styles\.mainRegion\}>\{children\}<\/main>/)
     assert.doesNotMatch(platformCall, /main-region|children/)
     assert.match(pcShellSource, /data-platform-view="pc"/)
     assert.match(mobileShellSource, /data-platform-view="mobile"/)

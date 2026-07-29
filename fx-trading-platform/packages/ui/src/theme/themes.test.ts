@@ -105,6 +105,26 @@ describe('trading theme package', () => {
     assert.match(css, /--theme-chart-grid:\s*#e8edf4/u)
     assert.doesNotMatch(css, /\bInter\b/u)
   })
+
+  it('mixes soft feedback colors with the active theme surface', () => {
+    const css = readFileSync(cssPath, 'utf8')
+
+    for (const token of ['info', 'success', 'danger', 'warning']) {
+      assert.match(
+        css,
+        new RegExp(`--theme-${token}-soft:\\s*color-mix\\([^;]+var\\(--theme-surface\\)\\)`)
+      )
+    }
+  })
+
+  it('names fixed asset colors by identity instead of literal hue', () => {
+    const css = readFileSync(cssPath, 'utf8')
+
+    for (const token of ['opg-hei', 'opg-hei-shadow', 'pond', 'index', 'index-accent']) {
+      assert.match(css, new RegExp(`--theme-asset-${token}:`))
+    }
+    assert.doesNotMatch(css, /--theme-asset-(?:blue|teal(?:-shadow)?):/u)
+  })
 })
 
 function escapeRegExp(value: string) {

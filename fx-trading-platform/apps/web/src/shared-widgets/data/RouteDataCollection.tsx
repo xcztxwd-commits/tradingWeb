@@ -8,6 +8,9 @@ import {
 } from '@fx-platform/ui'
 import { paginateRows, sortRows } from '@fx-platform/frontend-core'
 
+import { cssModuleClasses as css } from './cssModuleClasses'
+import styles from './UserPageSurface.module.css'
+
 export type RouteDataCollectionProps<T extends object> = {
   rows: T[]
   columns: Array<DataViewColumn<T>>
@@ -63,9 +66,9 @@ export function RouteDataCollectionEmpty({
       <span>{t('common.continueActionHint')}</span>
       {action ? (
         action.href ? (
-          <a className="table-action table-action--primary" href={action.href}>{action.label}</a>
+          <a className={css(styles, "table-action", "table-action--primary")} href={action.href}>{action.label}</a>
         ) : (
-          <button type="button" className="table-action table-action--primary" onClick={action.onClick}>{action.label}</button>
+          <button type="button" className={css(styles, "table-action", "table-action--primary")} onClick={action.onClick}>{action.label}</button>
         )
       ) : null}
     </>
@@ -85,13 +88,13 @@ export function RouteDataCollectionPagination({
 }) {
   const { t } = useTranslation()
   return (
-    <div className="table-pagination">
+    <div className={css(styles, "table-pagination")}>
       <span>{t('common.pageSummary', { total, page, totalPages })}</span>
       <div>
-        <button type="button" className="table-action table-action--secondary" disabled={page <= 1} onClick={() => onPage(-1)}>
+        <button type="button" className={css(styles, "table-action", "table-action--secondary")} disabled={page <= 1} onClick={() => onPage(-1)}>
           {t('common.previousPage')}
         </button>
-        <button type="button" className="table-action table-action--secondary" disabled={page >= totalPages} onClick={() => onPage(1)}>
+        <button type="button" className={css(styles, "table-action", "table-action--secondary")} disabled={page >= totalPages} onClick={() => onPage(1)}>
           {t('common.nextPage')}
         </button>
       </div>

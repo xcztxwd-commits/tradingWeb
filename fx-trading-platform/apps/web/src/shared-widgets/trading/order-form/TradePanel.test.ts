@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
@@ -22,6 +22,12 @@ const orderTypeTabsSource = readFileSync(join(currentDir, 'OrderTypeTabs.tsx'), 
 const tradeTabsSource = readFileSync(join(currentDir, 'TradeTabs.tsx'), 'utf8')
 const tpSlPanelSource = readFileSync(join(currentDir, 'TpSlPanel.tsx'), 'utf8')
 const styles = readFileSync(join(currentDir, 'TradePanel.module.css'), 'utf8')
+const tradingRouteStyles = readFileSync(join(currentDir, '../../../routes/trading/TradingRoute.module.css'), 'utf8')
+const tradingWorkspaceStyles = readFileSync(join(currentDir, '../../../pc/pages/trading/layout/TradingWorkspace.module.css'), 'utf8')
+const styledComponentSources = readdirSync(currentDir)
+  .filter((fileName) => fileName.endsWith('.tsx'))
+  .map((fileName) => ({ fileName, source: readFileSync(join(currentDir, fileName), 'utf8') }))
+  .filter(({ source }) => source.includes('trade-panel'))
 
 const userFacingSources = [
   tradePanelSource,
@@ -69,6 +75,11 @@ describe('OKX-style trade panel density', () => {
     assert.match(tradePanelSource, /trade-panel__forms--dual/)
     assert.match(styles, /\.trade-panel__forms--dual\s*{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*minmax\(0,\s*1fr\)/)
     assert.match(styles, /\.trade-panel--compact\s+\.trade-panel__forms--dual\s*{[\s\S]*grid-template-columns:\s*1fr/)
+  })
+
+  it('keeps interactive Mobile sheet inputs touch- and zoom-safe without changing PC density', () => {
+    assert.match(styles, /\[data-platform-view='mobile'\]\s+\.trade-panel--compact\s+\.trade-panel__control input:not\(:disabled\)\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px/)
+    assert.match(styles, /\[data-platform-view='pc'\]\s+\.trade-panel__control,[\s\S]*?\.trade-panel__best-price\s*\{[\s\S]*?min-height:\s*34px/)
   })
 
   it('shows canonical quantity-unit sizing inside each side form', () => {
@@ -126,7 +137,7 @@ describe('OKX-style trade panel density', () => {
     assert.match(orderSideSource, /form\.orderType === 'limit' && form\.strategyType !== 'trigger'/)
     assert.match(orderSideSource, /<StaticOrderField/)
     assert.match(orderSideSource, /<SlippageTolerance/)
-    assert.match(orderSideSource, /trade-panel__side--\$\{form\.orderType\}/)
+    assert.doesNotMatch(orderSideSource, /trade-panel__side--\$\{form\.orderType\}/)
     assert.match(orderSideSource, /form\.orderType === 'market' \?/)
     assert.doesNotMatch(orderSideSource, /form\.orderType === 'market' \?[\s\S]*<TpSlPanel/)
   })
@@ -148,8 +159,16 @@ describe('OKX-style trade panel density', () => {
   })
 
   it('uses cohesive compact light surfaces instead of mixed order-form layers', () => {
-    assert.match(styles, /--tp-bg:\s*#ffffff/)
-    assert.match(styles, /--tp-surface-2:\s*#f5f7fa/)
+    const tradePanelBlocks = [...styles.matchAll(/(?:^|\n)\.trade-panel\s*\{([^}]*)\}/gu)]
+    const effectiveTradePanelBlock = tradePanelBlocks.at(-1)?.[1] ?? ''
+
+    assert.match(styles, /--tp-bg:\s*var\(--trading-surface-2/)
+    assert.match(styles, /--tp-surface-2:\s*var\(--trading-field-bg/)
+    assert.match(effectiveTradePanelBlock, /--tp-bg:\s*var\(--theme-surface-contrast\)/)
+    assert.match(effectiveTradePanelBlock, /border:\s*0/)
+    assert.match(effectiveTradePanelBlock, /background:\s*var\(--tp-bg\)/)
+    assert.doesNotMatch(effectiveTradePanelBlock, /var\(--trading-surface\)/)
+    assert.doesNotMatch(styles, /#[0-9a-f]{3,8}\b|\b(?:rgb|rgba|hsl|hsla)\s*\(/i)
     assert.match(styles, /\.trade-panel__price-row\s*{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*46px/)
     assert.match(styles, /\.trade-panel__submit\s*{[\s\S]*border-radius:\s*4px/)
     assert.doesNotMatch(orderSideSource, /trade-panel__order-metrics/)
@@ -194,6 +213,22 @@ describe('OKX-style trade panel density', () => {
   it('formats the caught order submission error instead of stale parent error state', () => {
     assert.match(submitHookSource, /createOrderSubmitFailureMessage\(error\)/)
     assert.doesNotMatch(submitHookSource, /orderError \?\? error/)
+  })
+
+  it('owns trade-panel styles through hashed module classes without cross-module global overrides', () => {
+    assert.doesNotMatch(styles, /:global\(\.trade-panel/)
+    assert.doesNotMatch(tradingRouteStyles, /:global\(\.trade-panel/)
+    assert.doesNotMatch(tradingWorkspaceStyles, /:global\(\.trade-panel/)
+    assert.match(styles, /\[data-platform-view=['"]pc['"]\]\s+\.trade-panel/)
+
+    for (const { fileName, source } of styledComponentSources) {
+      const styledSource = source.replace(/styles\[(?:'[^']+'|"[^"]+"|`[^`]+`)\]/gu, '')
+      assert.match(source, /import styles from '\.\/TradePanel\.module\.css'/, `${fileName} must import the local trade-panel module`)
+      assert.doesNotMatch(styledSource, /trade-panel__/, `${fileName} must not emit an unstyled global trade-panel token`)
+      assert.doesNotMatch(styledSource, /(?:className|backdropClassName|panelClassName)="trade-panel/, `${fileName} must not emit a styled global trade-panel class`)
+      assert.doesNotMatch(styledSource, /className=\{`trade-panel/, `${fileName} must start composed classes from the module map`)
+      assert.doesNotMatch(styledSource, /\?\s*'trade-panel__/, `${fileName} must resolve conditional styled classes through the module map`)
+    }
   })
 
   it('formats backend API order failures with code, status, and request id', () => {

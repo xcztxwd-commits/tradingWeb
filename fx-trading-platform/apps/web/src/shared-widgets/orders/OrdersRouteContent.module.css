@@ -1,0 +1,9 @@
+[data-platform-view='pc'] .orders-page {
+  --user-toolbar-columns: repeat(5, minmax(0, 1fr));
+}
+
+[data-platform-view='mobile'] .orders-page {
+  --table-action-min-height: 44px;
+  --user-form-columns: 1fr;
+  --user-toolbar-columns: 1fr;
+}

@@ -1,3 +1,5 @@
+import styles from './TradePanel.module.css'
+
 type Props = {
   ariaLabel: string
   label: string
@@ -24,9 +26,9 @@ export function AmountInput({
   onChange
 }: Props) {
   return (
-    <label className={`trade-panel__field ${error ? 'trade-panel__field--invalid' : ''}`}>
-      <span className={`trade-panel__control ${showStepper ? 'trade-panel__control--with-stepper' : ''}`}>
-        <span className="trade-panel__field-label">{label}</span>
+    <label className={`${styles['trade-panel__field']} ${error ? styles['trade-panel__field--invalid'] : ''}`}>
+      <span className={styles['trade-panel__control']}>
+        <span className={styles['trade-panel__field-label']}>{label}</span>
         <input
           aria-label={ariaLabel}
           inputMode="decimal"
@@ -34,11 +36,11 @@ export function AmountInput({
           value={value}
           onChange={(event) => onChange(event.target.value)}
         />
-        {caption ? <span className="trade-panel__quantity-caption">{caption}</span> : null}
-        <span className={`trade-panel__unit ${unitDropdown ? 'trade-panel__unit--dropdown' : ''}`}>{unit}</span>
-        {showStepper ? <span className="trade-panel__stepper" aria-hidden="true"><span /><span /></span> : null}
+        {caption ? <span className={styles['trade-panel__quantity-caption']}>{caption}</span> : null}
+        <span className={`${styles['trade-panel__unit']} ${unitDropdown ? styles['trade-panel__unit--dropdown'] : ''}`}>{unit}</span>
+        {showStepper ? <span className={styles['trade-panel__stepper']} aria-hidden="true"><span /><span /></span> : null}
       </span>
-      {error ? <span className="trade-panel__error">{error}</span> : null}
+      {error ? <span className={styles['trade-panel__error']}>{error}</span> : null}
     </label>
   )
 }

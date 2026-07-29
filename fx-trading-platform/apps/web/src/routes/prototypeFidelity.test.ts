@@ -25,8 +25,7 @@ const authSource = readFileSync(join(srcDir, 'shared-widgets', 'auth', 'AuthPage
 const loginSource = readFileSync(join(srcDir, 'routes', 'auth', 'useAuthRouteController.ts'), 'utf8')
 const accountSource = [
   readFileSync(join(srcDir, 'shared-widgets', 'account', 'AccountPagesContent.tsx'), 'utf8'),
-  readFileSync(join(srcDir, 'routes', 'account', 'AccountRoutes.tsx'), 'utf8'),
-  readFileSync(join(pagesDir, 'account', 'AccountHubPage.tsx'), 'utf8')
+  readFileSync(join(srcDir, 'routes', 'account', 'AccountRoutes.tsx'), 'utf8')
 ].join('\n')
 const shellSource = [
   readFileSync(join(srcDir, 'app', 'AppShell.tsx'), 'utf8'),
@@ -34,7 +33,13 @@ const shellSource = [
   readFileSync(join(srcDir, 'mobile', 'shell', 'MobileShellChrome.tsx'), 'utf8')
 ].join('\n')
 const zhLocale = readFileSync(join(srcDir, 'i18n', 'locales', 'zh-CN.ts'), 'utf8')
-const styles = readFileSync(join(srcDir, 'styles.css'), 'utf8')
+const baseStyles = readFileSync(join(srcDir, 'styles.css'), 'utf8')
+const marketStyles = readFileSync(join(srcDir, 'shared-widgets', 'market', 'MarketsContent.module.css'), 'utf8')
+const pcMarketTableStyles = readFileSync(join(srcDir, 'pc', 'pages', 'markets', 'PcMarketTable.module.css'), 'utf8')
+const mobileMarketListStyles = readFileSync(join(srcDir, 'mobile', 'pages', 'markets', 'MobileMarketList.module.css'), 'utf8')
+const userPageStyles = readFileSync(join(srcDir, 'shared-widgets', 'data', 'UserPageSurface.module.css'), 'utf8')
+const accountStyles = readFileSync(join(srcDir, 'shared-widgets', 'account', 'AccountPagesContent.module.css'), 'utf8')
+const styles = `${baseStyles}\n${marketStyles}\n${pcMarketTableStyles}\n${mobileMarketListStyles}\n${userPageStyles}\n${accountStyles}`
 const themeStyles = readFileSync(join(webRoot, '..', '..', 'packages', 'ui', 'src', 'theme', 'theme.css'), 'utf8')
 const homeStyles = readFileSync(join(sharedHomeDir, 'HomeContent.module.css'), 'utf8')
 const authStyles = readFileSync(join(srcDir, 'shared-widgets', 'auth', 'AuthPageContent.module.css'), 'utf8')
@@ -84,7 +89,7 @@ describe('HTML export fidelity baseline', () => {
     assert.match(styles, /--bn-bg:\s*var\(--theme-background\)/)
     assert.match(styles, /--color-BtnBg:\s*var\(--theme-primary-hover\)/)
     assert.match(styles, /\.market-summary-grid/)
-    assert.match(styles, /\.market-table/)
+    assert.match(styles, /\.table table/)
     assert.match(styles, /\.account-sidebar/)
     assert.match(styles, /\.account-dashboard-layout/)
     assert.match(authStyles, /\.shell\s*{[\s\S]*grid-template-columns:\s*minmax\(0,\s*520px\) 425px/)
