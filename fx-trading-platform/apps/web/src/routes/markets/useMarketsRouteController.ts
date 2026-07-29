@@ -98,6 +98,7 @@ export function useMarketsRouteController(): MarketsRouteModel {
             ? formatApiError(symbolsResult.reason)
             : null
         )
+        setLoading(false)
       }
       const quotedMarkets = await loadQuotedMarkets(
         nextMarkets.filter(canHydrateMarketQuote).slice(0, marketQuoteHydrationLimit)

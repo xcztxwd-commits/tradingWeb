@@ -40,6 +40,19 @@ describe('user core pages smoke command', () => {
     assert.match(source, /VITE_API_BASE_URL: apiBaseUrl/)
   })
 
+  it('clears an existing same-origin session without starting a duplicate markets load', () => {
+    const source = readFileSync(scriptPath, 'utf8')
+    const clearSessionSource = source.slice(
+      source.indexOf('async function clearBrowserSession'),
+      source.indexOf('async function setAuthToken')
+    )
+
+    assert.match(clearSessionSource, /const currentOrigin = await page\.evaluate\(\(\) => window\.location\.origin\)/)
+    assert.match(clearSessionSource, /if \(currentOrigin !== webUrl\.origin\)/)
+    assert.match(clearSessionSource, /\/login\?clear=\$\{runId\}/)
+    assert.doesNotMatch(clearSessionSource, /\/markets\?clear=/)
+  })
+
   it('fails both market data sources when checking the markets error state', () => {
     const source = readFileSync(scriptPath, 'utf8')
 
@@ -100,6 +113,17 @@ describe('user core pages smoke command', () => {
     assert.doesNotMatch(source, /window\.location\.pathname === '\/trading'/u)
   })
 
+  it('opens a market through an enabled trading action', () => {
+    const source = readFileSync(scriptPath, 'utf8')
+    const marketsStepSource = source.slice(
+      source.indexOf("await step('markets loads real symbols"),
+      source.indexOf("await step('orders page shows real orders")
+    )
+
+    assert.match(marketsStepSource, /tbody button\[type="button"\]:not\(\[aria-pressed\]\):not\(\[disabled\]\)/u)
+    assert.doesNotMatch(marketsStepSource, /find\(\(button\) => !button\.hasAttribute\('aria-pressed'\)\)/u)
+  })
+
   it('waits for wallet fund order loading before asserting wallet network coverage', () => {
     const source = readFileSync(scriptPath, 'utf8')
 
@@ -139,7 +163,7 @@ describe('user core pages smoke command', () => {
 
     assert.match(source, /window\.location\.pathname === `\/trade\/perpetual\/\$\{symbol\}`/u)
     assert.match(source, /\[role="tablist"\]\[aria-label\] button\[role="tab"\]\[aria-controls\]/u)
-    assert.match(source, /\[role="dialog"\]\[aria-modal="true"\]\[aria-label="Position action"\]/u)
+    assert.match(source, /\[role="dialog"\]\[aria-modal="true"\]\[aria-labelledby\]/u)
     assert.match(source, /\[aria-label="Position take-profit and stop-loss protections"\]/u)
     assert.match(source, /const editor = dialog\?\.querySelector\('\[aria-label="Position take-profit and stop-loss protections"\]'\)/u)
     assert.match(source, /const quantityUnit = dialog\?\.querySelector\('form select'\)/u)
@@ -152,6 +176,17 @@ describe('user core pages smoke command', () => {
     assert.match(source, /response\.url\.includes\(`\/api\/trading\/positions\/\$\{context\.openPositionId\}\/protections`\)/u)
     assert.match(source, /\.filter\([\s\S]*\)\.length >= 2/u)
     assert.doesNotMatch(source, /form input\[name="stopLoss"\]/u)
+  })
+
+  it('follows the live labelled position action dialog contract', () => {
+    const source = readFileSync(scriptPath, 'utf8')
+    const positionStepSource = source.slice(
+      source.indexOf("await step('positions page reaches canonical protection controls"),
+      source.indexOf("await step('wallet page loads real balances")
+    )
+
+    assert.match(positionStepSource, /\[role="dialog"\]\[aria-modal="true"\]\[aria-labelledby\]/u)
+    assert.doesNotMatch(positionStepSource, /aria-label="Position action"/u)
   })
 
   it('targets rendered UI by semantic state, identity, role, and form selectors', () => {

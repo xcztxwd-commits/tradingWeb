@@ -58,6 +58,16 @@ describe('markets route platform contract', () => {
     assert.match(contentSource, /formatMarketPrice/)
   })
 
+  it('settles blocking loading before optional quote enrichment', () => {
+    const coreLoadIndex = controllerSource.indexOf('const [symbolsResult, overviewResult]')
+    const loadingSettledIndex = controllerSource.indexOf('setLoading(false)', coreLoadIndex)
+    const quoteEnrichmentIndex = controllerSource.indexOf('const quotedMarkets = await loadQuotedMarkets', coreLoadIndex)
+
+    assert.ok(coreLoadIndex >= 0)
+    assert.ok(loadingSettledIndex > coreLoadIndex)
+    assert.ok(loadingSettledIndex < quoteEnrichmentIndex)
+  })
+
   it('lazy-loads only the active platform view around the same model', () => {
     assert.match(routeSource, /const PcMarketsPage = lazy/)
     assert.match(routeSource, /const MobileMarketsPage = lazy/)

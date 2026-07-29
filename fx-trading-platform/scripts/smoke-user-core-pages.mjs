@@ -248,10 +248,9 @@ try {
       return favorite?.getAttribute('aria-pressed') === 'true'
     }, 'favorite toggled')
     await page.evaluate(() => {
-      const favorite = document.querySelector('[aria-labelledby="market-table-title"] tbody button[aria-pressed]')
-      const row = favorite?.closest('tr')
-      if (!row) throw new Error('market row not found')
-      const trade = [...row.querySelectorAll('button[type="button"]')].find((button) => !button.hasAttribute('aria-pressed'))
+      const trade = document.querySelector(
+        '[aria-labelledby="market-table-title"] tbody button[type="button"]:not([aria-pressed]):not([disabled])'
+      )
       if (!(trade instanceof HTMLButtonElement)) throw new Error('trade navigation button not found')
       trade.click()
     })
@@ -391,23 +390,23 @@ try {
       action.click()
     }, context.symbol)
     await page.waitForFunction(
-      () => Boolean(document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')),
+      () => Boolean(document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')),
       'canonical position action dialog'
     )
     await page.evaluate(() => {
-      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
       const protectionTab = [...(dialog?.querySelectorAll('[role="tablist"][aria-label="Position action type"] button[role="tab"]') ?? [])].at(-1)
       if (!(protectionTab instanceof HTMLButtonElement)) throw new Error('TP/SL action tab not found')
       if (protectionTab.disabled) throw new Error('TP/SL action tab is disabled')
       protectionTab.click()
     })
     await page.waitForFunction(() => {
-      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
       const quantityUnit = dialog?.querySelector('form select')
       return quantityUnit instanceof HTMLSelectElement && [...quantityUnit.options].some((option) => option.value === 'BASE')
     }, 'protection quantity unit')
     await page.evaluate(() => {
-      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
       const quantityUnit = dialog?.querySelector('form select')
       if (!(quantityUnit instanceof HTMLSelectElement)) throw new Error('protection quantity unit not found')
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
@@ -416,19 +415,19 @@ try {
       quantityUnit.dispatchEvent(new Event('change', { bubbles: true }))
     })
     await page.waitForFunction(() => {
-      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
       const quantityUnit = dialog?.querySelector('form select')
       return quantityUnit instanceof HTMLSelectElement && quantityUnit.value === 'BASE'
     }, 'BASE protection quantity unit')
     await page.waitForFunction(
       () => {
-        const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+        const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
         return Boolean(dialog?.querySelector('[aria-label="Position take-profit and stop-loss protections"]'))
       },
       'canonical TP/SL editor'
     )
     await page.evaluate(() => {
-      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
       const editor = dialog?.querySelector('[aria-label="Position take-profit and stop-loss protections"]')
       const addButtons = editor?.querySelectorAll('button[type="button"]:not([disabled])')
       const addTakeProfit = addButtons?.[0]
@@ -440,14 +439,14 @@ try {
     })
     await page.waitForFunction(
       () => {
-        const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+        const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
         const editor = dialog?.querySelector('[aria-label="Position take-profit and stop-loss protections"]')
         return (editor?.querySelectorAll('fieldset input[inputmode="decimal"]').length ?? 0) >= 4
       },
       'canonical TP/SL level fields'
     )
     await page.evaluate((takeProfitPrice, stopLossPrice, quantity) => {
-      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
       const editor = dialog?.querySelector('[aria-label="Position take-profit and stop-loss protections"]')
       const fields = editor?.querySelectorAll('fieldset input[inputmode="decimal"]') ?? []
       const takeProfitTrigger = fields[0]
@@ -471,12 +470,12 @@ try {
       setValue(stopLossQuantity, quantity)
     }, context.protectionTakeProfitPrice, context.protectionStopLossPrice, context.protectionQuantity)
     await page.waitForFunction(() => {
-      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
       const confirm = dialog?.querySelector('form button[type="submit"]')
       return confirm instanceof HTMLButtonElement && !confirm.disabled
     }, 'enabled TP/SL confirmation')
     await page.evaluate(() => {
-      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
       const confirm = dialog?.querySelector('form button[type="submit"]')
       if (!(confirm instanceof HTMLButtonElement)) throw new Error('TP/SL confirmation not found')
       confirm.click()
@@ -492,7 +491,7 @@ try {
     } catch (error) {
       const diagnostics = await page.evaluate(() => ({
         href: window.location.href,
-        dialogError: document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"] [role="alert"]')?.textContent,
+        dialogError: document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby] [role="alert"]')?.textContent,
         bodyText: document.body.textContent?.slice(0, 700)
       }))
       throw new Error(
@@ -503,7 +502,7 @@ try {
     }
 
     await page.waitForFunction((symbol) => {
-      if (document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')) return false
+      if (document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')) return false
       const row = [...document.querySelectorAll('[role="tabpanel"] tbody tr')]
         .find((candidate) => candidate.textContent?.includes(symbol))
       const action = row?.querySelector('button[title]')
@@ -518,7 +517,7 @@ try {
     }, context.symbol)
     await page.waitForFunction(
       () => {
-        const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+        const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
         const tabs = [...(dialog?.querySelectorAll('[role="tablist"][aria-label="Position action type"] button[role="tab"]') ?? [])]
         const confirm = dialog?.querySelector('form button[type="submit"]')
         return tabs[1]?.getAttribute('aria-selected') === 'true' && confirm instanceof HTMLButtonElement && !confirm.disabled
@@ -526,7 +525,7 @@ try {
       'position close confirmation dialog'
     )
     await page.evaluate(() => {
-      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-label="Position action"]')
+      const dialog = document.querySelector('[role="dialog"][aria-modal="true"][aria-labelledby]')
       const confirmButton = dialog?.querySelector('form button[type="submit"]')
       if (!(confirmButton instanceof HTMLButtonElement)) throw new Error('position close confirm button not found')
       confirmButton.click()
@@ -965,7 +964,10 @@ async function openMarketsOverviewTab(page) {
 }
 
 async function clearBrowserSession(page) {
-  await page.navigate(`${webBaseUrl}/markets?clear=${runId}`)
+  const currentOrigin = await page.evaluate(() => window.location.origin)
+  if (currentOrigin !== webUrl.origin) {
+    await page.navigate(`${webBaseUrl}/login?clear=${runId}`)
+  }
   await page.evaluate(() => {
     localStorage.clear()
     sessionStorage.clear()
