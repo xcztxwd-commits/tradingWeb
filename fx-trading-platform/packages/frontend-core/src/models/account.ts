@@ -1,6 +1,7 @@
 import type { Amount } from './trading.ts'
 import type {
   OrderOrigin,
+  OrderResponse as GeneratedOrderResponse,
   PositionResponse as GeneratedPositionResponse,
   ProductType,
   ProtectionType,
@@ -12,6 +13,7 @@ import type {
 export type OrderResponse = {
   id: string
   accountId?: string
+  clientOrderId?: GeneratedOrderResponse['clientOrderId'] | null
   symbol: string
   side: string
   orderType: string

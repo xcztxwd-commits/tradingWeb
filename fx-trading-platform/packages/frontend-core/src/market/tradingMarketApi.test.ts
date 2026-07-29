@@ -119,6 +119,7 @@ describe('trading market API adapters', () => {
       marginAsset: 'USDT',
       settlementAsset: 'USDT',
       contractSize: '1',
+      contractMultiplier: '10',
       riskTier: 'spot-default',
       tradingSession: '24x7',
       kycRequirement: 'STANDARD',
@@ -130,6 +131,7 @@ describe('trading market API adapters', () => {
     assert.equal(rules.minNotional, 5)
     assert.equal(rules.orderEnabled, false)
     assert.equal(rules.maxLeverage, 1)
+    assert.equal(rules.contractMultiplier, 10)
   })
 
   it('maps backend symbols to the trading page market model', () => {

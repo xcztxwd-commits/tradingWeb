@@ -1,5 +1,6 @@
-import type { FormEvent } from 'react'
+import { useId, type FormEvent } from 'react'
 import type { QuantityUnit } from '@fx-platform/shared-types'
+import { Dialog } from '@fx-platform/ui'
 
 import { MultiLevelProtectionEditor } from './MultiLevelProtectionEditor'
 import type { ProtectionLevel, ProtectionType } from './MultiLevelProtectionEditor'
@@ -79,6 +80,7 @@ export function PositionActionDialog({
   onConfirm,
   onClose
 }: Props) {
+  const titleId = useId()
   if (!open) return null
 
   const isolated = marginMode === 'ISOLATED'
@@ -101,11 +103,18 @@ export function PositionActionDialog({
   }
 
   return (
-    <div className={styles.dialogLayer} role="presentation">
-      <button type="button" className={styles.dialogBackdrop} aria-label="Close position action dialog" disabled={pending} onClick={onClose} />
-      <section className={styles.dialog} role="dialog" aria-modal="true" aria-label="Position action" aria-busy={pending}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      labelledBy={titleId}
+      closeLabel="Close position action dialog"
+      pending={pending}
+      className={styles.dialogLayer}
+      backdropClassName={styles.dialogBackdrop}
+      panelClassName={styles.dialog}
+    >
         <header className={styles.dialogHeader}>
-          <strong>Position action</strong>
+          <strong id={titleId}>Position action</strong>
           <button type="button" aria-label="Close" disabled={pending} onClick={onClose}>
             ×
           </button>
@@ -243,7 +252,6 @@ export function PositionActionDialog({
             </button>
           </footer>
         </form>
-      </section>
-    </div>
+    </Dialog>
   )
 }

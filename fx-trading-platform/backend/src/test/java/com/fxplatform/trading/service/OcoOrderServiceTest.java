@@ -583,6 +583,6 @@ class OcoOrderServiceTest {
         ProductType.CRYPTO_SPOT, new BigDecimal("0.1"), new BigDecimal("0.0001"),
         new BigDecimal("0.0001"), new BigDecimal("100"), new BigDecimal("5"), null,
         new BigDecimal("0.0001"), new BigDecimal("100"), 1, 1,
-        "USDT", "USDT", BigDecimal.ONE, "DEFAULT", "ALWAYS", "NONE", "NORMAL");
+        "USDT", "USDT", BigDecimal.ONE, BigDecimal.ONE, "DEFAULT", "ALWAYS", "NONE", "NORMAL");
   }
 }

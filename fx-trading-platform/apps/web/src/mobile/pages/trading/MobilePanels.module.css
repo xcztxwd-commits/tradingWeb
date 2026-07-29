@@ -8,7 +8,7 @@
   inset: 0;
   border: 0;
   background: color-mix(in srgb, var(--theme-background) 72%, transparent);
-  opacity: 0;
+  opacity: 1;
   cursor: pointer;
   transition: opacity var(--motion-panel) var(--ease-standard);
 }
@@ -23,20 +23,11 @@
   border-radius: var(--radius-4) var(--radius-4) var(--radius-0) var(--radius-0);
   background: var(--trading-surface-2);
   box-shadow: var(--trading-shadow-lg);
-  opacity: 0;
-  transform: translateY(var(--space-4));
+  opacity: 1;
+  transform: translate(0);
   transition:
     opacity var(--motion-panel) var(--ease-standard),
     transform var(--motion-panel) var(--ease-standard);
-}
-
-.open .backdrop,
-.open .sheet {
-  opacity: 1;
-}
-
-.open .sheet {
-  transform: translate(0);
 }
 
 .mobileHeader {
@@ -104,11 +95,6 @@
     inset: 0;
     z-index: var(--z-drawer);
     display: block;
-    pointer-events: none;
-  }
-
-  .open {
-    pointer-events: auto;
   }
 }
 

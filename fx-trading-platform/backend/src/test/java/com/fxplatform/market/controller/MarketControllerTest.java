@@ -166,6 +166,7 @@ class MarketControllerTest {
 
     assertThat(controller.symbolRules("BTCUSDT").data().symbol()).isEqualTo("BTCUSDT");
     assertThat(controller.symbolRules("BTCUSDT").data().minNotional()).isEqualByComparingTo("5");
+    assertThat(controller.symbolRules("BTCUSDT").data().contractMultiplier()).isEqualByComparingTo("10");
   }
 
   @Test
@@ -214,6 +215,7 @@ class MarketControllerTest {
         "USDT",
         "USDT",
         BigDecimal.ONE,
+        BigDecimal.TEN,
         "DEFAULT",
         "ALWAYS",
         "NONE",

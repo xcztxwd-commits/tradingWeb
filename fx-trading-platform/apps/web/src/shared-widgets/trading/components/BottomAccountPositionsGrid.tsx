@@ -151,7 +151,7 @@ export function PositionsGrid({
                 : undefined
 
             return (
-              <tr key={position.id}>
+              <tr key={position.id} data-position-id={position.id}>
                 <td>
                   <span className={styles.positionSymbol}>{row.instrument}</span>
                   <span className={styles.positionMeta}>{row.leverage}</span>

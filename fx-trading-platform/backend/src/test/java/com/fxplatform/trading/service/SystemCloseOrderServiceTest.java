@@ -1399,6 +1399,7 @@ class SystemCloseOrderServiceTest {
         "USDT",
         "USDT",
         BigDecimal.ONE,
+        BigDecimal.ONE,
         "DEFAULT",
         "ALWAYS",
         "NONE",

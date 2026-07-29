@@ -132,7 +132,7 @@ export function useTradeForm(
   const fillLimitPrice = useCallback((price: number | string): LimitPriceFillResult => {
     if (priceFocused) return 'skipped-focused'
     const nextPrice = normalizeNumericInput(String(price))
-    if (!nextPrice) return 'invalid'
+    if (toNumber(nextPrice) <= 0) return 'invalid'
     setPriceTouched(true)
     setForm((current) =>
       deriveTradeForm(
@@ -221,6 +221,13 @@ export function deriveTradeForm(
   const price = toNumber(next.price)
   const amount = toNumber(next.amount)
   const total = toNumber(next.total)
+  if (
+    sourceField === 'total'
+    && (usesQuoteBudgetMarketBuy(next, market) || usesQuoteQuantity(next, market))
+    && total <= 0
+  ) {
+    next.amount = ''
+  }
 
   if (next.orderType === 'market') {
     const marketPrice = market?.lastPrice ?? 0
@@ -326,8 +333,8 @@ function formatPrice(value: number) {
   return String(value)
 }
 
-function normalizeNumericInput(value: string) {
-  return value.replace(/[^\d.]/g, '').replace(/(\..*)\./g, '$1')
+export function normalizeNumericInput(value: string) {
+  return /^\d*\.?\d*$/.test(value) ? value : ''
 }
 
 function createClientOrderId() {

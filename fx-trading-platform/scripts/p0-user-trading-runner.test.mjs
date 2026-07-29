@@ -1385,6 +1385,11 @@ test('P0Context locks the real runtime interfaces used by detailed case modules'
       openTradePanel: noop,
       withCapturedMutation: noop,
       submitOrderViaUi: noop,
+      setPerpetualSettingsViaUi: noop,
+      positionActionViaUi: noop,
+      closeAllPositionsViaUi: noop,
+      transferViaUi: noop,
+      resetDemoViaUi: noop,
       acceptNextNativeDialog: noop,
       followLoginPromptViaUi: noop,
       cancelAllOrdersViaUi: noop
@@ -1421,7 +1426,8 @@ test('P0Context locks the real runtime interfaces used by detailed case modules'
       captureCheckpoint: noop,
       writeCaseResultAtomic: noop
     },
-    userFactory: noop
+    userFactory: noop,
+    adminFactory: noop
   }
 
   const context = p0CaseContracts.createP0Context(input)
@@ -1442,7 +1448,12 @@ test('P0Context locks the real runtime interfaces used by detailed case modules'
     'launchBrowser',
     'logoutViaUi',
     'followLoginPromptViaUi',
-    'cancelAllOrdersViaUi'
+    'cancelAllOrdersViaUi',
+    'setPerpetualSettingsViaUi',
+    'positionActionViaUi',
+    'closeAllPositionsViaUi',
+    'transferViaUi',
+    'resetDemoViaUi'
   ]) {
     assert.throws(
       () => p0CaseContracts.createP0Context({
@@ -1455,19 +1466,52 @@ test('P0Context locks the real runtime interfaces used by detailed case modules'
   assert.throws(
     () => p0CaseContracts.createP0Context({
       ...input,
+      adminFactory: undefined
+    }),
+    /P0_CONTEXT_INTERFACE_REQUIRED: adminFactory/
+  )
+  assert.throws(
+    () => p0CaseContracts.createP0Context({
+      ...input,
       events: { ...input.events, probeForbiddenSubscription: undefined }
     }),
     /P0_CONTEXT_INTERFACE_REQUIRED: events\.probeForbiddenSubscription/
   )
 })
 
-test('AUTH handlers are real owned dispatch targets and AUTH-03 launches two browser processes', () => {
+test('core handlers are real owned dispatch targets and AUTH-03 launches two browser processes', () => {
   assert.deepEqual(Object.keys(p0CoreContracts.CASE_HANDLERS).toSorted(), [
     'runAuth01',
     'runAuth02',
-    'runAuth03'
+    'runAuth03',
+    'runBatch02',
+    'runCat01',
+    'runCat02',
+    'runCat03',
+    'runLife02',
+    'runPerp01',
+    'runPerp02',
+    'runPerp03',
+    'runPerp04',
+    'runPerp05',
+    'runPerp06',
+    'runPerp07',
+    'runPerp08',
+    'runPerp09',
+    'runPerp12',
+    'runSpot01',
+    'runSpot02',
+    'runSpot03',
+    'runWallet01'
   ])
-  for (const id of ['AUTH-01', 'AUTH-02', 'AUTH-03']) {
+  for (const id of [
+    'AUTH-01', 'AUTH-02', 'AUTH-03',
+    'CAT-01', 'CAT-02', 'CAT-03',
+    'SPOT-01', 'SPOT-02', 'SPOT-03',
+    'PERP-01', 'PERP-02', 'PERP-03', 'PERP-04', 'PERP-05',
+    'PERP-06', 'PERP-07', 'PERP-08', 'PERP-09', 'PERP-12',
+    'BATCH-02', 'WALLET-01', 'LIFE-02'
+  ]) {
     const definition = P0_CASES.find((candidate) => candidate.id === id)
     assert.equal(typeof p0CoreContracts.CASE_HANDLERS[definition.handlerId], 'function')
   }
@@ -1492,6 +1536,256 @@ test('AUTH handlers are real owned dispatch targets and AUTH-03 launches two bro
     auth03Source,
     /context\.events\.probeForbiddenSubscription\([\s\S]*\/topic\/trading\/accounts\//
   )
+})
+
+test('UI core handlers keep deterministic product, batch, reset, and evidence contracts', () => {
+  const corePath = fileURLToPath(new URL('./p0-user-trading-core-cases.mjs', import.meta.url))
+  const source = readFileSync(corePath, 'utf8')
+  const section = (start, end) => {
+    const from = source.indexOf(start)
+    const to = source.indexOf(end, from + start.length)
+    assert.notEqual(from, -1, start)
+    assert.notEqual(to, -1, end)
+    return source.slice(from, to)
+  }
+
+  const persistPass = section('function persistPass', 'function terminalFields')
+  assert.match(persistPass, /const financialChecks =/)
+  assert.match(
+    persistPass,
+    /financialCalculation:\s*\{\s*status:\s*'PASS',\s*checks:\s*financialChecks/
+  )
+
+  const spot03 = section(
+    'async function runSpotMarketableLimitJourney',
+    'async function runCatalogRouteJourney'
+  )
+  assert.match(
+    spot03,
+    /const buyFee = Number\(bought\.trade\.lots\)\s*\*\s*Number\(DEMO_RATES\.takerFeeRate\)/
+  )
+  assert.doesNotMatch(spot03, /const buyFee =[^\r\n]*bought\.trade\.price/)
+  assert.match(spot03, /assert\.equal\(bought\.trade\.feeAsset,\s*'BTC'\)/)
+  assert.match(spot03, /assert\.equal\(sold\.trade\.feeAsset,\s*'USDT'\)/)
+  const spotAuthority = section(
+    'async function prepareSpotAuthorityMarket',
+    'function assertSingleFullFillMutation'
+  )
+  assert.match(
+    spotAuthority,
+    /scope\.context\.authority\?\.authorityBundleFixture\s*===\s*'PASS'/
+  )
+  assert.match(spotAuthority, /scope\.context\.fixtures\.marketOverride\(/)
+  assert.equal(
+    [...spot03.matchAll(/assertSpotTradeLedger\(/g)].length,
+    2,
+    'SPOT-03 must prove one exact settlement ledger set per fill'
+  )
+
+  const spot01 = section(
+    'async function runSpotMarketLifecycle',
+    'async function runPerpLifecycle'
+  )
+  assert.match(spot01, /partialSpotPosition\.realizedPnl/)
+  assert.doesNotMatch(spot01, /partiallySold\.trade\.realizedPnl/)
+  assert.equal(
+    [...spot01.matchAll(/assertSpotTradeLedger\(/g)].length,
+    3,
+    'SPOT-01 must prove one exact settlement ledger set per fill'
+  )
+
+  const spotValidation = section(
+    'async function runSpotValidationJourney',
+    'async function runWalletTransferJourney'
+  )
+  assert.match(spotValidation, /probe\.guarded/)
+  assert.match(spotValidation, /emptySell\.guarded/)
+  assert.doesNotMatch(spotValidation, /probe\.submitDisabled,\s*true/)
+  const invalidInputProbe = section(
+    'async function probeDisabledOrderSubmission',
+    'function tradingStateFingerprint'
+  )
+  assert.match(invalidInputProbe, /submit\.click\(\)/)
+  assert.match(invalidInputProbe, /visibleError/)
+  assert.match(invalidInputProbe, /guarded:/)
+
+  const openPositions = section('function openPositions', 'function activeOrders')
+  assert.match(openPositions, /!isSpotPosition\(position\)/)
+  const spotDust = section('function assertSpotDust', 'function assertWalletInvariant')
+  assert.match(spotDust, /position\.lots/)
+  assert.match(spotDust, /rules\.minQty \?\? effectiveQuantityStep\(rules\)/)
+  for (const [start, end] of [
+    ['async function runSpotMarketableLimitJourney', 'async function runCatalogRouteJourney'],
+    ['async function runCatalogSweepJourney', 'async function runCatalogGuardJourney'],
+    ['async function runCatalogGuardJourney', 'async function runSpotMarketLifecycle'],
+    ['async function runSpotMarketLifecycle', 'async function runPerpLifecycle'],
+    ['async function runSpotValidationJourney', 'async function runWalletTransferJourney'],
+    ['async function runDemoResetJourney', 'function assertCoreCleanup']
+  ]) {
+    assert.match(section(start, end), /assertSpotDust\(/, start)
+  }
+
+  const openMenu = section(
+    'async function openTradingProductFromMenu',
+    'async function inspectTradingSurface'
+  )
+  assert.equal([...openMenu.matchAll(/page\.evaluate/g)].length, 2)
+  assert.match(openMenu, /trigger\.click\(\)[\s\S]*await page\.waitForFunction/)
+  const surface = section(
+    'async function inspectTradingSurface',
+    'async function inspectInvalidTradingRoute'
+  )
+  assert.match(surface, /querySelectorAll\('span, strong'\)/)
+  assert.match(surface, /assert\(result\.marketSymbols\.length > 0/)
+  const forbiddenMenu = section(
+    'async function inspectForbiddenProductReachability',
+    'function scalarResult'
+  )
+  assert.equal([...forbiddenMenu.matchAll(/page\.evaluate/g)].length, 2)
+  assert.match(forbiddenMenu, /trigger\.click\(\)[\s\S]*await page\.waitForFunction/)
+
+  const catalogGuard = section(
+    'async function runCatalogGuardJourney',
+    'async function runSpotMarketLifecycle'
+  )
+  assert.match(catalogGuard, /assert\(reachability\.tradingMenu/)
+  assert.match(catalogGuard, /symbol:\s*'BTCUSDT'/)
+  assert.match(catalogGuard, /marginMode:\s*'CROSS'/)
+  assert.match(catalogGuard, /reduceOnly:\s*true/)
+  assert.doesNotMatch(catalogGuard, /product_type NOT IN/)
+
+  const closeAll = section(
+    'async function runCloseAllJourney',
+    'async function runSpotValidationJourney'
+  )
+  assert.doesNotMatch(closeAll, /trade\.positionId|trade\.parentPositionId/)
+  assert.match(closeAll, /assertBatchCloseTrades\(\s*normalClosed/)
+  assert.match(closeAll, /assertBatchCloseTrades\(\s*final/)
+  const batchTradeCheck = section(
+    'function assertBatchCloseTrades',
+    'async function openBatchPositions'
+  )
+  assert.match(
+    batchTradeCheck,
+    /new Set\(successful\.map\(\(\{ orderId \}\) => orderId\)\)\.size/
+  )
+  assert.match(
+    batchTradeCheck,
+    /successful\.map\(\(\{ positionId \}\) => positionId\)\.toSorted\(\)/
+  )
+  assert.match(batchTradeCheck, /order\.origin,\s*'BATCH_CLOSE'/)
+  assert.match(batchTradeCheck, /order\.parentPositionId,\s*position\.id/)
+  assert.match(
+    batchTradeCheck,
+    /snapshot\.trades\.filter\(\(\{ orderId \}\) => orderId === item\.orderId\)/
+  )
+  assert.match(batchTradeCheck, /perpCloseOracle\(\{/)
+  assert.match(batchTradeCheck, /assertPerpLedgerDelta\(/)
+
+  const walletTransfer = section(
+    'async function runWalletTransferJourney',
+    'async function runDemoResetJourney'
+  )
+  assert.match(walletTransfer, /JSON\.parse\(forward\.rawRequest\.postData\)/)
+  assert.match(walletTransfer, /JSON\.parse\(reverse\.rawRequest\.postData\)/)
+  assert.match(
+    walletTransfer,
+    /assertCapturedTransfer\(\s*forwardRequest,\s*forwardResponse/
+  )
+  assert.match(
+    walletTransfer,
+    /assertCapturedTransfer\(\s*reverseRequest,\s*reverseResponse/
+  )
+  assert.match(walletTransfer, /response\.transferId/)
+  assert.match(walletTransfer, /\['equity',\s*oracle\.perpEquityAfter\]/)
+  assert.match(walletTransfer, /\['freeMargin',\s*oracle\.perpFreeMarginAfter\]/)
+  assert.match(walletTransfer, /assetLedgerRows/)
+  assert.match(walletTransfer, /cashLedgerRows/)
+  assert.match(walletTransfer, /assertTransferLedgerPair\(/)
+
+  const reset = section('async function runDemoResetJourney', 'function assertCoreCleanup')
+  assert.match(reset, /submitted\.db\.accountRow\.demo_generation/)
+  assert.match(reset, /\.map\(\(\{\s*transferId\s*\}\)\s*=>\s*transferId\)/)
+  assert.match(reset, /\/api\/ledger\?accountId=/)
+  assert.match(reset, /resetResponse\.demoGeneration/)
+  assert.match(reset, /resetResponse\.replayed/)
+  assert.match(reset, /replayResponse\.replayed/)
+  assert.match(reset, /replayResponse\.requestId/)
+  assert.match(reset, /context\.events\.waitForStompEvent\(page,\s*'DEMO_RESET'/)
+  assert.match(reset, /\['available',\s*'total'\]/)
+  assert.match(reset, /spotUsdt\[field\]/)
+  assert.match(reset, /spotUsdt\.locked/)
+  assert.match(reset, /spotPositionRows/)
+  assert.match(reset, /average_cost/)
+  assert.match(reset, /unrealized_pnl/)
+  assert.match(reset, /cashLedgerRows/)
+  assert.match(reset, /reference_id === resetResponse\.requestId/)
+  assert.match(reset, /completeResetStateFingerprint\(/)
+  assert.match(reset, /beforeReplayFingerprint/)
+  assert.match(reset, /afterReplayFingerprint/)
+
+  const perp07 = section(
+    'async function runPerpReversalJourney',
+    'async function runPerpHedgeJourney'
+  )
+  const secondOpen = perp07.slice(perp07.indexOf('const secondOpen'))
+  assert.match(secondOpen, /reduceOnly:\s*false/)
+  const perp12 = section(
+    'async function runPerpValidationJourney',
+    'async function runCloseAllJourney'
+  )
+  assert.match(
+    perp12,
+    /kind:\s*'QUANTITY_STEP_MISMATCH',\s*expected:\s*'QUANTITY_STEP_MISMATCH'/
+  )
+})
+
+test('PERP-01/02 lifecycle closes financial, target-mark, and cash-ledger evidence', () => {
+  const corePath = fileURLToPath(new URL('./p0-user-trading-core-cases.mjs', import.meta.url))
+  const source = readFileSync(corePath, 'utf8')
+  const start = source.indexOf('async function runPerpLifecycle')
+  const end = source.indexOf('async function runPerpLeverageJourney', start)
+  assert.notEqual(start, -1)
+  assert.notEqual(end, -1)
+  const lifecycle = source.slice(start, end)
+
+  assert.match(source.slice(0, start), /perpOpeningHoldOracle/)
+  assert.match(lifecycle, /const openingHold = perpOpeningHoldOracle\(/)
+  assert.match(lifecycle, /openingRow\.initial_margin/)
+  assert.match(lifecycle, /openingHold\.openingInitialMargin/)
+  assert.match(lifecycle, /openingHold\.feeBuffer/)
+  assert.match(lifecycle, /assertPerpAccountSummary\(/)
+  assert.equal(
+    [...lifecycle.matchAll(/assertPerpTargetRisk\(/g)].length,
+    3,
+    'T1 and reverse T2 must each recalculate and assert Perp risk/projection'
+  )
+  assert.match(lifecycle, /const reverseTarget =/)
+  assert.match(lifecycle, /partialOracle\.remainingMargin/)
+  assert.match(lifecycle, /partiallyClosed\.position\.realizedPnl/)
+  assert.match(lifecycle, /partialOracle\.closeFee/)
+  assert.match(lifecycle, /adjusted\.position\.liquidationPrice/)
+  assert.match(lifecycle, /adjusted\.position\.openPrice/)
+  assert.match(lifecycle, /adjusted\.position\.realizedPnl/)
+  assert.match(lifecycle, /fullyClosed\.history\.realizedPnl/)
+  assert.match(lifecycle, /const lifecycleTrades =/)
+  assert.match(lifecycle, /new Set\(lifecycleTrades\.map\(\(\{ id \}\) => id\)\)/)
+  assert.match(lifecycle, /const finalBalanceDelta =/)
+  assert.ok(
+    [...lifecycle.matchAll(/assertPerpLedgerDelta\(/g)].length >= 3,
+    'opening, partial close, and final close must prove cash-ledger deltas'
+  )
+
+  const ledgerStart = source.indexOf('function assertPerpLedgerDelta')
+  const ledgerEnd = source.indexOf('function assertSpotTradeLedger', ledgerStart)
+  assert.notEqual(ledgerStart, -1)
+  assert.notEqual(ledgerEnd, -1)
+  const ledger = source.slice(ledgerStart, ledgerEnd)
+  assert.match(ledger, /cashLedgerRows/)
+  assert.match(ledger, /reference_type/)
+  assert.match(ledger, /reference_id/)
+  assert.match(ledger, /operation_type/)
+  assert.match(ledger, /assert\.equal\(matches\.length,\s*1/)
 })
 
 test('default P0 dispatch builds one context and injects the owned AUTH handlers', () => {
@@ -5484,7 +5778,12 @@ test('filtered P0 report accepts only selected subruns with scopeComplete false 
     id: 'SOURCE-03',
     status: 'PASS',
     scopeComplete: false,
-    subruns: selectedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+    subruns: selectedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+    financialCalculation: {
+      status: 'PASS',
+      checks: [{ kind: 'TEST_EVIDENCE' }]
+    },
+    cleanup: { status: 'PASS' }
   }
   const runRoot = join(root, options.runId)
   mkdirSync(runRoot, { recursive: true })
@@ -5510,7 +5809,10 @@ test('filtered P0 report accepts only selected subruns with scopeComplete false 
   })
 
   assert.equal(report.verdict, 'PARTIAL_PASS')
-  assert.deepEqual(report.caseResults, [caseResult])
+  assert.deepEqual(
+    report.caseResults,
+    redactNetworkEntry({ cases: [caseResult] }).cases
+  )
   assert.equal(JSON.parse(readFileSync(join(runRoot, 'report.json'), 'utf8')).verdict, 'PARTIAL_PASS')
 })
 
@@ -6280,7 +6582,12 @@ test('P0 report derives verdict from aggregate evidence and persists canonical m
       id: croppedDefinition.id,
       status: 'PASS',
       scopeComplete: false,
-      subruns: selectedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      subruns: selectedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+      financialCalculation: {
+        status: 'PASS',
+        checks: [{ kind: 'TEST_EVIDENCE' }]
+      },
+      cleanup: { status: 'PASS' }
     }],
     planVerdict: 'PASS'
   })
@@ -8823,6 +9130,7 @@ test('formal case fragment merge retains unified evidence and explicit hashes on
   assert.deepEqual(merged.fixtureActions, [])
   assert.deepEqual(merged.replayProbes, [])
   assert.deepEqual(merged.consoleErrors, [])
+  assert.equal(merged.financialCalculation.status, 'PASS')
   assert.equal(merged.financialCalculation.checks.length, 2)
   assert.deepEqual(merged.cleanup, { status: 'PASS' })
 
@@ -8831,6 +9139,7 @@ test('formal case fragment merge retains unified evidence and explicit hashes on
   const persisted = JSON.parse(readFileSync(path, 'utf8'))
   assert.deepEqual(persisted.artifactHashes, merged.artifactHashes)
   assert.equal(persisted.userActions.length, 2)
+  assert.equal(persisted.financialCalculation.status, 'PASS')
   assert.equal(persisted.financialCalculation.checks.length, 2)
 })
 
@@ -10030,6 +10339,24 @@ test('default P0 dependency factory wires local adapters and main injects it', a
   }
   const canonicalInvocations = []
   const processManager = {
+    async startOwnedFrontend(surface) {
+      events.push(`frontend:start:${surface}`)
+      const pid = surface === 'web' ? 5153 : 5154
+      return {
+        pid,
+        processIdentity: {
+          pid,
+          startedAt: `fixture-process-${pid}`,
+          processFingerprint: `sha256:${'8'.repeat(64)}`
+        }
+      }
+    },
+    async waitForFrontend(frontend) {
+      events.push(`frontend:ready:${frontend.pid}`)
+    },
+    async stopOwnedFrontend(frontend) {
+      events.push(`frontend:stop:${frontend?.pid ?? 'none'}`)
+    },
     async startOwnedBackend({ environment }) {
       events.push(`backend:start:${environment.EXECUTION_MODE}`)
       return {
@@ -10124,10 +10451,12 @@ test('default P0 dependency factory wires local adapters and main injects it', a
     runAuthority: async () => ({ status: 'PASS', source: 'default-factory-fixture' }),
     writePhaseReport: async (context, plan) => exactP0ReportPhaseEvidence(context, plan),
     dispatchCase: async (definition) => ({
-      id: definition.id,
-      status: 'PASS',
-      scopeComplete: true,
-      subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      ...formalP0CaseFragment(definition, definition.requiredSubruns),
+      financialCalculation: {
+        status: 'PASS',
+        checks: [{ status: 'PASS' }]
+      },
+      cleanup: { status: 'PASS' }
     })
   })
   for (const name of [
@@ -10153,7 +10482,11 @@ test('default P0 dependency factory wires local adapters and main injects it', a
     assert.equal(existsSync(join(root, 'artifacts')), false)
   } else {
     const completed = await smokeContracts.runP0Suite(options, dependencies)
-    assert.equal(completed.report.verdict, 'PASS')
+    assert.equal(
+      completed.report.verdict,
+      'PASS',
+      JSON.stringify(completed.report, null, 2)
+    )
     assert.equal(completed.cleanup.status, 'CLEANED')
     assert.equal(completed.cleanup.restored, 10)
     assert.equal(canonicalInvocations.length, 1)
@@ -11767,6 +12100,8 @@ test('positive evidence schema preserves unified case records', (t) => {
   const record = {
     id: 'AUTH-01',
     status: 'BLOCKED',
+    attempt: 2,
+    durationMs: 150,
     commit: RUN_STATE_COMMIT_A,
     database: 'p0-demo-database-01',
     user: 'p0-user-01',
@@ -11791,15 +12126,26 @@ test('positive evidence schema preserves unified case records', (t) => {
     consoleErrors: [],
     cleanup: { status: 'PASS' },
     failureOrBlocker: { status: 'BLOCKED', reason: 'CLI_INTERNAL_ERROR' },
+    subruns: [{
+      id: 'desktop-ui-core',
+      profile: 'UI_CORE',
+      viewport: 'desktop',
+      status: 'BLOCKED',
+      attempt: 2,
+      profileAttempt: 3,
+      durationMs: 150
+    }],
     [unknownContainer]: { status: 'PASS' },
     apiToken: credentialMarker
   }
   const expectedFields = [
-    'id', 'status', 'commit', 'database', 'user', 'account', 'profile', 'viewport',
+    'id', 'status', 'attempt', 'durationMs', 'commit', 'database', 'user', 'account',
+    'profile', 'viewport',
     'startedAt', 'finishedAt', 'preconditions', 'userActions', 'fixtureActions',
     'authorityBundleFixture', 'contractProbes', 'replayProbes', 'checkpoints',
     'financialCalculation', 'uiEvidence', 'networkEvidence', 'apiEvidence',
-    'dbEvidence', 'eventEvidence', 'consoleErrors', 'cleanup', 'failureOrBlocker'
+    'dbEvidence', 'eventEvidence', 'consoleErrors', 'cleanup', 'failureOrBlocker',
+    'subruns'
   ]
   const original = structuredClone(record)
 
@@ -11814,6 +12160,11 @@ test('positive evidence schema preserves unified case records', (t) => {
     for (const field of expectedFields) assert.equal(Object.hasOwn(safe, field), true, field)
     assert.equal(safe.startedAt, record.startedAt)
     assert.equal(safe.finishedAt, record.finishedAt)
+    assert.equal(safe.attempt, record.attempt)
+    assert.equal(safe.durationMs, record.durationMs)
+    assert.equal(safe.subruns[0].attempt, record.subruns[0].attempt)
+    assert.equal(safe.subruns[0].profileAttempt, record.subruns[0].profileAttempt)
+    assert.equal(safe.subruns[0].durationMs, record.subruns[0].durationMs)
     assert.equal(safe.authorityBundleFixture, 'BLOCKED')
     assert.deepEqual(safe.financialCalculation, { amount: '1.2500' })
     assert.equal(Object.hasOwn(safe, unknownContainer), false)
@@ -13806,7 +14157,12 @@ test('run state ignores inherited identity registry and selection fields', (t) =
           subruns: definition.requiredSubruns.map((subrun) => ({
             ...subrun,
             status: 'PASS'
-          }))
+          })),
+          financialCalculation: {
+            status: 'PASS',
+            checks: [{ kind: 'TEST_EVIDENCE' }]
+          },
+          cleanup: { status: 'PASS' }
         }
       ]))
       const baseState = {
@@ -14015,7 +14371,12 @@ function passingCase(definition) {
     id: definition.id,
     status: 'PASS',
     scopeComplete: true,
-    subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+    subruns: definition.requiredSubruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+    financialCalculation: {
+      status: 'PASS',
+      checks: [{ kind: 'TEST_EVIDENCE' }]
+    },
+    cleanup: { status: 'PASS' }
   }
 }
 
@@ -14700,7 +15061,12 @@ test('resume ignores inherited case evidence on malformed cases containers', () 
         subruns: first.requiredSubruns.map((subrun) => ({
           ...subrun,
           status: 'PASS'
-        }))
+        })),
+        financialCalculation: {
+          status: 'PASS',
+          checks: [{ kind: 'TEST_EVIDENCE' }]
+        },
+        cleanup: { status: 'PASS' }
       }
       const selection = { caseIds: [first.id] }
       const state = (cases) => ({
@@ -14821,7 +15187,12 @@ test('resume rejects boxed scalar result and subrun evidence', () => {
         subruns: [{
           ...required,
           status: 'PASS'
-        }]
+        }],
+        financialCalculation: {
+          status: 'PASS',
+          checks: [{ kind: 'TEST_EVIDENCE' }]
+        },
+        cleanup: { status: 'PASS' }
       }
       const selection = { caseIds: [definition.id] }
       const state = (cases) => ({
@@ -14977,7 +15348,12 @@ test('resume rejects scalar root state without prototype callbacks', () => {
         subruns: definition.requiredSubruns.map((subrun) => ({
           ...subrun,
           status: 'PASS'
-        }))
+        })),
+        financialCalculation: {
+          status: 'PASS',
+          checks: [{ kind: 'TEST_EVIDENCE' }]
+        },
+        cleanup: { status: 'PASS' }
       }
       const validState = {
         definitions: P0_CASES,
@@ -15112,7 +15488,12 @@ test('prototype inheritance cannot forge aggregate or resume evidence', () => {
         subruns: definition.requiredSubruns.map((subrun) => ({
           ...subrun,
           status: 'PASS'
-        }))
+        })),
+        financialCalculation: {
+          status: 'PASS',
+          checks: [{ kind: 'TEST_EVIDENCE' }]
+        },
+        cleanup: { status: 'PASS' }
       })
       const allCases = Object.fromEntries(P0_CASES.map((definition) => [
         definition.id,
@@ -15712,7 +16093,12 @@ function passingSelectedCase(definition, selection) {
     id: definition.id,
     status: 'PASS',
     scopeComplete: !selection.profiles?.length && !selection.viewports?.length,
-    subruns: subruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+    subruns: subruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+    financialCalculation: {
+      status: 'PASS',
+      checks: [{ kind: 'TEST_EVIDENCE' }]
+    },
+    cleanup: { status: 'PASS' }
   }
 }
 
@@ -16047,7 +16433,12 @@ test('filtered successful evidence is PARTIAL_PASS and never terminal PASS', () 
       id: definition.id,
       status: 'PASS',
       scopeComplete: false,
-      subruns: selected.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      subruns: selected.map((subrun) => ({ ...subrun, status: 'PASS' })),
+      financialCalculation: {
+        status: 'PASS',
+        checks: [{ kind: 'TEST_EVIDENCE' }]
+      },
+      cleanup: { status: 'PASS' }
     }]
   )
 
@@ -16076,7 +16467,12 @@ test('cropped scope requires exact false while case selection requires true', ()
     const result = {
       id: croppedDefinition.id,
       status: 'PASS',
-      subruns: croppedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      subruns: croppedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+      financialCalculation: {
+        status: 'PASS',
+        checks: [{ kind: 'TEST_EVIDENCE' }]
+      },
+      cleanup: { status: 'PASS' }
     }
     if (Object.hasOwn(variant, 'scopeComplete')) result.scopeComplete = variant.scopeComplete
     const report = aggregateReport(
@@ -16091,7 +16487,12 @@ test('cropped scope requires exact false while case selection requires true', ()
       id: croppedDefinition.id,
       status: 'PASS',
       scopeComplete: false,
-      subruns: croppedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' }))
+      subruns: croppedSubruns.map((subrun) => ({ ...subrun, status: 'PASS' })),
+      financialCalculation: {
+        status: 'PASS',
+        checks: [{ kind: 'TEST_EVIDENCE' }]
+      },
+      cleanup: { status: 'PASS' }
     }]
   )
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { createInitialTradeForm, toOrderPayload } from '@fx-platform/frontend-core'
-import { createPanelMarket } from './tradePanelMarket.ts'
+import { createPanelMarket, resolveUnitSize } from './tradePanelMarket.ts'
 
 describe('trade panel market model', () => {
   it('keeps the selected symbol in the order payload when the quote snapshot is empty', () => {
@@ -129,13 +129,21 @@ describe('trade panel market model', () => {
           minNotional: 5,
           stepSize: 0.0001,
           tickSize: 0.01,
-          contractSize: 1
+          contractSize: 0.1,
+          contractMultiplier: 5
         }
       }
     )
 
     assert.equal(market.rules?.minNotional, 5)
-    assert.equal(market.unitSize, 1)
+    assert.equal(market.unitSize, 0.5)
+    assert.equal(
+      resolveUnitSize('BTCUSDT-PERP', 'crypto', 'LINEAR_PERP', {
+        ...market.rules!,
+        contractMultiplier: undefined
+      }),
+      0.1
+    )
   })
 
   it('uses explicit productType modes for perpetual contracts', () => {

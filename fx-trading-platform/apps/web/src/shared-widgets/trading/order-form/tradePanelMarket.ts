@@ -50,7 +50,9 @@ export function resolveUnitSize(
   productType?: TradeMarket['productType'],
   rules?: TradeMarket['rules']
 ) {
-  if (rules?.contractSize && rules.contractSize > 0) return rules.contractSize
+  if (rules?.contractSize && rules.contractSize > 0) {
+    return rules.contractSize * (rules.contractMultiplier && rules.contractMultiplier > 0 ? rules.contractMultiplier : 1)
+  }
   if (productType === 'FX_MARGIN' || category === 'fx' || isForexSymbol(symbol)) return 100_000
   return 1
 }

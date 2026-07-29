@@ -45,17 +45,19 @@ describe('contract governance workspace wiring', () => {
     assert.match(sharedIndex, /generated\/openapi/)
     assert.match(sharedIndex, /tradingTypes/)
     assert.match(sharedIndex, /ApiErrorCode/)
-    assert.match(text('apps/web/src/services/authApi.ts'), /@fx-platform\/shared-types/)
+    assert.match(text('packages/frontend-core/src/api/authApi.ts'), /@fx-platform\/shared-types/)
     assert.match(text('apps/admin/src/types.ts'), /@fx-platform\/shared-types/)
-    assert.match(text('apps/web/src/services/apiClient.ts'), /friendlyApiErrorMessage/)
+    assert.match(text('packages/frontend-core/src/api/apiClient.ts'), /friendlyApiErrorMessage/)
     assert.match(text('apps/admin/src/services/apiClient.ts'), /friendlyApiErrorMessage/)
   })
 
   it('provides a generated-schema facade and canonical P0 trading types', () => {
     const apiTypes = text('packages/shared-types/src/apiTypes.ts')
     const tradingTypes = text('packages/shared-types/src/tradingTypes.ts')
+    const generatedOpenApi = text('packages/shared-types/src/generated/openapi.ts')
 
     assert.match(apiTypes, /BackendSchema/)
+    assert.match(generatedOpenApi, /contractMultiplier\?: number;/)
     assert.match(apiTypes, /ApiPathData/)
     assert.match(tradingTypes, /CANONICAL_TRADING_SYMBOLS/)
     assert.match(tradingTypes, /'BTCUSDT-PERP'/)

@@ -12,6 +12,7 @@ import {
 import type { PositionMutation } from './tradingSession.ts'
 import { useAccountData } from '../account/useAccountData.ts'
 import { ApiClientError } from '../api/apiClient.ts'
+import { getOrders } from '../api/tradingApi.ts'
 import type { CoreMessage } from '../coreMessage.ts'
 import type {
   OcoOrderPayload,
@@ -67,6 +68,33 @@ export function formatTradingSessionError(error: unknown): CoreMessage {
   }
 }
 
+export async function submitTradingOrderReconciled(
+  payload: OrderPayload,
+  accountId?: string,
+  token?: string | null
+) {
+  const submittedPayload = accountId ? { ...payload, accountId } : payload
+  try {
+    return {
+      order: await submitTradingOrder(submittedPayload, token),
+      reconciled: false as const
+    }
+  } catch (error) {
+    if (
+      !token
+      || !accountId
+      || (error instanceof ApiClientError && error.status >= 400 && error.status < 500)
+    ) {
+      throw error
+    }
+    const order = await getOrders(accountId, token)
+      .then((orders) => orders.find(({ clientOrderId }) => clientOrderId === payload.clientOrderId))
+      .catch(() => undefined)
+    if (!order) throw error
+    return { order, reconciled: true as const }
+  }
+}
+
 export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
   const accountData = useAccountData({ refreshMs })
   const {
@@ -112,11 +140,15 @@ export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
         if (token && !accountId) {
           throw new Error('Trading account is not ready')
         }
-        const response = await submitTradingOrder(accountId ? { ...payload, accountId } : payload, token)
+        const { order: response, reconciled } = await submitTradingOrderReconciled(
+          payload,
+          accountId,
+          token
+        )
 
         setSubmittedOrders((current) => [response, ...current.filter((order) => order.id !== response.id)])
 
-        if (token && accountId) {
+        if (token && accountId && !reconciled) {
           await refreshAccountData(token, accountId).catch(() => undefined)
         }
 

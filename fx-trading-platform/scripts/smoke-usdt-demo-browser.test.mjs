@@ -10,7 +10,13 @@ import {
   acceptNextNativeDialog,
   assertNewestFirstProtectionResize,
   assertNoRuntimeErrors,
+  closeAllPositionsViaUi,
   createEvidencePage,
+  positionActionViaUi,
+  resetDemoViaUi,
+  setPerpetualSettingsViaUi,
+  submitOrderViaUi,
+  transferViaUi,
   withCapturedMutation
 } from './smoke-usdt-demo-browser.mjs'
 
@@ -789,6 +795,24 @@ describe('real USDT demo browser smoke contract', () => {
     assert.equal(capture.method, 'POST')
     assert.equal(capture.status, 200)
     assert.equal(capture.idempotencyKey, 'idem-contract-1')
+    assert.deepEqual(capture.rawRequest, {
+      method: 'POST',
+      url: 'http://127.0.0.1:18086/api/trading/orders',
+      postData: JSON.stringify({
+        symbol: 'BTCUSDT',
+        password: 'must-not-leave-process',
+        idempotencyKey: 'idem-contract-1'
+      }),
+      requestHeaders: { 'X-Idempotency-Key': 'idem-contract-1' }
+    })
+    assert.deepEqual(capture.parsedResponse, {
+      id: 'order-contract-1',
+      status: 'FILLED',
+      accessToken: 'must-not-leave-process'
+    })
+    assert.equal(Object.keys(capture).includes('rawRequest'), false)
+    assert.equal(Object.keys(capture).includes('parsedResponse'), false)
+    assert.equal(JSON.stringify(capture).includes('must-not-leave-process'), false)
     assert.equal(
       sent.some(({ method, params }) => (
         method === 'Network.getResponseBody'
@@ -801,6 +825,146 @@ describe('real USDT demo browser smoke contract', () => {
     assert.equal(Object.hasOwn(capture.networkEvidence, 'postData'), false)
     assert.equal(capture.networkEvidence.responseBody.includes('[REDACTED]'), true)
     assert.doesNotThrow(() => page.assertEvidenceClean('AUTH-03 mutation'))
+  })
+
+  it('exports and wires the shared UI-core mutations and complete oracle snapshots', () => {
+    for (const helper of [
+      setPerpetualSettingsViaUi,
+      positionActionViaUi,
+      closeAllPositionsViaUi,
+      transferViaUi,
+      resetDemoViaUi,
+      submitOrderViaUi
+    ]) {
+      assert.equal(typeof helper, 'function')
+    }
+
+    const text = source()
+    const contextSource = text.slice(
+      text.indexOf('function createDefaultP0CaseContext'),
+      text.indexOf('export function createDefaultP0Dependencies')
+    )
+    for (const helperName of [
+      'setPerpetualSettingsViaUi',
+      'positionActionViaUi',
+      'closeAllPositionsViaUi',
+      'transferViaUi',
+      'resetDemoViaUi'
+    ]) {
+      assert.match(contextSource, new RegExp(`\\b${helperName},`))
+    }
+    for (const endpoint of [
+      '/api/trading/positions/history?accountId=',
+      '/asset-ledger',
+      '/transfers?page=0&size=200',
+      '/api/market/symbols/${encodeURIComponent(symbol)}/rules',
+      '/api/market/perpetuals/${encodeURIComponent(symbol)}/reference'
+    ]) {
+      assert.equal(contextSource.includes(endpoint), true, endpoint)
+    }
+  })
+
+  it('allows the owned backend to finish the bounded fresh-database migration', () => {
+    const text = source()
+    const processManagerSource = text.slice(
+      text.indexOf('export function createLocalProcessManager'),
+      text.indexOf('export function createDefaultP0Dependencies')
+    )
+
+    assert.match(
+      processManagerSource,
+      /'owned P0 backend health', 600000, signal/
+    )
+  })
+
+  it('runs the artifact fail-closed contract in the P0 preflight gate', () => {
+    const text = source()
+    const preflightSource = text.slice(
+      text.indexOf('export async function runP0Preflight'),
+      text.indexOf('function requireExactP0SurefireClasses')
+    )
+
+    assert.match(preflightSource, /p0-user-trading-artifacts\.test\.mjs/)
+  })
+
+  it('keeps every new UI mutation scoped to the real labelled control and captured endpoint', () => {
+    const text = source()
+    const sharedUiSource = text.slice(
+      text.indexOf('export async function setPerpetualSettingsViaUi'),
+      text.indexOf('export async function followLoginPromptViaUi')
+    )
+
+    for (const contract of [
+      'Perpetual trading settings',
+      'Perpetual order options',
+      'Position action',
+      'Margin adjustment direction',
+      'Close all positions',
+      '全部平仓',
+      'wallet-transfer-title',
+      'Confirm transfer',
+      'wallet-reset-title',
+      'Confirm reset'
+    ]) {
+      assert.equal(sharedUiSource.includes(contract), true, contract)
+    }
+    assert.equal(sharedUiSource.includes('positions\\/close-all'), true)
+    assert.equal(sharedUiSource.includes('accounts\\/'), true)
+    assert.match(sharedUiSource, /positionSide/)
+    assert.match(sharedUiSource, /reduceOnly/)
+    assert.match(sharedUiSource, /expectFailure/)
+    assert.match(sharedUiSource, /page\.allowHttpError/)
+  })
+
+  it('waits for hydrated UI controls and the refreshed target position row', () => {
+    const text = source()
+    const settingsSource = text.slice(
+      text.indexOf('export async function setPerpetualSettingsViaUi'),
+      text.indexOf('export async function submitOrderViaUi')
+    )
+    const submitSource = text.slice(
+      text.indexOf('export async function submitOrderViaUi'),
+      text.indexOf('export async function positionActionViaUi')
+    )
+    const positionSource = text.slice(
+      text.indexOf('export async function positionActionViaUi'),
+      text.indexOf('export async function closeAllPositionsViaUi')
+    )
+    const walletSource = text.slice(
+      text.indexOf('async function openWalletViaUi'),
+      text.indexOf('function finishP0UiMutation')
+    )
+
+    assert.match(settingsSource, /section\.getAttribute\('aria-busy'\) === 'true'/)
+    assert.match(settingsSource, /control && !control\.disabled/)
+    assert.match(submitSource, /form\?\.querySelectorAll\('strong'\)/)
+    assert.match(submitSource, /!value\.textContent\?\.trim\(\)\.startsWith\('-'\)/)
+    assert.match(walletSource, /button\.textContent\?\.trim\(\) === 'Transfer Spot \/ Perpetual'\s*&& !button\.disabled/)
+    assert.match(positionSource, /await page\.waitForFunction\(\s*\(positionId, positionSide\)/)
+    assert.match(positionSource, /let candidates = positionId\s*\?/)
+    assert.match(positionSource, /refreshed Position row/)
+  })
+
+  it('does not issue Perpetual setting requests for omitted or already-selected fields', async () => {
+    const inspected = []
+    const page = {
+      async waitForFunction() {},
+      async evaluate(_callback, label) {
+        inspected.push(label)
+        return {
+          'Position mode': 'ONE_WAY',
+          Leverage: '10'
+        }[label]
+      }
+    }
+
+    const captures = await setPerpetualSettingsViaUi(page, {
+      positionMode: 'ONE_WAY',
+      leverage: 10
+    })
+
+    assert.deepEqual(captures, [])
+    assert.deepEqual(inspected, ['Position mode', 'Leverage'])
   })
 
   it('fails closed on unexplained browser errors and only allows a request-scoped expected 4xx', async () => {

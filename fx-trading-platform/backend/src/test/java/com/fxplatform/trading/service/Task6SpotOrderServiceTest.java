@@ -1226,7 +1226,7 @@ class Task6SpotOrderServiceTest {
         new BigDecimal("0.0001"), new BigDecimal("100"),
         new BigDecimal("5"), null,
         new BigDecimal("0.0001"), new BigDecimal("100"),
-        1, 1, "USDT", "USDT", BigDecimal.ONE,
+        1, 1, "USDT", "USDT", BigDecimal.ONE, BigDecimal.ONE,
         "DEFAULT", "ALWAYS", "NONE", "NORMAL");
   }
 

@@ -429,6 +429,137 @@ describe('trading session submit mode', () => {
     )
   })
 
+  it('reconciles a lost submit response by clientOrderId without posting twice', async () => {
+    const originalFetch = globalThis.fetch
+    const payload = orderPayload('client-lost-response')
+    const existingOrder = orderResponse({
+      id: 'server-order-1',
+      clientOrderId: payload.clientOrderId
+    })
+    let postCalls = 0
+    let getCalls = 0
+    globalThis.fetch = async (_input, init) => {
+      if (init?.method === 'POST') {
+        postCalls += 1
+        throw new TypeError('response lost after submit')
+      }
+      getCalls += 1
+      return jsonResponse({
+        items: [existingOrder],
+        page: 0,
+        size: 100,
+        total: 1,
+        totalPages: 1
+      })
+    }
+
+    try {
+      const { submitTradingOrderReconciled } = await import('./useTradingSession.ts')
+
+      assert.deepEqual(
+        await submitTradingOrderReconciled(payload, 'acct_1', 'token_1'),
+        { order: existingOrder, reconciled: true }
+      )
+      assert.equal(postCalls, 1)
+      assert.equal(getCalls, 1)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('does not reconcile an explicit 4xx order rejection', async () => {
+    const originalFetch = globalThis.fetch
+    let postCalls = 0
+    let getCalls = 0
+    globalThis.fetch = async (_input, init) => {
+      if (init?.method === 'POST') {
+        postCalls += 1
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'QUANTITY_STEP_MISMATCH',
+          message: 'Invalid quantity step'
+        }), { status: 422, headers: { 'Content-Type': 'application/json' } })
+      }
+      getCalls += 1
+      return jsonResponse({ items: [], page: 0, size: 100, total: 0, totalPages: 1 })
+    }
+
+    try {
+      const { ApiClientError } = await import('../api/apiClient.ts')
+      const { submitTradingOrderReconciled } = await import('./useTradingSession.ts')
+
+      await assert.rejects(
+        () => submitTradingOrderReconciled(orderPayload('client-invalid'), 'acct_1', 'token_1'),
+        (error) => error instanceof ApiClientError
+          && error.status === 422
+          && error.code === 'QUANTITY_STEP_MISMATCH'
+      )
+      assert.equal(postCalls, 1)
+      assert.equal(getCalls, 0)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('reconciles a 5xx submit outcome before exposing a retryable failure', async () => {
+    const originalFetch = globalThis.fetch
+    const payload = orderPayload('client-server-error')
+    const existingOrder = orderResponse({
+      id: 'server-order-503',
+      clientOrderId: payload.clientOrderId
+    })
+    let getCalls = 0
+    globalThis.fetch = async (_input, init) => {
+      if (init?.method === 'POST') {
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'ORDER_RESPONSE_UNAVAILABLE',
+          message: 'Order response unavailable'
+        }), { status: 503, headers: { 'Content-Type': 'application/json' } })
+      }
+      getCalls += 1
+      return jsonResponse({
+        items: [existingOrder],
+        page: 0,
+        size: 100,
+        total: 1,
+        totalPages: 1
+      })
+    }
+
+    try {
+      const { submitTradingOrderReconciled } = await import('./useTradingSession.ts')
+
+      assert.deepEqual(
+        await submitTradingOrderReconciled(payload, 'acct_1', 'token_1'),
+        { order: existingOrder, reconciled: true }
+      )
+      assert.equal(getCalls, 1)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('preserves the unknown submit failure when reconciliation finds no order', async () => {
+    const originalFetch = globalThis.fetch
+    const submitFailure = new TypeError('response lost after submit')
+    globalThis.fetch = async (_input, init) => {
+      if (init?.method === 'POST') throw submitFailure
+      return jsonResponse({ items: [], page: 0, size: 100, total: 0, totalPages: 1 })
+    }
+
+    try {
+      const { submitTradingOrderReconciled } = await import('./useTradingSession.ts')
+
+      await assert.rejects(
+        () => submitTradingOrderReconciled(orderPayload('client-not-found'), 'acct_1', 'token_1'),
+        (error) => error === submitFailure
+      )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('treats auth failures as login-required session failures', async () => {
     const { ApiClientError } = await import('@fx-platform/frontend-core')
     const { isAuthSessionFailure } = await import('./tradingSession.ts')
@@ -703,6 +834,39 @@ function accountSummary(patch: Partial<AccountSummary> = {}): AccountSummary {
     marginLevel: null,
     leverage: 100,
     status: 'ACTIVE',
+    ...patch
+  }
+}
+
+function orderPayload(clientOrderId: string): OrderPayload {
+  return {
+    accountId: 'acct_1',
+    symbol: 'BTCUSDT',
+    side: 'BUY',
+    orderType: 'MARKET',
+    quantity: 0.01,
+    clientOrderId,
+    idempotencyKey: `${clientOrderId}-request`,
+    positionSide: 'BOTH',
+    quantityUnit: 'BASE',
+    marginMode: 'CASH',
+    reduceOnly: false,
+    timeInForce: 'GTC',
+    postOnly: false
+  }
+}
+
+function orderResponse(patch: Record<string, unknown> = {}) {
+  return {
+    id: 'order-1',
+    accountId: 'acct_1',
+    symbol: 'BTCUSDT',
+    side: 'BUY',
+    orderType: 'MARKET',
+    status: 'FILLED',
+    lots: 0.01,
+    executionPrice: 60000,
+    createdAt: '2026-06-06T00:00:00.000Z',
     ...patch
   }
 }

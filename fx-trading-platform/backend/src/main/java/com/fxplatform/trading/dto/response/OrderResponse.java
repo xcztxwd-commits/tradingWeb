@@ -22,6 +22,7 @@ import java.util.UUID;
 public record OrderResponse(
     UUID id,
     UUID accountId,
+    String clientOrderId,
     String symbol,
     String side,
     String orderType,
@@ -111,6 +112,7 @@ public record OrderResponse(
     this(
         id,
         accountId,
+        null,
         symbol,
         side,
         orderType,

@@ -20,6 +20,7 @@ public class OrderResponseMapper {
     return new OrderResponse(
         order.getId(),
         order.getAccountId(),
+        order.getClientOrderId(),
         order.getSymbol(),
         order.getSide().name(),
         order.getOrderType().name(),

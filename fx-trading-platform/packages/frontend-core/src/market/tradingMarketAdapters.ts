@@ -77,6 +77,7 @@ export type BackendInstrumentRules = {
   marginAsset?: string | null
   settlementAsset?: string | null
   contractSize?: string | number | null
+  contractMultiplier?: string | number | null
   riskTier?: string | null
   tradingSession?: string | null
   kycRequirement?: string | null
@@ -298,6 +299,7 @@ export function mapInstrumentRulesToTradingRules(rules: BackendInstrumentRules):
     marginAsset: optionalText(rules.marginAsset),
     settlementAsset: optionalText(rules.settlementAsset),
     contractSize: optionalNumber(rules.contractSize),
+    contractMultiplier: optionalNumber(rules.contractMultiplier),
     riskTier: optionalText(rules.riskTier),
     tradingSession: optionalText(rules.tradingSession),
     kycRequirement: optionalText(rules.kycRequirement),

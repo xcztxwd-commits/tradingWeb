@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { createTestTradeMarket, testMarket as mockMarket } from './tradeFormTestFixtures.ts'
+import {
+  createTestTradeMarket,
+  testBalances as mockBalances,
+  testMarket as mockMarket
+} from './tradeFormTestFixtures.ts'
 import {
   createInitialTradeForm,
   deriveTradeForm,
+  normalizeNumericInput,
   replaceAttachedProtections
 } from './useTradeForm.ts'
 import { getOrderNotional, getRequiredMargin, validateOrder } from './orderValidation.ts'
@@ -189,6 +194,39 @@ describe('trade form sizing algorithms', () => {
 
     assert.equal(form.amount, '0.01')
     assert.equal(getOrderNotional(form, mockMarket), 607.333)
+  })
+
+  it('keeps malformed numeric input invalid instead of converting it into a positive order', () => {
+    assert.equal(normalizeNumericInput('-1'), '')
+    assert.equal(normalizeNumericInput('1.2.3'), '')
+    assert.equal(normalizeNumericInput('0.125'), '0.125')
+    assert.equal(normalizeNumericInput(''), '')
+
+    const valid = deriveTradeForm(
+      { ...createInitialTradeForm('buy', mockMarket), orderType: 'market', price: '' },
+      { total: '10' },
+      'total',
+      mockMarket
+    )
+    for (const input of ['-1', '1.2.3']) {
+      const malformed = deriveTradeForm(
+        valid,
+        { total: normalizeNumericInput(input) },
+        'total',
+        mockMarket
+      )
+
+      assert.equal(malformed.total, '')
+      assert.equal(malformed.amount, '')
+      const validation = validateOrder(malformed, {
+        balances: mockBalances,
+        market: mockMarket,
+        minAmount: 0,
+        minNotional: 0
+      })
+      assert.equal(validation.canSubmit, false)
+      assert.equal(validation.errors.includes('amount'), true)
+    }
   })
 
   it('rejects market orders when the quote is unavailable or stale', () => {

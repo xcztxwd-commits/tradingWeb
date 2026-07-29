@@ -93,6 +93,7 @@ public class InstrumentRulesEngine {
         asset(symbol.getMarginAsset(), symbol.getQuoteCurrency()),
         asset(symbol.getSettlementAsset(), symbol.getQuoteCurrency()),
         firstPositive(symbol.getContractSize(), profile.contractSize(), BigDecimal.ONE),
+        firstPositive(symbol.getContractMultiplier(), profile.contractMultiplier(), BigDecimal.ONE),
         "DEFAULT",
         "ALWAYS",
         "NONE",

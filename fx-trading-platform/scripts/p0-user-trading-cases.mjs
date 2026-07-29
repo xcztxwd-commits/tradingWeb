@@ -568,6 +568,11 @@ const P0_CONTEXT_INTERFACES = {
     'openTradePanel',
     'withCapturedMutation',
     'submitOrderViaUi',
+    'setPerpetualSettingsViaUi',
+    'positionActionViaUi',
+    'closeAllPositionsViaUi',
+    'transferViaUi',
+    'resetDemoViaUi',
     'acceptNextNativeDialog',
     'followLoginPromptViaUi',
     'cancelAllOrdersViaUi'
@@ -598,6 +603,9 @@ export function createP0Context(input) {
   }
   if (typeof input.userFactory !== 'function') {
     throw new Error('P0_CONTEXT_INTERFACE_REQUIRED: userFactory')
+  }
+  if (typeof input.adminFactory !== 'function') {
+    throw new Error('P0_CONTEXT_INTERFACE_REQUIRED: adminFactory')
   }
   return Object.freeze({ ...input })
 }

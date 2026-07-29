@@ -1758,6 +1758,7 @@ class ProtectionOrderServiceTest {
         "USDT",
         "USDT",
         BigDecimal.ONE,
+        BigDecimal.ONE,
         "DEFAULT",
         "ALWAYS",
         "NONE",

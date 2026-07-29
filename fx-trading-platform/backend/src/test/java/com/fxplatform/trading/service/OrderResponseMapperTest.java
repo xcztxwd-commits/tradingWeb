@@ -38,6 +38,7 @@ class OrderResponseMapperTest {
     order.setSide(OrderSide.BUY);
     order.setOrderType(OrderType.STOP_MARKET);
     order.setStatus(OrderStatus.PENDING);
+    order.setClientOrderId("web-order-123");
     order.setLots(new BigDecimal("0.0019"));
     order.setQuantity(new BigDecimal("100.1235"));
     order.setQuantityUnit(QuantityUnit.QUOTE);
@@ -62,6 +63,7 @@ class OrderResponseMapperTest {
     assertThat(response.positionMode()).isEqualTo(PositionMode.ONE_WAY);
     assertThat(response.positionSide()).isEqualTo(PositionSide.BOTH);
     assertThat(response.marginMode()).isEqualTo(MarginMode.CASH);
+    assertThat(response.clientOrderId()).isEqualTo("web-order-123");
     assertThat(response.quantity()).isEqualByComparingTo("100.12345678");
     assertThat(response.quantityUnit()).isEqualTo(QuantityUnit.QUOTE);
     assertThat(response.originalQuantity()).isEqualByComparingTo("100.12345678");

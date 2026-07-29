@@ -83,6 +83,7 @@ export type TradingInstrumentRules = {
   marginAsset?: string
   settlementAsset?: string
   contractSize?: number
+  contractMultiplier?: number
   riskTier?: string
   tradingSession?: string
   kycRequirement?: string

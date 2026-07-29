@@ -14,6 +14,7 @@ const routeSource = readFileSync(join(webSrcDir, 'routes', 'trading', 'TradingRo
 const routeStyles = readFileSync(join(webSrcDir, 'routes', 'trading', 'TradingRoute.module.css'), 'utf8')
 const mobileViewSource = readFileSync(join(mobilePageDir, 'MobileTradingTerminal.tsx'), 'utf8')
 const mobilePanelsSource = readFileSync(join(mobilePageDir, 'MobilePanels.tsx'), 'utf8')
+const dialogSource = readFileSync(join(projectRoot, 'packages', 'ui', 'src', 'dialog', 'Dialog.tsx'), 'utf8')
 const deviceClassSource = readFileSync(join(webSrcDir, 'app', 'device', 'deviceClass.ts'), 'utf8')
 const themeCss = readFileSync(join(projectRoot, 'packages', 'ui', 'src', 'theme', 'theme.css'), 'utf8')
 const mobilePanelsStyles = readFileSync(join(mobilePageDir, 'MobilePanels.module.css'), 'utf8')
@@ -56,12 +57,32 @@ describe('mobile trading terminal redesign', () => {
   })
 
   it('keeps drawers and order sheets interactive across the full Mobile platform range', () => {
-    assert.match(mobilePanelsSource, /import \{ Drawer \} from '@fx-platform\/ui'/)
+    assert.match(mobilePanelsSource, /import \{ Dialog, Drawer \} from '@fx-platform\/ui'/)
     assert.match(mobilePanelsSource, /return \(\s*<Drawer/)
     assert.ok((mobileViewSource.match(/<MobileDrawer/g) ?? []).length >= 2)
     assert.doesNotMatch(mobilePanelsSource, /styles\.drawerLayer/)
     assert.match(mobilePanelsStyles, /@media \(max-width:\s*900px\)\s*\{[\s\S]*?\.drawerViewport,[\s\S]*?\.sheetLayer\s*\{[\s\S]*?display:\s*block/)
     assert.doesNotMatch(mobilePanelsStyles, /max-width:\s*760px/)
+  })
+
+  it('uses the focus-managed Dialog primitive for the mobile Trade sheet', () => {
+    assert.match(mobilePanelsSource, /import \{ Dialog, Drawer \} from '@fx-platform\/ui'/)
+    assert.match(mobilePanelsSource, /const titleId = useId\(\)/)
+    assert.match(mobilePanelsSource, /<Dialog[\s\S]*open=\{open\}[\s\S]*onClose=\{onClose\}/)
+    assert.match(mobilePanelsSource, /labelledBy=\{titleId\}/)
+    assert.match(mobilePanelsSource, /closeLabel=\{`Close \$\{title\}`\}/)
+    assert.match(mobilePanelsSource, /<h2 id=\{titleId\}>\{title\}<\/h2>/)
+    assert.match(mobilePanelsSource, /aria-label=\{`Close \$\{title\}`\}/)
+    assert.match(mobilePanelsSource, /<X size=\{17\} aria-hidden="true" \/>/)
+
+    assert.equal((dialogSource.match(/role="dialog"/g) ?? []).length, 1)
+    assert.match(dialogSource, /aria-modal="true"/)
+    assert.match(dialogSource, /if \(!open\) return null/)
+    assert.match(dialogSource, /event\.key === 'Escape'/)
+    assert.match(dialogSource, /document\.activeElement/)
+    assert.match(dialogSource, /firstFocusable/)
+    assert.match(dialogSource, /previousFocusRef\.current\?\.focus\(\)/)
+    assert.match(dialogSource, /source: 'backdrop'/)
   })
 
   it('renders the product label from the selected market without inventing a contract state', () => {

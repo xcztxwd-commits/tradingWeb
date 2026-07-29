@@ -2868,6 +2868,7 @@ export interface components {
             id?: string;
             /** Format: uuid */
             accountId?: string;
+            clientOrderId?: string;
             symbol?: string;
             side?: string;
             orderType?: string;
@@ -4210,6 +4211,7 @@ export interface components {
             marginAsset?: string;
             settlementAsset?: string;
             contractSize?: number;
+            contractMultiplier?: number;
             riskTier?: string;
             tradingSession?: string;
             kycRequirement?: string;

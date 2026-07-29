@@ -3679,16 +3679,12 @@ async function activateP0Profile({ phase, profile, attempt, context, operations,
   if (typeof databaseUrl !== 'string') throw new Error('P0_PROFILE_DATABASE_URL_REQUIRED')
   context.activeDatabaseSegment = phaseDatabase.segmentName
   context.activeDatabaseUrl = databaseUrl
-  const authorityCredentials = phase === 'authority'
-    ? p0AuthorityAdminCredentials(context)
-    : null
-  const authorityEnvironment = authorityCredentials
-    ? {
-        ADMIN_BOOTSTRAP_ENABLED: 'true',
-        ADMIN_BOOTSTRAP_EMAIL: authorityCredentials.email,
-        ADMIN_BOOTSTRAP_PASSWORD: authorityCredentials.password
-      }
-    : {}
+  const authorityCredentials = p0AuthorityAdminCredentials(context)
+  const authorityEnvironment = {
+    ADMIN_BOOTSTRAP_ENABLED: 'true',
+    ADMIN_BOOTSTRAP_EMAIL: authorityCredentials.email,
+    ADMIN_BOOTSTRAP_PASSWORD: authorityCredentials.password
+  }
   const environment = buildBackendEnvironment(profile, {
     DATABASE_URL: databaseUrl,
     SPRING_DATASOURCE_URL: databaseUrl,
@@ -4017,7 +4013,8 @@ export async function runP0Preflight({
       args: [
         '--test',
         join(scriptsDirectory, 'smoke-usdt-demo-browser.test.mjs'),
-        join(scriptsDirectory, 'p0-user-trading-runner.test.mjs')
+        join(scriptsDirectory, 'p0-user-trading-runner.test.mjs'),
+        join(scriptsDirectory, 'p0-user-trading-artifacts.test.mjs')
       ],
       cwd: p0ProjectRoot
     },
@@ -6751,7 +6748,7 @@ export async function withCapturedMutation(page, matcher, action) {
   record.responseBody = responseBody?.base64Encoded
     ? Buffer.from(responseBody.body ?? '', 'base64').toString('utf8')
     : String(responseBody?.body ?? '')
-  return {
+  const capture = {
     actionResult,
     requestRef: record.requestId,
     method: record.method,
@@ -6760,6 +6757,20 @@ export async function withCapturedMutation(page, matcher, action) {
     status: Number(record.response.status),
     networkEvidence: redactP0NetworkRecord(record)
   }
+  Object.defineProperties(capture, {
+    rawRequest: {
+      value: Object.freeze({
+        method: record.method,
+        url: record.url,
+        postData: record.postData,
+        requestHeaders: Object.freeze({ ...record.requestHeaders })
+      })
+    },
+    parsedResponse: {
+      value: parseP0CapturedResponse(record.responseBody)
+    }
+  })
+  return capture
 }
 
 export async function registerViaUi(page, credentials) {
@@ -6991,6 +7002,94 @@ export async function openTradePanel(page, target) {
   return page.p0TradePanel
 }
 
+export async function setPerpetualSettingsViaUi(page, options = {}) {
+  const requested = [
+    ['positionMode', 'Position mode', options.positionMode],
+    ['marginMode', 'Margin', options.marginMode],
+    ['leverage', 'Leverage', options.leverage],
+    ['quantityUnit', 'Quantity unit', options.quantityUnit]
+  ].filter(([, , value]) => value !== undefined)
+  const captures = []
+  if (requested.length === 0) return captures
+
+  await page.waitForFunction((fieldLabels) => {
+    const section = document.querySelector(
+      'section[aria-label="Perpetual trading settings"]'
+    )
+    if (!section || section.getAttribute('aria-busy') === 'true') return false
+    return fieldLabels.every((fieldLabel) => {
+      const field = [...section.querySelectorAll(':scope > label')]
+        .find((candidate) => (
+          candidate.querySelector(':scope > span')?.textContent?.trim() === fieldLabel
+        ))
+      const control = field?.querySelector('select, input')
+      return Boolean(control && !control.disabled)
+    })
+  }, 'ready Perpetual trading settings', requested.map(([, label]) => label))
+  for (const [field, label, value] of requested) {
+    const desired = String(value)
+    const current = await page.evaluate((fieldLabel) => {
+      const section = document.querySelector(
+        'section[aria-label="Perpetual trading settings"]'
+      )
+      const field = [...(section?.querySelectorAll(':scope > label') ?? [])]
+        .find((candidate) => (
+          candidate.querySelector(':scope > span')?.textContent?.trim() === fieldLabel
+        ))
+      return field?.querySelector('select, input')?.value ?? null
+    }, label)
+    if (current === desired) continue
+
+    const matcher = field === 'positionMode'
+      ? { method: 'PATCH', url: /\/api\/accounts\/[^/]+\/position-mode$/ }
+      : {
+          method: 'PATCH',
+          url: /\/api\/accounts\/[^/]+\/symbols\/[^/]+\/settings$/
+        }
+    const capture = await withCapturedMutation(
+      page,
+      matcher,
+      () => page.evaluate((fieldLabel, nextValue) => {
+        const section = document.querySelector(
+          'section[aria-label="Perpetual trading settings"]'
+        )
+        const field = [...(section?.querySelectorAll(':scope > label') ?? [])]
+          .find((candidate) => (
+            candidate.querySelector(':scope > span')?.textContent?.trim() === fieldLabel
+          ))
+        const control = field?.querySelector('select, input')
+        if (!control || control.disabled) {
+          throw new Error(`P0_PERPETUAL_SETTING_UNAVAILABLE: ${fieldLabel}`)
+        }
+        const prototype = control instanceof HTMLSelectElement
+          ? HTMLSelectElement.prototype
+          : HTMLInputElement.prototype
+        const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+        setter?.call(control, nextValue)
+        control.dispatchEvent(new Event('input', { bubbles: true }))
+        control.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      }, label, desired)
+    )
+    finishP0UiMutation(page, capture, `Perpetual ${label}`, options)
+    captures.push(capture)
+    if (!options.expectFailure) {
+      await page.waitForFunction((fieldLabel, expected) => {
+        const section = document.querySelector(
+          'section[aria-label="Perpetual trading settings"]'
+        )
+        if (!section || section.getAttribute('aria-busy') === 'true') return false
+        const field = [...section.querySelectorAll(':scope > label')]
+          .find((candidate) => (
+            candidate.querySelector(':scope > span')?.textContent?.trim() === fieldLabel
+          ))
+        return field?.querySelector('select, input')?.value === expected
+      }, `saved Perpetual ${label}`, label, desired)
+    }
+  }
+  return captures
+}
+
 export async function submitOrderViaUi(page, order) {
   if (!page.p0TradePanel) await openTradePanel(page, order.target ?? order)
   const panelSelector = page.p0TradePanel.selector
@@ -7025,6 +7124,32 @@ export async function submitOrderViaUi(page, order) {
       `section[data-price-precision][class*="side--${selectedSide}"]`
     )
     if (!form) return false
+    const perpetualOptions = panel.querySelector(
+      'section[aria-label="Perpetual order options"]'
+    )
+    if (values.positionSide !== undefined && values.positionSide !== 'BOTH') {
+      const positionSide = perpetualOptions?.querySelector('select')
+      if (!positionSide) throw new Error('P0_POSITION_SIDE_CONTROL_MISSING')
+      if (positionSide.value !== String(values.positionSide)) {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLSelectElement.prototype,
+          'value'
+        )?.set
+        setter?.call(positionSide, String(values.positionSide))
+        positionSide.dispatchEvent(new Event('change', { bubbles: true }))
+        return false
+      }
+    }
+    if (values.reduceOnly !== undefined) {
+      const reduceOnly = perpetualOptions?.querySelector('input[type="checkbox"]')
+      if (!reduceOnly && values.reduceOnly) {
+        throw new Error('P0_REDUCE_ONLY_CONTROL_MISSING')
+      }
+      if (reduceOnly && reduceOnly.checked !== Boolean(values.reduceOnly)) {
+        reduceOnly.click()
+        return false
+      }
+    }
     const inputs = [...form.querySelectorAll('input[inputmode="decimal"]:not([disabled])')]
     const setValue = (input, value) => {
       if (value === undefined || value === null) return true
@@ -7055,7 +7180,9 @@ export async function submitOrderViaUi(page, order) {
   }, panelSelector, side, orderType, {
     price: order.price,
     triggerPrice: order.triggerPrice,
-    amount: order.amount ?? order.quantity
+    amount: order.amount ?? order.quantity,
+    positionSide: order.positionSide,
+    reduceOnly: order.reduceOnly
   }), 'scoped order form inputs', 15000)
 
   if (order.expectLogin) {
@@ -7093,7 +7220,9 @@ export async function submitOrderViaUi(page, order) {
       `section[data-price-precision][class*="side--${selectedSide}"]`
     )
     const button = form?.querySelector('[data-trading-action="submit-order"]')
-    if (!button || button.disabled) return false
+    const balanceReady = [...(form?.querySelectorAll('strong') ?? [])]
+      .some((value) => !value.textContent?.trim().startsWith('-'))
+    if (!button || button.disabled || !balanceReady) return false
     button.click()
     return true
   }, panelSelector, side), 'scoped order submit action', 15000)
@@ -7121,7 +7250,367 @@ export async function submitOrderViaUi(page, order) {
       return true
     }, panelSelector)
   )
-  assertP0MutationSucceeded(capture, 'order submission')
+  finishP0UiMutation(page, capture, 'order submission', order)
+  return capture
+}
+
+export async function positionActionViaUi(page, options) {
+  if (!options?.action) throw new Error('P0_POSITION_ACTION_REQUIRED')
+  await openCurrentPositionsTabViaUi(page)
+  await page.waitForFunction((positionId, positionSide) => {
+    const tablist = [...document.querySelectorAll('[role="tablist"]')]
+      .find((candidate) => [...candidate.querySelectorAll(':scope > [role="tab"]')]
+        .some((tab) => [
+          'Current positions',
+          '当前持仓',
+          '現在ポジション'
+        ].includes(tab.textContent?.trim())))
+    const panel = tablist?.closest('section')?.querySelector(':scope > [role="tabpanel"]')
+    const closableRows = [...(panel?.querySelectorAll('tbody tr') ?? [])]
+      .filter((row) => row.querySelector('button'))
+    let candidates = positionId
+      ? closableRows.filter((row) => row.getAttribute('data-position-id') === positionId)
+      : closableRows
+    if (positionSide && String(positionSide).toUpperCase() !== 'BOTH') {
+      const expectedSide = String(positionSide).trim().toUpperCase()
+      candidates = candidates.filter((row) => (
+        [...row.querySelectorAll('td')]
+          .some((cell) => cell.textContent?.trim().toUpperCase() === expectedSide)
+      ))
+    }
+    const button = candidates[0]?.querySelector('button')
+    return candidates.length === 1 && Boolean(button && !button.disabled)
+  }, 'target current-position row', options.positionId, options.positionSide)
+  const selected = await page.evaluate((positionId, positionSide) => {
+    const tablist = [...document.querySelectorAll('[role="tablist"]')]
+      .find((candidate) => [...candidate.querySelectorAll(':scope > [role="tab"]')]
+        .some((tab) => [
+          'Current positions',
+          '当前持仓',
+          '現在ポジション'
+        ].includes(tab.textContent?.trim())))
+    const panel = tablist?.closest('section')?.querySelector(':scope > [role="tabpanel"]')
+    const closableRows = [...(panel?.querySelectorAll('tbody tr') ?? [])]
+      .filter((row) => row.querySelector('button'))
+    let candidates = positionId
+      ? closableRows.filter((row) => row.getAttribute('data-position-id') === positionId)
+      : closableRows
+    if (positionSide && String(positionSide).toUpperCase() !== 'BOTH') {
+      const expectedSide = String(positionSide).trim().toUpperCase()
+      candidates = candidates.filter((row) => (
+        [...row.querySelectorAll('td')]
+          .some((cell) => cell.textContent?.trim().toUpperCase() === expectedSide)
+      ))
+    }
+    if (candidates.length !== 1) {
+      throw new Error(`P0_POSITION_ROW_AMBIGUOUS: ${candidates.length}`)
+    }
+    const button = [...candidates[0].querySelectorAll('button')]
+      .find((candidate) => !candidate.disabled)
+    if (!button) throw new Error('P0_POSITION_ACTION_BUTTON_MISSING')
+    button.click()
+    return {
+      positionId: candidates[0].getAttribute('data-position-id'),
+      rowText: candidates[0].textContent?.trim() ?? ''
+    }
+  }, options.positionId, options.positionSide)
+  assert(selected?.positionId, 'one real current-position row must open Position action')
+  await page.waitForFunction(
+    () => Boolean(document.querySelector('[role="dialog"][aria-label="Position action"]')),
+    'Position action'
+  )
+  await waitFor(() => page.evaluate((values) => {
+    const dialog = document.querySelector('[role="dialog"][aria-label="Position action"]')
+    if (!dialog) return false
+    const actionLabel = {
+      PARTIAL_CLOSE: 'Partial close',
+      FULL_CLOSE: 'Close all',
+      ADJUST_MARGIN: 'Adjust margin'
+    }[values.action]
+    const actionTab = [...dialog.querySelectorAll(
+      '[role="tablist"][aria-label="Position action type"] [role="tab"]'
+    )].find((candidate) => candidate.textContent?.trim() === actionLabel)
+    if (!actionTab || actionTab.disabled) {
+      throw new Error(`P0_POSITION_ACTION_UNAVAILABLE: ${values.action}`)
+    }
+    if (actionTab.getAttribute('aria-selected') !== 'true') {
+      actionTab.click()
+      return false
+    }
+
+    const setValue = (control, value) => {
+      if (value === undefined || value === null || control.value === String(value)) {
+        return true
+      }
+      const prototype = control instanceof HTMLSelectElement
+        ? HTMLSelectElement.prototype
+        : HTMLInputElement.prototype
+      const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+      setter?.call(control, String(value))
+      control.dispatchEvent(new Event('input', { bubbles: true }))
+      control.dispatchEvent(new Event('change', { bubbles: true }))
+      return false
+    }
+    const labelControl = (labelText) => {
+      const label = [...dialog.querySelectorAll('label')]
+        .find((candidate) => candidate.querySelector('span')?.textContent?.trim()
+          .startsWith(labelText))
+      return label?.querySelector('select, input') ?? null
+    }
+
+    if (values.action === 'PARTIAL_CLOSE') {
+      const unit = labelControl('Quantity unit')
+      const quantity = labelControl('Close quantity')
+      if (!unit || !quantity) throw new Error('P0_PARTIAL_CLOSE_CONTROLS_MISSING')
+      if (!setValue(unit, values.quantityUnit)) return false
+      if (!setValue(quantity, values.quantity)) return false
+    } else if (values.action === 'ADJUST_MARGIN') {
+      const directionGroup = dialog.querySelector(
+        '[role="group"][aria-label="Margin adjustment direction"]'
+      )
+      const directionLabel = values.marginDirection === 'REDUCE' ? 'Reduce' : 'Add'
+      const direction = [...(directionGroup?.querySelectorAll('button') ?? [])]
+        .find((candidate) => candidate.textContent?.trim() === directionLabel)
+      const amount = labelControl('Margin amount')
+      if (!direction || !amount) throw new Error('P0_MARGIN_ADJUSTMENT_CONTROLS_MISSING')
+      if (direction.getAttribute('aria-pressed') !== 'true') {
+        direction.click()
+        return false
+      }
+      if (!setValue(amount, values.marginAmount)) return false
+    }
+    const confirm = dialog.querySelector('footer button[type="submit"]')
+    return Boolean(confirm && !confirm.disabled)
+  }, {
+    action: options.action,
+    quantity: options.quantity,
+    quantityUnit: options.quantityUnit,
+    marginDirection: options.marginDirection,
+    marginAmount: options.marginAmount
+  }), `ready Position action ${options.action}`, 15000)
+
+  const matcher = options.action === 'ADJUST_MARGIN'
+    ? {
+        method: 'POST',
+        url: /\/api\/trading\/positions\/[^/?]+\/margin$/
+      }
+    : {
+        method: 'POST',
+        url: /\/api\/trading\/positions\/[^/?]+\/close(?:\?|$)/
+      }
+  const capture = await withCapturedMutation(
+    page,
+    options.matcher ?? matcher,
+    () => page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-label="Position action"]')
+      const confirm = dialog?.querySelector('footer button[type="submit"]')
+      if (!confirm || confirm.disabled) {
+        throw new Error('P0_POSITION_ACTION_CONFIRM_MISSING')
+      }
+      confirm.click()
+      return true
+    })
+  )
+  finishP0UiMutation(page, capture, `Position action ${options.action}`, options)
+  if (!options.expectFailure) {
+    await page.waitForFunction((positionId, previousText, shouldDisappear) => {
+      if (document.querySelector('[role="dialog"][aria-label="Position action"]')) {
+        return false
+      }
+      const row = [...document.querySelectorAll('tbody tr')]
+        .find((candidate) => candidate.getAttribute('data-position-id') === positionId)
+      return shouldDisappear
+        ? !row
+        : Boolean(row && row.textContent?.trim() !== previousText)
+    }, `refreshed Position row ${selected.positionId}`,
+    selected.positionId, selected.rowText, options.action === 'FULL_CLOSE')
+  }
+  return capture
+}
+
+export async function closeAllPositionsViaUi(page, options = {}) {
+  await openCurrentPositionsTabViaUi(page)
+  const capture = await withCapturedMutation(
+    page,
+    options.matcher ?? {
+      method: 'POST',
+      url: /\/api\/trading\/positions\/close-all$/
+    },
+    () => acceptNextNativeDialog(page, () => waitFor(() => page.evaluate(() => {
+      const buttons = [...document.querySelectorAll('button')]
+      const closeAll = buttons.find((button) => {
+        const label = button.textContent?.trim()
+        return !button.disabled && (
+          label === 'Close all positions'
+            || label === '全部平仓'
+            || label === 'すべてのポジションを決済'
+        )
+      })
+      if (!closeAll) return false
+      closeAll.click()
+      return true
+    }), 'visible Close all positions action', 15000))
+  )
+  finishP0UiMutation(page, capture, 'Close all positions', options)
+  return capture
+}
+
+export async function transferViaUi(page, options) {
+  if (!options?.direction || options.amount === undefined) {
+    throw new Error('P0_TRANSFER_INPUT_REQUIRED')
+  }
+  await openWalletViaUi(page)
+  const opened = await page.evaluate(() => {
+    const button = [...document.querySelectorAll('button')]
+      .find((candidate) => (
+        candidate.textContent?.trim() === 'Transfer Spot / Perpetual'
+          && !candidate.disabled
+      ))
+    button?.click()
+    return Boolean(button)
+  })
+  assert(opened, 'real wallet Transfer Spot / Perpetual action must be available')
+  await page.waitForFunction(
+    () => Boolean(document.getElementById('wallet-transfer-title')?.closest('[role="dialog"]')),
+    'wallet-transfer-title'
+  )
+  await waitFor(() => page.evaluate((direction, amount) => {
+    const dialog = document.getElementById('wallet-transfer-title')?.closest('[role="dialog"]')
+    const directionControl = dialog?.querySelector('select')
+    const amountControl = [...(dialog?.querySelectorAll('input') ?? [])]
+      .find((input) => input.inputMode === 'decimal')
+    if (!directionControl || !amountControl) return false
+    const setValue = (control, value) => {
+      if (control.value === String(value)) return true
+      const prototype = control instanceof HTMLSelectElement
+        ? HTMLSelectElement.prototype
+        : HTMLInputElement.prototype
+      const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+      setter?.call(control, String(value))
+      control.dispatchEvent(new Event('input', { bubbles: true }))
+      control.dispatchEvent(new Event('change', { bubbles: true }))
+      return false
+    }
+    if (!setValue(directionControl, direction)) return false
+    if (!setValue(amountControl, amount)) return false
+    const confirm = [...dialog.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === 'Confirm transfer')
+    return Boolean(confirm && !confirm.disabled)
+  }, options.direction, options.amount), 'ready wallet transfer', 15000)
+  const capture = await withCapturedMutation(
+    page,
+    options.matcher ?? {
+      method: 'POST',
+      url: /\/api\/accounts\/[^/]+\/transfers$/
+    },
+    () => page.evaluate(() => {
+      const dialog = document.getElementById('wallet-transfer-title')?.closest('[role="dialog"]')
+      const confirm = [...(dialog?.querySelectorAll('button') ?? [])]
+        .find((button) => button.textContent?.trim() === 'Confirm transfer')
+      if (!confirm || confirm.disabled) throw new Error('P0_TRANSFER_CONFIRM_MISSING')
+      confirm.click()
+      return true
+    })
+  )
+  finishP0UiMutation(page, capture, 'wallet transfer', options)
+  return capture
+}
+
+export async function resetDemoViaUi(page, options = {}) {
+  await openWalletViaUi(page)
+  const opened = await page.evaluate(() => {
+    const button = [...document.querySelectorAll('button')]
+      .find((candidate) => (
+        candidate.textContent?.trim() === 'Reset Demo account'
+          && !candidate.disabled
+      ))
+    button?.click()
+    return Boolean(button)
+  })
+  assert(opened, 'real wallet Reset Demo account action must be available')
+  await page.waitForFunction(
+    () => Boolean(document.getElementById('wallet-reset-title')?.closest('[role="dialog"]')),
+    'wallet-reset-title'
+  )
+  const capture = await withCapturedMutation(
+    page,
+    options.matcher ?? {
+      method: 'POST',
+      url: /\/api\/accounts\/[^/]+\/demo-reset$/
+    },
+    () => page.evaluate(() => {
+      const dialog = document.getElementById('wallet-reset-title')?.closest('[role="dialog"]')
+      const confirm = [...(dialog?.querySelectorAll('button') ?? [])]
+        .find((button) => button.textContent?.trim() === 'Confirm reset')
+      if (!confirm || confirm.disabled) throw new Error('P0_DEMO_RESET_CONFIRM_MISSING')
+      confirm.click()
+      return true
+    })
+  )
+  finishP0UiMutation(page, capture, 'Demo reset', options)
+  return capture
+}
+
+async function openCurrentPositionsTabViaUi(page) {
+  await waitFor(() => page.evaluate(() => {
+    const tablist = [...document.querySelectorAll('[role="tablist"]')]
+      .find((candidate) => {
+        const labels = [...candidate.querySelectorAll(':scope > [role="tab"]')]
+          .map((tab) => tab.textContent?.trim())
+        return labels.some((label) => [
+          'Current positions',
+          '当前持仓',
+          '現在ポジション'
+        ].includes(label))
+      })
+    const tabs = [...(tablist?.querySelectorAll(':scope > [role="tab"]') ?? [])]
+    const currentPositions = tabs.find((tab) => [
+      'Current positions',
+      '当前持仓',
+      '現在ポジション'
+    ].includes(tab.textContent?.trim())) ?? tabs[2]
+    if (!currentPositions) return false
+    if (currentPositions.getAttribute('aria-selected') !== 'true') {
+      currentPositions.click()
+      return false
+    }
+    const panel = tablist?.closest('section')?.querySelector(':scope > [role="tabpanel"]')
+    return Boolean(panel && panel.getAttribute('aria-busy') !== 'true')
+  }), 'visible Current positions tab', 15000)
+}
+
+async function openWalletViaUi(page) {
+  const baseUrl = p0PageBaseUrl(
+    page,
+    'webBaseUrl',
+    'WEB_BASE_URL',
+    'http://127.0.0.1:5199'
+  )
+  await page.navigate(`${baseUrl}/wallet`)
+  await page.waitForFunction(
+    () => window.location.pathname === '/wallet'
+      && [...document.querySelectorAll('button')].some((button) => (
+        button.textContent?.trim() === 'Transfer Spot / Perpetual'
+          && !button.disabled
+      )),
+    'real wallet route'
+  )
+}
+
+function finishP0UiMutation(page, capture, label, options = {}) {
+  if (!options.expectFailure) {
+    assertP0MutationSucceeded(capture, label)
+    return capture
+  }
+  assert(
+    capture.status >= 400 && capture.status < 500,
+    `${label} rejection must return 4xx, got HTTP ${capture.status}`
+  )
+  assert(
+    typeof page.allowHttpError === 'function',
+    `${label} expected HTTP error must be request-scoped`
+  )
+  page.allowHttpError(capture.requestRef, options.reason ?? `expected ${label} rejection`)
   return capture
 }
 
@@ -8541,6 +9030,15 @@ function matchesP0NetworkRequest(record, matcher) {
     return false
   }
   return true
+}
+
+function parseP0CapturedResponse(body) {
+  if (body === '') return null
+  try {
+    return JSON.parse(body)
+  } catch {
+    return body
+  }
 }
 
 function redactP0NetworkRecord(record) {
@@ -10606,7 +11104,7 @@ export function createLocalProcessManager(
         })
         throwIfP0Aborted(signal)
         return body?.status === 'UP'
-      }, 'owned P0 backend health', 120000, signal)
+      }, 'owned P0 backend health', 600000, signal)
     },
     async waitForBusinessEndpoint(backend, url, signal) {
       await waitFor(async () => {
@@ -11023,12 +11521,18 @@ function mergedP0CaseEvidence(fragments, terminalStatus) {
     ownP0CaseEvidenceValue(fragment, 'financialCalculation')
   ))
   if (calculations.some((value) => value !== undefined)) {
-    if (calculations.some((value) => !isPlainP0CaseEvidence(value))) {
+    if (calculations.some((value) => (
+      !isPlainP0CaseEvidence(value)
+      || !Object.hasOwn(
+        P0_CASE_STATUS_PRIORITY,
+        ownP0CaseEvidenceValue(value, 'status')
+      )
+    ))) {
       throw new Error('P0_CASE_FRAGMENT_EVIDENCE_CONFLICT')
     }
     merged.financialCalculation = calculations.length === 1
       ? calculations[0]
-      : { checks: calculations }
+      : { status: terminalStatus, checks: calculations }
   }
 
   const cleanup = fragments.map((fragment) => (
@@ -12248,14 +12752,28 @@ function createDefaultP0CaseContext({
     )
     const account = activeDemoAccounts[0]
     const accountId = encodeURIComponent(account.id)
-    const [summary, wallets, settings, ordersPage, tradesPage, positionsPage, fundingPage] = await Promise.all([
+    const [
+      summary,
+      wallets,
+      settings,
+      ordersPage,
+      tradesPage,
+      positionsPage,
+      positionHistoryPage,
+      fundingPage,
+      assetLedger,
+      transfersPage
+    ] = await Promise.all([
       userApi(page, `/api/accounts/${accountId}/summary`),
       userApi(page, `/api/accounts/${accountId}/wallet-balances`),
       userApi(page, `/api/accounts/${accountId}/trading-settings`),
       userApi(page, `/api/trading/orders?accountId=${accountId}&page=0&size=200`),
       userApi(page, `/api/trading/trades?accountId=${accountId}&page=0&size=200`),
       userApi(page, `/api/trading/positions?accountId=${accountId}&page=0&size=200`),
-      userApi(page, `/api/trading/funding/settlements?accountId=${accountId}&page=0&size=200`)
+      userApi(page, `/api/trading/positions/history?accountId=${accountId}&page=0&size=200`),
+      userApi(page, `/api/trading/funding/settlements?accountId=${accountId}&page=0&size=200`),
+      userApi(page, `/api/accounts/${accountId}/asset-ledger`),
+      userApi(page, `/api/accounts/${accountId}/transfers?page=0&size=200`)
     ])
     return {
       accounts,
@@ -12267,15 +12785,31 @@ function createDefaultP0CaseContext({
       orders: pageContent(ordersPage),
       trades: pageContent(tradesPage),
       positions: pageContent(positionsPage),
-      fundingSettlements: pageContent(fundingPage)
+      positionHistory: pageContent(positionHistoryPage),
+      fundingSettlements: pageContent(fundingPage),
+      assetLedger: pageContent(assetLedger),
+      transfers: pageContent(transfersPage)
     }
   }
   const snapshotMarket = async (symbol = SPOT_SYMBOL) => {
-    const [symbols, quote] = await Promise.all([
+    const [symbols, rules, quote] = await Promise.all([
       requestP0Json(apiUrl, '/api/market/symbols'),
+      requestP0Json(
+        apiUrl,
+        `/api/market/symbols/${encodeURIComponent(symbol)}/rules`
+      ),
       requestP0Json(apiUrl, `/api/market/quotes/${encodeURIComponent(symbol)}`)
     ])
-    return { symbols, quote }
+    const market = symbols.find((candidate) => candidate.symbol === symbol)
+    const perpetual = market?.productType === 'LINEAR_PERP'
+      || String(symbol).toUpperCase().endsWith('-PERP')
+    const reference = perpetual
+      ? await requestP0Json(
+          apiUrl,
+          `/api/market/perpetuals/${encodeURIComponent(symbol)}/reference`
+        )
+      : undefined
+    return { symbols, rules, quote, ...(perpetual ? { reference } : {}) }
   }
   const activeDatabaseSegment = () => (
     prepared.activeDatabaseSegment ?? prepared.matrixDatabase
@@ -12318,7 +12852,81 @@ function createDefaultP0CaseContext({
         'fundingSettlements', (
           SELECT count(*) FROM trading.funding_settlements
           WHERE account_id = '${sqlLiteral(targetAccountId)}'
-        )
+        ),
+        'accountRow', (
+          SELECT to_jsonb(account_row)
+          FROM core.trading_accounts account_row
+          WHERE account_row.id = '${sqlLiteral(targetAccountId)}'
+        ),
+        'walletRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(wallet_row) ORDER BY wallet_row.wallet_type, wallet_row.asset)
+          FROM core.wallet_balances wallet_row
+          WHERE wallet_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'orderRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(order_row) ORDER BY order_row.created_at, order_row.id)
+          FROM trading.orders order_row
+          WHERE order_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'orderEventRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(event_row) ORDER BY event_row.created_at, event_row.id)
+          FROM trading.order_events event_row
+          JOIN trading.orders order_row ON order_row.id = event_row.order_id
+          WHERE order_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'tradeRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(trade_row) ORDER BY trade_row.executed_at, trade_row.id)
+          FROM trading.trades trade_row
+          WHERE trade_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'positionRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(position_row) ORDER BY position_row.opened_at, position_row.id)
+          FROM trading.positions position_row
+          WHERE position_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'spotPositionRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(position_row) ORDER BY position_row.asset, position_row.id)
+          FROM trading.spot_positions position_row
+          WHERE position_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'symbolSettingRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(setting_row) ORDER BY setting_row.symbol)
+          FROM trading.account_symbol_settings setting_row
+          WHERE setting_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'assetLedgerRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(ledger_row) ORDER BY ledger_row.created_at, ledger_row.id)
+          FROM ledger.asset_ledger_entries ledger_row
+          WHERE ledger_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'cashLedgerRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(ledger_row) ORDER BY ledger_row.created_at, ledger_row.id)
+          FROM ledger.ledger_entries ledger_row
+          WHERE ledger_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'fundingSettlementRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(settlement_row) ORDER BY settlement_row.funding_time, settlement_row.id)
+          FROM trading.funding_settlements settlement_row
+          WHERE settlement_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'batchActionRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(batch_row) ORDER BY batch_row.created_at, batch_row.id)
+          FROM trading.batch_action_requests batch_row
+          WHERE batch_row.account_id = '${sqlLiteral(targetAccountId)}'
+        ), '[]'::jsonb),
+        'auditRows', COALESCE((
+          SELECT jsonb_agg(to_jsonb(audit_row) ORDER BY audit_row.created_at, audit_row.id)
+          FROM audit.audit_logs audit_row
+          WHERE audit_row.actor_user_id = (
+            SELECT owner.user_id
+            FROM core.trading_accounts owner
+            WHERE owner.id = '${sqlLiteral(targetAccountId)}'
+          )
+            AND (
+              audit_row.target_id = '${sqlLiteral(targetAccountId)}'
+              OR audit_row.details::text LIKE '%${sqlLiteral(targetAccountId)}%'
+            )
+        ), '[]'::jsonb)
       )::text;
     `)
     const json = String(raw).split(/\r?\n/).filter(Boolean).at(-1)
@@ -12383,6 +12991,11 @@ function createDefaultP0CaseContext({
     openTradePanel,
     withCapturedMutation,
     submitOrderViaUi,
+    setPerpetualSettingsViaUi,
+    positionActionViaUi,
+    closeAllPositionsViaUi,
+    transferViaUi,
+    resetDemoViaUi,
     acceptNextNativeDialog,
     followLoginPromptViaUi,
     cancelAllOrdersViaUi,
@@ -12438,7 +13051,8 @@ function createDefaultP0CaseContext({
       writeCaseResultAtomic,
       ...(runtime.p0Evidence ?? {})
     },
-    userFactory
+    userFactory,
+    adminFactory: () => p0AuthorityAdminCredentials(prepared)
   })
 }
 

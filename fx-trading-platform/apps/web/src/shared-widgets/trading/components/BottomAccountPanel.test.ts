@@ -189,6 +189,28 @@ describe('bottom account panel tabs', () => {
     assert.match(actionDialogSource, /Position version is unavailable from the current positions contract\./)
   })
 
+  it('delegates the position action modal accessibility and focus lifecycle to the shared Dialog', () => {
+    const actionDialogSource = readFileSync(join(currentDir, '../order-form/PositionActionDialog.tsx'), 'utf8')
+    const dialogSource = readFileSync(join(projectRoot, 'packages', 'ui', 'src', 'dialog', 'Dialog.tsx'), 'utf8')
+
+    assert.match(actionDialogSource, /import \{ Dialog \} from '@fx-platform\/ui'/)
+    assert.match(actionDialogSource, /const titleId = useId\(\)/)
+    assert.match(actionDialogSource, /<Dialog[\s\S]*open=\{open\}[\s\S]*onClose=\{onClose\}/)
+    assert.match(actionDialogSource, /labelledBy=\{titleId\}/)
+    assert.match(actionDialogSource, /closeLabel="Close position action dialog"/)
+    assert.match(actionDialogSource, /pending=\{pending\}/)
+    assert.match(actionDialogSource, /<strong id=\{titleId\}>Position action<\/strong>/)
+    assert.doesNotMatch(actionDialogSource, /role="dialog"/)
+
+    assert.match(dialogSource, /role="dialog"/)
+    assert.match(dialogSource, /aria-modal="true"/)
+    assert.match(dialogSource, /if \(!open\) return null/)
+    assert.match(dialogSource, /event\.key === 'Escape'/)
+    assert.match(dialogSource, /firstFocusable/)
+    assert.match(dialogSource, /previousFocusRef\.current\?\.focus\(\)/)
+    assert.match(dialogSource, /source: 'backdrop'/)
+  })
+
   it('offers account batch actions only for non-empty ready current collections', () => {
     const data = resolveBottomAccountPanelData({
       orders: [{
@@ -328,6 +350,7 @@ describe('bottom account panel tabs', () => {
     const positionsGridSource = readFileSync(join(currentDir, 'BottomAccountPositionsGrid.tsx'), 'utf8')
     assert.match(positionsGridSource, /positions\.positionSide/)
     assert.match(positionsGridSource, /row\.positionSide/)
+    assert.match(positionsGridSource, /data-position-id=\{position\.id\}/)
   })
 
   it('defaults position actions to the backend native unit without forbidding unit switches', () => {

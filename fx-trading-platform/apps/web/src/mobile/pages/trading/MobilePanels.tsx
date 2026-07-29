@@ -1,6 +1,6 @@
-import { Drawer } from '@fx-platform/ui'
+import { Dialog, Drawer } from '@fx-platform/ui'
 import { X } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 
 import styles from './MobilePanels.module.css'
 
@@ -35,18 +35,25 @@ export function MobileDrawer({ open, title, side, onClose, children }: DrawerPro
 }
 
 export function MobileOrderSheet({ open, title, onClose, children }: SheetProps) {
+  const titleId = useId()
+
   return (
-    <div className={`${styles.sheetLayer} ${open ? styles.open : ''}`} aria-hidden={!open} inert={!open || undefined}>
-      <button type="button" className={styles.backdrop} tabIndex={open ? 0 : -1} onClick={onClose} />
-      <section className={styles.sheet} role="dialog" aria-modal="true" aria-labelledby="mobile-order-sheet-title">
-        <header className={styles.mobileHeader}>
-          <h2 id="mobile-order-sheet-title">{title}</h2>
-          <button type="button" onClick={onClose}>
-            <X size={17} />
-          </button>
-        </header>
-        <div className={styles.sheetBody}>{children}</div>
-      </section>
-    </div>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      labelledBy={titleId}
+      closeLabel={`Close ${title}`}
+      className={styles.sheetLayer}
+      backdropClassName={styles.backdrop}
+      panelClassName={styles.sheet}
+    >
+      <header className={styles.mobileHeader}>
+        <h2 id={titleId}>{title}</h2>
+        <button type="button" aria-label={`Close ${title}`} onClick={onClose}>
+          <X size={17} aria-hidden="true" />
+        </button>
+      </header>
+      <div className={styles.sheetBody}>{children}</div>
+    </Dialog>
   )
 }

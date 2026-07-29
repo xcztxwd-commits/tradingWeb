@@ -435,9 +435,12 @@ const DECIMAL_FIELDS = new Set([
 ])
 const INTEGER_FIELDS = new Set([
   'adllevel',
+  'attempt',
+  'durationms',
   'errors',
   'failures',
   'leverage',
+  'profileattempt',
   'skipped',
   'slot',
   'tests',
@@ -1543,7 +1546,8 @@ function coversRequiredSubruns(result, definition) {
   if (!result || typeof result !== 'object' || Array.isArray(result)
     || ownDataDescriptor(result, 'id')?.value !== definition.id
     || ownDataDescriptor(result, 'status')?.value !== 'PASS'
-    || ownDataDescriptor(result, 'scopeComplete')?.value !== true) return false
+    || ownDataDescriptor(result, 'scopeComplete')?.value !== true
+    || !completePassEvidence(result, definition)) return false
   const subruns = ownDataDescriptor(result, 'subruns')?.value
   if (!Array.isArray(subruns) || subruns.length !== definition.requiredSubruns.length) {
     return false
@@ -1673,6 +1677,23 @@ function validAggregateResultScalars(result) {
   ))
 }
 
+function completePassEvidence(result, definition) {
+  const cleanup = ownDataDescriptor(result, 'cleanup')?.value
+  const financialCalculation = ownDataDescriptor(result, 'financialCalculation')?.value
+  const checks = ownDataDescriptor(financialCalculation, 'checks')?.value
+  if (!cleanup || typeof cleanup !== 'object' || Array.isArray(cleanup)
+    || ownDataDescriptor(cleanup, 'status')?.value !== 'PASS'
+    || !financialCalculation
+    || typeof financialCalculation !== 'object'
+    || Array.isArray(financialCalculation)
+    || ownDataDescriptor(financialCalculation, 'status')?.value !== 'PASS'
+    || !Array.isArray(checks)) {
+    return false
+  }
+  return !/^(?:SPOT|PERP|PROT|BATCH|WALLET|LIFE|FUND|LIQ)-/.test(definition.id)
+    || checks.length > 0
+}
+
 export function aggregateReport(state, results) {
   let stateSnapshot
   let resultsSnapshot
@@ -1751,6 +1772,10 @@ export function aggregateReport(state, results) {
       || (!subrunsFiltered && result.scopeComplete !== true)
       || (subrunsFiltered && result.scopeComplete !== false)) {
       issues.push(`INCOMPLETE_MATRIX: ${definition.id}`)
+      continue
+    }
+    if (!completePassEvidence(result, definition)) {
+      issues.push(`INCOMPLETE_EVIDENCE: ${definition.id}`)
       continue
     }
     counts.PASS += 1

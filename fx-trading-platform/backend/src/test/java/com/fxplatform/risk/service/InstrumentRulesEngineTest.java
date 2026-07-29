@@ -57,6 +57,7 @@ class InstrumentRulesEngineTest {
   @Test
   void rulesMergeSymbolProviderMetadataAndRiskLimits() {
     SymbolEntity symbol = cryptoSpotSymbol();
+    symbol.setContractMultiplier(new BigDecimal("10"));
     SymbolProviderBindingEntity binding = binding(symbol.getId(), UUID.randomUUID(), UUID.randomUUID(), "BTCUSDT");
     ProviderInstrumentEntity instrument = providerInstrument(
         binding.getProviderInstrumentId(),
@@ -97,6 +98,7 @@ class InstrumentRulesEngineTest {
     assertThat(rules.marginAsset()).isEqualTo("USDT");
     assertThat(rules.settlementAsset()).isEqualTo("USDT");
     assertThat(rules.contractSize()).isEqualByComparingTo("1");
+    assertThat(rules.contractMultiplier()).isEqualByComparingTo("10");
     assertThat(rules.riskTier()).isEqualTo("DEFAULT");
     assertThat(rules.tradingSession()).isEqualTo("ALWAYS");
     assertThat(rules.kycRequirement()).isEqualTo("NONE");

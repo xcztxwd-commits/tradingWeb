@@ -1,0 +1,205 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import test from 'node:test'
+
+const source = readFileSync(
+  fileURLToPath(new URL('./p0-user-trading-core-cases.mjs', import.meta.url)),
+  'utf8'
+)
+
+function section(start, end) {
+  const from = source.indexOf(start)
+  const to = source.indexOf(end, from + start.length)
+  assert.notEqual(from, -1, start)
+  assert.notEqual(to, -1, end)
+  return source.slice(from, to)
+}
+
+test('SPOT-01/03 bind every fill to fresh pricing, fee, wallet, and position evidence', () => {
+  const spot03 = section(
+    'async function runSpotMarketableLimitJourney',
+    'async function runCatalogRouteJourney'
+  )
+  assert.match(spot03, /const sellMarket = await context\.api\.snapshotMarket\('BTCUSDT'\)/)
+  assert.match(spot03, /const sellFee =/)
+  assert.match(spot03, /assertDecimalClose\(\s*sold\.trade\.fee,\s*sellFee/)
+  assert.equal(
+    [...spot03.matchAll(/assertSingleFullFillMutation\(/g)].length,
+    2
+  )
+
+  const spot01 = section(
+    'async function runSpotMarketLifecycle',
+    'async function runPerpLifecycle'
+  )
+  assert.match(spot01, /prepareSpotAuthorityMarket\(/)
+  assert.equal([...spot01.matchAll(/marketFillOracle\(/g)].length, 3)
+  assert.equal([...spot01.matchAll(/spotSellOracle\(/g)].length, 2)
+  assert.equal(
+    [...spot01.matchAll(/assertSingleFullFillMutation\(/g)].length,
+    3
+  )
+  assert.equal([...spot01.matchAll(/assertSpotWalletDelta\(/g)].length, 3)
+  assert.match(spot01, /partialSpotPosition\.openPrice/)
+  assert.match(spot01, /finalSpotPosition\.realizedPnl/)
+  assert.match(spot01, /finalSpotRow\.fee_cost/)
+  assert.match(spot01, /return \{\s*finalSnapshot: fullySold\.snapshot,\s*finalDb:/)
+})
+
+test('PERP-12 proves every rejection and cites the exact fresh backend full-fill test', () => {
+  const perp12 = section(
+    'async function runPerpValidationJourney',
+    'async function runCloseAllJourney'
+  )
+  for (const kind of [
+    'VALIDATION_ERROR',
+    'QUANTITY_TOO_SMALL',
+    'QUANTITY_STEP_MISMATCH',
+    'QUANTITY_TOO_LARGE',
+    'INSUFFICIENT_MARGIN',
+    'INVALID_HEDGE_POSITION_SIDE'
+  ]) {
+    assert.match(perp12, new RegExp(`kind:\\s*'${kind}'`))
+  }
+  assert.match(perp12, /positionMode:\s*'HEDGE'/)
+  assert.match(perp12, /positionSide:\s*'BOTH'/)
+  assert.match(perp12, /backendFullFillContractProof\(/)
+  assert.doesNotMatch(perp12, /BACKEND_CONTRACT_ONLY/)
+
+  const proof = section(
+    'function backendFullFillContractProof',
+    'function assertCoreCleanup'
+  )
+  assert.match(proof, /FullFillCoordinatorTest/)
+  assert.match(proof, /rejectsEveryNonFullAdapterResultBeforeItCanBecomeCanonical/)
+  assert.match(proof, /createHash\('sha256'\)/)
+  assert.match(proof, /failures="0"/)
+  assert.match(proof, /errors="0"/)
+})
+
+test('PERP-04 runs BASE, QUOTE, and CONTRACTS as independent users at one fixed mark', () => {
+  const wrapper = section(
+    'async function runPerpQuantityUnits',
+    'async function runPerpQuantityUnitJourney'
+  )
+  assert.match(wrapper, /for \(const subrun of definition\.requiredSubruns\)/)
+  assert.match(wrapper, /userFactory: \(seed\) => context\.userFactory\(`\$\{seed\}-\$\{subrun\.id\}`\)/)
+  assert.match(wrapper, /subrunIdentity: subrun\.id/)
+  assert.match(wrapper, /fixedMark/)
+  assert.match(wrapper, /mergeIndependentCaseResults\(/)
+
+  const journey = section(
+    'async function runPerpQuantityUnitJourney',
+    'async function runPerpWeightedEntryJourney'
+  )
+  for (const token of [
+    "'desktop-base': { unit: 'BASE'",
+    "'desktop-quote': { unit: 'QUOTE'",
+    "'desktop-contracts': { unit: 'CONTRACTS'",
+    'perpOpeningHoldOracle',
+    'assertPerpLedgerDelta',
+    'openingFee',
+    'initialMargin'
+  ]) {
+    assert.match(journey, new RegExp(token.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  }
+})
+
+test('Perp financial helper proves every position risk field and aggregate account summary', () => {
+  const helper = section(
+    'function assertPerpPositionFinancials',
+    'function assertPerpLedgerDelta'
+  )
+  for (const token of [
+    'perpPositionOracle',
+    'position.floatingPnl',
+    'position.maintenanceMargin',
+    'position.initialMargin',
+    'assertPerpAccountSummary',
+    'usedMargin',
+    'maintenanceMargin'
+  ]) {
+    assert.match(helper, new RegExp(token.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+  }
+})
+
+test('PERP-03/05-09 close every financial ledger and rejection invariant', () => {
+  const sections = {
+    perp03: section(
+      'async function runPerpLeverageJourney',
+      'async function runPerpQuantityUnits'
+    ),
+    perp05: section(
+      'async function runPerpWeightedEntryJourney',
+      'async function runPerpReductionJourney'
+    ),
+    perp06: section(
+      'async function runPerpReductionJourney',
+      'async function runPerpReversalJourney'
+    ),
+    perp07: section(
+      'async function runPerpReversalJourney',
+      'async function runPerpHedgeJourney'
+    ),
+    perp08: section(
+      'async function runPerpHedgeJourney',
+      'async function runPerpMarginJourney'
+    ),
+    perp09: section(
+      'async function runPerpMarginJourney',
+      'async function runPerpValidationJourney'
+    )
+  }
+
+  for (const [id, body] of Object.entries(sections)) {
+    assert.match(body, /assertPerpPositionFinancials\(/, `${id} position financials`)
+    assert.match(body, /assertPerpLedgerDelta\(/, `${id} cash ledger`)
+    assert.match(body, /return \{\s*finalSnapshot:[\s\S]*?finalDb:/, `${id} final DB`)
+  }
+
+  assert.match(sections.perp03, /perpOpeningHoldOracle\(/)
+  assert.match(sections.perp03, /MARGIN_(?:HOLD|RELEASE)/)
+  assert.ok(
+    [...sections.perp03.matchAll(/assertTradingStateEqual\(/g)].length >= 2,
+    'PERP-03 rejection fingerprints'
+  )
+
+  assert.ok(
+    [...sections.perp05.matchAll(/perpOpeningHoldOracle\(/g)].length >= 2,
+    'PERP-05 two opening holds'
+  )
+  assert.match(sections.perp05, /perpCloseOracle\(/)
+  assert.match(sections.perp05, /history\.realizedPnl/)
+
+  assert.match(sections.perp06, /partialCloseOracle\(/)
+  assert.match(sections.perp06, /perpCloseOracle\(/)
+  assert.match(sections.perp06, /history\.realizedPnl/)
+
+  assert.match(sections.perp07, /reversalFee/)
+  assert.match(sections.perp07, /\w+History\.realizedPnl/)
+  assert.ok(
+    [...sections.perp07.matchAll(/assertTradingStateEqual\(/g)].length >= 3,
+    'PERP-07 idempotency and reduce-only rejection fingerprints'
+  )
+
+  assert.match(sections.perp08, /partialCloseOracle\(/)
+  assert.ok(
+    [...sections.perp08.matchAll(/perpCloseOracle\(/g)].length >= 2,
+    'PERP-08 independent full-close oracles'
+  )
+  assert.ok(
+    [...sections.perp08.matchAll(/assertTradingStateEqual\(/g)].length >= 2,
+    'PERP-08 blocked switch and overclose fingerprints'
+  )
+
+  for (const operation of ['MARGIN_HOLD', 'MARGIN_RELEASE']) {
+    assert.match(sections.perp09, new RegExp(`operationType:\\s*'${operation}'`))
+  }
+  assert.match(sections.perp09, /added\.position\.liquidationPrice/)
+  assert.match(sections.perp09, /reduced\.position\.liquidationPrice/)
+  assert.ok(
+    [...sections.perp09.matchAll(/assertTradingStateEqual\(/g)].length >= 4,
+    'PERP-09 every rejection is zero mutation'
+  )
+})

@@ -1204,6 +1204,7 @@ class PerpetualOrderServiceTest {
         "USDT",
         "USDT",
         BigDecimal.ONE,
+        BigDecimal.ONE,
         "DEFAULT",
         "ALWAYS",
         "NONE",
