@@ -64,7 +64,7 @@ describe('real USDT demo browser smoke contract', () => {
       assert.match(text, new RegExp(escapeRegExp(fragment)))
     }
     assert.match(text, /MARKET_TEST_CONTROL_ENABLED["']?:?\s*["']?true/i)
-    assert.match(text, /'real backend \/actuator\/health', 180000/)
+    assert.match(text, /'real backend \/actuator\/health', 300000/)
   })
 
   it('retains enough canonical process output to preserve the first server exception', () => {

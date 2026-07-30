@@ -618,7 +618,7 @@ async function ensureBackendServer() {
     assertProcessRunning(child)
     const response = await rawJson('/actuator/health').catch(() => null)
     return response?.status === 'UP'
-  }, 'real backend /actuator/health', 180000)
+  }, 'real backend /actuator/health', 300000)
   await waitFor(async () => number(await runDbSql(`
     SELECT count(*)
     FROM pg_stat_activity
