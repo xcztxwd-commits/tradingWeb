@@ -4588,7 +4588,7 @@ async function runSpotJourney() {
 
   const beforeBuyOcoWallets = await walletBalances()
   const buyOco = await createOcoWithFreshLast('BUY OCO', 'BUY', '0.0001', tick)
-  const buyOutcome = await waitOcoOutcome(buyOco.contingencyGroupId)
+  const buyOutcome = await waitOcoOutcome(buyOco.contingencyGroupId, 'BUY', tick)
   assertOcoOutcome(buyOutcome, 'BUY OCO')
   const afterBuyOcoWallets = await walletBalances()
   assert(
@@ -4598,7 +4598,7 @@ async function runSpotJourney() {
 
   const beforeSellOcoWallets = afterBuyOcoWallets
   const sellOco = await createOcoWithFreshLast('SELL OCO', 'SELL', '0.0001', tick)
-  const sellOutcome = await waitOcoOutcome(sellOco.contingencyGroupId)
+  const sellOutcome = await waitOcoOutcome(sellOco.contingencyGroupId, 'SELL', tick)
   assertOcoOutcome(sellOutcome, 'SELL OCO')
   const afterOcoWallets = await walletBalances()
   assertWalletInvariant(afterOcoWallets)
@@ -9216,11 +9216,27 @@ async function waitOrderTerminal(orderId) {
   }, `terminal order ${orderId}`, 30000)
 }
 
-async function waitOcoOutcome(groupId) {
-  return waitFor(async () => {
-    const rows = (await orders({ size: 200 })).filter((order) => order.contingencyGroupId === groupId)
-    return rows.length === 2 && rows.every((order) => TERMINAL_ORDER_STATUSES.has(order.status)) ? rows : false
-  }, `OCO outcome ${groupId}`, 30000)
+async function waitOcoOutcome(groupId, side, tick) {
+  const quote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
+  const last = number(quote.mid ?? quote.last ?? quote.ask)
+  const buy = side === 'BUY'
+  const edge = aligned(last * (buy ? 0.95 : 1.05), tick, buy ? 'floor' : 'ceil')
+  const bid = buy ? aligned(number(edge) - tick, tick, 'floor') : edge
+  const ask = buy ? edge : aligned(number(edge) + tick, tick, 'ceil')
+  await adminApi('/api/admin/market/test-control/overrides', {
+    method: 'POST',
+    body: { symbol: SPOT_SYMBOL, bid, ask, ttl: 'PT30S' }
+  })
+  try {
+    return await waitFor(async () => {
+      const rows = (await orders({ size: 200 })).filter((order) => order.contingencyGroupId === groupId)
+      return rows.length === 2 && rows.every((order) => TERMINAL_ORDER_STATUSES.has(order.status)) ? rows : false
+    }, `OCO outcome ${groupId}`, 30000)
+  } finally {
+    await adminApi(`/api/admin/market/test-control/overrides/${encodeURIComponent(SPOT_SYMBOL)}`, {
+      method: 'DELETE'
+    })
+  }
 }
 
 function assertOcoOutcome(rows, label) {

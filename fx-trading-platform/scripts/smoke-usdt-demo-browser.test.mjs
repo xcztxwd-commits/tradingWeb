@@ -588,6 +588,10 @@ describe('real USDT demo browser smoke contract', () => {
     const freshOcoSource = text.match(
       /async function createOcoWithFreshLast\([\s\S]*?\r?\n\}\r?\n\r?\nasync function runTransferJourney/
     )?.[0]
+    const ocoOutcomeSource = text.slice(
+      text.indexOf('async function waitOcoOutcome'),
+      text.indexOf('function assertOcoOutcome')
+    )
 
     assert.ok(freshOcoSource)
     assert.match(freshOcoSource, /for \(let attempt = 0; attempt < 3; attempt \+= 1\)/)
@@ -598,6 +602,12 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(freshOcoSource, /throw lastRelationError/)
     assert.match(text, /createOcoWithFreshLast\('BUY OCO', 'BUY'/)
     assert.match(text, /createOcoWithFreshLast\('SELL OCO', 'SELL'/)
+    assert.match(text, /waitOcoOutcome\(buyOco\.contingencyGroupId, 'BUY', tick\)/)
+    assert.match(text, /waitOcoOutcome\(sellOco\.contingencyGroupId, 'SELL', tick\)/)
+    assert.match(ocoOutcomeSource, /adminApi\('\/api\/admin\/market\/test-control\/overrides'/)
+    assert.match(ocoOutcomeSource, /ttl: 'PT30S'/)
+    assert.match(ocoOutcomeSource, /try \{[\s\S]*OCO outcome \$\{groupId\}`, 30000\)[\s\S]*\} finally \{/)
+    assert.match(ocoOutcomeSource, /method: 'DELETE'/)
     assert.match(text, /for \(const transfer of \[spotToPerp, perpToSpot\]\)/)
     assert.match(text, /number\(duringPending\.summary\.usedMargin\) > number\(beforePending\.summary\.usedMargin\)/)
     assert.match(text, /number\(afterPending\.summary\.usedMargin\) <= number\(beforePending\.summary\.usedMargin\) \+ 0\.01/)
