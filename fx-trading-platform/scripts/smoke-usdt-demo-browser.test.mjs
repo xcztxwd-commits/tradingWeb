@@ -384,6 +384,22 @@ describe('real USDT demo browser smoke contract', () => {
     )
   })
 
+  it('waits for the hydrated mobile Trade action before clicking it', () => {
+    const text = source()
+    const openPanel = text.slice(
+      text.indexOf('export async function openTradePanel'),
+      text.indexOf('export async function setPerpetualSettingsViaUi')
+    )
+
+    assert.match(
+      openPanel,
+      /await page\.waitForFunction\([\s\S]*?\[data-testid="mobile-trade-action"\][\s\S]*?visible mobile Trade action/
+    )
+    assert.ok(
+      openPanel.indexOf('visible mobile Trade action') < openPanel.indexOf('button.click()')
+    )
+  })
+
   it('cannot report PASS until provider state is restored and browser targets are closed', () => {
     const text = source()
 

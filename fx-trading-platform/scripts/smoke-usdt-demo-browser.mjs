@@ -6987,6 +6987,14 @@ export async function openTradePanel(page, target) {
     ? MOBILE_TRADE_PANEL_SELECTOR
     : '[data-platform-view="pc"] [data-panel-id="trade"] section[aria-label][class*="trade-panel"]'
   if (mobile) {
+    await page.waitForFunction(() => {
+      const button = document.querySelector('[data-testid="mobile-trade-action"]')
+      if (!button) return false
+      const rect = button.getBoundingClientRect()
+      const style = getComputedStyle(button)
+      return rect.width > 0 && rect.height > 0
+        && style.display !== 'none' && style.visibility !== 'hidden'
+    }, 'visible mobile Trade action')
     const clicked = await page.evaluate(() => {
       const button = document.querySelector('[data-testid="mobile-trade-action"]')
       if (!button) return false
