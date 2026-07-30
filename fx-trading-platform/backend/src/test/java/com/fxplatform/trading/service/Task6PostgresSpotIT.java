@@ -482,7 +482,7 @@ class Task6PostgresSpotIT {
   }
 
   @Test
-  void buyJumpBeyondHoldRollsBackAndNeverDebitsAvailableFunds() {
+  void buyJumpBeyondWalletBalanceRollsBackAndNeverDebitsAvailableFunds() {
     Fixture fixture = createFixture(new BigDecimal("10000.00000000"), ZERO);
     when(marketBundleResolver.resolveSpot(eq(SYMBOL), any(CandleRequest.class)))
         .thenReturn(creationBundle(Instant.now().plusSeconds(30)));
@@ -496,9 +496,9 @@ class Task6PostgresSpotIT {
     BigDecimal lockedBefore = walletBefore.getLocked();
 
     assertThatThrownBy(() -> pendingOrderExecutionProcessor.process(
-        stop, snapshot("59990", "60000", "60000")))
+        stop, snapshot("119990", "120000", "120000")))
         .isInstanceOfSatisfying(com.fxplatform.common.exception.BusinessException.class,
-            exception -> assertThat(exception.getCode()).isEqualTo("LOCKED_BALANCE_NOT_ENOUGH"));
+            exception -> assertThat(exception.getCode()).isEqualTo("INSUFFICIENT_BALANCE"));
 
     List<OrderEntity> reloaded = group(created.contingencyGroupId());
     assertThat(reloaded).extracting(OrderEntity::getStatus).containsOnly(OrderStatus.PENDING);
