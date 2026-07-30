@@ -223,6 +223,27 @@ class FullFillCoordinatorTest {
   }
 
   @Test
+  void spotNormalizesCanonicalPriceToTheSupportedScale() {
+    FullFillPricingProjection projection = coordinator.project(
+        ProductType.CRYPTO_SPOT,
+        OrderSide.BUY,
+        FullFillExecutionPath.MARKET,
+        null,
+        snapshot(
+            ProductType.CRYPTO_SPOT,
+            "49999.9",
+            "50000.1234567890",
+            "50000",
+            null,
+            null));
+
+    assertThat(projection.filledPrice()).isEqualByComparingTo("50005.1234691347");
+    assertThat(projection.filledPrice().scale()).isEqualTo(10);
+    assertThat(projection.slippage()).isEqualByComparingTo("5.0000123457");
+    assertThat(projection.slippage().scale()).isEqualTo(10);
+  }
+
+  @Test
   void projectsCanonicalPricingAndSharedRatesWithoutCallingExecutionAdapter() {
     FullFillPricingProjection projection = coordinator.project(
         ProductType.CRYPTO_SPOT,

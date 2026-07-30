@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 public class FullFillCoordinator {
 
   private static final int MONEY_SCALE = 8;
+  private static final int SPOT_PRICE_SCALE = 10;
 
   private final ExecutionAdapter executionAdapter;
   private final DemoExecutionPolicyProvider policyProvider;
@@ -134,6 +135,12 @@ public class FullFillCoordinator {
         ? referencePrice.multiply(policy.slippageRate())
         : BigDecimal.ZERO;
     BigDecimal filledPrice = fillPrice(side, executionPath, limitPrice, referencePrice, slippage);
+    if (productType == ProductType.CRYPTO_SPOT && executionPath.marketPricing()) {
+      filledPrice = filledPrice.setScale(SPOT_PRICE_SCALE, RoundingMode.HALF_UP);
+      slippage = side == OrderSide.BUY
+          ? filledPrice.subtract(referencePrice)
+          : referencePrice.subtract(filledPrice);
+    }
     if (productType == ProductType.LINEAR_PERP) {
       filledPrice = money(filledPrice);
       slippage = money(side == OrderSide.BUY
