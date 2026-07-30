@@ -583,11 +583,21 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(openRouteSource, /\[aria-label\$="market side panel"\] \[role="status"\]/)
   })
 
-  it('refreshes LAST_PRICE for each backend OCO matrix and keeps exact ledger, funding, and batch invariants', () => {
+  it('retries an OCO relation race against fresh LAST_PRICE and keeps exact ledger, funding, and batch invariants', () => {
     const text = source()
+    const freshOcoSource = text.match(
+      /async function createOcoWithFreshLast\([\s\S]*?\r?\n\}\r?\n\r?\nasync function runTransferJourney/
+    )?.[0]
 
-    assert.match(text, /const buyOcoQuote = await api\(`\/api\/market\/quotes\/\$\{SPOT_SYMBOL\}`\)[\s\S]*const buyOcoLast = number\(buyOcoQuote\.mid \?\? buyOcoQuote\.last \?\? buyOcoQuote\.ask\)[\s\S]*BUY OCO[\s\S]*limitPrice: aligned\(buyOcoLast \* 0\.9998[\s\S]*stopTriggerPrice: aligned\(buyOcoLast \* 1\.0002/)
-    assert.match(text, /const sellOcoQuote = await api\(`\/api\/market\/quotes\/\$\{SPOT_SYMBOL\}`\)[\s\S]*const sellOcoLast = number\(sellOcoQuote\.mid \?\? sellOcoQuote\.last \?\? sellOcoQuote\.ask\)[\s\S]*SELL OCO[\s\S]*limitPrice: aligned\(sellOcoLast \* 1\.0002[\s\S]*stopTriggerPrice: aligned\(sellOcoLast \* 0\.9998/)
+    assert.ok(freshOcoSource)
+    assert.match(freshOcoSource, /for \(let attempt = 0; attempt < 3; attempt \+= 1\)/)
+    assert.match(freshOcoSource, /await api\(`\/api\/market\/quotes\/\$\{SPOT_SYMBOL\}`\)/)
+    assert.match(freshOcoSource, /limitPrice: aligned\(last \* \(buy \? 0\.9998 : 1\.0002\), tick, buy \? 'floor' : 'ceil'\)/)
+    assert.match(freshOcoSource, /stopTriggerPrice: aligned\(last \* \(buy \? 1\.0002 : 0\.9998\), tick, buy \? 'ceil' : 'floor'\)/)
+    assert.match(freshOcoSource, /if \(error\.code !== 'OCO_PRICE_RELATION_INVALID'\) throw error/)
+    assert.match(freshOcoSource, /throw lastRelationError/)
+    assert.match(text, /createOcoWithFreshLast\('BUY OCO', 'BUY'/)
+    assert.match(text, /createOcoWithFreshLast\('SELL OCO', 'SELL'/)
     assert.match(text, /for \(const transfer of \[spotToPerp, perpToSpot\]\)/)
     assert.match(text, /number\(duringPending\.summary\.usedMargin\) > number\(beforePending\.summary\.usedMargin\)/)
     assert.match(text, /number\(afterPending\.summary\.usedMargin\) <= number\(beforePending\.summary\.usedMargin\) \+ 0\.01/)

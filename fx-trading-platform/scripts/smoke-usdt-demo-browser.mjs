@@ -4587,13 +4587,7 @@ async function runSpotJourney() {
   assert(triggeredStop.status === 'FILLED', `Spot STOP_MARKET must trigger and fill, got ${triggeredStop.status}`)
 
   const beforeBuyOcoWallets = await walletBalances()
-  const buyOcoQuote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
-  const buyOcoLast = number(buyOcoQuote.mid ?? buyOcoQuote.last ?? buyOcoQuote.ask)
-  const buyOco = await createOco('BUY OCO', 'BUY', {
-    quantity: '0.0001',
-    limitPrice: aligned(buyOcoLast * 0.9998, tick, 'floor'),
-    stopTriggerPrice: aligned(buyOcoLast * 1.0002, tick, 'ceil')
-  })
+  const buyOco = await createOcoWithFreshLast('BUY OCO', 'BUY', '0.0001', tick)
   const buyOutcome = await waitOcoOutcome(buyOco.contingencyGroupId)
   assertOcoOutcome(buyOutcome, 'BUY OCO')
   const afterBuyOcoWallets = await walletBalances()
@@ -4603,13 +4597,7 @@ async function runSpotJourney() {
   )
 
   const beforeSellOcoWallets = afterBuyOcoWallets
-  const sellOcoQuote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
-  const sellOcoLast = number(sellOcoQuote.mid ?? sellOcoQuote.last ?? sellOcoQuote.ask)
-  const sellOco = await createOco('SELL OCO', 'SELL', {
-    quantity: '0.0001',
-    limitPrice: aligned(sellOcoLast * 1.0002, tick, 'ceil'),
-    stopTriggerPrice: aligned(sellOcoLast * 0.9998, tick, 'floor')
-  })
+  const sellOco = await createOcoWithFreshLast('SELL OCO', 'SELL', '0.0001', tick)
   const sellOutcome = await waitOcoOutcome(sellOco.contingencyGroupId)
   assertOcoOutcome(sellOutcome, 'SELL OCO')
   const afterOcoWallets = await walletBalances()
@@ -4628,6 +4616,26 @@ async function runSpotJourney() {
     buyOco: buyOco.contingencyGroupId,
     sellOco: sellOco.contingencyGroupId
   }
+}
+
+async function createOcoWithFreshLast(label, side, quantity, tick) {
+  let lastRelationError
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const quote = await api(`/api/market/quotes/${SPOT_SYMBOL}`)
+    const last = number(quote.mid ?? quote.last ?? quote.ask)
+    const buy = side === 'BUY'
+    try {
+      return await createOco(label, side, {
+        quantity,
+        limitPrice: aligned(last * (buy ? 0.9998 : 1.0002), tick, buy ? 'floor' : 'ceil'),
+        stopTriggerPrice: aligned(last * (buy ? 1.0002 : 0.9998), tick, buy ? 'ceil' : 'floor')
+      })
+    } catch (error) {
+      if (error.code !== 'OCO_PRICE_RELATION_INVALID') throw error
+      lastRelationError = error
+    }
+  }
+  throw lastRelationError
 }
 
 async function runTransferJourney() {
