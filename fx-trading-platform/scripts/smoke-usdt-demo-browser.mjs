@@ -6391,6 +6391,12 @@ export async function launchBrowser({ onSpawn, signal } = {}) {
   assert(executable, 'Chrome or Edge is required; set SMOKE_BROWSER_PATH or CHROME_PATH')
   const port = await freePort()
   const userDataDir = await mkdtemp(join(tmpdir(), 'fx-usdt-demo-smoke-'))
+  const browserProfileRemoveOptions = {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 200
+  }
   const args = [
     '--headless=new',
     ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
@@ -6429,7 +6435,7 @@ export async function launchBrowser({ onSpawn, signal } = {}) {
     }, 'Chrome DevTools endpoint', 30000, signal)
   } catch (error) {
     await terminateProcessTree(child, 'browser launch cleanup').catch(() => {})
-    await rm(userDataDir, { recursive: true, force: true })
+    await rm(userDataDir, browserProfileRemoveOptions)
     throw error
   }
   return {
@@ -6441,7 +6447,7 @@ export async function launchBrowser({ onSpawn, signal } = {}) {
         if (child.p0AbortTermination) await child.p0AbortTermination
         else await terminateProcessTree(child, 'browser')
       } finally {
-        await rm(userDataDir, { recursive: true, force: true })
+        await rm(userDataDir, browserProfileRemoveOptions)
       }
     }
   }

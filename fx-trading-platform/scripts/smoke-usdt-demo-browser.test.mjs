@@ -141,6 +141,23 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(source(), /\.\.\.\(process\.getuid\?\.\(\) === 0 \? \['--no-sandbox'\] : \[\]\)/)
   })
 
+  it('retries Chromium profile removal while child processes finish writing', () => {
+    const text = source()
+    const browserSource = text.slice(
+      text.indexOf('export async function launchBrowser'),
+      text.indexOf('async function createCdpPage')
+    )
+
+    assert.match(
+      browserSource,
+      /const browserProfileRemoveOptions = \{[\s\S]*?recursive: true,[\s\S]*?force: true,[\s\S]*?maxRetries: 5,[\s\S]*?retryDelay: 200[\s\S]*?\}/
+    )
+    assert.equal(
+      browserSource.match(/rm\(userDataDir, browserProfileRemoveOptions\)/g)?.length,
+      2
+    )
+  })
+
   it('covers public primary, OKX failover, local fallback, and recovery source jumps', () => {
     const text = source()
 
