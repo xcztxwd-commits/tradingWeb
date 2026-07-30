@@ -9920,7 +9920,8 @@ test('managed preflight runs exact gates invocation scoped IT and owned OpenAPI 
   assert.ok(surefire.args.includes(`--output=${gateOutput}`))
   for (const contract of commands.filter(({ id }) => id.startsWith('contract-'))) {
     assert.deepEqual(contract.env, {
-      OPENAPI_SOURCE_URL: 'http://127.0.0.1:18086/v3/api-docs'
+      OPENAPI_SOURCE_URL: 'http://127.0.0.1:18086/v3/api-docs',
+      OPENAPI_EXPORT_TIMEOUT_MS: '60000'
     })
   }
   assert.equal(JSON.stringify(commands).includes('localhost:8080'), false)

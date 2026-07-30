@@ -4108,7 +4108,8 @@ export async function runP0Preflight({
     await operations.verifyBackendDatabaseIdentity?.(backend, { databaseUrl, signal })
     throwIfP0Aborted(signal)
     const contractEnvironment = {
-      OPENAPI_SOURCE_URL: 'http://127.0.0.1:18086/v3/api-docs'
+      OPENAPI_SOURCE_URL: 'http://127.0.0.1:18086/v3/api-docs',
+      OPENAPI_EXPORT_TIMEOUT_MS: '60000'
     }
     await runGate({
       id: 'contract-export',
