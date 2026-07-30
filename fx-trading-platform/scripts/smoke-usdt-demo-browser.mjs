@@ -4627,8 +4627,8 @@ async function createOcoWithFreshLast(label, side, quantity, tick) {
     try {
       return await createOco(label, side, {
         quantity,
-        limitPrice: aligned(last * (buy ? 0.9998 : 1.0002), tick, buy ? 'floor' : 'ceil'),
-        stopTriggerPrice: aligned(last * (buy ? 1.0002 : 0.9998), tick, buy ? 'ceil' : 'floor')
+        limitPrice: aligned(last * (buy ? 0.98 : 1.02), tick, buy ? 'floor' : 'ceil'),
+        stopTriggerPrice: aligned(last * (buy ? 1.02 : 0.98), tick, buy ? 'ceil' : 'floor')
       })
     } catch (error) {
       if (error.code !== 'OCO_PRICE_RELATION_INVALID') throw error
