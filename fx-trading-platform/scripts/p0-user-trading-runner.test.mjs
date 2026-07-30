@@ -5120,6 +5120,7 @@ function authorityGateContractContext({
   const overrides = new Map()
   const lastOverrides = new Map()
   const adminCleanupCalls = []
+  const authorityAdminSetup = []
   let restoredAfterOverride = false
   let sequence = 0
   let spotBuyCount = 0
@@ -5259,7 +5260,10 @@ function authorityGateContractContext({
         return caseId === 'authority-admin' ? adminPage : userPage
       },
       async registerViaUi() { return { requestRef: '101.1' } },
-      async loginAdminViaUi() { return { requestRef: '102.1' } },
+      async loginAdminViaUi(_page, credentials) {
+        authorityAdminSetup.push({ action: 'login', credentials: structuredClone(credentials) })
+        return { requestRef: '102.1' }
+      },
       async openTradePanel(targetPage, target) {
         targetPage.target = target
       },
@@ -5448,6 +5452,10 @@ function authorityGateContractContext({
       async assertDedicatedDatabase() {
         return 'fx_p0_user_e2e_authority_direct_a1'
       },
+      async query(sql) {
+        authorityAdminSetup.push({ action: 'grant', sql })
+        return '1'
+      },
       async snapshotTradingRows() {
         return {
           database: 'fx_p0_user_e2e_authority_direct_a1',
@@ -5485,6 +5493,7 @@ function authorityGateContractContext({
     context,
     persisted: () => persisted,
     adminCleanupCalls: () => structuredClone(adminCleanupCalls),
+    authorityAdminSetup: () => structuredClone(authorityAdminSetup),
     snapshotAccount
   }
 }
@@ -5500,6 +5509,17 @@ test('runAuthorityBundleGate directly proves PASS, BLOCKED, and cleanup failure'
   })
   assert.equal(pass.authorityBundleFixture, 'PASS')
   assert.equal(passing.persisted(), pass)
+  assert.deepEqual(
+    passing.authorityAdminSetup().map(({ action }) => action),
+    ['grant', 'login']
+  )
+  for (const authority of [
+    'market:symbol:update',
+    'trading:account:demo-reset',
+    'trading:account:force-cleanup'
+  ]) {
+    assert.match(passing.authorityAdminSetup()[0].sql, new RegExp(authority))
+  }
   assert.deepEqual(
     passing.adminCleanupCalls().map(({ path }) => path),
     [

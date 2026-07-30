@@ -8018,8 +8018,9 @@ async function readAuthorityUiQuote(page, target, signal) {
   await page.navigate(`${baseUrl}${route}`)
   await page.waitForFunction(
     (expectedRoute, expectedSymbol) => {
-      const mobile = document.querySelector('[data-platform-view="mobile"]')
-      const button = mobile?.querySelector('[data-testid="mobile-trade-action"]')
+      const button = document.querySelector(
+        '[data-platform-view="mobile"] [data-testid="mobile-trade-action"]'
+      )
       const shell = button?.closest('section')
       const symbol = shell?.querySelector('header button strong')?.textContent?.trim()
       return window.location.pathname === expectedRoute
@@ -8036,6 +8037,56 @@ async function readAuthorityUiQuote(page, target, signal) {
     15000,
     signal
   )
+}
+
+async function grantAuthorityAdminAuthorities(context, credentials, signal) {
+  requireP0Credentials(credentials)
+  if (typeof context?.db?.query !== 'function') {
+    throw new Error('P0_AUTHORITY_DB_QUERY_REQUIRED')
+  }
+  const menuRows = CANONICAL_ADMIN_AUTHORITIES.map((authority) => (
+    `('P0 authority ${sqlLiteral(authority)}', '${sqlLiteral(authority)}', 'BUTTON', true)`
+  )).join(',\n')
+  const bound = await context.db.query(`
+    WITH admin_user AS (
+      SELECT id
+      FROM auth.users
+      WHERE lower(email) = lower('${sqlLiteral(credentials.email)}')
+        AND role = 'ADMIN'
+        AND status = 'ACTIVE'
+    ), role_upsert AS (
+      INSERT INTO admin.roles (role_name, role_code, enabled, description)
+      VALUES (
+        'P0 authority gate admin',
+        'p0-authority-gate-admin',
+        true,
+        'Isolated P0 authority gate permissions'
+      )
+      ON CONFLICT (role_code) DO UPDATE SET enabled = true, updated_at = now()
+      RETURNING id
+    ), menu_upsert AS (
+      INSERT INTO admin.menus (menu_name, permission_key, menu_type, enabled)
+      VALUES ${menuRows}
+      ON CONFLICT (permission_key) DO UPDATE SET enabled = true, updated_at = now()
+      RETURNING id
+    ), permission_upsert AS (
+      INSERT INTO admin.role_menu_permissions (role_id, menu_id, buttons, enabled)
+      SELECT role_upsert.id, menu_upsert.id, '[]'::jsonb, true
+      FROM role_upsert CROSS JOIN menu_upsert
+      ON CONFLICT (role_id, menu_id) DO UPDATE SET enabled = true, updated_at = now()
+      RETURNING role_id
+    ), user_role_upsert AS (
+      INSERT INTO admin.user_roles (user_id, role_id)
+      SELECT admin_user.id, granted.role_id
+      FROM admin_user
+      CROSS JOIN (SELECT DISTINCT role_id FROM permission_upsert) granted
+      ON CONFLICT (user_id, role_id) DO UPDATE SET user_id = excluded.user_id
+      RETURNING 1
+    )
+    SELECT count(*) FROM user_role_upsert;
+  `, { signal })
+  if (bound !== '1') throw new Error('P0_AUTHORITY_ADMIN_BINDING_FAILED')
+  return [...CANONICAL_ADMIN_AUTHORITIES]
 }
 
 async function waitForAuthorityUiTarget(page, target, expected, rules, signal) {
@@ -8465,6 +8516,16 @@ export async function runAuthorityBundleGate(context, options = {}) {
       action: 'register-authority-user-via-ui',
       reasonCode: 'REGISTER_AUTHORITY_USER_VIA_UI',
       requestRef: registration.requestRef
+    })
+    const grantedAuthorities = await grantAuthorityAdminAuthorities(
+      context,
+      adminCredentials,
+      signal
+    )
+    fixtureActions.push({
+      action: 'grant-authority-admin-permissions',
+      reasonCode: 'GRANT_AUTHORITY_ADMIN_PERMISSIONS',
+      authorities: grantedAuthorities
     })
     const adminLogin = await context.ui.loginAdminViaUi(adminPage, adminCredentials)
     adminAuthenticated = true

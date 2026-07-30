@@ -367,6 +367,23 @@ describe('real USDT demo browser smoke contract', () => {
     assert.doesNotMatch(text, /grantCanonicalAdminAuthority\(['"]\*['"]\)/)
   })
 
+  it('finds the active mobile trading terminal when the page has multiple mobile roots', () => {
+    const text = source()
+    const routeProbe = text.slice(
+      text.indexOf('async function readAuthorityUiQuote'),
+      text.indexOf('async function waitForAuthorityUiTarget')
+    )
+
+    assert.match(
+      routeProbe,
+      /document\.querySelector\(\s*'\[data-platform-view="mobile"\] \[data-testid="mobile-trade-action"\]'\s*\)/
+    )
+    assert.doesNotMatch(
+      routeProbe,
+      /const mobile = document\.querySelector\('\[data-platform-view="mobile"\]'\)/
+    )
+  })
+
   it('cannot report PASS until provider state is restored and browser targets are closed', () => {
     const text = source()
 
