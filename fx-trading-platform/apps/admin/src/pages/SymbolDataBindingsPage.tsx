@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   createSymbolProviderBinding,
@@ -19,6 +19,7 @@ import type {
   SymbolRow
 } from '../types'
 import { DataTable, display, PageHeader, StateBlock, useAdminData } from './adminPageUtils'
+import { createLatestRequestGate } from './latestRequestGate'
 
 type BindingForm = {
   bindingId: string
@@ -65,6 +66,7 @@ export function SymbolDataBindingsPage() {
   const [providerInstrumentError, setProviderInstrumentError] = useState('')
   const [message, setMessage] = useState('')
   const [actionError, setActionError] = useState('')
+  const bindingsRequestGate = useRef(createLatestRequestGate())
 
   const symbolRows = symbols.data?.items ?? []
   const selectedSymbol = useMemo(
@@ -355,19 +357,28 @@ export function SymbolDataBindingsPage() {
   }
 
   async function loadBindings(nextSymbolId: string) {
+    const request = bindingsRequestGate.current.begin()
     const token = getValidAdminToken()
     if (!token) {
+      setLoadingBindings(false)
       setActionError('登录状态已失效，请重新登录')
       return
     }
     setLoadingBindings(true)
     setActionError('')
     try {
-      setBindings(await getSymbolProviderBindings(token, nextSymbolId))
+      const nextBindings = await getSymbolProviderBindings(token, nextSymbolId)
+      if (bindingsRequestGate.current.isCurrent(request)) {
+        setBindings(nextBindings)
+      }
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : '加载绑定失败')
+      if (bindingsRequestGate.current.isCurrent(request)) {
+        setActionError(err instanceof Error ? err.message : '加载绑定失败')
+      }
     } finally {
-      setLoadingBindings(false)
+      if (bindingsRequestGate.current.isCurrent(request)) {
+        setLoadingBindings(false)
+      }
     }
   }
 
