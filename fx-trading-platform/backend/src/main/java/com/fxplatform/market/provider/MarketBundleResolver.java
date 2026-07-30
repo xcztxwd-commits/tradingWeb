@@ -13,12 +13,18 @@ import com.fxplatform.market.service.MarketSourceSelectionTracker;
 import com.fxplatform.market.service.ProviderHealthRecorder;
 import com.fxplatform.market.service.SymbolProductTypes;
 import com.fxplatform.validation.service.ValidationMarketState;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
@@ -41,6 +47,10 @@ public class MarketBundleResolver {
   private final MarketTestControlService testControlService;
   private final Clock clock;
   private final ValidationMarketState validationMarketState;
+  private final ConcurrentHashMap<BundleFlightKey, CompletableFuture<SpotMarketBundle>>
+      defaultSpotFlights = new ConcurrentHashMap<>();
+  private final ConcurrentHashMap<BundleFlightKey, CompletableFuture<PerpetualMarketBundle>>
+      defaultPerpetualFlights = new ConcurrentHashMap<>();
 
   @Autowired
   public MarketBundleResolver(
@@ -156,13 +166,52 @@ public class MarketBundleResolver {
     this.validationMarketState = validationMarketState;
   }
 
+  public SpotMarketBundle resolveDefaultSpot(String platformSymbol) {
+    String symbol = SymbolNormalizer.normalize(platformSymbol);
+    if (validationMarketState != null) {
+      return validationMarketState.requireSpot(symbol);
+    }
+    List<ProviderResolution> candidates =
+        candidates(symbol, ProductType.CRYPTO_SPOT, SPOT_PROVIDERS);
+    return resolveSingleFlight(
+        defaultSpotFlights,
+        flightKey(symbol, candidates),
+        () -> resolveSpot(symbol, defaultCandleRequest(), candidates),
+        SpotMarketBundle::expiresAt);
+  }
+
+  public PerpetualMarketBundle resolveDefaultPerpetual(String platformSymbol) {
+    String symbol = SymbolNormalizer.normalize(platformSymbol);
+    if (validationMarketState != null) {
+      return validationMarketState.requirePerpetual(symbol);
+    }
+    List<ProviderResolution> candidates =
+        candidates(symbol, ProductType.LINEAR_PERP, PERP_PROVIDERS);
+    return resolveSingleFlight(
+        defaultPerpetualFlights,
+        flightKey(symbol, candidates),
+        () -> resolvePerpetual(symbol, defaultCandleRequest(), candidates),
+        PerpetualMarketBundle::expiresAt);
+  }
+
   public SpotMarketBundle resolveSpot(String platformSymbol, CandleRequest candleRequest) {
     CandleRequestPolicy.requireValid(candleRequest);
     String symbol = SymbolNormalizer.normalize(platformSymbol);
     if (validationMarketState != null) {
       return validationMarketState.requireSpot(symbol);
     }
-    for (ProviderResolution candidate : candidates(symbol, ProductType.CRYPTO_SPOT, SPOT_PROVIDERS)) {
+    return resolveSpot(
+        symbol,
+        candleRequest,
+        candidates(symbol, ProductType.CRYPTO_SPOT, SPOT_PROVIDERS));
+  }
+
+  private SpotMarketBundle resolveSpot(
+      String symbol,
+      CandleRequest candleRequest,
+      List<ProviderResolution> candidates
+  ) {
+    for (ProviderResolution candidate : candidates) {
       Instant startedAt = clock.instant();
       try {
         Optional<SpotMarketBundle> bundle = candidate.adapter().fetchSpotBundle(
@@ -202,7 +251,18 @@ public class MarketBundleResolver {
     if (validationMarketState != null) {
       return validationMarketState.requirePerpetual(symbol);
     }
-    for (ProviderResolution candidate : candidates(symbol, ProductType.LINEAR_PERP, PERP_PROVIDERS)) {
+    return resolvePerpetual(
+        symbol,
+        candleRequest,
+        candidates(symbol, ProductType.LINEAR_PERP, PERP_PROVIDERS));
+  }
+
+  private PerpetualMarketBundle resolvePerpetual(
+      String symbol,
+      CandleRequest candleRequest,
+      List<ProviderResolution> candidates
+  ) {
+    for (ProviderResolution candidate : candidates) {
       Instant startedAt = clock.instant();
       try {
         Optional<PerpetualMarketBundle> bundle = candidate.adapter().fetchPerpetualBundle(
@@ -234,6 +294,90 @@ public class MarketBundleResolver {
       recordFailure(candidate, startedAt);
     }
     throw new BusinessException(ErrorCode.MARKET_DATA_UNAVAILABLE, "No complete fresh market bundle is available");
+  }
+
+  private BundleFlightKey flightKey(String symbol, List<ProviderResolution> candidates) {
+    List<CandidateRevision> revisions = candidates.stream()
+        .map(candidate -> new CandidateRevision(
+            candidate.binding().getId(),
+            candidate.binding().getUpdatedAt(),
+            candidate.binding().getProviderId(),
+            candidate.binding().getProviderSymbol(),
+            candidate.binding().getPriority(),
+            candidate.provider().getId(),
+            candidate.provider().getCode(),
+            candidate.provider().getRestBaseUrl(),
+            candidate.provider().getTimeoutMs(),
+            candidate.provider().getConfigJson()))
+        .toList();
+    return new BundleFlightKey(symbol, revisions);
+  }
+
+  private <T> T resolveSingleFlight(
+      ConcurrentHashMap<BundleFlightKey, CompletableFuture<T>> flights,
+      BundleFlightKey key,
+      Supplier<T> resolver,
+      Function<T, Instant> expiresAt
+  ) {
+    flights.keySet().removeIf(existingKey ->
+        existingKey.symbol().equals(key.symbol()) && !existingKey.equals(key));
+    while (true) {
+      CompletableFuture<T> candidate = new CompletableFuture<>();
+      CompletableFuture<T> existing = flights.putIfAbsent(key, candidate);
+      if (existing != null) {
+        T bundle = awaitBundle(existing);
+        if (clock.instant().isBefore(expiresAt.apply(bundle))) {
+          return bundle;
+        }
+        flights.remove(key, existing);
+        continue;
+      }
+      try {
+        T bundle = resolver.get();
+        candidate.complete(bundle);
+        return bundle;
+      } catch (RuntimeException | Error error) {
+        candidate.completeExceptionally(error);
+        flights.remove(key, candidate);
+        throw error;
+      }
+    }
+  }
+
+  private <T> T awaitBundle(CompletableFuture<T> flight) {
+    try {
+      return flight.join();
+    } catch (CompletionException error) {
+      if (error.getCause() instanceof RuntimeException runtimeException) {
+        throw runtimeException;
+      }
+      if (error.getCause() instanceof Error seriousError) {
+        throw seriousError;
+      }
+      throw error;
+    }
+  }
+
+  private CandleRequest defaultCandleRequest() {
+    Instant to = clock.instant();
+    return new CandleRequest("1m", to.minus(Duration.ofHours(1)), to);
+  }
+
+  private record BundleFlightKey(String symbol, List<CandidateRevision> candidates) {
+  }
+
+  private record CandidateRevision(
+      UUID bindingId,
+      Instant bindingUpdatedAt,
+      UUID bindingProviderId,
+      String providerSymbol,
+      Integer bindingPriority,
+      UUID providerId,
+      String providerCode,
+      String restBaseUrl,
+      Integer timeoutMs,
+      String providerConfig
+  ) {
   }
 
   private List<ProviderResolution> candidates(

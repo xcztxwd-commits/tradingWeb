@@ -482,8 +482,14 @@ describe('real USDT demo browser smoke contract', () => {
     assert.doesNotMatch(text, /\.trade-panel/)
     assert.doesNotMatch(text, /\.table-action--danger/)
     assert.doesNotMatch(text, /class\*=["']actionBar/)
-    assert.match(text, /closest\('\[aria-hidden\]'\)/)
-    assert.match(text, /getAttribute\('aria-hidden'\) === 'false'/)
+    assert.match(
+      text,
+      /const MOBILE_TRADE_PANEL_SELECTOR = '\[data-platform-view="mobile"\] \[data-overlay-top="true"\]:not\(\[aria-hidden="true"\]\):not\(\[inert\]\) section\[role="dialog"\]\[aria-modal="true"\] section\[aria-label\]\[class\*="trade-panel"\]'/
+    )
+    assert.match(text, /getAttribute\('data-overlay-top'\) === 'true'/)
+    assert.match(text, /getAttribute\('aria-hidden'\) !== 'true'/)
+    assert.match(text, /!layer\.hasAttribute\('inert'\)/)
+    assert.doesNotMatch(text, /mobile-order-sheet-title/)
     assert.match(text, /mobile real order sheet[\s\S]*getBoundingClientRect|getBoundingClientRect[\s\S]*mobile real order sheet/)
     assert.match(text, /getElementById\('order-cancel-title'\)/)
     assert.match(text, /resulting REST state/)
@@ -1113,7 +1119,7 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(detailedRuntime, /getBoundingClientRect/)
     assert.match(detailedRuntime, /getComputedStyle/)
     assert.match(detailedRuntime, /\[data-testid="mobile-trade-action"\]/)
-    assert.match(detailedRuntime, /\[aria-hidden="false"\]/)
+    assert.match(detailedRuntime, /MOBILE_TRADE_PANEL_SELECTOR/)
     assert.match(detailedRuntime, /Page\.javascriptDialogOpening/)
     assert.match(detailedRuntime, /Page\.handleJavaScriptDialog/)
   })

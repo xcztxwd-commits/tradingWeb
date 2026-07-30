@@ -18,7 +18,6 @@ import com.fxplatform.market.service.ProviderHealthRecorder;
 import com.fxplatform.trading.entity.FundingRateEntity;
 import com.fxplatform.trading.repository.FundingRateRepository;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -122,11 +121,9 @@ public class MarketDataRouter {
         throw new BusinessException("SYMBOL_QUOTE_DISABLED", "Symbol quote is disabled");
       }
       if (MarketBundleProducts.isSpot(normalized)) {
-        return MarketBundleAssembler.quote(
-            marketBundleResolver.resolveSpot(normalized, defaultCandleRequest()), clock);
+        return MarketBundleAssembler.quote(marketBundleResolver.resolveDefaultSpot(normalized), clock);
       }
-      return MarketBundleAssembler.quote(
-          marketBundleResolver.resolvePerp(normalized, defaultCandleRequest()), clock);
+      return MarketBundleAssembler.quote(marketBundleResolver.resolveDefaultPerpetual(normalized), clock);
     }
     ProviderResolution resolution = providerResolver.resolve(symbol, MarketDataCapability.QUOTE);
     if (!Boolean.TRUE.equals(resolution.symbol().getQuoteEnabled())) {
@@ -178,8 +175,8 @@ public class MarketDataRouter {
         throw new BusinessException("SYMBOL_ORDER_BOOK_DISABLED", "Symbol order book is disabled");
       }
       return MarketBundleProducts.isSpot(normalized)
-          ? marketBundleResolver.resolveSpot(normalized, defaultCandleRequest()).orderBook()
-          : marketBundleResolver.resolvePerp(normalized, defaultCandleRequest()).orderBook();
+          ? marketBundleResolver.resolveDefaultSpot(normalized).orderBook()
+          : marketBundleResolver.resolveDefaultPerpetual(normalized).orderBook();
     }
     ProviderResolution resolution = providerResolver.resolve(symbol, MarketDataCapability.ORDER_BOOK);
     if (!Boolean.TRUE.equals(resolution.symbol().getOrderBookEnabled())) {
@@ -195,8 +192,8 @@ public class MarketDataRouter {
     if (usesAuthoritativeBundle(normalized)) {
       providerResolver.requireEnabledSymbol(normalized);
       List<RecentTradeResponse> trades = MarketBundleProducts.isSpot(normalized)
-          ? marketBundleResolver.resolveSpot(normalized, defaultCandleRequest()).recentTrades()
-          : marketBundleResolver.resolvePerp(normalized, defaultCandleRequest()).recentTrades();
+          ? marketBundleResolver.resolveDefaultSpot(normalized).recentTrades()
+          : marketBundleResolver.resolveDefaultPerpetual(normalized).recentTrades();
       return limit <= 0 ? List.of() : trades.stream().limit(limit).toList();
     }
     ProviderResolution resolution = providerResolver.resolve(symbol, MarketDataCapability.TRADES);
@@ -248,7 +245,7 @@ public class MarketDataRouter {
     if (!Boolean.TRUE.equals(platformSymbol.getQuoteEnabled())) {
       throw new BusinessException("SYMBOL_QUOTE_DISABLED", "Symbol quote is disabled");
     }
-    PerpetualMarketBundle bundle = marketBundleResolver.resolvePerp(normalized, defaultCandleRequest());
+    PerpetualMarketBundle bundle = marketBundleResolver.resolveDefaultPerpetual(normalized);
     FundingRateEntity latestFunding = fundingRateRepository == null
         ? null
         : fundingRateRepository.findLatestBySymbol(normalized).orElse(null);
@@ -334,10 +331,5 @@ public class MarketDataRouter {
 
   private boolean usesAuthoritativeBundle(String symbol) {
     return marketBundleResolver != null && MarketBundleProducts.isP0(symbol);
-  }
-
-  private CandleRequest defaultCandleRequest() {
-    Instant to = clock.instant();
-    return new CandleRequest("1m", to.minus(Duration.ofHours(1)), to);
   }
 }

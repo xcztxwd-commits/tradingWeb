@@ -36,6 +36,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -175,6 +180,127 @@ class MarketBundleResolverTest {
     assertThat(secondary.perpCalls).isZero();
     assertThat(local.perpCalls).isZero();
     verifyNoInteractions(healthRecorder, selectionTracker);
+  }
+
+  @Test
+  void concurrentDefaultSpotComponentsShareOneAuthoritativeBundleResolution() throws Exception {
+    SpotMarketBundle bundle = completeSpot("okx", "BTC-USDT", NOW.minusSeconds(1));
+    MarketDataProviderAdapter adapter = mock(MarketDataProviderAdapter.class);
+    CountDownLatch componentCallsReady = new CountDownLatch(3);
+    CountDownLatch firstResolutionStarted = new CountDownLatch(1);
+    CountDownLatch duplicateResolutionStarted = new CountDownLatch(1);
+    CountDownLatch releaseResolution = new CountDownLatch(1);
+    AtomicInteger resolutionCalls = new AtomicInteger();
+    when(adapter.code()).thenReturn("okx");
+    when(adapter.fetchSpotBundle(
+        org.mockito.ArgumentMatchers.eq("BTCUSDT"),
+        org.mockito.ArgumentMatchers.eq("BTC-USDT"),
+        org.mockito.ArgumentMatchers.any())).thenAnswer(ignored -> {
+          if (resolutionCalls.incrementAndGet() == 1) {
+            firstResolutionStarted.countDown();
+          } else {
+            duplicateResolutionStarted.countDown();
+          }
+          assertThat(releaseResolution.await(5, TimeUnit.SECONDS)).isTrue();
+          return Optional.of(bundle);
+        });
+    ProviderResolution candidate =
+        candidate("BTCUSDT", ProductType.CRYPTO_SPOT, "BTC-USDT", adapter);
+    when(providerResolver.resolveCandidates("BTCUSDT", BUNDLE_CAPABILITIES))
+        .thenAnswer(ignored -> {
+          componentCallsReady.countDown();
+          assertThat(componentCallsReady.await(5, TimeUnit.SECONDS)).isTrue();
+          return List.of(candidate);
+        });
+    ExecutorService executor = Executors.newFixedThreadPool(3);
+
+    try {
+      Future<SpotMarketBundle> quote = executor.submit(() -> resolver.resolveDefaultSpot("BTCUSDT"));
+      Future<SpotMarketBundle> depth = executor.submit(() -> resolver.resolveDefaultSpot("BTCUSDT"));
+      Future<SpotMarketBundle> trades = executor.submit(() -> resolver.resolveDefaultSpot("BTCUSDT"));
+      assertThat(firstResolutionStarted.await(5, TimeUnit.SECONDS)).isTrue();
+      boolean duplicateResolution = duplicateResolutionStarted.await(1, TimeUnit.SECONDS);
+      releaseResolution.countDown();
+
+      assertThat(quote.get(5, TimeUnit.SECONDS)).isSameAs(bundle);
+      assertThat(depth.get(5, TimeUnit.SECONDS)).isSameAs(bundle);
+      assertThat(trades.get(5, TimeUnit.SECONDS)).isSameAs(bundle);
+      assertThat(duplicateResolution).isFalse();
+      assertThat(resolutionCalls).hasValue(1);
+    } finally {
+      releaseResolution.countDown();
+      executor.shutdownNow();
+    }
+  }
+
+  @Test
+  void sequentialDefaultSpotComponentsReuseOneFreshAuthoritativeBundle() {
+    SpotMarketBundle bundle = completeSpot("okx", "BTC-USDT", NOW.minusSeconds(1));
+    BundleAdapter adapter = BundleAdapter.spot("okx", bundle);
+    ProviderResolution candidate =
+        candidate("BTCUSDT", ProductType.CRYPTO_SPOT, "BTC-USDT", adapter);
+    when(providerResolver.resolveCandidates("BTCUSDT", BUNDLE_CAPABILITIES))
+        .thenReturn(List.of(candidate));
+
+    assertThat(resolver.resolveDefaultSpot("BTCUSDT")).isSameAs(bundle);
+    assertThat(resolver.resolveDefaultSpot("BTCUSDT")).isSameAs(bundle);
+    assertThat(resolver.resolveDefaultSpot("BTCUSDT")).isSameAs(bundle);
+    assertThat(adapter.spotCalls).isEqualTo(1);
+  }
+
+  @Test
+  void providerBindingChangeDoesNotReuseEarlierDefaultSpotFlight() throws Exception {
+    SpotMarketBundle localBundle =
+        completeSpot("local-spot", "BTCUSDT", NOW.minusSeconds(1));
+    SpotMarketBundle publicBundle =
+        completeSpot("binance", "BTCUSDT", NOW.minusSeconds(1));
+    MarketDataProviderAdapter localAdapter = mock(MarketDataProviderAdapter.class);
+    MarketDataProviderAdapter publicAdapter = mock(MarketDataProviderAdapter.class);
+    CountDownLatch firstResolutionStarted = new CountDownLatch(1);
+    CountDownLatch secondResolutionStarted = new CountDownLatch(1);
+    CountDownLatch releaseFirstResolution = new CountDownLatch(1);
+    when(localAdapter.code()).thenReturn("local-spot");
+    when(publicAdapter.code()).thenReturn("binance");
+    when(localAdapter.fetchSpotBundle(
+        org.mockito.ArgumentMatchers.eq("BTCUSDT"),
+        org.mockito.ArgumentMatchers.eq("BTCUSDT"),
+        org.mockito.ArgumentMatchers.any())).thenAnswer(ignored -> {
+          firstResolutionStarted.countDown();
+          assertThat(releaseFirstResolution.await(5, TimeUnit.SECONDS)).isTrue();
+          return Optional.of(localBundle);
+        });
+    when(publicAdapter.fetchSpotBundle(
+        org.mockito.ArgumentMatchers.eq("BTCUSDT"),
+        org.mockito.ArgumentMatchers.eq("BTCUSDT"),
+        org.mockito.ArgumentMatchers.any())).thenAnswer(ignored -> {
+          secondResolutionStarted.countDown();
+          return Optional.of(publicBundle);
+        });
+    ProviderResolution local =
+        candidate("BTCUSDT", ProductType.CRYPTO_SPOT, "BTCUSDT", localAdapter);
+    ProviderResolution external =
+        candidate("BTCUSDT", ProductType.CRYPTO_SPOT, "BTCUSDT", publicAdapter);
+    when(providerResolver.resolveCandidates("BTCUSDT", BUNDLE_CAPABILITIES))
+        .thenReturn(List.of(local), List.of(external, local));
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+
+    try {
+      Future<SpotMarketBundle> beforeChange =
+          executor.submit(() -> resolver.resolveDefaultSpot("BTCUSDT"));
+      assertThat(firstResolutionStarted.await(5, TimeUnit.SECONDS)).isTrue();
+      Future<SpotMarketBundle> afterChange =
+          executor.submit(() -> resolver.resolveDefaultSpot("BTCUSDT"));
+      boolean freshResolution = secondResolutionStarted.await(1, TimeUnit.SECONDS);
+      SpotMarketBundle currentBundle = afterChange.get(5, TimeUnit.SECONDS);
+      releaseFirstResolution.countDown();
+
+      assertThat(beforeChange.get(5, TimeUnit.SECONDS)).isSameAs(localBundle);
+      assertThat(currentBundle).isSameAs(publicBundle);
+      assertThat(freshResolution).isTrue();
+    } finally {
+      releaseFirstResolution.countDown();
+      executor.shutdownNow();
+    }
   }
 
   private static Stream<CandleRequest> invalidCandleRequests() {
@@ -498,7 +624,7 @@ class MarketBundleResolverTest {
       String platformSymbol,
       ProductType productType,
       String providerSymbol,
-      BundleAdapter adapter
+      MarketDataProviderAdapter adapter
   ) {
     SymbolEntity symbol = new SymbolEntity();
     symbol.setId(UUID.randomUUID());

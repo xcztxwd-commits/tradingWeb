@@ -144,6 +144,7 @@ const CANONICAL_ADMIN_AUTHORITIES = [
 ]
 const CANONICAL_PROCESS_LOG_TAIL_BYTES = 200_000
 const TRADE_PANEL_SELECTOR = '[data-platform-view="pc"] [data-panel-id="trade"]'
+const MOBILE_TRADE_PANEL_SELECTOR = '[data-platform-view="mobile"] [data-overlay-top="true"]:not([aria-hidden="true"]):not([inert]) section[role="dialog"][aria-modal="true"] section[aria-label][class*="trade-panel"]'
 
 // Human-readable bootstrap evidence retained in the report: docker compose, not an in-memory substitute.
 const STARTUP_COMMANDS = [
@@ -6095,14 +6096,18 @@ async function captureWebCriticalPaths(page, mode, viewport, runtimeErrors, netw
           return Boolean(tradeButton)
         })
         assert(opened, `${route} mobile Trade action must be available`)
-        await page.waitForFunction(() => {
-          const layer = document.getElementById('mobile-order-sheet-title')?.closest('[aria-hidden]')
-          const side = layer?.querySelector('section[data-price-precision]')
-          const panel = side?.parentElement?.closest('section[aria-label]')
+        await page.waitForFunction((panelSelector) => {
+          const panel = document.querySelector(panelSelector)
+          const layer = panel?.closest('[data-overlay-top]')
           const rect = panel?.getBoundingClientRect()
-          return layer?.getAttribute('aria-hidden') === 'false'
+          const style = panel ? getComputedStyle(panel) : null
+          return layer?.getAttribute('data-overlay-top') === 'true'
+            && layer.getAttribute('aria-hidden') !== 'true'
+            && !layer.hasAttribute('inert')
             && Boolean(rect && rect.width > 0 && rect.height > 0)
-        }, 'mobile real order sheet')
+            && Boolean(style && style.display !== 'none'
+              && style.visibility !== 'hidden' && Number(style.opacity) > 0)
+        }, 'mobile real order sheet', MOBILE_TRADE_PANEL_SELECTOR)
       } else {
         await page.waitForFunction(
           (panelSelector) => Boolean(document.querySelector(panelSelector)?.querySelector('section[data-price-precision]')),
@@ -6971,7 +6976,7 @@ export async function openTradePanel(page, target) {
       && style.display !== 'none' && style.visibility !== 'hidden'
   })
   const selector = mobile
-    ? '[data-platform-view="mobile"] [aria-hidden="false"] section[aria-label][class*="trade-panel"]'
+    ? MOBILE_TRADE_PANEL_SELECTOR
     : '[data-platform-view="pc"] [data-panel-id="trade"] section[aria-label][class*="trade-panel"]'
   if (mobile) {
     const clicked = await page.evaluate(() => {

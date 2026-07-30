@@ -58,6 +58,7 @@ class MarketDataRouterTest {
     Instant now = Instant.parse("2026-07-12T00:00:10Z");
     SpotMarketBundle bundle = spotBundle(now);
     when(providerResolver.requireEnabledSymbol("BTCUSDT")).thenReturn(enabledSymbol("BTCUSDT"));
+    when(marketBundleResolver.resolveDefaultSpot("BTCUSDT")).thenReturn(bundle);
     when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(bundle);
     MarketDataRouter router = new MarketDataRouter(
         providerResolver, marketBundleResolver, Clock.fixed(now, ZoneOffset.UTC));
@@ -81,7 +82,7 @@ class MarketDataRouterTest {
     Instant now = Instant.parse("2026-07-12T00:00:10Z");
     PerpetualMarketBundle bundle = perpBundle(now);
     when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP")).thenReturn(enabledSymbol("BTCUSDT-PERP"));
-    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    when(marketBundleResolver.resolveDefaultPerpetual("BTCUSDT-PERP")).thenReturn(bundle);
     MarketDataRouter router = new MarketDataRouter(
         providerResolver, marketBundleResolver, Clock.fixed(now, ZoneOffset.UTC));
 
@@ -110,7 +111,7 @@ class MarketDataRouterTest {
     funding.setAsOf(Instant.parse("2026-07-12T00:00:00Z"));
     when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP"))
         .thenReturn(enabledSymbol("BTCUSDT-PERP"));
-    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    when(marketBundleResolver.resolveDefaultPerpetual("BTCUSDT-PERP")).thenReturn(bundle);
     when(fundingRateRepository.findLatestBySymbol("BTCUSDT-PERP"))
         .thenReturn(Optional.of(funding));
     MarketDataRouter router = new MarketDataRouter(
@@ -143,7 +144,7 @@ class MarketDataRouterTest {
     funding.setAsOf(now);
     when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP"))
         .thenReturn(enabledSymbol("BTCUSDT-PERP"));
-    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    when(marketBundleResolver.resolveDefaultPerpetual("BTCUSDT-PERP")).thenReturn(bundle);
     when(fundingRateRepository.findLatestBySymbol("BTCUSDT-PERP"))
         .thenReturn(Optional.of(funding));
     MarketDataRouter router = new MarketDataRouter(
@@ -178,7 +179,7 @@ class MarketDataRouterTest {
     funding.setAsOf(beforeLookup);
     when(providerResolver.requireEnabledSymbol("BTCUSDT-PERP"))
         .thenReturn(enabledSymbol("BTCUSDT-PERP"));
-    when(marketBundleResolver.resolvePerp(eq("BTCUSDT-PERP"), any())).thenReturn(bundle);
+    when(marketBundleResolver.resolveDefaultPerpetual("BTCUSDT-PERP")).thenReturn(bundle);
     when(fundingRateRepository.findLatestBySymbol("BTCUSDT-PERP"))
         .thenAnswer(ignored -> {
           currentTime.set(afterLookup);
@@ -233,7 +234,7 @@ class MarketDataRouterTest {
     symbol.setChartEnabled(false);
     symbol.setOrderBookEnabled(false);
     when(providerResolver.requireEnabledSymbol("BTCUSDT")).thenReturn(symbol);
-    when(marketBundleResolver.resolveSpot(eq("BTCUSDT"), any())).thenReturn(spotBundle(now));
+    when(marketBundleResolver.resolveDefaultSpot("BTCUSDT")).thenReturn(spotBundle(now));
     MarketDataRouter router = new MarketDataRouter(
         providerResolver, marketBundleResolver, Clock.fixed(now, ZoneOffset.UTC));
 
