@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { resolveMarketTradingTarget } from './marketTradingTarget.ts'
+import { isMarketTradingEnabled, resolveMarketTradingTarget } from './marketTradingTarget.ts'
 
 describe('market trading targets', () => {
   it('routes only the canonical P0 Spot and linear Perpetual products', () => {
@@ -20,5 +20,10 @@ describe('market trading targets', () => {
     assert.equal(resolveMarketTradingTarget({ symbol: 'BTCUSD-PERP', productType: 'INVERSE_PERP' }), null)
     assert.equal(resolveMarketTradingTarget({ symbol: 'BTC-USD-OPTION' }), null)
     assert.equal(resolveMarketTradingTarget({ symbol: 'BTC-USDT-SWAP', productType: 'LINEAR_PERP' }), null)
+  })
+
+  it('keeps empty fallback summary slots non-interactive', () => {
+    assert.equal(resolveMarketTradingTarget(undefined), null)
+    assert.equal(isMarketTradingEnabled(undefined), false)
   })
 })

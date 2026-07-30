@@ -10,7 +10,9 @@ type MarketTradingCandidate = {
   productType?: ProductType | null
 }
 
-export function resolveMarketTradingTarget(market: MarketTradingCandidate) {
+export function resolveMarketTradingTarget(market?: MarketTradingCandidate | null) {
+  if (!market) return null
+
   const spotSymbol = normalizeTradingProductSymbol('spot', market.symbol)
   if (spotSymbol && (market.productType === undefined || market.productType === null || market.productType === 'CRYPTO_SPOT')) {
     return buildTradingPath('spot', spotSymbol)
@@ -24,7 +26,7 @@ export function resolveMarketTradingTarget(market: MarketTradingCandidate) {
   return null
 }
 
-export function isMarketTradingEnabled(market: MarketTradingCandidate, product?: TradingProduct) {
+export function isMarketTradingEnabled(market?: MarketTradingCandidate | null, product?: TradingProduct) {
   const target = resolveMarketTradingTarget(market)
   return target !== null && (product === undefined || target.startsWith(`/trade/${product}/`))
 }
