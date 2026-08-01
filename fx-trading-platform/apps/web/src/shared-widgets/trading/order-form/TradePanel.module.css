@@ -1,4 +1,5 @@
-.trade-panel {
+.trade-panel,
+.trade-panel__confirm-layer {
   --tp-bg: var(--trading-surface-2);
   --tp-surface: var(--trading-surface);
   --tp-surface-2: var(--trading-field-bg);
@@ -14,6 +15,8 @@
   --tp-sell-hover: var(--trading-sell-strong);
   --tp-focus: var(--trading-accent);
   --tp-warning: var(--trading-accent);
+}
+.trade-panel {
   position: relative;
   min-width: 0;
   display: grid;

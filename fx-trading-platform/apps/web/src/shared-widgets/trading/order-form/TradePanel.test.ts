@@ -135,6 +135,12 @@ describe('OKX-style trade panel density', () => {
     assert.match(tradePanelSource, /confirmed:\s*skipConfirm/)
   })
 
+  it('portals the critical order confirmation outside the inert Mobile order sheet', () => {
+    assert.match(confirmDialogSource, /import \{ createPortal \} from 'react-dom'/)
+    assert.match(confirmDialogSource, /return createPortal\([\s\S]*document\.body\)/)
+    assert.match(styles, /\.trade-panel,\s*\.trade-panel__confirm-layer\s*\{[\s\S]*?--tp-warning:/)
+  })
+
   it('renders market orders with a disabled market price field and slippage controls, not TP\\/SL', () => {
     assert.match(orderSideSource, /form\.orderType === 'limit' && form\.strategyType !== 'trigger'/)
     assert.match(orderSideSource, /<StaticOrderField/)

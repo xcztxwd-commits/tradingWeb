@@ -1,5 +1,6 @@
 import { Dialog } from '@fx-platform/ui'
 import { Bitcoin, X } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 import type { CanonicalSubmitPayload, OcoOrderPayload } from '@fx-platform/frontend-core'
@@ -26,7 +27,7 @@ export function OrderConfirmationDialog({
   const sideLabel = payload.side === 'BUY' ? t('common.buy') : t('common.sell')
   const rows = buildConfirmationRows(payload, t('trading.marketOrder'))
 
-  return (
+  const dialog = (
     <Dialog
       open
       onClose={onCancel}
@@ -68,6 +69,8 @@ export function OrderConfirmationDialog({
       </footer>
     </Dialog>
   )
+  if (typeof document === 'undefined') return dialog
+  return createPortal(dialog, document.body)
 }
 
 export function buildConfirmationRows(payload: CanonicalSubmitPayload, marketOrderLabel: string) {
