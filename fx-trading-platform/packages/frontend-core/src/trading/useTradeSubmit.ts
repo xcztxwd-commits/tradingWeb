@@ -48,13 +48,14 @@ export function useTradeSubmit({
   const handleSubmit = useCallback(
     async (form: TradeFormState, validation: OrderValidationResult, reset: () => void, options: SubmitOptions = {}) => {
       setAttempted((current) => ({ ...current, [form.side]: true }))
+      const hasPreparedConfirmation = options.confirmed === true && options.payload !== undefined
 
       if (loginRequired) {
         setNotice({ key: 'trading.loginBeforeOrder' })
         onLoginRequired?.()
         return
       }
-      if (!canTrade) {
+      if (!canTrade && !hasPreparedConfirmation) {
         setNotice({ key: sessionHasError ? 'trading.sessionRetryFirst' : 'trading.backendNotReadyCannotSubmit' })
         return
       }

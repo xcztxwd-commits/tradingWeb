@@ -135,6 +135,13 @@ describe('OKX-style trade panel density', () => {
     assert.match(tradePanelSource, /confirmed:\s*skipConfirm/)
   })
 
+  it('keeps a prepared confirmation submittable across transient market refreshes', () => {
+    assert.match(submitHookSource, /const hasPreparedConfirmation = options\.confirmed === true && options\.payload !== undefined/)
+    assert.match(submitHookSource, /if \(!canTrade && !hasPreparedConfirmation\)/)
+    assert.match(submitHookSource, /if \(!validation\.canSubmit\)/)
+    assert.match(submitHookSource, /if \(!backendReady \|\| !accountId \|\| !onSubmitOrder\)/)
+  })
+
   it('portals the critical order confirmation outside the inert Mobile order sheet', () => {
     assert.match(confirmDialogSource, /import \{ createPortal \} from 'react-dom'/)
     assert.match(confirmDialogSource, /return createPortal\([\s\S]*document\.body\)/)
