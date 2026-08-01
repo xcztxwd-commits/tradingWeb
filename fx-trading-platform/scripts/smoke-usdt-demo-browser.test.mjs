@@ -12,6 +12,7 @@ import {
   assertNoRuntimeErrors,
   closeAllPositionsViaUi,
   createEvidencePage,
+  openTradePanel,
   positionActionViaUi,
   resetDemoViaUi,
   setPerpetualSettingsViaUi,
@@ -415,6 +416,38 @@ describe('real USDT demo browser smoke contract', () => {
     assert.ok(
       openPanel.indexOf('visible mobile Trade action') < openPanel.indexOf('button.click()')
     )
+  })
+
+  it('keeps an already-ready mobile trade route before opening the order sheet', async () => {
+    let navigations = 0
+    let panelOpen = false
+    const page = {
+      async navigate() {
+        navigations += 1
+      },
+      async waitForFunction(_check, label) {
+        if (label.startsWith('one visible scoped trade panel')) {
+          assert.equal(panelOpen, true)
+        }
+      },
+      async evaluate(check) {
+        const body = check.toString()
+        if (body.includes('window.location.pathname')) return true
+        if (body.includes('button.click()')) {
+          panelOpen = navigations === 0
+          return true
+        }
+        throw new Error('unexpected mobile trade route probe')
+      }
+    }
+
+    await openTradePanel(page, {
+      product: 'spot',
+      symbol: 'BTCUSDT',
+      mobile: true
+    })
+
+    assert.equal(navigations, 0)
   })
 
   it('cannot report PASS until provider state is restored and browser targets are closed', () => {

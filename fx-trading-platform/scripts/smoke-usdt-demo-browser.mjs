@@ -6974,7 +6974,8 @@ export async function logoutViaUi(page) {
 export async function openTradePanel(page, target) {
   const route = resolveP0TradeRoute(target)
   const baseUrl = p0PageBaseUrl(page, 'webBaseUrl', 'WEB_BASE_URL', 'http://127.0.0.1:5199')
-  await page.navigate(`${baseUrl}${route}`)
+  const alreadyThere = await page.evaluate((expectedPath) => window.location.pathname === expectedPath, route)
+  if (!alreadyThere) await page.navigate(`${baseUrl}${route}`)
   await page.waitForFunction(
     (expectedPath) => window.location.pathname === expectedPath
       && (document.body?.innerText?.trim().length ?? 0) > 40,
