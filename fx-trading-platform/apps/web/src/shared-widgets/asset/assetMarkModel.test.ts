@@ -69,13 +69,26 @@ describe('asset mark model', () => {
     })
   })
 
-  it('uses Binance image URLs for crypto marks when provided', () => {
-    const iconUrl = 'https://bin.bnbstatic.com/image/admin_mgs_image_upload/20201110/btc.png'
+  it('uses configured image URLs for crypto marks when provided', () => {
+    const iconUrl = 'https://assets.example.test/btc.png'
     const mark = createAssetMarkModel('BTCUSDT', 'crypto', iconUrl)
 
     assert.equal(mark.kind, 'single')
     if (mark.kind !== 'single') throw new Error('Expected single crypto mark')
     assert.equal(mark.imageUrl, iconUrl)
+    assert.equal(mark.display, 'BTC')
+  })
+
+  it('uses the local glyph fallback instead of requesting Binance CDN icons', () => {
+    const mark = createAssetMarkModel(
+      'BTCUSDT',
+      'crypto',
+      'https://bin.bnbstatic.com/image/admin_mgs_image_upload/20201110/btc.png'
+    )
+
+    assert.equal(mark.kind, 'single')
+    if (mark.kind !== 'single') throw new Error('Expected single crypto mark')
+    assert.equal(mark.imageUrl, undefined)
     assert.equal(mark.display, 'BTC')
   })
 })

@@ -255,6 +255,7 @@ function normalizeCategory(category?: string) {
 
 function normalizeIconUrl(iconUrl?: string) {
   const text = iconUrl?.trim()
+  if (/^https?:\/\/bin\.bnbstatic\.com(?:\/|$)/i.test(text ?? '')) return undefined
   return text ? text : undefined
 }
 
