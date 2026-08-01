@@ -450,6 +450,58 @@ describe('real USDT demo browser smoke contract', () => {
     assert.equal(navigations, 0)
   })
 
+  it('selects the one outer mobile trade panel instead of its two side forms', async () => {
+    const visibleElement = {
+      getBoundingClientRect: () => ({
+        width: 320,
+        height: 640,
+        top: 0,
+        right: 320,
+        bottom: 640,
+        left: 0
+      })
+    }
+    const page = {
+      async navigate() {},
+      async evaluate(check) {
+        const body = check.toString()
+        if (body.includes('window.location.pathname')) return true
+        if (body.includes('button.click()')) return true
+        throw new Error('unexpected mobile trade route probe')
+      },
+      async waitForFunction(check, label, ...args) {
+        if (!label.startsWith('one visible scoped trade panel')) return
+        const previousDocument = globalThis.document
+        const previousWindow = globalThis.window
+        const previousGetComputedStyle = globalThis.getComputedStyle
+        try {
+          globalThis.document = {
+            querySelectorAll: (selector) => selector.includes(':not([data-price-precision])')
+              ? [visibleElement]
+              : [visibleElement, visibleElement, visibleElement]
+          }
+          globalThis.window = { innerHeight: 844, innerWidth: 390 }
+          globalThis.getComputedStyle = () => ({
+            display: 'block',
+            visibility: 'visible',
+            opacity: '1'
+          })
+          assert.equal(check(...args), true)
+        } finally {
+          globalThis.document = previousDocument
+          globalThis.window = previousWindow
+          globalThis.getComputedStyle = previousGetComputedStyle
+        }
+      }
+    }
+
+    await openTradePanel(page, {
+      product: 'spot',
+      symbol: 'BTCUSDT',
+      mobile: true
+    })
+  })
+
   it('cannot report PASS until provider state is restored and browser targets are closed', () => {
     const text = source()
 
@@ -567,7 +619,7 @@ describe('real USDT demo browser smoke contract', () => {
     assert.doesNotMatch(text, /class\*=["']actionBar/)
     assert.match(
       text,
-      /const MOBILE_TRADE_PANEL_SELECTOR = '\[data-platform-view="mobile"\] \[data-overlay-top="true"\]:not\(\[aria-hidden="true"\]\):not\(\[inert\]\) section\[role="dialog"\]\[aria-modal="true"\] section\[aria-label\]\[class\*="trade-panel"\]'/
+      /const MOBILE_TRADE_PANEL_SELECTOR = '\[data-platform-view="mobile"\] \[data-overlay-top="true"\]:not\(\[aria-hidden="true"\]\):not\(\[inert\]\) section\[role="dialog"\]\[aria-modal="true"\] section\[aria-label\]\[class\*="trade-panel"\]:not\(\[data-price-precision\]\)'/
     )
     assert.match(text, /getAttribute\('data-overlay-top'\) === 'true'/)
     assert.match(text, /getAttribute\('aria-hidden'\) !== 'true'/)

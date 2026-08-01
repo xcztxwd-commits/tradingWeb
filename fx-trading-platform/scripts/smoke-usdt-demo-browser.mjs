@@ -144,7 +144,7 @@ const CANONICAL_ADMIN_AUTHORITIES = [
 ]
 const CANONICAL_PROCESS_LOG_TAIL_BYTES = 200_000
 const TRADE_PANEL_SELECTOR = '[data-platform-view="pc"] [data-panel-id="trade"]'
-const MOBILE_TRADE_PANEL_SELECTOR = '[data-platform-view="mobile"] [data-overlay-top="true"]:not([aria-hidden="true"]):not([inert]) section[role="dialog"][aria-modal="true"] section[aria-label][class*="trade-panel"]'
+const MOBILE_TRADE_PANEL_SELECTOR = '[data-platform-view="mobile"] [data-overlay-top="true"]:not([aria-hidden="true"]):not([inert]) section[role="dialog"][aria-modal="true"] section[aria-label][class*="trade-panel"]:not([data-price-precision])'
 
 // Human-readable bootstrap evidence retained in the report: docker compose, not an in-memory substitute.
 const STARTUP_COMMANDS = [
