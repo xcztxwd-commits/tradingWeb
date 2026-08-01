@@ -502,6 +502,22 @@ describe('real USDT demo browser smoke contract', () => {
     })
   })
 
+  it('follows the critical order confirmation after the mobile sheet stops being top', () => {
+    const text = source()
+    const submitSource = text.slice(
+      text.indexOf('export async function submitOrderViaUi'),
+      text.indexOf('export async function positionActionViaUi')
+    )
+
+    assert.match(text, /const TOP_ORDER_CONFIRMATION_SELECTOR = /)
+    assert.match(submitSource, /querySelectorAll\(confirmationSelector\)[\s\S]*:scope > dl/)
+    assert.match(submitSource, /'scoped order confirmation', TOP_ORDER_CONFIRMATION_SELECTOR/)
+    assert.doesNotMatch(
+      submitSource,
+      /const dialog = panel\?\.querySelector\('section\[role="dialog"\]'\)/
+    )
+  })
+
   it('cannot report PASS until provider state is restored and browser targets are closed', () => {
     const text = source()
 

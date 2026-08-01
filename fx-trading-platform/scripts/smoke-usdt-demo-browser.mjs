@@ -145,6 +145,7 @@ const CANONICAL_ADMIN_AUTHORITIES = [
 const CANONICAL_PROCESS_LOG_TAIL_BYTES = 200_000
 const TRADE_PANEL_SELECTOR = '[data-platform-view="pc"] [data-panel-id="trade"]'
 const MOBILE_TRADE_PANEL_SELECTOR = '[data-platform-view="mobile"] [data-overlay-top="true"]:not([aria-hidden="true"]):not([inert]) section[role="dialog"][aria-modal="true"] section[aria-label][class*="trade-panel"]:not([data-price-precision])'
+const TOP_ORDER_CONFIRMATION_SELECTOR = '[data-overlay-top="true"]:not([aria-hidden="true"]):not([inert]) > section[role="dialog"][aria-modal="true"]'
 
 // Human-readable bootstrap evidence retained in the report: docker compose, not an in-memory substitute.
 const STARTUP_COMMANDS = [
@@ -7257,28 +7258,28 @@ export async function submitOrderViaUi(page, order) {
     return true
   }, panelSelector, side), 'scoped order submit action', 15000)
   assert(opened, 'real order confirmation must open from the scoped panel')
-  await page.waitForFunction((selector) => {
-    const panel = document.querySelector(selector)
-    const dialog = panel?.querySelector('section[role="dialog"]')
+  await page.waitForFunction((confirmationSelector) => {
+    const dialog = [...document.querySelectorAll(confirmationSelector)]
+      .find((candidate) => candidate.querySelector(':scope > dl'))
     if (!dialog) return false
     const rect = dialog.getBoundingClientRect()
     const style = getComputedStyle(dialog)
     return rect.width > 0 && rect.height > 0
       && style.display !== 'none' && style.visibility !== 'hidden'
-  }, 'scoped order confirmation', panelSelector)
+  }, 'scoped order confirmation', TOP_ORDER_CONFIRMATION_SELECTOR)
   const capture = await withCapturedMutation(
     page,
     order.matcher ?? { method: 'POST', url: /\/api\/trading\/orders$/ },
-    () => page.evaluate((selector) => {
-      const panel = document.querySelector(selector)
-      const dialog = panel?.querySelector('section[role="dialog"]')
+    () => page.evaluate((confirmationSelector) => {
+      const dialog = [...document.querySelectorAll(confirmationSelector)]
+        .find((candidate) => candidate.querySelector(':scope > dl'))
       const submit = dialog?.querySelector('footer button:last-child')
       if (!dialog || !submit || submit.disabled) {
         throw new Error('P0_SCOPED_ORDER_CONFIRM_MISSING')
       }
       submit.click()
       return true
-    }, panelSelector)
+    }, TOP_ORDER_CONFIRMATION_SELECTOR)
   )
   finishP0UiMutation(page, capture, 'order submission', order)
   return capture
