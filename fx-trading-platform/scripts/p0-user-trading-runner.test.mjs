@@ -5104,6 +5104,7 @@ test('authority baseline fill and Perp risk checks use independent market eviden
 function authorityGateContractContext({
   wrongControlledSpotFill = false,
   staleRestoredUi = false,
+  movingProvider = false,
   browserCloseFailure = false
 } = {}) {
   const baseline = {
@@ -5133,6 +5134,7 @@ function authorityGateContractContext({
   const authorityAdminSetup = []
   let restoredAfterOverride = false
   let sequence = 0
+  let marketRead = 0
   let spotBuyCount = 0
   let persisted
   const nextId = () => (
@@ -5175,7 +5177,33 @@ function authorityGateContractContext({
     positions: [],
     fundingSettlements: []
   }
-  const market = (symbol) => structuredClone(overrides.get(symbol) ?? baseline[symbol])
+  const market = (symbol) => {
+    const override = overrides.get(symbol)
+    if (!movingProvider) {
+      return structuredClone(override ?? baseline[symbol])
+    }
+    marketRead += 1
+    const quote = override ?? baseline[symbol]
+    const offset = override ? 0 : marketRead * 10
+    const external = marketRead % 2 === 0
+    return {
+      ...quote,
+      bid: String(Number(quote.bid) + offset),
+      ask: String(Number(quote.ask) + offset),
+      ...(symbol.endsWith('-PERP')
+        ? {
+            markPrice: String(Number(quote.markPrice) + offset),
+            providerCode: external ? 'binance-usdm' : 'local-perp',
+            providerSymbol: external ? 'BTCUSDT' : 'BTCUSDT-PERP',
+            sourceMode: external ? 'PUBLIC_EXTERNAL' : 'LOCAL_SIMULATED'
+          }
+        : {
+            providerCode: external ? 'binance' : 'local-spot',
+            providerSymbol: symbol,
+            sourceMode: external ? 'PUBLIC_EXTERNAL' : 'LOCAL_SIMULATED'
+          })
+    }
+  }
   const reference = () => {
     const quote = market('BTCUSDT-PERP')
     return {
@@ -5540,6 +5568,16 @@ test('runAuthorityBundleGate directly proves PASS, BLOCKED, and cleanup failure'
   assert.equal(
     passing.snapshotAccount().positions.filter(({ status }) => status === 'OPEN').length,
     0
+  )
+
+  const moving = authorityGateContractContext({ movingProvider: true })
+  const movingPass = await smokeContracts.runAuthorityBundleGate(moving.context, {
+    adminCredentials
+  })
+  assert.equal(
+    movingPass.authorityBundleFixture,
+    'PASS',
+    'dynamic quotes and a legitimate provider failover must not race the authority fixture'
   )
 
   const wrongFill = authorityGateContractContext({ wrongControlledSpotFill: true })

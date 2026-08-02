@@ -7945,14 +7945,11 @@ function authoritySummaryEvidence(summary) {
   }
 }
 
-function authoritySourcesMatch(left, right) {
-  return typeof left?.providerCode === 'string'
-    && left.providerCode === right?.providerCode
-    && typeof left?.sourceMode === 'string'
-    && left.sourceMode === right?.sourceMode
-    && (left.providerSymbol === undefined
-      || right?.providerSymbol === undefined
-      || left.providerSymbol === right.providerSymbol)
+function authoritySourceComplete(value) {
+  return typeof value?.providerCode === 'string'
+    && value.providerCode.trim().length > 0
+    && value.providerCode !== 'test-control'
+    && ['PUBLIC_EXTERNAL', 'LOCAL_SIMULATED'].includes(value.sourceMode)
 }
 
 function authorityQuotesMatch(left, right, rules) {
@@ -8122,19 +8119,20 @@ async function waitForAuthorityUiTarget(page, target, expected, rules, signal) {
   }
 }
 
-async function waitForAuthorityUiBootstrap(context, page, target, rules, signal) {
-  let latest
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    const visible = await readAuthorityUiQuote(page, target, signal)
-    const quote = authorityQuoteEvidence(
-      (await context.api.snapshotMarket(target.symbol)).quote
-    )
-    latest = { status: 'FAIL', visible, quote }
-    if (authorityQuotesMatch(visible, quote, rules)) {
-      return { status: 'PASS', visible, quote }
-    }
+async function waitForAuthorityUiBootstrap(context, page, target, signal) {
+  const visible = await readAuthorityUiQuote(page, target, signal)
+  const quote = authorityQuoteEvidence(
+    (await context.api.snapshotMarket(target.symbol)).quote
+  )
+  return {
+    status: authorityUiQuoteComplete(visible)
+      && authoritySourceComplete(quote)
+      && quote.stale !== true
+      ? 'PASS'
+      : 'FAIL',
+    visible,
+    quote
   }
-  return latest
 }
 
 function newAuthorityTrade(before, after, symbol, side) {
@@ -8194,7 +8192,8 @@ export function authorityFillCheck(probe, quote, rules, productType) {
   return {
     pass: withinTolerance(trade.price, expected.filledPrice, tolerance)
       && trade.liquidityRole === expected.liquidityRole
-      && authoritySourcesMatch(trade, quote),
+      && authoritySourceComplete(trade)
+      && authoritySourceComplete(quote),
     oracle: {
       symbol: quote.symbol,
       side: probe.trade.side,
@@ -8573,17 +8572,41 @@ export async function runAuthorityBundleGate(context, options = {}) {
       context,
       userPage,
       spotTarget,
+      signal
+    )
+    const baselineSpotQuote = baselineSpotBootstrap.quote
+    const baselineSpotHold = {
+      symbol: SPOT_SYMBOL,
+      bid: baselineSpotQuote.bid,
+      ask: baselineSpotQuote.ask
+    }
+    await context.api.admin(
+      adminPage,
+      '/api/admin/market/test-control/overrides',
+      {
+        method: 'POST',
+        body: { ...baselineSpotHold, ttl: AUTHORITY_TARGET_TTL }
+      }
+    )
+    fixtureActions.push({
+      action: 'set-baseline-authority-override',
+      reasonCode: 'SET_BASELINE_AUTHORITY_OVERRIDE',
+      symbol: SPOT_SYMBOL
+    })
+    const baselineSpotTarget = await waitForAuthorityUiTarget(
+      userPage,
+      spotTarget,
+      baselineSpotHold,
       spotRules,
       signal
     )
-    const baselineSpotVisible = baselineSpotBootstrap.visible
-    const baselineSpotQuote = baselineSpotBootstrap.quote
+    const baselineSpotVisible = baselineSpotTarget.visible
     recordCheck(
       'baseline-spot-ui-quote',
       baselineSpotBootstrap.status === 'PASS'
+        && baselineSpotTarget.status === 'PASS'
         && authorityUiQuoteComplete(baselineSpotVisible)
-        && typeof baselineSpotQuote.providerCode === 'string'
-        && typeof baselineSpotQuote.sourceMode === 'string'
+        && authoritySourceComplete(baselineSpotQuote)
         && baselineSpotQuote.stale !== true,
       { symbol: SPOT_SYMBOL }
     )
@@ -8609,7 +8632,7 @@ export async function runAuthorityBundleGate(context, options = {}) {
       baselineSpotFill.pass
         && baselineSpotProbe.order.orderType === 'MARKET'
         && baselineSpotProbe.order.status === 'FILLED'
-        && authoritySourcesMatch(baselineSpotFill.trade, baselineSpotQuote),
+        && authoritySourceComplete(baselineSpotFill.trade),
       { symbol: SPOT_SYMBOL }
     )
     oracleEvidence.push(baselineSpotFill.oracle)
@@ -8629,11 +8652,35 @@ export async function runAuthorityBundleGate(context, options = {}) {
       context,
       userPage,
       perpTarget,
+      signal
+    )
+    const baselinePerpQuote = baselinePerpBootstrap.quote
+    const baselinePerpHold = {
+      symbol: PERP_SYMBOL,
+      bid: baselinePerpQuote.bid,
+      ask: baselinePerpQuote.ask
+    }
+    await context.api.admin(
+      adminPage,
+      '/api/admin/market/test-control/overrides',
+      {
+        method: 'POST',
+        body: { ...baselinePerpHold, ttl: AUTHORITY_TARGET_TTL }
+      }
+    )
+    fixtureActions.push({
+      action: 'set-baseline-authority-override',
+      reasonCode: 'SET_BASELINE_AUTHORITY_OVERRIDE',
+      symbol: PERP_SYMBOL
+    })
+    const baselinePerpTarget = await waitForAuthorityUiTarget(
+      userPage,
+      perpTarget,
+      baselinePerpHold,
       perpRules,
       signal
     )
-    const baselinePerpVisible = baselinePerpBootstrap.visible
-    const baselinePerpQuote = baselinePerpBootstrap.quote
+    const baselinePerpVisible = baselinePerpTarget.visible
     const rawBaselineReference = await context.api.user(
       userPage,
       `/api/market/perpetuals/${encodeURIComponent(PERP_SYMBOL)}/reference`
@@ -8642,9 +8689,9 @@ export async function runAuthorityBundleGate(context, options = {}) {
     recordCheck(
       'baseline-perp-ui-quote',
       baselinePerpBootstrap.status === 'PASS'
+        && baselinePerpTarget.status === 'PASS'
         && authorityUiQuoteComplete(baselinePerpVisible)
-        && typeof baselinePerpQuote.providerCode === 'string'
-        && typeof baselinePerpQuote.sourceMode === 'string'
+        && authoritySourceComplete(baselinePerpQuote)
         && baselinePerpQuote.stale !== true,
       { symbol: PERP_SYMBOL }
     )
@@ -8675,13 +8722,13 @@ export async function runAuthorityBundleGate(context, options = {}) {
       baselinePerpFill.pass
         && baselinePerpProbe.order.orderType === 'MARKET'
         && baselinePerpProbe.order.status === 'FILLED'
-        && authoritySourcesMatch(baselinePerpFill.trade, baselinePerpQuote),
+        && authoritySourceComplete(baselinePerpFill.trade),
       { symbol: PERP_SYMBOL }
     )
     recordCheck(
       'baseline-perp-mark',
       baselinePerpRisk.markPass
-        && authoritySourcesMatch(baselineReference, baselinePerpQuote),
+        && authoritySourceComplete(baselineReference),
       { symbol: PERP_SYMBOL }
     )
     recordCheck('baseline-perp-risk', baselinePerpRisk.riskPass, { symbol: PERP_SYMBOL })
@@ -8894,7 +8941,8 @@ export async function runAuthorityBundleGate(context, options = {}) {
         'controlled-perp-mark',
         controlledPerpRisk.markPass
           && controlledPerpAuthorityMatches
-          && authoritySourcesMatch(controlledReference, controlledPerpAuthority),
+          && authoritySourceComplete(controlledReference)
+          && authoritySourceComplete(controlledPerpAuthority),
         { symbol: PERP_SYMBOL }
       )
       recordCheck(
@@ -8953,7 +9001,6 @@ export async function runAuthorityBundleGate(context, options = {}) {
       context,
       userPage,
       spotTarget,
-      spotRules,
       signal
     )
     const restoredSpotVisible = restoredSpotBootstrap.visible
@@ -8962,7 +9009,6 @@ export async function runAuthorityBundleGate(context, options = {}) {
       context,
       userPage,
       perpTarget,
-      perpRules,
       signal
     )
     const restoredPerpVisible = restoredPerpBootstrap.visible
@@ -8974,7 +9020,7 @@ export async function runAuthorityBundleGate(context, options = {}) {
     recordCheck(
       'restored-spot-provider',
       restoredSpotBootstrap.status === 'PASS'
-        && authoritySourcesMatch(restoredSpotQuote, baselineSpotQuote)
+        && authoritySourceComplete(restoredSpotQuote)
         && authorityUiQuoteComplete(restoredSpotVisible)
         && !authorityQuotesMatch(restoredSpotVisible, spotOverride, spotRules)
         && !authorityQuotesMatch(restoredSpotQuote, spotOverride, spotRules),
@@ -8983,8 +9029,8 @@ export async function runAuthorityBundleGate(context, options = {}) {
     recordCheck(
       'restored-perp-provider',
       restoredPerpBootstrap.status === 'PASS'
-        && authoritySourcesMatch(restoredPerpQuote, baselinePerpQuote)
-        && authoritySourcesMatch(restoredReference, baselineReference)
+        && authoritySourceComplete(restoredPerpQuote)
+        && authoritySourceComplete(restoredReference)
         && authorityUiQuoteComplete(restoredPerpVisible)
         && !authorityQuotesMatch(restoredPerpVisible, perpOverride, perpRules)
         && !authorityQuotesMatch(restoredPerpQuote, perpOverride, perpRules),
