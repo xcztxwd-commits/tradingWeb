@@ -6993,7 +6993,7 @@ export async function openTradePanel(page, target) {
   })
   const selector = mobile
     ? MOBILE_TRADE_PANEL_SELECTOR
-    : '[data-platform-view="pc"] [data-panel-id="trade"] section[aria-label][class*="trade-panel"]'
+    : TRADE_PANEL_SELECTOR
   if (mobile) {
     await page.waitForFunction(() => {
       const button = document.querySelector('[data-testid="mobile-trade-action"]')

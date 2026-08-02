@@ -450,6 +450,19 @@ describe('real USDT demo browser smoke contract', () => {
     assert.equal(navigations, 0)
   })
 
+  it('selects the desktop panel shell instead of its nested buy and sell forms', () => {
+    const text = source()
+    const openPanel = text.slice(
+      text.indexOf('export async function openTradePanel'),
+      text.indexOf('export async function setPerpetualSettingsViaUi')
+    )
+
+    assert.match(
+      openPanel,
+      /const selector = mobile\s*\? MOBILE_TRADE_PANEL_SELECTOR\s*:\s*TRADE_PANEL_SELECTOR/
+    )
+  })
+
   it('selects the one outer mobile trade panel instead of its two side forms', async () => {
     const visibleElement = {
       getBoundingClientRect: () => ({
