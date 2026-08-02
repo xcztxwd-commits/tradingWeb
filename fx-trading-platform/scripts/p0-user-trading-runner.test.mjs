@@ -1798,6 +1798,17 @@ test('default P0 dispatch builds one context and injects the owned AUTH handlers
   assert.match(smokeSource, /dispatchCase\(definition, caseContext, handlers/)
 })
 
+test('default P0 market snapshots normalize numeric rules before fixed-point oracles', () => {
+  const smokePath = fileURLToPath(new URL('./smoke-usdt-demo-browser.mjs', import.meta.url))
+  const smokeSource = readFileSync(smokePath, 'utf8')
+  const start = smokeSource.indexOf('const snapshotMarket = async')
+  const end = smokeSource.indexOf('const activeDatabaseSegment', start)
+
+  assert.notEqual(start, -1)
+  assert.notEqual(end, -1)
+  assert.match(smokeSource.slice(start, end), /rules:\s*authorityRules\(rules\)/)
+})
+
 test('default P0 DB oracle follows the active profile database', async (t) => {
   const artifactBase = mkdtempSync(join(tmpdir(), 'p0-active-profile-database-'))
   t.after(() => rmSync(artifactBase, { recursive: true, force: true }))

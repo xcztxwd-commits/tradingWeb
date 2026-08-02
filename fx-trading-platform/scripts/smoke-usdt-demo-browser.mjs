@@ -13002,7 +13002,7 @@ function createDefaultP0CaseContext({
           `/api/market/perpetuals/${encodeURIComponent(symbol)}/reference`
         )
       : undefined
-    return { symbols, rules, quote, ...(perpetual ? { reference } : {}) }
+    return { symbols, rules: authorityRules(rules), quote, ...(perpetual ? { reference } : {}) }
   }
   const activeDatabaseSegment = () => (
     prepared.activeDatabaseSegment ?? prepared.matrixDatabase
