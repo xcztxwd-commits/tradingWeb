@@ -5105,6 +5105,9 @@ function authorityGateContractContext({
   wrongControlledSpotFill = false,
   staleRestoredUi = false,
   movingProvider = false,
+  normalizeOverrides = false,
+  restoredUiLagReads = 0,
+  unalignedPerpBaseline = false,
   browserCloseFailure = false
 } = {}) {
   const baseline = {
@@ -5119,9 +5122,9 @@ function authorityGateContractContext({
     },
     'BTCUSDT-PERP': {
       symbol: 'BTCUSDT-PERP',
-      bid: '60000',
-      ask: '60010',
-      markPrice: '60005',
+      bid: unalignedPerpBaseline ? '60000.009' : '60000',
+      ask: unalignedPerpBaseline ? '60010.001' : '60010',
+      markPrice: unalignedPerpBaseline ? '60005.005' : '60005',
       providerCode: 'binance-usdm',
       providerSymbol: 'BTCUSDT',
       sourceMode: 'PUBLIC_EXTERNAL',
@@ -5130,6 +5133,7 @@ function authorityGateContractContext({
   }
   const overrides = new Map()
   const lastOverrides = new Map()
+  const restoredUiReads = new Map()
   const adminCleanupCalls = []
   const authorityAdminSetup = []
   let restoredAfterOverride = false
@@ -5261,11 +5265,14 @@ function authorityGateContractContext({
     async evaluate() {
       if (!this.target) return null
       const symbol = this.target.symbol
+      const lagReads = restoredUiReads.get(symbol) ?? 0
       const visible = staleRestoredUi
         && restoredAfterOverride
         && !overrides.has(symbol)
         ? lastOverrides.get(symbol)
-        : market(symbol)
+        : lagReads > 0
+          ? (restoredUiReads.set(symbol, lagReads - 1), lastOverrides.get(symbol))
+          : market(symbol)
       return { bid: visible.bid, ask: visible.ask }
     },
     assertEvidenceClean() {},
@@ -5460,7 +5467,10 @@ function authorityGateContractContext({
         }
         if (request.method === 'DELETE') {
           const symbol = decodeURIComponent(path.split('/').at(-1))
-          if (overrides.has(symbol)) restoredAfterOverride = true
+          if (overrides.has(symbol)) {
+            restoredAfterOverride = true
+            restoredUiReads.set(symbol, restoredUiLagReads)
+          }
           overrides.delete(symbol)
           return { status: 'PASS' }
         }
@@ -5469,8 +5479,12 @@ function authorityGateContractContext({
           const baselineQuote = baseline[body.symbol]
           const quote = {
             ...baselineQuote,
-            bid: body.bid,
-            ask: body.ask,
+            bid: normalizeOverrides
+              ? financialOracles.alignPriceToTick(body.bid, BTC_RULES)
+              : body.bid,
+            ask: normalizeOverrides
+              ? financialOracles.alignPriceToTick(body.ask, BTC_RULES, 'CEILING')
+              : body.ask,
             ...(body.symbol.endsWith('-PERP')
               ? {
                   markPrice: String(
@@ -5570,14 +5584,21 @@ test('runAuthorityBundleGate directly proves PASS, BLOCKED, and cleanup failure'
     0
   )
 
-  const moving = authorityGateContractContext({ movingProvider: true })
+  const moving = authorityGateContractContext({
+    movingProvider: true,
+    normalizeOverrides: true,
+    restoredUiLagReads: 2,
+    unalignedPerpBaseline: true
+  })
   const movingPass = await smokeContracts.runAuthorityBundleGate(moving.context, {
     adminCredentials
   })
   assert.equal(
     movingPass.authorityBundleFixture,
     'PASS',
-    'dynamic quotes and a legitimate provider failover must not race the authority fixture'
+    `dynamic quotes and a legitimate provider failover must not race the authority fixture: ${JSON.stringify(
+      movingPass.checks.filter(({ status }) => status !== 'PASS')
+    )}`
   )
 
   const wrongFill = authorityGateContractContext({ wrongControlledSpotFill: true })

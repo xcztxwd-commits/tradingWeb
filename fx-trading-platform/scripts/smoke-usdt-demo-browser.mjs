@@ -7980,6 +7980,13 @@ function authorityUiQuoteComplete(quote) {
   }
 }
 
+function authorityHeldQuote(baseline, rules) {
+  const bid = alignPriceToTick(baseline.bid, rules)
+  const ask = alignPriceToTick(baseline.ask, rules, 'CEILING')
+  if (Number(ask) <= Number(bid)) throw new Error('P0_AUTHORITY_HOLD_SPREAD_INVALID')
+  return { ...baseline, bid, ask }
+}
+
 export function authorityTargetQuote(baseline, rules) {
   const bid = alignPriceToTick(String(Number(baseline.bid) * 1.3), rules)
   const ask = alignPriceToTick(String(Number(baseline.ask) * 1.3), rules, 'CEILING')
@@ -8132,6 +8139,29 @@ async function waitForAuthorityUiBootstrap(context, page, target, signal) {
       : 'FAIL',
     visible,
     quote
+  }
+}
+
+async function waitForAuthorityUiRestore(context, page, target, controlled, rules, signal) {
+  let { visible, quote } = await waitForAuthorityUiBootstrap(context, page, target, signal)
+  const restored = () => authorityUiQuoteComplete(visible)
+    && authoritySourceComplete(quote)
+    && quote.stale !== true
+    && !authorityQuotesMatch(visible, controlled, rules)
+    && !authorityQuotesMatch(quote, controlled, rules)
+  try {
+    await waitFor(async () => {
+      const candidate = await authorityVisibleQuote(page)
+      if (candidate) visible = candidate
+      quote = authorityQuoteEvidence((await context.api.snapshotMarket(target.symbol)).quote)
+      return restored()
+    }, `authority UI restore ${target.symbol}`, 15000, signal)
+    return { status: 'PASS', visible, quote }
+  } catch (error) {
+    if (!String(error?.message).startsWith('Timed out waiting for authority UI restore')) {
+      throw error
+    }
+    return { status: 'FAIL', visible, quote }
   }
 }
 
@@ -8575,11 +8605,7 @@ export async function runAuthorityBundleGate(context, options = {}) {
       signal
     )
     const baselineSpotQuote = baselineSpotBootstrap.quote
-    const baselineSpotHold = {
-      symbol: SPOT_SYMBOL,
-      bid: baselineSpotQuote.bid,
-      ask: baselineSpotQuote.ask
-    }
+    const baselineSpotHold = authorityHeldQuote(baselineSpotQuote, spotRules)
     await context.api.admin(
       adminPage,
       '/api/admin/market/test-control/overrides',
@@ -8623,7 +8649,7 @@ export async function runAuthorityBundleGate(context, options = {}) {
     )
     const baselineSpotFill = authorityFillCheck(
       baselineSpotProbe,
-      baselineSpotQuote,
+      baselineSpotHold,
       spotRules,
       'CRYPTO_SPOT'
     )
@@ -8655,11 +8681,7 @@ export async function runAuthorityBundleGate(context, options = {}) {
       signal
     )
     const baselinePerpQuote = baselinePerpBootstrap.quote
-    const baselinePerpHold = {
-      symbol: PERP_SYMBOL,
-      bid: baselinePerpQuote.bid,
-      ask: baselinePerpQuote.ask
-    }
+    const baselinePerpHold = authorityHeldQuote(baselinePerpQuote, perpRules)
     await context.api.admin(
       adminPage,
       '/api/admin/market/test-control/overrides',
@@ -8708,7 +8730,7 @@ export async function runAuthorityBundleGate(context, options = {}) {
     )
     const baselinePerpFill = authorityFillCheck(
       baselinePerpProbe,
-      baselinePerpQuote,
+      baselinePerpHold,
       perpRules,
       'LINEAR_PERP'
     )
@@ -8997,18 +9019,22 @@ export async function runAuthorityBundleGate(context, options = {}) {
         symbol
       })
     }
-    const restoredSpotBootstrap = await waitForAuthorityUiBootstrap(
+    const restoredSpotBootstrap = await waitForAuthorityUiRestore(
       context,
       userPage,
       spotTarget,
+      spotOverride,
+      spotRules,
       signal
     )
     const restoredSpotVisible = restoredSpotBootstrap.visible
     const restoredSpotQuote = restoredSpotBootstrap.quote
-    const restoredPerpBootstrap = await waitForAuthorityUiBootstrap(
+    const restoredPerpBootstrap = await waitForAuthorityUiRestore(
       context,
       userPage,
       perpTarget,
+      perpOverride,
+      perpRules,
       signal
     )
     const restoredPerpVisible = restoredPerpBootstrap.visible
