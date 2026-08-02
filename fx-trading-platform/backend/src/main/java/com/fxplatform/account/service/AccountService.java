@@ -11,6 +11,7 @@ import com.fxplatform.account.dto.WalletBalanceResponse;
 import com.fxplatform.account.dto.DemoResetResponse;
 import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.ledger.service.LedgerService;
 import com.fxplatform.wallet.service.AssetConversionService;
@@ -139,7 +140,7 @@ public class AccountService {
   public AccountResponse summary(UUID userId, UUID accountId) {
     return accountRepository.findByIdAndUserId(accountId, userId)
         .map(this::toResponse)
-        .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
+        .orElseThrow(() -> new AuthorizationException("ACCOUNT_NOT_FOUND", "Account not found"));
   }
 
   public List<WalletBalanceResponse> walletBalances(UUID userId, UUID accountId) {

@@ -1,6 +1,7 @@
 package com.fxplatform.account.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -13,6 +14,7 @@ import com.fxplatform.account.entity.TradingAccountEntity;
 import com.fxplatform.account.enums.AccountStatus;
 import com.fxplatform.account.enums.AccountType;
 import com.fxplatform.account.repository.TradingAccountRepository;
+import com.fxplatform.common.exception.AuthorizationException;
 import com.fxplatform.ledger.service.LedgerService;
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -100,5 +102,17 @@ class AccountServiceRegressionProtectionTest {
     assertThat(account.getFreeMargin()).isEqualByComparingTo("9889.98000000");
     verify(accountSnapshotService).snapshot(account);
     verify(accountRepository, never()).save(any());
+  }
+
+  @Test
+  void summaryRejectsForeignAccountAsAuthorizationFailure() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.empty());
+    AccountService service = new AccountService(accountRepository, ledgerService, accountSnapshotService);
+
+    assertThatThrownBy(() -> service.summary(userId, accountId))
+        .isInstanceOfSatisfying(AuthorizationException.class,
+            error -> assertThat(error.getCode()).isEqualTo("ACCOUNT_NOT_FOUND"));
   }
 }
