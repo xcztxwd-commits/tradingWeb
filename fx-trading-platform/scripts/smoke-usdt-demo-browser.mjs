@@ -6718,16 +6718,16 @@ export async function createEvidencePage(browserInstance, options = {}) {
     evidence.allowedHttpErrors.set(requestRef, reason)
   }
   page.assertEvidenceClean = (label = options.caseId ?? 'P0 browser page') => {
-    const runtimeErrors = [...evidence.consoleErrors]
-    for (const httpError of evidence.httpErrors) {
-      if (!evidence.allowedHttpErrors.has(httpError.requestId)) continue
-      const match = runtimeErrors.findIndex((error) => (
+    const allowedHttpErrors = evidence.httpErrors.filter(({ requestId }) => (
+      evidence.allowedHttpErrors.has(requestId)
+    ))
+    const runtimeErrors = evidence.consoleErrors.filter((error) => (
+      !allowedHttpErrors.some((httpError) => (
         error?.source === 'network'
         && error?.url === httpError.url
         && new RegExp(`\\b${httpError.status}\\b`).test(browserRuntimeErrorMessage(error))
       ))
-      if (match >= 0) runtimeErrors.splice(match, 1)
-    }
+    ))
     assertNoRuntimeErrors(runtimeErrors, label)
     const unexplained = evidence.httpErrors.filter(({ requestId }) => (
       !evidence.allowedHttpErrors.has(requestId)

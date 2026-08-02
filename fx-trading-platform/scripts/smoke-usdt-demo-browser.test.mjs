@@ -1203,14 +1203,16 @@ describe('real USDT demo browser smoke contract', () => {
       () => page.assertEvidenceClean('AUTH-02 unexpected 401'),
       /unexplained HTTP 401/
     )
-    emit('Log.entryAdded', {
+    const expectedHttpLog = {
       entry: {
         level: 'error',
         source: 'network',
         url: 'http://127.0.0.1:18086/api/auth/login',
         text: 'Failed to load resource: the server responded with a status of 401 ()'
       }
-    })
+    }
+    emit('Log.entryAdded', expectedHttpLog)
+    emit('Log.entryAdded', expectedHttpLog)
     page.allowHttpError(capture.requestRef, 'AUTH-02 wrong password')
     assert.doesNotThrow(() => page.assertEvidenceClean('AUTH-02 expected 401'))
 
