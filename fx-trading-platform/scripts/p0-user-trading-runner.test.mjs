@@ -2273,6 +2273,19 @@ test('default P0 browser launch journals native identity before readiness', asyn
   assert.equal(resource.processFingerprint, browser.processIdentity.processFingerprint)
 })
 
+test('AUTH-02 continuity ignores the generated account summary observation time', () => {
+  const beforeSnapshot = authAccountSnapshot({
+    accountId: '11111111-1111-4111-8111-111111111111'
+  })
+  beforeSnapshot.summary.lastSnapshotAt = '2026-08-02T19:55:47.281764143Z'
+  const afterSnapshot = structuredClone(beforeSnapshot)
+  afterSnapshot.summary.lastSnapshotAt = '2026-08-02T19:55:58.032946950Z'
+
+  assert.doesNotThrow(() => (
+    p0CoreContracts.assertAuth02SessionContinuity(beforeSnapshot, afterSnapshot)
+  ))
+})
+
 test('AUTH-02 fails closed when a login cycle changes account continuity', async () => {
   const definition = P0_CASES.find(({ id }) => id === 'AUTH-02')
   const beforeSnapshot = authAccountSnapshot({

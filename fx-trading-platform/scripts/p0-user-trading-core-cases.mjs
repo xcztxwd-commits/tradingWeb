@@ -910,12 +910,19 @@ const ACTIVE_ORDER_STATUSES = new Set([
   'CANCEL_PENDING'
 ])
 
-function assertAuth02SessionContinuity(beforeSnapshot, afterSnapshot) {
+export function assertAuth02SessionContinuity(beforeSnapshot, afterSnapshot) {
   assert.deepEqual(
-    safeAccountEvidence(afterSnapshot),
-    safeAccountEvidence(beforeSnapshot),
+    auth02SessionContinuityEvidence(afterSnapshot),
+    auth02SessionContinuityEvidence(beforeSnapshot),
     'AUTH-02 session continuity must preserve account, wallet, settings, and trading history'
   )
+}
+
+function auth02SessionContinuityEvidence(snapshot) {
+  const evidence = safeAccountEvidence(snapshot)
+  const summary = { ...evidence.data.summary }
+  delete summary.lastSnapshotAt
+  return { ...evidence, data: { ...evidence.data, summary } }
 }
 
 function assertAuth03DatabaseIsolation(database, dbA, dbB) {
