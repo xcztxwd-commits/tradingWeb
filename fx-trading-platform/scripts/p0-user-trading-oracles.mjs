@@ -321,11 +321,11 @@ export function withinTolerance(actual, expected, tolerance) {
   ) <= 0
 }
 
-export function alignPriceToTick(price, rules) {
+export function alignPriceToTick(price, rules, rounding = 'FLOOR') {
   return formatFixed(roundToStep(
     positive(price, 'price'),
     rulesTick(rules),
-    'FLOOR'
+    rounding
   ))
 }
 

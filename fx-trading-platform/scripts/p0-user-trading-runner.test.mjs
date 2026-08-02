@@ -4979,6 +4979,16 @@ test('authority bundle evidence is complete, fail-closed, and separates fixture 
   )
 })
 
+test('authority target preserves a spread when the market tick is wider than the baseline spread', () => {
+  assert.deepEqual(
+    smokeContracts.authorityTargetQuote(
+      { symbol: 'BTCUSDT', bid: '67142.66', ask: '67142.67' },
+      { ...BTC_RULES, tickSize: '0.1' }
+    ),
+    { symbol: 'BTCUSDT', bid: '87285.4', ask: '87285.5' }
+  )
+})
+
 test('authority baseline fill and Perp risk checks use independent market evidence', () => {
   const quote = {
     symbol: 'BTCUSDT',

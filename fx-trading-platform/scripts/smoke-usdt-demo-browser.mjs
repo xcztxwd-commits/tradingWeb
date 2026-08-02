@@ -7983,9 +7983,9 @@ function authorityUiQuoteComplete(quote) {
   }
 }
 
-function authorityTargetQuote(baseline, rules) {
+export function authorityTargetQuote(baseline, rules) {
   const bid = alignPriceToTick(String(Number(baseline.bid) * 1.3), rules)
-  const ask = alignPriceToTick(String(Number(baseline.ask) * 1.3), rules)
+  const ask = alignPriceToTick(String(Number(baseline.ask) * 1.3), rules, 'CEILING')
   if (Number(ask) <= Number(bid)) throw new Error('P0_AUTHORITY_TARGET_SPREAD_INVALID')
   return { symbol: baseline.symbol, bid, ask }
 }
