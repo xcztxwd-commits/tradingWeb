@@ -8052,7 +8052,10 @@ async function readAuthorityUiQuote(page, target, signal) {
     target.symbol
   )
   return waitFor(
-    () => authorityVisibleQuote(page),
+    async () => {
+      const quote = await authorityVisibleQuote(page)
+      return authorityUiQuoteComplete(quote) ? quote : null
+    },
     `visible authority quote ${target.symbol}`,
     15000,
     signal

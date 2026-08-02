@@ -5108,6 +5108,7 @@ function authorityGateContractContext({
   normalizeOverrides = false,
   restoredUiLagReads = 0,
   unalignedPerpBaseline = false,
+  transientUiPlaceholder = false,
   browserCloseFailure = false
 } = {}) {
   const baseline = {
@@ -5251,19 +5252,28 @@ function authorityGateContractContext({
   const page = (role) => ({
     role,
     target: null,
+    uiPlaceholderReads: 0,
     p0Options: {
       webBaseUrl: 'http://127.0.0.1:5199',
       adminBaseUrl: 'http://127.0.0.1:5200'
     },
     async navigate(url) {
-      if (url.includes('/trade/spot/')) this.target = { product: 'spot', symbol: 'BTCUSDT' }
+      if (url.includes('/trade/spot/')) {
+        this.target = { product: 'spot', symbol: 'BTCUSDT' }
+        this.uiPlaceholderReads = transientUiPlaceholder ? 1 : 0
+      }
       if (url.includes('/trade/perpetual/')) {
         this.target = { product: 'perpetual', symbol: 'BTCUSDT-PERP' }
+        this.uiPlaceholderReads = transientUiPlaceholder ? 1 : 0
       }
     },
     async waitForFunction() {},
     async evaluate() {
       if (!this.target) return null
+      if (this.uiPlaceholderReads > 0) {
+        this.uiPlaceholderReads -= 1
+        return { bid: '--', ask: '--' }
+      }
       const symbol = this.target.symbol
       const lagReads = restoredUiReads.get(symbol) ?? 0
       const visible = staleRestoredUi
@@ -5588,7 +5598,8 @@ test('runAuthorityBundleGate directly proves PASS, BLOCKED, and cleanup failure'
     movingProvider: true,
     normalizeOverrides: true,
     restoredUiLagReads: 2,
-    unalignedPerpBaseline: true
+    unalignedPerpBaseline: true,
+    transientUiPlaceholder: true
   })
   const movingPass = await smokeContracts.runAuthorityBundleGate(moving.context, {
     adminCredentials
