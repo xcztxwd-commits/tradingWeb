@@ -47,6 +47,10 @@ export async function runAuth01(context, definition, details = {}) {
       )
       const before = await checkpoint(context, definition, 'before', [page])
       const registration = await context.ui.registerViaUi(page, credentials)
+      await page.waitForFunction(
+        () => Boolean(document.getElementById('account-page-title')),
+        'AUTH-01 registered account view'
+      )
       const submitted = await checkpoint(context, definition, 'submitted', [page])
 
       const priorTimeOrigin = await page.evaluate(() => performance.timeOrigin)
@@ -54,13 +58,15 @@ export async function runAuth01(context, definition, details = {}) {
       await page.waitForFunction(
         (previousTimeOrigin) => performance.timeOrigin !== previousTimeOrigin
           && window.location.pathname === '/account/overview'
-          && document.readyState === 'complete',
+          && document.readyState === 'complete'
+          && Boolean(document.getElementById('account-page-title')),
         'AUTH-01 persisted browser session',
         priorTimeOrigin
       )
       await page.navigate(`${page.p0Options.webBaseUrl}/wallet`)
       await page.waitForFunction(
-        () => window.location.pathname === '/wallet',
+        () => window.location.pathname === '/wallet'
+          && Boolean(document.getElementById('wallet-overview')),
         'AUTH-01 wallet route'
       )
       await context.ui.openTradePanel(page, {

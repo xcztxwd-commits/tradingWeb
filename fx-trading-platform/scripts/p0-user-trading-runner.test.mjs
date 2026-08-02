@@ -2395,10 +2395,13 @@ test('AUTH fragments satisfy the merge contract and hash every checkpoint screen
   const definition = P0_CASES.find(({ id }) => id === 'AUTH-01')
   let persisted
   let screenshotSequence = 0
+  const readinessChecks = []
   const page = {
     p0Options: { webBaseUrl: 'http://127.0.0.1:5199' },
     async navigate() {},
-    async waitForFunction() {},
+    async waitForFunction(check, label) {
+      readinessChecks.push({ label, source: check.toString() })
+    },
     async evaluate() { return 1 },
     async send(method) {
       if (method === 'Page.captureScreenshot') {
@@ -2515,6 +2518,17 @@ test('AUTH fragments satisfy the merge contract and hash every checkpoint screen
     artifactHashes: result.artifactHashes
   }])
   assert.equal(persisted, result)
+  for (const [label, selector] of [
+    ['AUTH-01 registered account view', 'account-page-title'],
+    ['AUTH-01 persisted browser session', 'account-page-title'],
+    ['AUTH-01 wallet route', 'wallet-overview']
+  ]) {
+    assert.match(
+      readinessChecks.find((check) => check.label === label)?.source ?? '',
+      new RegExp(selector),
+      `${label} must wait for hydrated route content`
+    )
+  }
   assert.doesNotThrow(() => smokeContracts.mergeP0CaseFragments({
     id: definition.id,
     definition,
