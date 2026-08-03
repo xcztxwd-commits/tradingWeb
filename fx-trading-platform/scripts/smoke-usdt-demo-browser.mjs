@@ -7002,6 +7002,7 @@ export async function logoutViaUi(page) {
 
 export async function openTradePanel(page, target) {
   const route = resolveP0TradeRoute(target)
+  const expectedSymbol = decodeURIComponent(route.split('/').at(-1) ?? '').toUpperCase()
   const baseUrl = p0PageBaseUrl(page, 'webBaseUrl', 'WEB_BASE_URL', 'http://127.0.0.1:5199')
   const alreadyThere = await page.evaluate((expectedPath) => window.location.pathname === expectedPath, route)
   if (!alreadyThere) await page.navigate(`${baseUrl}${route}`)
@@ -7043,7 +7044,7 @@ export async function openTradePanel(page, target) {
     })
     assert(clicked, 'visible mobile Trade action must open the real order sheet')
   }
-  await page.waitForFunction((panelSelector) => {
+  await page.waitForFunction((panelSelector, symbol) => {
     const panels = [...document.querySelectorAll(panelSelector)]
     const visible = panels.filter((panel) => {
       const rect = panel.getBoundingClientRect()
@@ -7054,9 +7055,10 @@ export async function openTradePanel(page, target) {
         && style.display !== 'none'
         && style.visibility !== 'hidden'
         && Number(style.opacity) > 0
+        && panel.getAttribute('aria-label')?.toUpperCase().includes(symbol)
     })
     return visible.length === 1
-  }, `one visible scoped trade panel ${route}`, selector)
+  }, `one visible scoped trade panel ${route}`, selector, expectedSymbol)
   page.p0TradePanel = { selector, mobile, route }
   return page.p0TradePanel
 }

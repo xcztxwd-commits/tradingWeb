@@ -465,6 +465,7 @@ describe('real USDT demo browser smoke contract', () => {
 
   it('selects the one outer mobile trade panel instead of its two side forms', async () => {
     const visibleElement = {
+      getAttribute: (name) => name === 'aria-label' ? 'Trading panel for BTCUSDT' : null,
       getBoundingClientRect: () => ({
         width: 320,
         height: 640,
@@ -484,6 +485,7 @@ describe('real USDT demo browser smoke contract', () => {
       },
       async waitForFunction(check, label, ...args) {
         if (!label.startsWith('one visible scoped trade panel')) return
+        assert.equal(args.at(-1), 'BTCUSDT')
         const previousDocument = globalThis.document
         const previousWindow = globalThis.window
         const previousGetComputedStyle = globalThis.getComputedStyle
