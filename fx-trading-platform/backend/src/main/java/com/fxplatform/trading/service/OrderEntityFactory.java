@@ -3,6 +3,7 @@ import cn.hutool.core.date.DateUtil;
 
 import com.fxplatform.trading.entity.OrderEntity;
 import com.fxplatform.trading.enums.OrderStatus;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Component;
@@ -22,6 +23,7 @@ public class OrderEntityFactory {
     order.setSide(command.side());
     order.setOrderType(command.orderType());
     order.setStatus(OrderStatus.RECEIVED);
+    order.setHoldAmount(BigDecimal.ZERO);
     order.setLots(command.baseQuantity());
     order.setRequestedPrice(command.price());
     order.setClientOrderId(command.clientOrderId());

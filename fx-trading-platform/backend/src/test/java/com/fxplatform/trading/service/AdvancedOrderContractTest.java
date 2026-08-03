@@ -163,11 +163,13 @@ class AdvancedOrderContractTest {
     assertThat(entity.getActivationPrice()).isEqualByComparingTo("59000");
     assertThat(entity.getTrailingDelta()).isEqualByComparingTo("100");
     assertThat(entity.getTrailingRate()).isNull();
+    assertThat(entity.getHoldAmount()).isZero();
     assertThat(response.timeInForce()).isEqualTo(TimeInForce.FOK);
     assertThat(response.postOnly()).isFalse();
     assertThat(response.activationPrice()).isEqualByComparingTo("59000");
     assertThat(response.trailingDelta()).isEqualByComparingTo("100");
     assertThat(response.trailingRate()).isNull();
+    assertThat(response.holdAmount()).isZero();
     assertThat(response.trailingExtreme()).isEqualByComparingTo("60500");
 
     String baseline = OrderRequestFingerprint.calculate(Requests.order(
