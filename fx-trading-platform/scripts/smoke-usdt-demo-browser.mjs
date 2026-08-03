@@ -4876,14 +4876,32 @@ async function runProtectionAndFundingJourney() {
   assert(created.some((order) => order.protectionType === 'STOP_LOSS' && order.triggerExecutionType === 'LIMIT'), 'mixed protections must include LIMIT STOP_LOSS')
   assert(created.filter((order) => order.triggerExecutionType === 'LIMIT').every((order) => order.timeInForce === 'GTC'), 'triggered protection LIMIT may remain GTC')
 
-  const triggered = await waitFor(async () => {
-    const current = await orders({ symbol: PERP_SYMBOL, size: 200 })
-    const transitioned = current.filter((order) =>
-      created.some((candidate) => candidate.id === order.id)
-        && order.status !== 'PENDING_ACTIVATION'
-    )
-    return transitioned.length === 1 && transitioned[0].id === created[0].id ? transitioned[0] : false
-  }, 'exactly one deterministic protection trigger', 45000)
+  const triggerPrice = number(created[0].triggerPrice)
+  const triggerBid = trend.direction === 'UP'
+    ? aligned(triggerPrice + tick, tick, 'ceil')
+    : aligned(triggerPrice - tick * 3, tick, 'floor')
+  const triggerAsk = trend.direction === 'UP'
+    ? aligned(triggerPrice + tick * 3, tick, 'ceil')
+    : aligned(triggerPrice - tick, tick, 'floor')
+  await adminApi('/api/admin/market/test-control/overrides', {
+    method: 'POST',
+    body: { symbol: PERP_SYMBOL, bid: triggerBid, ask: triggerAsk, ttl: 'PT30S' }
+  })
+  let triggered
+  try {
+    triggered = await waitFor(async () => {
+      const current = await orders({ symbol: PERP_SYMBOL, size: 200 })
+      const transitioned = current.filter((order) =>
+        created.some((candidate) => candidate.id === order.id)
+          && order.status !== 'PENDING_ACTIVATION'
+      )
+      return transitioned.length === 1 && transitioned[0].id === created[0].id ? transitioned[0] : false
+    }, 'exactly one deterministic protection trigger', 45000)
+  } finally {
+    await adminApi(`/api/admin/market/test-control/overrides/${encodeURIComponent(PERP_SYMBOL)}`, {
+      method: 'DELETE'
+    })
+  }
   assert(triggered.triggerExecutionType === 'LIMIT', 'the deterministic protection trigger must exercise LIMIT execution')
   assert(triggered.timeInForce === 'GTC', 'triggered protection LIMIT must retain GTC')
   assert(!TERMINAL_ORDER_STATUSES.has(triggered.status), 'triggered far-price protection LIMIT must remain active instead of filling')

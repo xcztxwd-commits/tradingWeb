@@ -784,6 +784,22 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /openPositions\(\)\)\.every\(\(position\) => position\.productType !== 'LINEAR_PERP'\)/)
   })
 
+  it('drives the deterministic protection trigger through a scoped market override', () => {
+    const text = source()
+    const protectionSource = text.slice(
+      text.indexOf('async function runProtectionAndFundingJourney'),
+      text.indexOf('async function waitForDirectionalPerpMark')
+    )
+
+    assert.match(protectionSource, /const triggerPrice = number\(created\[0\]\.triggerPrice\)/)
+    assert.match(protectionSource, /await adminApi\('\/api\/admin\/market\/test-control\/overrides'/)
+    assert.match(protectionSource, /body: \{ symbol: PERP_SYMBOL, bid: triggerBid, ask: triggerAsk, ttl: 'PT30S' \}/)
+    assert.match(
+      protectionSource,
+      /try \{[\s\S]*exactly one deterministic protection trigger[\s\S]*\} finally \{[\s\S]*\/overrides\/\$\{encodeURIComponent\(PERP_SYMBOL\)\}[\s\S]*method: 'DELETE'/
+    )
+  })
+
   it('binds scheduler funding to fresh provider rows and exactly one target-position settlement', () => {
     const text = source()
 
