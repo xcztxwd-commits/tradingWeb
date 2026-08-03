@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
 import {
+  alignPriceToTick,
   DEMO_RATES,
   effectiveQuantityStep,
   floorToStep,
@@ -248,11 +249,11 @@ export async function runAuth03(context, definition, details = {}) {
       })
       await context.events.waitForStompEvent(pageA, 'TRADE_CREATED')
       await context.events.waitForStompEvent(pageA, 'BALANCE_UPDATED')
-      const quote = (await context.api.snapshotMarket('BTCUSDT')).quote
+      const market = await context.api.snapshotMarket('BTCUSDT')
       const pendingLimit = await context.ui.submitOrderViaUi(pageA, {
         side: 'BUY',
         orderType: 'LIMIT',
-        price: limitPriceBelow(quote),
+        price: limitPriceBelow(market),
         amount: '0.001'
       })
       const cancelAll = await context.ui.cancelAllOrdersViaUi(pageA)
@@ -1146,10 +1147,11 @@ function readIsolationLeak(foreignAccountId) {
   return document.body?.innerText?.includes(foreignAccountId) ?? false
 }
 
-function limitPriceBelow(quote) {
+function limitPriceBelow(market) {
+  const quote = market?.quote
   const value = Number(quote?.bid ?? quote?.mid ?? quote?.last)
   assert(Number.isFinite(value) && value > 0, 'AUTH-03 requires a positive BTCUSDT quote')
-  return (value * 0.5).toFixed(2)
+  return alignPriceToTick((value * 0.5).toFixed(10), rulesFor(market))
 }
 
 function assertNear(actual, expected, label) {

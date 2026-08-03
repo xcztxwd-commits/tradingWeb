@@ -2413,6 +2413,37 @@ test('AUTH-03 fails closed when USER_B Trades UI renders another user row', asyn
   )
 })
 
+test('AUTH-03 aligns its pending limit price to the authority tick size', async () => {
+  const definition = P0_CASES.find(({ id }) => id === 'AUTH-03')
+  const database = 'fx_p0_user_e2e_auth_03_tick_a1'
+  const submittedOrders = []
+  const context = auth03Context({
+    accountA: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    accountB: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    database,
+    dbB: {
+      database,
+      activeDemoAccounts: 1,
+      orders: 0,
+      trades: 0,
+      openPositions: 0,
+      fundingSettlements: 0
+    }
+  })
+  context.api.snapshotMarket = async () => ({
+    quote: { bid: 62925.9774096822 },
+    rules: { tickSize: '0.10' }
+  })
+  context.ui.submitOrderViaUi = async (_page, order) => {
+    submittedOrders.push(order)
+    return { requestRef: `submit-${order.orderType.toLowerCase()}` }
+  }
+
+  await p0CoreContracts.runAuth03(context, definition)
+
+  assert.equal(submittedOrders[1]?.price, '31462.90')
+})
+
 test('AUTH fragments satisfy the merge contract and hash every checkpoint screenshot', async (t) => {
   const artifactRoot = mkdtempSync(join(tmpdir(), 'p0-auth-fragment-contract-'))
   t.after(() => rmSync(artifactRoot, { recursive: true, force: true }))
@@ -2767,7 +2798,7 @@ function auth03Context({
         return snapshotByPage.get(page).shift()
       },
       async snapshotMarket() {
-        return { quote: { bid: 60000 } }
+        return { quote: { bid: 60000 }, rules: { tickSize: '0.10' } }
       },
       async user() {
         const error = new Error('forbidden')
