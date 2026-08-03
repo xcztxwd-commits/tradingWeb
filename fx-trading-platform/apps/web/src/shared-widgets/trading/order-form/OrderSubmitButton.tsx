@@ -18,7 +18,7 @@ export function OrderSubmitButton({ side, baseAsset, canTrade, disabledReason, l
   const { t } = useTranslation()
   const sideLabel = side === 'buy' ? t('trading.openLong') : t('trading.openShort')
   const label = loginRequired || !canTrade ? t('auth.loginAccount') : sideLabel
-  const disabled = submitting || Boolean(disabledReason) || (!canTrade && !loginRequired)
+  const disabled = submitting || Boolean(disabledReason)
 
   return (
     <button

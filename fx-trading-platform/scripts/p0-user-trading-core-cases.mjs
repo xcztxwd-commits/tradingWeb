@@ -7361,7 +7361,7 @@ function rulesFor(market) {
   return market.rules
 }
 
-function stepAlignedQuantity(market, preferred = 0.01) {
+export function stepAlignedQuantity(market, preferred = 0.01) {
   const rules = rulesFor(market)
   const stepText = effectiveQuantityStep(rules)
   const step = Number(stepText)
@@ -7377,7 +7377,7 @@ function stepAlignedQuantity(market, preferred = 0.01) {
   const minQuantity = Math.max(
     step,
     Number(rules.minQty ?? rules.minimumQuantity ?? step),
-    Number(rules.minNotional ?? rules.minimumNotional ?? 0) / mark,
+    Number(rules.minNotional ?? rules.minimumNotional ?? 5) / mark,
     preferred
   )
   const steps = Math.ceil((minQuantity - step * 1e-8) / step)

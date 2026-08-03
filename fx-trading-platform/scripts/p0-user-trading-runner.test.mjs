@@ -1740,6 +1740,13 @@ test('UI core handlers keep deterministic product, batch, reset, and evidence co
   )
 })
 
+test('CAT-02 quantity honors the Web minimum-notional fallback', () => {
+  assert.equal(p0CoreContracts.stepAlignedQuantity({
+    rules: { stepSize: '0.01', minQty: '0.01' },
+    reference: { mark: '151.48' }
+  }), '0.04')
+})
+
 test('PERP-01/02 lifecycle closes financial, target-mark, and cash-ledger evidence', () => {
   const corePath = fileURLToPath(new URL('./p0-user-trading-core-cases.mjs', import.meta.url))
   const source = readFileSync(corePath, 'utf8')
