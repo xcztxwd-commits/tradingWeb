@@ -7049,13 +7049,17 @@ export async function openTradePanel(page, target) {
     const visible = panels.filter((panel) => {
       const rect = panel.getBoundingClientRect()
       const style = getComputedStyle(panel)
+      const labels = [
+        panel.getAttribute('aria-label'),
+        panel.querySelector?.('section[aria-label][class*="trade-panel"]')?.getAttribute('aria-label')
+      ]
       return rect.width > 0 && rect.height > 0
         && rect.bottom > 0 && rect.right > 0
         && rect.top < window.innerHeight && rect.left < window.innerWidth
         && style.display !== 'none'
         && style.visibility !== 'hidden'
         && Number(style.opacity) > 0
-        && panel.getAttribute('aria-label')?.toUpperCase().includes(symbol)
+        && labels.some((label) => label?.toUpperCase().includes(symbol))
     })
     return visible.length === 1
   }, `one visible scoped trade panel ${route}`, selector, expectedSymbol)

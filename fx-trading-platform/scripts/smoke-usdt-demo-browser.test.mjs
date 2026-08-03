@@ -463,6 +463,57 @@ describe('real USDT demo browser smoke contract', () => {
     )
   })
 
+  it('matches the desktop panel shell through its nested symbol-scoped trade panel', async () => {
+    const panelShell = {
+      getAttribute: (name) => name === 'aria-label' ? 'Trade panel' : null,
+      querySelector: (selector) => selector.includes('trade-panel')
+        ? { getAttribute: (name) => name === 'aria-label' ? 'BTCUSDT trading panel' : null }
+        : null,
+      getBoundingClientRect: () => ({
+        width: 480,
+        height: 640,
+        top: 0,
+        right: 480,
+        bottom: 640,
+        left: 0
+      })
+    }
+    const page = {
+      async navigate() {},
+      async evaluate(check) {
+        if (check.toString().includes('window.location.pathname')) return true
+        throw new Error('unexpected desktop trade route probe')
+      },
+      async waitForFunction(check, label, ...args) {
+        if (!label.startsWith('one visible scoped trade panel')) return
+        assert.equal(args.at(-1), 'BTCUSDT')
+        const previousDocument = globalThis.document
+        const previousWindow = globalThis.window
+        const previousGetComputedStyle = globalThis.getComputedStyle
+        try {
+          globalThis.document = { querySelectorAll: () => [panelShell] }
+          globalThis.window = { innerHeight: 900, innerWidth: 1440 }
+          globalThis.getComputedStyle = () => ({
+            display: 'block',
+            visibility: 'visible',
+            opacity: '1'
+          })
+          assert.equal(check(...args), true)
+        } finally {
+          globalThis.document = previousDocument
+          globalThis.window = previousWindow
+          globalThis.getComputedStyle = previousGetComputedStyle
+        }
+      }
+    }
+
+    await openTradePanel(page, {
+      product: 'spot',
+      symbol: 'BTCUSDT',
+      mobile: false
+    })
+  })
+
   it('selects the one outer mobile trade panel instead of its two side forms', async () => {
     const visibleElement = {
       getAttribute: (name) => name === 'aria-label' ? 'Trading panel for BTCUSDT' : null,
