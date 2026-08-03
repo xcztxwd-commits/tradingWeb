@@ -7843,13 +7843,13 @@ async function inspectMarginActionAvailability(page, position) {
   assert.equal(opened, true, 'PERP-09 Position action dialog opener')
   await page.waitForFunction(
     () => Boolean(document.querySelector(
-      'section[role="dialog"][aria-label="Position action"]'
+      'section[role="dialog"]:has([role="tablist"][aria-label="Position action type"])'
     )),
     'PERP-09 Position action dialog'
   )
   const result = await page.evaluate(() => {
     const dialog = document.querySelector(
-      'section[role="dialog"][aria-label="Position action"]'
+      'section[role="dialog"]:has([role="tablist"][aria-label="Position action type"])'
     )
     const adjust = [...(dialog?.querySelectorAll('[role="tab"]') ?? [])]
       .find((button) => button.textContent?.trim() === 'Adjust margin')

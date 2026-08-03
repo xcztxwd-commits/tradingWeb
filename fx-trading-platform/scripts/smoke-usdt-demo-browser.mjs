@@ -7375,11 +7375,11 @@ export async function positionActionViaUi(page, options) {
   }, options.positionId, options.positionSide)
   assert(selected?.positionId, 'one real current-position row must open Position action')
   await page.waitForFunction(
-    () => Boolean(document.querySelector('[role="dialog"][aria-label="Position action"]')),
+    () => Boolean(document.querySelector('section[role="dialog"]:has([role="tablist"][aria-label="Position action type"])')),
     'Position action'
   )
   await waitFor(() => page.evaluate((values) => {
-    const dialog = document.querySelector('[role="dialog"][aria-label="Position action"]')
+    const dialog = document.querySelector('section[role="dialog"]:has([role="tablist"][aria-label="Position action type"])')
     if (!dialog) return false
     const actionLabel = {
       PARTIAL_CLOSE: 'Partial close',
@@ -7461,7 +7461,7 @@ export async function positionActionViaUi(page, options) {
     page,
     options.matcher ?? matcher,
     () => page.evaluate(() => {
-      const dialog = document.querySelector('[role="dialog"][aria-label="Position action"]')
+      const dialog = document.querySelector('section[role="dialog"]:has([role="tablist"][aria-label="Position action type"])')
       const confirm = dialog?.querySelector('footer button[type="submit"]')
       if (!confirm || confirm.disabled) {
         throw new Error('P0_POSITION_ACTION_CONFIRM_MISSING')
@@ -7473,7 +7473,7 @@ export async function positionActionViaUi(page, options) {
   finishP0UiMutation(page, capture, `Position action ${options.action}`, options)
   if (!options.expectFailure) {
     await page.waitForFunction((positionId, previousText, shouldDisappear) => {
-      if (document.querySelector('[role="dialog"][aria-label="Position action"]')) {
+      if (document.querySelector('section[role="dialog"]:has([role="tablist"][aria-label="Position action type"])')) {
         return false
       }
       const row = [...document.querySelectorAll('tbody tr')]

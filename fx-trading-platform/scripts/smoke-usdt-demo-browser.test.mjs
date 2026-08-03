@@ -1122,6 +1122,25 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(sharedUiSource, /page\.allowHttpError/)
   })
 
+  it('follows labelled Position action dialogs instead of the removed aria-label', () => {
+    const text = source()
+    const positionSource = text.slice(
+      text.indexOf('export async function positionActionViaUi'),
+      text.indexOf('export async function closeAllPositionsViaUi')
+    )
+    const coreSource = readFileSync(
+      join(scriptsDir, 'p0-user-trading-core-cases.mjs'),
+      'utf8'
+    )
+    const legacySelector = '[role="dialog"][aria-label="Position action"]'
+    const labelledControl = '[role="tablist"][aria-label="Position action type"]'
+
+    assert.equal(positionSource.includes(legacySelector), false)
+    assert.equal(positionSource.includes(labelledControl), true)
+    assert.equal(coreSource.includes(legacySelector), false)
+    assert.equal(coreSource.includes(labelledControl), true)
+  })
+
   it('waits for hydrated UI controls and the refreshed target position row', () => {
     const text = source()
     const settingsSource = text.slice(
