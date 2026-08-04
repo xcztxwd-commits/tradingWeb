@@ -1594,9 +1594,7 @@ async function runCatalogGuardJourney(scope) {
       legal,
       (body) => ({
         ...body,
-        symbol: 'BTCUSDT',
-        marginMode: 'CROSS',
-        reduceOnly: true,
+        symbol: 'EURUSD',
         idempotencyKey: randomUUID(),
         clientOrderId: randomUUID()
       }),
@@ -1614,9 +1612,8 @@ async function runCatalogGuardJourney(scope) {
       status: 'REJECTED',
       kind: 'L7_NON_P0_PRODUCT',
       requestRef: productProbe.requestRef,
-      symbol: 'BTCUSDT',
-      marginMode: 'CROSS',
-      reduceOnly: true,
+      symbol: 'EURUSD',
+      productType: 'FX_MARGIN',
       errorCode: responseCode(productProbe)
     })
 

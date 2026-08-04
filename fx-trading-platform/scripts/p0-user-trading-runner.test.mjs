@@ -1649,9 +1649,13 @@ test('UI core handlers keep deterministic product, batch, reset, and evidence co
     'async function runSpotMarketLifecycle'
   )
   assert.match(catalogGuard, /assert\(reachability\.tradingMenu/)
-  assert.match(catalogGuard, /symbol:\s*'BTCUSDT'/)
-  assert.match(catalogGuard, /marginMode:\s*'CROSS'/)
-  assert.match(catalogGuard, /reduceOnly:\s*true/)
+  const productProbe = catalogGuard.slice(
+    catalogGuard.indexOf('const productProbe'),
+    catalogGuard.indexOf('const symbolProbe')
+  )
+  assert.match(productProbe, /symbol:\s*'EURUSD'/)
+  assert.doesNotMatch(productProbe, /marginMode:\s*'CROSS'/)
+  assert.doesNotMatch(productProbe, /reduceOnly:\s*true/)
   assert.doesNotMatch(catalogGuard, /product_type NOT IN/)
 
   const closeAll = section(

@@ -15,17 +15,21 @@ import com.fxplatform.common.exception.BusinessException;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.execution.ExecutionAdapter;
 import com.fxplatform.execution.DemoExecutionGuard;
+import com.fxplatform.execution.ExecutionMode;
+import com.fxplatform.execution.ExecutionProperties;
 import com.fxplatform.execution.ExecutionResult;
 import com.fxplatform.execution.ExecutableMarketSnapshot;
 import com.fxplatform.execution.FullFillCoordinator;
 import com.fxplatform.execution.FullFillRequest;
 import com.fxplatform.execution.FullFillResult;
 import com.fxplatform.ledger.service.LedgerService;
+import com.fxplatform.market.entity.SymbolEntity;
 import com.fxplatform.market.model.MarketSourceMode;
 import com.fxplatform.market.model.ProductType;
 import com.fxplatform.market.model.SpotMarketBundle;
 import com.fxplatform.market.model.PerpetualMarketBundle;
 import com.fxplatform.market.provider.MarketBundleResolver;
+import com.fxplatform.market.repository.SymbolRepository;
 import com.fxplatform.risk.service.RiskCheckService;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.request.UpdateOrderRequest;
@@ -107,6 +111,9 @@ class OrderServiceTest {
   private MarketBundleResolver marketBundleResolver;
 
   @Mock
+  private SymbolRepository symbolRepository;
+
+  @Mock
   private FullFillCoordinator fullFillCoordinator;
 
   @Mock
@@ -144,6 +151,35 @@ class OrderServiceTest {
         .createOrder(principal, request))
         .isInstanceOfSatisfying(BusinessException.class,
             exception -> assertThat(exception.getCode()).isEqualTo("SYMBOL_NOT_ALLOWED"));
+
+    verify(marketBundleResolver, never()).resolveSpot(any(), any());
+    verify(fullFillCoordinator, never()).execute(any(), any());
+    verify(transactionExecutor, never()).execute(any());
+  }
+
+  @Test
+  void configuredNonP0ProductUsesCatalogTypeAtGuard() {
+    UUID userId = UUID.randomUUID();
+    UUID accountId = UUID.randomUUID();
+    UserPrincipal principal = new UserPrincipal(userId, "trader@example.com", "TRADER");
+    CreateOrderRequest request = advancedOrder(
+        accountId, "EURUSD", OrderType.MARKET, TimeInForce.GTC, false,
+        "non-p0-product");
+    TradingAccountEntity account = demoAccount(userId, accountId);
+    SymbolEntity symbol = new SymbolEntity();
+    symbol.setSymbol("EURUSD");
+    symbol.setProductType(ProductType.FX_MARGIN);
+    ExecutionProperties properties = new ExecutionProperties();
+    properties.setMode(ExecutionMode.DEMO);
+
+    when(accountRepository.findByIdAndUserId(accountId, userId)).thenReturn(Optional.of(account));
+    when(symbolRepository.findBySymbol("EURUSD")).thenReturn(Optional.of(symbol));
+
+    assertThatThrownBy(() -> orderServiceWithSymbolRepository(
+        org.mockito.Mockito.mock(OrderEventService.class),
+        new DemoExecutionGuard(properties, symbolRepository)).createOrder(principal, request))
+        .isInstanceOfSatisfying(BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("PRODUCT_NOT_ALLOWED"));
 
     verify(marketBundleResolver, never()).resolveSpot(any(), any());
     verify(fullFillCoordinator, never()).execute(any(), any());
@@ -1673,6 +1709,36 @@ class OrderServiceTest {
         marketBundleResolver,
         fullFillCoordinator,
         transactionExecutor);
+  }
+
+  private OrderService orderServiceWithSymbolRepository(
+      OrderEventService orderEventService,
+      DemoExecutionGuard guard
+  ) {
+    return new OrderService(
+        orderRepository,
+        accountRepository,
+        riskCheckService,
+        executionAdapter,
+        new OrderFillService(orderRepository, tradeRepository, positionRepository, accountRepository, ledgerService),
+        ledgerService,
+        walletService,
+        orderEventService,
+        new OrderCommandFactory(),
+        new OrderEntityFactory(),
+        new OrderResponseMapper(),
+        new OrderStatusPolicy(),
+        guard,
+        walletBalanceRepository,
+        positionRepository,
+        spotPositionService,
+        marketBundleResolver,
+        fullFillCoordinator,
+        transactionExecutor,
+        symbolRepository,
+        null,
+        null,
+        null);
   }
 
   @Test

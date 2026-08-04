@@ -3851,6 +3851,14 @@ public class OrderService {
   }
 
   private ProductType requestedProduct(String canonicalSymbol) {
+    if (symbolRepository != null) {
+      ProductType configuredProduct = symbolRepository.findBySymbol(canonicalSymbol)
+          .map(SymbolEntity::getProductType)
+          .orElse(null);
+      if (configuredProduct != null) {
+        return configuredProduct;
+      }
+    }
     return canonicalSymbol.endsWith("-PERP") ? ProductType.LINEAR_PERP : ProductType.CRYPTO_SPOT;
   }
 
