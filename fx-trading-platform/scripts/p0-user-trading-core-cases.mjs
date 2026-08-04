@@ -8194,6 +8194,8 @@ async function probeDisabledOrderSubmission(page, order) {
 }
 
 export function tradingStateFingerprint(snapshot) {
+  const summary = { ...(snapshot.summary ?? {}) }
+  delete summary.lastSnapshotAt
   const canonicalize = (value) => {
     if (Array.isArray(value)) {
       return value
@@ -8213,7 +8215,7 @@ export function tradingStateFingerprint(snapshot) {
   }
   return canonicalize({
     wallets: snapshot.wallets ?? [],
-    summary: snapshot.summary ?? {},
+    summary,
     orders: snapshot.orders ?? [],
     trades: snapshot.trades ?? [],
     positions: snapshot.positions ?? [],

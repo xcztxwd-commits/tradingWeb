@@ -2308,6 +2308,26 @@ test('AUTH-02 continuity ignores the generated account summary observation time'
   ))
 })
 
+test('zero-mutation fingerprint ignores the generated account summary observation time', () => {
+  const beforeSnapshot = authAccountSnapshot({
+    accountId: '11111111-1111-4111-8111-111111111111'
+  })
+  beforeSnapshot.summary.lastSnapshotAt = '2026-08-04T03:36:04.516598157Z'
+  const afterSnapshot = structuredClone(beforeSnapshot)
+  afterSnapshot.summary.lastSnapshotAt = '2026-08-04T03:36:05.458025137Z'
+
+  assert.deepEqual(
+    p0CoreContracts.tradingStateFingerprint(afterSnapshot),
+    p0CoreContracts.tradingStateFingerprint(beforeSnapshot)
+  )
+
+  afterSnapshot.summary.balance = 49999
+  assert.notDeepEqual(
+    p0CoreContracts.tradingStateFingerprint(afterSnapshot),
+    p0CoreContracts.tradingStateFingerprint(beforeSnapshot)
+  )
+})
+
 test('AUTH-02 fails closed when a login cycle changes account continuity', async () => {
   const definition = P0_CASES.find(({ id }) => id === 'AUTH-02')
   const beforeSnapshot = authAccountSnapshot({
