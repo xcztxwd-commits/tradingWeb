@@ -1575,6 +1575,14 @@ test('UI core handlers keep deterministic product, batch, reset, and evidence co
     spotAuthority,
     /scope\.context\.authority\?\.authorityBundleFixture\s*===\s*'PASS'/
   )
+  assert.match(spotAuthority, /scope\.context\.fixtures\.providerBindings\(/)
+  assert.match(spotAuthority, /enabledProviders:\s*\[\s*'local-spot'\s*\]/)
+  assert.match(spotAuthority, /restore-fixed-spot-provider-binding/)
+  assert(
+    spotAuthority.indexOf('fixtures.providerBindings')
+      < spotAuthority.indexOf('let market = await scope.context.api.snapshotMarket'),
+    'fixed Spot authority cases must select the local complete bundle before reading the market'
+  )
   assert.match(spotAuthority, /scope\.context\.fixtures\.marketOverride\(/)
   assert.equal(
     [...spot03.matchAll(/assertSpotTradeLedger\(/g)].length,

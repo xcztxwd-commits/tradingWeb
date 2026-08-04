@@ -7277,15 +7277,34 @@ function assertSpotTradeLedger(snapshot, trade, rules, label) {
 }
 
 async function prepareSpotAuthorityMarket(scope, symbol, label) {
-  let market = await scope.context.api.snapshotMarket(symbol)
   const fixedAuthority = (
     scope.context.authority?.authorityBundleFixture === 'PASS'
   )
-  if (!fixedAuthority) return { market, fixedAuthority }
+  if (!fixedAuthority) {
+    return {
+      market: await scope.context.api.snapshotMarket(symbol),
+      fixedAuthority
+    }
+  }
 
+  const adminPage = await scope.getAdminPage()
+  const bindingFixture = await scope.context.fixtures.providerBindings(adminPage, {
+    symbol,
+    enabledProviders: ['local-spot']
+  })
+  scope.registerFixtureRestore({
+    action: 'restore-fixed-spot-provider-binding',
+    symbol
+  }, bindingFixture.restore)
+  scope.fixtureActions.push({
+    action: 'set-fixed-spot-provider-binding',
+    symbol,
+    before: bindingFixture.before,
+    after: bindingFixture.after
+  })
+  let market = await scope.context.api.snapshotMarket(symbol)
   const bid = quoteDecimal(market, 'bid')
   const ask = quoteDecimal(market, 'ask')
-  const adminPage = await scope.getAdminPage()
   const fixture = await scope.context.fixtures.marketOverride(adminPage, {
     symbol,
     bid,
