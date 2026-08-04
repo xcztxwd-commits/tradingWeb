@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
+import * as coreContracts from './p0-user-trading-core-cases.mjs'
+
 const source = readFileSync(
   fileURLToPath(new URL('./p0-user-trading-core-cases.mjs', import.meta.url)),
   'utf8'
@@ -15,6 +17,32 @@ function section(start, end) {
   assert.notEqual(to, -1, end)
   return source.slice(from, to)
 }
+
+test('Spot wallet delta treats a missing pre-mutation asset wallet as zero', () => {
+  assert.equal(typeof coreContracts.findPreMutationWalletOrZero, 'function')
+  assert.deepEqual(
+    coreContracts.findPreMutationWalletOrZero({ wallets: [] }, 'SPOT', 'BTC'),
+    {
+      walletType: 'SPOT',
+      asset: 'BTC',
+      total: '0',
+      available: '0',
+      locked: '0'
+    }
+  )
+
+  const existing = {
+    walletType: 'SPOT',
+    asset: 'BTC',
+    total: '1',
+    available: '0.75',
+    locked: '0.25'
+  }
+  assert.equal(
+    coreContracts.findPreMutationWalletOrZero({ wallets: [existing] }, 'SPOT', 'BTC'),
+    existing
+  )
+})
 
 test('SPOT-01/03 bind every fill to fresh pricing, fee, wallet, and position evidence', () => {
   const spot03 = section(

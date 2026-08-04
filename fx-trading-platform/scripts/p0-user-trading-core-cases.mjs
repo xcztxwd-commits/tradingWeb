@@ -7170,6 +7170,18 @@ function findWallet(snapshot, walletType, asset) {
   return wallet
 }
 
+export function findPreMutationWalletOrZero(snapshot, walletType, asset) {
+  return snapshot.wallets.find((candidate) => (
+    candidate.walletType === walletType && candidate.asset === asset
+  )) ?? {
+    walletType,
+    asset,
+    total: '0',
+    available: '0',
+    locked: '0'
+  }
+}
+
 function findSymbolSettings(snapshot, symbol) {
   const settings = snapshot.settings.symbols?.find((candidate) => (
     candidate.symbol === symbol
@@ -7325,7 +7337,7 @@ function assertSingleFullFillMutation(before, result, label) {
 
 function assertSpotWalletDelta(before, after, expected, rules, label) {
   return expected.map((delta) => {
-    const beforeWallet = findWallet(before, 'SPOT', delta.asset)
+    const beforeWallet = findPreMutationWalletOrZero(before, 'SPOT', delta.asset)
     const afterWallet = findWallet(after, 'SPOT', delta.asset)
     for (const field of ['total', 'available', 'locked']) {
       assertDecimalClose(
