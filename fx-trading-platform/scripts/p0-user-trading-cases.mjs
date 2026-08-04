@@ -163,7 +163,7 @@ const REQUIRED_SUBRUN_OVERRIDES = {
 }
 
 const WHOLE_CASE_AUTHORITY = new Set([
-  ...sequence(5, 10).map((number) => `SPOT-${String(number).padStart(2, '0')}`),
+  ...sequence(1, 10).map((number) => `SPOT-${String(number).padStart(2, '0')}`),
   'PERP-04',
   'PERP-05',
   'PERP-11',

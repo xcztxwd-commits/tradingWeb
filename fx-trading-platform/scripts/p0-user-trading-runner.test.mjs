@@ -1253,7 +1253,7 @@ test('phase, profile, viewport and authority assignments match the approved matr
   }
 
   const wholeCaseAuthority = new Set([
-    ...ids('SPOT', range(5, 10)),
+    ...ids('SPOT', range(1, 10)),
     'PERP-04', 'PERP-05', 'PERP-11',
     'PROT-02', 'PROT-03', 'PROT-04',
     ...ids('LIQ', range(1, 4)),
@@ -3151,6 +3151,20 @@ test('P0 phase planner distinguishes selected partial all complete and cleanup v
   assert.equal(selected.includesCanonical, false)
   assert.equal(selected.fullMatrix, false)
   assert.equal(selected.verdict, 'PARTIAL_PASS')
+
+  const selectedSpot = p0CaseContracts.planP0Execution(
+    p0CaseContracts.parseP0Cli([
+      '--suite=p0',
+      '--phase=selected',
+      '--run-id=p0-selected-spot-plan-a1',
+      '--case=SPOT-02'
+    ]),
+    P0_CASES
+  )
+  assert.deepEqual(
+    selectedSpot.phases,
+    ['preflight', 'authority', 'selected', 'report', 'cleanup']
+  )
 
   const all = p0CaseContracts.planP0Execution(
     p0CaseContracts.parseP0Cli(['--suite=p0', '--run-id=p0-all-plan-a1']),
@@ -5849,7 +5863,7 @@ test('authority fixture BLOCKED blocks only declared dependent subruns and execu
     authorityBundleFixture: 'BLOCKED'
   }
   const wholeCase = P0_CASES.find(({ id }) => id === 'SPOT-05')
-  const independent = P0_CASES.find(({ id }) => id === 'SPOT-01')
+  const independent = P0_CASES.find(({ id }) => id === 'CAT-01')
   assert.deepEqual(
     smokeContracts.authorityBlockedSubruns(
       wholeCase,
@@ -6421,7 +6435,7 @@ test('managed backend receives verified compose credentials and exact database i
     '--suite=p0',
     '--run-id=p0-review1-managed-database-a1',
     '--phase=selected',
-    '--case=SPOT-01'
+    '--case=CAT-01'
   ])
 
   await smokeContracts.runP0Suite(options, dependencies)
@@ -6436,7 +6450,7 @@ test('managed backend receives verified compose credentials and exact database i
     assert.ok(probeAfterBusiness > business, segmentName)
   }
   const selectedSegment = started.at(-1).segmentName
-  assert.ok(events.indexOf(`probe:${selectedSegment}`) < events.indexOf('dispatch:SPOT-01'))
+  assert.ok(events.indexOf(`probe:${selectedSegment}`) < events.indexOf('dispatch:CAT-01'))
   assert.equal(databases.size, 0)
   assert.equal(redisOwner, null)
 })
