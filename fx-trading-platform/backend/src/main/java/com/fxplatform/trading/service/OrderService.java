@@ -393,9 +393,8 @@ public class OrderService {
     }
 
     TradingAccountEntity accountSnapshot = requireOwnedAccount(principal.id(), orderSnapshot.getAccountId());
-    ProductType productType = requestedProduct(orderSnapshot.getSymbol());
+    ProductType productType = requireDemoProduct(accountSnapshot, orderSnapshot.getSymbol());
     boolean spotWalletHold = riskCheckService.isSpotSymbol(orderSnapshot.getSymbol());
-    demoExecutionGuard.requireDemo(accountSnapshot, productType, orderSnapshot.getSymbol());
 
     TradingAccountEntity account = accountRepository
         .findByIdAndUserIdForUpdate(orderSnapshot.getAccountId(), principal.id())
@@ -503,7 +502,7 @@ public class OrderService {
           "OCO_ORDER_NOT_MODIFIABLE",
           "OCO legs cannot be modified independently");
     }
-    ProductType productType = requestedProduct(orderSnapshot.getSymbol());
+    ProductType productType = inferredProduct(orderSnapshot.getSymbol());
     if (productType == ProductType.CRYPTO_SPOT && isP0Symbol(orderSnapshot.getSymbol())) {
       if (!task6SpotReady()) {
         throw new BusinessException(
@@ -908,8 +907,7 @@ public class OrderService {
     }
 
     TradingAccountEntity accountSnapshot = requireOwnedAccount(principal.id(), orderSnapshot.getAccountId());
-    ProductType productType = requestedProduct(orderSnapshot.getSymbol());
-    demoExecutionGuard.requireDemo(accountSnapshot, productType, orderSnapshot.getSymbol());
+    ProductType productType = requireDemoProduct(accountSnapshot, orderSnapshot.getSymbol());
     BigDecimal oldHold = orZero(orderSnapshot.getHoldAmount());
     boolean spotWalletHold = riskCheckService.isSpotSymbol(orderSnapshot.getSymbol());
     CreateOrderRequest riskRequest = new CreateOrderRequest(
@@ -1421,7 +1419,7 @@ public class OrderService {
           "INVALID_ORDER_TYPE",
           "Post Only, IOC, FOK, and STOP_LIMIT require a P0 simple-matching symbol");
     }
-    ProductType productType = requestedProduct(command.symbol());
+    ProductType productType = inferredProduct(command.symbol());
     if (productType == ProductType.CRYPTO_SPOT && !task6SpotReady()) {
       throw new BusinessException(
           ErrorCode.EXECUTION_UNAVAILABLE,
@@ -1439,8 +1437,7 @@ public class OrderService {
     requireSimpleAdvancedExecutionAuthority(command, request);
     TradingAccountEntity accountSnapshot = accountRepository.findByIdAndUserId(command.accountId(), command.userId())
         .orElseThrow(() -> new BusinessException("ACCOUNT_NOT_FOUND", "Account not found"));
-    ProductType productType = requestedProduct(command.symbol());
-    demoExecutionGuard.requireDemo(accountSnapshot, productType, command.symbol());
+    ProductType productType = requireDemoProduct(accountSnapshot, command.symbol());
 
     if (request.orderType() == OrderType.TRAILING_STOP_MARKET) {
       if (productType != ProductType.LINEAR_PERP) {
@@ -3850,6 +3847,21 @@ public class OrderService {
     return order.getPrice() != null ? order.getPrice() : order.getRequestedPrice();
   }
 
+  private ProductType requireDemoProduct(
+      TradingAccountEntity account,
+      String canonicalSymbol
+  ) {
+    ProductType productType;
+    if (isP0Symbol(canonicalSymbol)) {
+      productType = inferredProduct(canonicalSymbol);
+    } else {
+      demoExecutionGuard.requireDemoAccount(account);
+      productType = requestedProduct(canonicalSymbol);
+    }
+    demoExecutionGuard.requireDemo(account, productType, canonicalSymbol);
+    return productType;
+  }
+
   private ProductType requestedProduct(String canonicalSymbol) {
     if (symbolRepository != null) {
       ProductType configuredProduct = symbolRepository.findBySymbol(canonicalSymbol)
@@ -3859,6 +3871,10 @@ public class OrderService {
         return configuredProduct;
       }
     }
+    return inferredProduct(canonicalSymbol);
+  }
+
+  private static ProductType inferredProduct(String canonicalSymbol) {
     return canonicalSymbol.endsWith("-PERP") ? ProductType.LINEAR_PERP : ProductType.CRYPTO_SPOT;
   }
 
