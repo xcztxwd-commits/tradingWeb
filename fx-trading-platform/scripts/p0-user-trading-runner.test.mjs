@@ -1624,6 +1624,20 @@ test('UI core handlers keep deterministic product, batch, reset, and evidence co
     spotValidation,
     /prepareSpotAuthorityMarket\(\s*scope,\s*'BTCUSDT',\s*'SPOT-02'\s*\)/
   )
+  assert.doesNotMatch(spotValidation, /quantity:\s*50001/)
+  assert.match(
+    spotValidation,
+    /const quoteAvailable = Number\(\s*findWallet\(\s*cleanBaseline\.snapshot,\s*'SPOT',\s*'USDT'\s*\)\.available\s*\)/
+  )
+  assert.match(
+    spotValidation,
+    /const quoteStepSpend = Number\(quoteDecimal\(market,\s*'ask'\)\)\s*\*\s*Number\(effectiveQuantityStep\(rules\)\)/
+  )
+  assert.match(
+    spotValidation,
+    /const insufficientBudget = Math\.ceil\(quoteAvailable \+ quoteStepSpend \* 2\)/
+  )
+  assert.match(spotValidation, /quantity:\s*insufficientBudget/)
   assert.doesNotMatch(spotValidation, /probe\.submitDisabled,\s*true/)
   const invalidInputProbe = section(
     'async function probeDisabledOrderSubmission',

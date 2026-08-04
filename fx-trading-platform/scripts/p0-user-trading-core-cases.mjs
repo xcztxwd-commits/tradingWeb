@@ -6229,12 +6229,18 @@ async function runSpotValidationJourney(scope) {
     errorCode: responseCode(invalidUnit)
   })
 
+  const quoteAvailable = Number(
+    findWallet(cleanBaseline.snapshot, 'SPOT', 'USDT').available
+  )
+  const quoteStepSpend = Number(quoteDecimal(market, 'ask'))
+    * Number(effectiveQuantityStep(rules))
+  const insufficientBudget = Math.ceil(quoteAvailable + quoteStepSpend * 2)
   const insufficient = await replayCapturedMutation(
     scope,
     seed,
     (body) => ({
       ...body,
-      quantity: 50001,
+      quantity: insufficientBudget,
       idempotencyKey: randomUUID(),
       clientOrderId: randomUUID()
     }),
