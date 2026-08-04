@@ -5113,8 +5113,8 @@ async function prepareSelectedFundingRate() {
   const externalPhaseStartedAt = Date.now()
   await clearFundingRatesForSymbol(PERP_SYMBOL)
   try {
-    const config = await waitForFundingConfigSource(PERP_SYMBOL, ['BINANCE', 'OKX'], 'PUBLIC_EXTERNAL', null, 45000)
-    const expectedProviders = config.actualSource === 'BINANCE' ? ['binance-usdm'] : ['okx-swap']
+    await waitForFundingConfigSource(PERP_SYMBOL, ['BINANCE', 'OKX'], 'PUBLIC_EXTERNAL', null, 45000)
+    const expectedProviders = ['binance-usdm', 'okx-swap']
     const rate = await waitForRealFundingRate(
       PERP_SYMBOL,
       expectedProviders,
@@ -5122,9 +5122,6 @@ async function prepareSelectedFundingRate() {
       45000,
       externalPhaseStartedAt
     )
-    const expectedActualSource = rate.providerCode === 'binance-usdm' ? 'BINANCE' : 'OKX'
-    assert(config.actualSource === expectedActualSource, `selected funding config must expose actualSource=${expectedActualSource}, got ${config.actualSource}`)
-    assert(config.sourceMode === 'PUBLIC_EXTERNAL', `selected external funding must expose PUBLIC_EXTERNAL, got ${config.sourceMode}`)
     return { rate, externalUnavailable: false }
   } catch (externalError) {
     const config = await fundingConfig(PERP_SYMBOL)

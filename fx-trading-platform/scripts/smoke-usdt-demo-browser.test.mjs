@@ -853,12 +853,13 @@ describe('real USDT demo browser smoke contract', () => {
     )
   })
 
-  it('binds scheduler funding to fresh provider rows and exactly one target-position settlement', () => {
+  it('binds scheduler funding to fresh provider rows across current/history source failover and exactly one target-position settlement', () => {
     const text = source()
 
-    assert.match(text, /\['binance-usdm', 'okx-swap'\]/)
+    assert.match(text, /const expectedProviders = \['binance-usdm', 'okx-swap'\]/)
     assert.match(text, /created_at >= to_timestamp/)
-    assert.match(text, /actualSource === expectedActualSource/)
+    assert.doesNotMatch(text, /config\.actualSource === 'BINANCE' \? \['binance-usdm'\] : \['okx-swap'\]/)
+    assert.doesNotMatch(text, /config\.actualSource === expectedActualSource/)
     assert.match(text, /sourceMode === 'PUBLIC_EXTERNAL'/)
     assert.match(text, /async function waitForFundingConfigSource/)
     assert.match(text, /Date\.parse\(candidate\.asOf\) >= asOfOrAfterMs/)
