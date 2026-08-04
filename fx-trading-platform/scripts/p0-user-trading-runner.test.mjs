@@ -1612,6 +1612,10 @@ test('UI core handlers keep deterministic product, batch, reset, and evidence co
   )
   assert.match(spotValidation, /probe\.guarded/)
   assert.match(spotValidation, /emptySell\.guarded/)
+  assert.match(
+    spotValidation,
+    /prepareSpotAuthorityMarket\(\s*scope,\s*'BTCUSDT',\s*'SPOT-02'\s*\)/
+  )
   assert.doesNotMatch(spotValidation, /probe\.submitDisabled,\s*true/)
   const invalidInputProbe = section(
     'async function probeDisabledOrderSubmission',

@@ -6144,7 +6144,7 @@ async function runCloseAllJourney(scope) {
 
 async function runSpotValidationJourney(scope) {
   const { context, page } = scope
-  const market = await context.api.snapshotMarket('BTCUSDT')
+  const { market } = await prepareSpotAuthorityMarket(scope, 'BTCUSDT', 'SPOT-02')
   const rules = rulesFor(market)
   await context.ui.openTradePanel(page, {
     product: 'spot',
