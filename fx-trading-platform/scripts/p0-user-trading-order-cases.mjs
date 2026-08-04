@@ -408,10 +408,12 @@ async function runSpot05Journey(scope) {
   assert.equal(filled.order.filledQuantity, filled.order.quantity)
   assertNear(filled.order.remainingQuantity, 0, 'SPOT-05 remaining quantity')
   assert.equal(filled.trade.liquidityRole, 'MAKER')
-  assert.equal(filled.trade.feeAsset, 'BTC')
+  assert.equal(filled.trade.feeAsset, 'USDT')
   assertDecimalClose(
     filled.trade.fee,
-    Number(filled.trade.lots) * Number(DEMO_RATES.makerFeeRate),
+    Number(filled.trade.lots)
+      * Number(filled.trade.price)
+      * Number(DEMO_RATES.makerFeeRate),
     tolerancesFromRules(rules).amount,
     'SPOT-05 maker fee'
   )
@@ -576,12 +578,14 @@ async function runSpot06Journey(scope) {
   )
   assert.notEqual(Number(filled.trade.price), Number(triggerPrice))
   assert.equal(filled.trade.liquidityRole, 'TAKER')
-  assert.equal(filled.trade.feeAsset, 'BTC')
+  assert.equal(filled.trade.feeAsset, 'USDT')
   assertDecimalClose(
     filled.trade.fee,
-    Number(filled.trade.lots) * Number(DEMO_RATES.takerFeeRate),
+    Number(filled.trade.lots)
+      * Number(filled.trade.price)
+      * Number(DEMO_RATES.takerFeeRate),
     tolerancesFromRules(rules).amount,
-    'SPOT-06 base fee'
+    'SPOT-06 quote fee'
   )
   assert.equal(
     filled.snapshot.trades.filter(({ orderId }) => orderId === pending.order.id).length,
@@ -2042,7 +2046,7 @@ function assertSpotTradeLedger(db, trade, rules, label) {
           amount: String(-Number(trade.lots) * Number(trade.price))
         },
         SPOT_BUY_CREDIT: { asset: 'BTC', amount: String(trade.lots) },
-        TRADE_FEE: { asset: 'BTC', amount: negativeAmount(trade.fee) }
+        TRADE_FEE: { asset: 'USDT', amount: negativeAmount(trade.fee) }
       }
     : {
         SPOT_SELL_DEBIT: { asset: 'BTC', amount: negativeAmount(trade.lots) },

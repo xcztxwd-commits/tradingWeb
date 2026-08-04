@@ -386,34 +386,38 @@ export function spotBuyOracle({
   fillPrice,
   feeRate = DEMO_RATES.takerFeeRate,
   previousGrossQuoteCost = '0',
-  previousNetBase = '0',
+  previousBase = '0',
   rules
 }) {
   const budget = positive(quoteBudget, 'quoteBudget')
   const price = positive(fillPrice, 'fillPrice')
   const rate = nonNegative(feeRate, 'feeRate')
   const step = compatibleStep(rules)
-  let grossBase = floorRatioToStep(budget, price, step)
+  const feeAdjustedPrice = multiply(price, add(decimal('1'), rate))
+  let grossBase = floorRatioToStep(budget, feeAdjustedPrice, step)
   let quoteSpent = money(multiply(grossBase, price))
-  while (grossBase.units > 0n && compare(quoteSpent, budget) > 0) {
+  let quoteFee = money(multiply(quoteSpent, rate))
+  let totalSpent = money(add(quoteSpent, quoteFee))
+  while (grossBase.units > 0n && compare(totalSpent, budget) > 0) {
     grossBase = subtract(grossBase, step)
     quoteSpent = money(multiply(grossBase, price))
+    quoteFee = money(multiply(quoteSpent, rate))
+    totalSpent = money(add(quoteSpent, quoteFee))
   }
   if (grossBase.units <= 0n) throw new RangeError('quote budget is below one effective step')
 
-  const baseFee = money(multiply(grossBase, rate))
-  const netBase = money(subtract(grossBase, baseFee))
+  const creditedBase = grossBase
   const cumulativeGrossQuoteCost = money(add(
     nonNegative(previousGrossQuoteCost, 'previousGrossQuoteCost'),
     quoteSpent
   ))
-  const currentNetBase = money(add(
-    nonNegative(previousNetBase, 'previousNetBase'),
-    netBase
+  const currentBase = money(add(
+    nonNegative(previousBase, 'previousBase'),
+    creditedBase
   ))
   const averageCost = divideFixed(
     cumulativeGrossQuoteCost,
-    currentNetBase,
+    currentBase,
     MONEY_SCALE,
     'HALF_UP'
   )
@@ -421,12 +425,13 @@ export function spotBuyOracle({
     effectiveStep: normalized(step),
     grossBase: formatFixed(grossBase),
     quoteSpent: formatFixed(quoteSpent),
-    baseFee: formatFixed(baseFee),
-    netBase: formatFixed(netBase),
+    quoteFee: formatFixed(quoteFee),
+    totalSpent: formatFixed(totalSpent),
+    creditedBase: formatFixed(creditedBase),
     cumulativeGrossQuoteCost: formatFixed(cumulativeGrossQuoteCost),
-    currentNetBase: formatFixed(currentNetBase),
+    currentBase: formatFixed(currentBase),
     averageCost: formatFixed(averageCost),
-    feeAsset: 'BASE',
+    feeAsset: 'QUOTE',
     tolerances: tolerancesFromRules(rules)
   }
 }

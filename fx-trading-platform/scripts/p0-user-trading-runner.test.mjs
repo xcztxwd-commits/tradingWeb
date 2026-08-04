@@ -134,7 +134,7 @@ test('financial oracle review: BASE quantity rejects rather than floors a step m
   }), '0.0100')
 })
 
-test('financial oracle: Spot BUY floors gross base and charges the fee in base', () => {
+test('financial oracle: Spot BUY budgets the quote fee and credits the full base', () => {
   assert.equal(typeof financialOracles.spotBuyOracle, 'function')
   assert.deepEqual(financialOracles.spotBuyOracle({
     quoteBudget: '1000',
@@ -145,12 +145,13 @@ test('financial oracle: Spot BUY floors gross base and charges the fee in base',
     effectiveStep: '0.0001',
     grossBase: '0.0199',
     quoteSpent: '995.09950000',
-    baseFee: '0.00000995',
-    netBase: '0.01989005',
+    quoteFee: '0.49754975',
+    totalSpent: '995.59704975',
+    creditedBase: '0.0199',
     cumulativeGrossQuoteCost: '995.09950000',
-    currentNetBase: '0.01989005',
-    averageCost: '50030.01500750',
-    feeAsset: 'BASE',
+    currentBase: '0.01990000',
+    averageCost: '50005.00000000',
+    feeAsset: 'QUOTE',
     tolerances: {
       price: '0.005',
       quantity: '0.00005',
@@ -1562,10 +1563,9 @@ test('UI core handlers keep deterministic product, batch, reset, and evidence co
   )
   assert.match(
     spot03,
-    /const buyFee = Number\(bought\.trade\.lots\)\s*\*\s*Number\(DEMO_RATES\.takerFeeRate\)/
+    /const buyFee = Number\(bought\.trade\.lots\)\s*\*\s*Number\(bought\.trade\.price\)\s*\*\s*Number\(DEMO_RATES\.takerFeeRate\)/
   )
-  assert.doesNotMatch(spot03, /const buyFee =[^\r\n]*bought\.trade\.price/)
-  assert.match(spot03, /assert\.equal\(bought\.trade\.feeAsset,\s*'BTC'\)/)
+  assert.match(spot03, /assert\.equal\(bought\.trade\.feeAsset,\s*'USDT'\)/)
   assert.match(spot03, /assert\.equal\(sold\.trade\.feeAsset,\s*'USDT'\)/)
   const spotAuthority = section(
     'async function prepareSpotAuthorityMarket',
@@ -1588,10 +1588,22 @@ test('UI core handlers keep deterministic product, batch, reset, and evidence co
   )
   assert.match(spot01, /partialSpotPosition\.realizedPnl/)
   assert.doesNotMatch(spot01, /partiallySold\.trade\.realizedPnl/)
+  assert.match(spot01, /buyOracle\.totalSpent/)
+  assert.match(spot01, /buyOracle\.creditedBase/)
+  assert.doesNotMatch(spot01, /buyOracle\.(?:baseFee|netBase)/)
   assert.equal(
     [...spot01.matchAll(/assertSpotTradeLedger\(/g)].length,
     3,
     'SPOT-01 must prove one exact settlement ledger set per fill'
+  )
+  const spotLedger = section(
+    'function assertSpotTradeLedger',
+    'async function prepareSpotAuthorityMarket'
+  )
+  assert.equal(
+    [...spotLedger.matchAll(/TRADE_FEE:\s*\{\s*asset:\s*'USDT'/g)].length,
+    2,
+    'Spot BUY and SELL ledger fees must both use USDT'
   )
 
   const spotValidation = section(
@@ -1741,6 +1753,36 @@ test('UI core handlers keep deterministic product, batch, reset, and evidence co
   assert.match(
     perp12,
     /kind:\s*'QUANTITY_STEP_MISMATCH',\s*expected:\s*'QUANTITY_STEP_MISMATCH'/
+  )
+})
+
+test('Spot pending-order cases keep BUY fees and Trade ledgers in USDT', () => {
+  const orderPath = fileURLToPath(new URL('./p0-user-trading-order-cases.mjs', import.meta.url))
+  const source = readFileSync(orderPath, 'utf8')
+  const section = (start, end) => {
+    const from = source.indexOf(start)
+    const to = source.indexOf(end, from + start.length)
+    assert.notEqual(from, -1, start)
+    assert.notEqual(to, -1, end)
+    return source.slice(from, to)
+  }
+
+  for (const journey of [
+    section('async function runSpot05Journey', 'async function runSpot06Journey'),
+    section('async function runSpot06Journey', 'async function runSpot07Journey')
+  ]) {
+    assert.match(journey, /assert\.equal\(filled\.trade\.feeAsset,\s*'USDT'\)/)
+    assert.match(
+      journey,
+      /Number\(filled\.trade\.lots\)\s*\*\s*Number\(filled\.trade\.price\)\s*\*\s*Number\(DEMO_RATES\.(?:maker|taker)FeeRate\)/
+    )
+  }
+
+  const ledger = section('function assertSpotTradeLedger', 'function assertSpotOrderLedger')
+  assert.equal(
+    [...ledger.matchAll(/TRADE_FEE:\s*\{\s*asset:\s*'USDT'/g)].length,
+    2,
+    'Spot BUY and SELL DB ledger fees must both use USDT'
   )
 })
 
@@ -5114,7 +5156,7 @@ test('authority baseline fill and Perp risk checks use independent market eviden
       price: expectedFill.filledPrice,
       realizedPnl: '0',
       fee: '0.050005',
-      feeAsset: 'BTC',
+      feeAsset: 'USDT',
       liquidityRole: 'TAKER',
       providerCode: quote.providerCode,
       sourceMode: quote.sourceMode
@@ -5461,7 +5503,7 @@ function authorityGateContractContext({
           price,
           realizedPnl: '0',
           fee: '0.0001',
-          feeAsset: target.product === 'spot' ? 'BTC' : 'USDT',
+          feeAsset: 'USDT',
           liquidityRole: 'TAKER',
           providerCode: quote.providerCode,
           providerSymbol: quote.providerSymbol,
@@ -5471,7 +5513,7 @@ function authorityGateContractContext({
         if (target.product === 'spot') {
           const wallet = state.wallets.find(({ asset }) => asset === 'BTC')
           const nextAvailable = order.side === 'BUY'
-            ? Number(wallet.available) + 0.0009995
+            ? Number(wallet.available) + 0.001
             : Number(wallet.available) - Number(order.amount)
           wallet.available = Math.max(0, nextAvailable).toFixed(8)
           wallet.total = wallet.available

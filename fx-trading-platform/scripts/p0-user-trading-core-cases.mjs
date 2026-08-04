@@ -1187,14 +1187,16 @@ async function runSpotMarketableLimitJourney(scope) {
   const buyFill = assertSingleFullFillMutation(beforeBuy, bought, 'SPOT-03 BUY')
   assert.equal(bought.trade.side, 'BUY')
   assert.equal(bought.trade.liquidityRole, 'TAKER')
-  assert.equal(bought.trade.feeAsset, 'BTC')
+  assert.equal(bought.trade.feeAsset, 'USDT')
   assertDecimalClose(
     bought.trade.price,
     Math.min(Number(quoteDecimal(market, 'ask')), Number(quoteDecimal(market, 'ask'))),
     tolerancesFromRules(rules).price,
     'SPOT-03 BUY fill'
   )
-  const buyFee = Number(bought.trade.lots) * Number(DEMO_RATES.takerFeeRate)
+  const buyFee = Number(bought.trade.lots)
+    * Number(bought.trade.price)
+    * Number(DEMO_RATES.takerFeeRate)
   assertDecimalClose(
     bought.trade.fee,
     buyFee,
@@ -1699,7 +1701,7 @@ async function runSpotMarketLifecycle(scope) {
     tolerancesFromRules(rules).price,
     'SPOT-01 BUY fill'
   )
-  assert.equal(bought.trade.feeAsset, 'BTC')
+  assert.equal(bought.trade.feeAsset, 'USDT')
   assert.equal(bought.trade.liquidityRole, 'TAKER')
   const buyOracle = spotBuyOracle({
     quoteBudget: '1000',
@@ -1714,9 +1716,9 @@ async function runSpotMarketLifecycle(scope) {
   )
   assertDecimalClose(
     bought.trade.fee,
-    buyOracle.baseFee,
+    buyOracle.quoteFee,
     buyOracle.tolerances.amount,
-    'SPOT-01 BUY base fee'
+    'SPOT-01 BUY quote fee'
   )
   const boughtPosition = bought.snapshot.positions.find((position) => (
     isSpotPosition(position) && position.symbol === 'BTCUSDT'
@@ -1724,9 +1726,9 @@ async function runSpotMarketLifecycle(scope) {
   assert(boughtPosition, 'SPOT-01 bought Spot position')
   assertDecimalClose(
     boughtPosition.lots,
-    buyOracle.netBase,
+    buyOracle.creditedBase,
     buyOracle.tolerances.quantity,
-    'SPOT-01 bought net base'
+    'SPOT-01 bought credited base'
   )
   assertDecimalClose(
     boughtPosition.openPrice,
@@ -1746,14 +1748,14 @@ async function runSpotMarketLifecycle(scope) {
     [
       {
         asset: 'USDT',
-        total: negativeAmount(buyOracle.quoteSpent),
-        available: negativeAmount(buyOracle.quoteSpent),
+        total: negativeAmount(buyOracle.totalSpent),
+        available: negativeAmount(buyOracle.totalSpent),
         locked: '0'
       },
       {
         asset: 'BTC',
-        total: buyOracle.netBase,
-        available: buyOracle.netBase,
+        total: buyOracle.creditedBase,
+        available: buyOracle.creditedBase,
         locked: '0'
       }
     ],
@@ -2023,7 +2025,7 @@ async function runSpotMarketLifecycle(scope) {
     asset === 'BTC'
   ))
   assert(finalSpotRow, 'SPOT-01 final DB Spot position')
-  const cumulativeFeeCost = Number(buyOracle.baseFee) * Number(bought.trade.price)
+  const cumulativeFeeCost = Number(buyOracle.quoteFee)
     + Number(partialOracle.quoteFee)
     + Number(finalOracle.quoteFee)
   assertDecimalClose(
@@ -7216,7 +7218,7 @@ function assertSpotTradeLedger(snapshot, trade, rules, label) {
           amount: String(trade.lots)
         },
         TRADE_FEE: {
-          asset: 'BTC',
+          asset: 'USDT',
           amount: String(-Number(trade.fee))
         }
       }
