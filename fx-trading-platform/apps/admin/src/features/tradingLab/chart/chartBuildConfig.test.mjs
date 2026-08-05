@@ -35,6 +35,29 @@ test('Admin build resolves the existing local KLineCharts dist without a package
   )
 })
 
+test('Admin clean installs include the Node types required by Vite', async () => {
+  const packageJson = JSON.parse(
+    await readPlatformFile('apps/admin/package.json'),
+  )
+  const packageLock = JSON.parse(
+    await readPlatformFile('package-lock.json'),
+  )
+
+  assert.equal(packageJson.devDependencies?.['@types/node'], '20.19.41')
+  assert.equal(
+    packageLock.packages?.['apps/admin']?.devDependencies?.['@types/node'],
+    '20.19.41',
+  )
+  assert.equal(
+    packageLock.packages?.['node_modules/@types/node']?.version,
+    '20.19.41',
+  )
+  assert.equal(
+    packageLock.packages?.['node_modules/undici-types']?.version,
+    '6.21.0',
+  )
+})
+
 test('Trading Lab stays lazy and reuses the unchanged dist guard', async () => {
   const adminApp = await readPlatformFile('apps/admin/src/app/AdminApp.tsx')
   assert.match(
