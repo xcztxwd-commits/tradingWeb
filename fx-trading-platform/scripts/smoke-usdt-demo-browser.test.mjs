@@ -853,6 +853,17 @@ describe('real USDT demo browser smoke contract', () => {
     )
   })
 
+  it('keeps the directional protection beyond the cached quote drift window', () => {
+    const text = source()
+    const helper = text.slice(
+      text.indexOf('async function createDirectionalNearProtection'),
+      text.indexOf('export function assertNewestFirstProtectionResize')
+    )
+
+    assert.match(helper, /authorityMark \* \(direction === 'UP' \? 1\.01 : 0\.99\)/)
+    assert.doesNotMatch(helper, /authorityMark [+-] tick \* 10/)
+  })
+
   it('binds scheduler funding to fresh provider rows across current/history source failover and exactly one target-position settlement', () => {
     const text = source()
 

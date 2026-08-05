@@ -5037,9 +5037,11 @@ async function createDirectionalNearProtection(positionId, direction, tick) {
     const quote = await api(`/api/market/quotes/${PERP_SYMBOL}`)
     assert(quote.providerCode === 'local-perp' && quote.sourceMode === 'LOCAL_SIMULATED', 'near protection must use the local Perpetual authority mark')
     const authorityMark = number(quote.markPrice ?? quote.mid ?? quote.ask)
-    const triggerPrice = direction === 'UP'
-      ? aligned(authorityMark + tick * 10, tick, 'ceil')
-      : aligned(authorityMark - tick * 10, tick, 'floor')
+    const triggerPrice = aligned(
+      authorityMark * (direction === 'UP' ? 1.01 : 0.99),
+      tick,
+      direction === 'UP' ? 'ceil' : 'floor'
+    )
     try {
       return await api(`/api/trading/positions/${positionId}/protections`, {
         method: 'POST', token: userToken,
