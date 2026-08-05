@@ -1176,10 +1176,12 @@ async function runSpotMarketableLimitJourney(scope) {
     symbol: 'BTCUSDT'
   })
   const beforeBuy = await context.api.snapshotAccount(page)
+  const buyAsk = quoteDecimal(market, 'ask')
+  const buyLimitPrice = alignPriceToTick(buyAsk, rules, 'CEILING')
   const buy = await context.ui.submitOrderViaUi(page, {
     side: 'BUY',
     orderType: 'LIMIT',
-    price: quoteDecimal(market, 'ask'),
+    price: buyLimitPrice,
     amount: quantity
   })
   scope.addMutation('marketable-limit-buy-via-ui', buy)
@@ -1190,7 +1192,7 @@ async function runSpotMarketableLimitJourney(scope) {
   assert.equal(bought.trade.feeAsset, 'USDT')
   assertDecimalClose(
     bought.trade.price,
-    Math.min(Number(quoteDecimal(market, 'ask')), Number(quoteDecimal(market, 'ask'))),
+    Math.min(Number(buyAsk), Number(buyLimitPrice)),
     tolerancesFromRules(rules).price,
     'SPOT-03 BUY fill'
   )
@@ -1219,10 +1221,12 @@ async function runSpotMarketableLimitJourney(scope) {
   assert(Number(sellQuantity) > 0, 'SPOT-03 requires sellable BTC')
   const beforeSell = bought.snapshot
   const sellMarket = await context.api.snapshotMarket('BTCUSDT')
+  const sellBid = quoteDecimal(sellMarket, 'bid')
+  const sellLimitPrice = alignPriceToTick(sellBid, rules, 'FLOOR')
   const sell = await context.ui.submitOrderViaUi(page, {
     side: 'SELL',
     orderType: 'LIMIT',
-    price: quoteDecimal(sellMarket, 'bid'),
+    price: sellLimitPrice,
     amount: sellQuantity
   })
   scope.addMutation('marketable-limit-sell-via-ui', sell)
@@ -1233,7 +1237,7 @@ async function runSpotMarketableLimitJourney(scope) {
   assert.equal(sold.trade.feeAsset, 'USDT')
   assertDecimalClose(
     sold.trade.price,
-    quoteDecimal(sellMarket, 'bid'),
+    Math.max(Number(sellBid), Number(sellLimitPrice)),
     tolerancesFromRules(rules).price,
     'SPOT-03 SELL fill'
   )

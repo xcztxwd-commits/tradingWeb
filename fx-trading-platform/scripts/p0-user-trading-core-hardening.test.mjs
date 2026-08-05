@@ -50,6 +50,28 @@ test('SPOT-01/03 bind every fill to fresh pricing, fee, wallet, and position evi
     'async function runCatalogRouteJourney'
   )
   assert.match(spot03, /const sellMarket = await context\.api\.snapshotMarket\('BTCUSDT'\)/)
+  assert.match(
+    spot03,
+    /const buyLimitPrice = alignPriceToTick\(buyAsk, rules, 'CEILING'\)/,
+    'SPOT-03 BUY limit must align up to stay marketable and tick-valid'
+  )
+  assert.match(spot03, /price:\s*buyLimitPrice/)
+  assert.match(
+    spot03,
+    /Math\.min\(Number\(buyAsk\), Number\(buyLimitPrice\)\)/,
+    'SPOT-03 BUY fill oracle must use ask and the submitted limit'
+  )
+  assert.match(
+    spot03,
+    /const sellLimitPrice = alignPriceToTick\(sellBid, rules, 'FLOOR'\)/,
+    'SPOT-03 SELL limit must align down to stay marketable and tick-valid'
+  )
+  assert.match(spot03, /price:\s*sellLimitPrice/)
+  assert.match(
+    spot03,
+    /Math\.max\(Number\(sellBid\), Number\(sellLimitPrice\)\)/,
+    'SPOT-03 SELL fill oracle must use bid and the submitted limit'
+  )
   assert.match(spot03, /const sellFee =/)
   assert.match(spot03, /assertDecimalClose\(\s*sold\.trade\.fee,\s*sellFee/)
   assert.equal(
