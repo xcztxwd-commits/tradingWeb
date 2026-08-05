@@ -2093,17 +2093,52 @@ async function runPerpLifecycle(scope, options) {
     tolerancesFromRules(rules).quantity,
     `${definition.id} opening quantity`
   )
+  const priceTolerance = tolerancesFromRules(rules).price
+  const persistenceTolerance = '0.00000001'
+  assertDecimalClose(
+    opened.order.executionPrice,
+    opened.trade.price,
+    persistenceTolerance,
+    `${definition.id} order execution price`
+  )
+  assertDecimalClose(
+    opened.order.avgFillPrice,
+    opened.trade.price,
+    persistenceTolerance,
+    `${definition.id} order average fill price`
+  )
+  assertDecimalClose(
+    position.openPrice,
+    opened.trade.price,
+    persistenceTolerance,
+    `${definition.id} position opening price`
+  )
+  const openingSlippage = Number(opened.order.slippage)
+  assert(
+    Number.isFinite(openingSlippage) && openingSlippage > 0,
+    `${definition.id} opening slippage`
+  )
+  const executionReference = String(
+    Number(opened.trade.price)
+      + (options.side === 'BUY' ? -openingSlippage : openingSlippage)
+  )
   const openingPricing = marketFillOracle({
     productType: 'LINEAR_PERP',
     side: options.side,
-    bid: quoteDecimal(market, 'bid'),
-    ask: quoteDecimal(market, 'ask')
+    bid: executionReference,
+    ask: executionReference
   })
   assertDecimalClose(
     opened.trade.price,
     openingPricing.filledPrice,
-    tolerancesFromRules(rules).price,
+    priceTolerance,
     `${definition.id} opening fill`
+  )
+  assertDecimalClose(
+    opened.order.slippage,
+    openingPricing.slippage,
+    persistenceTolerance,
+    `${definition.id} opening slippage rate`
   )
   assert.equal(opened.trade.liquidityRole, 'TAKER')
   const positionSide = options.side === 'BUY' ? 'LONG' : 'SHORT'

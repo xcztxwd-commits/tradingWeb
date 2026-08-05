@@ -134,6 +134,14 @@ const P0_SPOT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT']
 const P0_PERP_SYMBOLS = ['BTCUSDT-PERP', 'ETHUSDT-PERP', 'BNBUSDT-PERP', 'SOLUSDT-PERP', 'XRPUSDT-PERP']
 const P0_DEFAULT_REDIS_KEYS = [...P0_SPOT_SYMBOLS, ...P0_PERP_SYMBOLS]
   .map((symbol) => `quote:${symbol}`)
+  .concat([
+    'quote:AUDUSD',
+    'quote:EURUSD',
+    'quote:GBPUSD',
+    'quote:US100',
+    'quote:USDJPY',
+    'quote:XAUUSD'
+  ])
 const FORBIDDEN_PRODUCTS = ['FOREX', 'INVERSE_PERP', 'OPTION']
 const SOURCE_METADATA_FIELDS = ['providerCode', 'providerSymbol', 'sourceMode', 'asOf', 'expiresAt', 'stale']
 const TERMINAL_ORDER_STATUSES = new Set(['FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED'])

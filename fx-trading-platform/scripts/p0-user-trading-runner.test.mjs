@@ -4286,7 +4286,13 @@ function markP0RedisSnapshotReady(
     'quote:ETHUSDT-PERP',
     'quote:BNBUSDT-PERP',
     'quote:SOLUSDT-PERP',
-    'quote:XRPUSDT-PERP'
+    'quote:XRPUSDT-PERP',
+    'quote:AUDUSD',
+    'quote:EURUSD',
+    'quote:GBPUSD',
+    'quote:US100',
+    'quote:USDJPY',
+    'quote:XAUUSD'
   ]
   const provided = new Map(snapshot.map((entry) => [entry.key, entry]))
   const canonicalSnapshot = inventory.map((key) => provided.get(key) ?? ({
@@ -4707,7 +4713,13 @@ test('default P0 Redis journal snapshots every exact key and records touched key
     'quote:ETHUSDT-PERP',
     'quote:BNBUSDT-PERP',
     'quote:SOLUSDT-PERP',
-    'quote:XRPUSDT-PERP'
+    'quote:XRPUSDT-PERP',
+    'quote:AUDUSD',
+    'quote:EURUSD',
+    'quote:GBPUSD',
+    'quote:US100',
+    'quote:USDJPY',
+    'quote:XAUUSD'
   ]
   const redisReads = []
   const redisRequests = []
@@ -6488,7 +6500,13 @@ test('standalone canonical owns snapshots restores and releases Redis exactly on
     'quote:ETHUSDT-PERP',
     'quote:BNBUSDT-PERP',
     'quote:SOLUSDT-PERP',
-    'quote:XRPUSDT-PERP'
+    'quote:XRPUSDT-PERP',
+    'quote:AUDUSD',
+    'quote:EURUSD',
+    'quote:GBPUSD',
+    'quote:US100',
+    'quote:USDJPY',
+    'quote:XAUUSD'
   ]
   const state = new Map([
     ['quote:BTCUSDT', { value: 'before-spot', expiresAtMs: 1_900_000_000_000 }],
@@ -6555,8 +6573,8 @@ test('standalone canonical owns snapshots restores and releases Redis exactly on
   state.set('quote:BTCUSDT', { value: 'mutated', expiresAtMs: null })
   state.set('quote:ETHUSDT', { value: 'created', expiresAtMs: null })
 
-  assert.deepEqual(await ownership.cleanup(), { restored: 10, ownerReleased: true })
-  assert.deepEqual(await ownership.cleanup(), { restored: 10, ownerReleased: true, alreadyCleaned: true })
+  assert.deepEqual(await ownership.cleanup(), { restored: 16, ownerReleased: true })
+  assert.deepEqual(await ownership.cleanup(), { restored: 16, ownerReleased: true, alreadyCleaned: true })
   assert.deepEqual(state.get('quote:BTCUSDT'), {
     value: 'before-spot',
     expiresAtMs: 1_900_000_000_000
@@ -10772,7 +10790,7 @@ test('default P0 dependency factory wires local adapters and main injects it', a
       JSON.stringify(completed.report, null, 2)
     )
     assert.equal(completed.cleanup.status, 'CLEANED')
-    assert.equal(completed.cleanup.restored, 10)
+    assert.equal(completed.cleanup.restored, 16)
     assert.equal(canonicalInvocations.length, 1)
     assert.deepEqual(canonicalInvocations[0].args, [
       fileURLToPath(new URL('./smoke-usdt-demo-browser.mjs', import.meta.url))
@@ -10793,7 +10811,7 @@ test('default P0 dependency factory wires local adapters and main injects it', a
       join(root, 'artifacts', options.runId, 'control', 'redis.json'),
       'utf8'
     ))
-    assert.equal(redisRecovery.touchedKeys.length, 10)
+    assert.equal(redisRecovery.touchedKeys.length, 16)
     assert.equal(redisRecovery.touchedKeys.includes(redisKey), true)
     const cleaned = JSON.parse(readFileSync(
       join(root, 'artifacts', options.runId, 'control', 'ownership.json'),
@@ -19576,7 +19594,7 @@ test('resume rejects unsafe run-state files and control selection drift before i
   )
 })
 
-test('Redis recovery journal binds schema run owner and exact ten-key inventory', () => {
+test('Redis recovery journal binds schema run owner and exact sixteen-key inventory', () => {
   assert.equal(typeof smokeContracts.createP0RedisRecoveryState, 'function')
   assert.equal(typeof smokeContracts.validateP0RedisRecoveryState, 'function')
   const runId = 'p0-review1-s9-redis-journal-a1'
@@ -19591,7 +19609,13 @@ test('Redis recovery journal binds schema run owner and exact ten-key inventory'
     'quote:ETHUSDT-PERP',
     'quote:BNBUSDT-PERP',
     'quote:SOLUSDT-PERP',
-    'quote:XRPUSDT-PERP'
+    'quote:XRPUSDT-PERP',
+    'quote:AUDUSD',
+    'quote:EURUSD',
+    'quote:GBPUSD',
+    'quote:US100',
+    'quote:USDJPY',
+    'quote:XAUUSD'
   ]
   const snapshot = inventory.map((key, index) => index === 0
     ? { key, exists: true, value: 'before', expiresAtMs: 1_900_000_000_000 }
@@ -19607,7 +19631,7 @@ test('Redis recovery journal binds schema run owner and exact ten-key inventory'
     schemaVersion: 1,
     runId,
     ownerId,
-    inventoryCount: 10,
+    inventoryCount: 16,
     inventoryFingerprint: `sha256:${createHash('sha256')
       .update(JSON.stringify(inventory))
       .digest('hex')}`,
@@ -19634,7 +19658,13 @@ test('cleanup rejects truncated duplicate foreign and invalid-TTL Redis recovery
     'quote:ETHUSDT-PERP',
     'quote:BNBUSDT-PERP',
     'quote:SOLUSDT-PERP',
-    'quote:XRPUSDT-PERP'
+    'quote:XRPUSDT-PERP',
+    'quote:AUDUSD',
+    'quote:EURUSD',
+    'quote:GBPUSD',
+    'quote:US100',
+    'quote:USDJPY',
+    'quote:XAUUSD'
   ]
   const inventoryFingerprint = `sha256:${createHash('sha256')
     .update(JSON.stringify(inventory))

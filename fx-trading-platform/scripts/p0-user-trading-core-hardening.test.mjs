@@ -97,6 +97,29 @@ test('SPOT-01/03 bind every fill to fresh pricing, fee, wallet, and position evi
   assert.match(spot01, /return \{\s*finalSnapshot: fullySold\.snapshot,\s*finalDb:/)
 })
 
+test('PERP-01/02 bind dynamic opening fills to persisted execution evidence', () => {
+  const lifecycle = section(
+    'async function runPerpLifecycle',
+    'function assertPerpAccountSummary'
+  )
+  const opening = lifecycle.slice(
+    0,
+    lifecycle.indexOf('const openingHold = perpOpeningHoldOracle')
+  )
+
+  assert.doesNotMatch(opening, /bid:\s*quoteDecimal\(market, 'bid'\)/)
+  assert.doesNotMatch(opening, /ask:\s*quoteDecimal\(market, 'ask'\)/)
+  assert.match(opening, /opened\.order\.slippage/)
+  assert.match(opening, /opened\.order\.executionPrice/)
+  assert.match(opening, /opened\.order\.avgFillPrice/)
+  assert.match(
+    opening,
+    /Number\(opened\.trade\.price\)[\s\S]*?options\.side === 'BUY' \? -openingSlippage : openingSlippage/
+  )
+  assert.match(opening, /openingPricing\.slippage/)
+  assert.match(opening, /position\.openPrice/)
+})
+
 test('PERP-12 proves every rejection and cites the exact fresh backend full-fill test', () => {
   const perp12 = section(
     'async function runPerpValidationJourney',
