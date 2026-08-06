@@ -163,6 +163,7 @@ class AdminTradingCommandServiceTest {
     PositionEntity position = new PositionEntity();
     position.setId(positionId);
     position.setAccountId(accountId);
+    position.setInitialMargin(new BigDecimal("42.00000000"));
     TradingAccountEntity account = account(accountId);
     when(systemCloseOrderService.closeWhole(
         accountId,
@@ -186,6 +187,7 @@ class AdminTradingCommandServiceTest {
             "CONFIRM_FORCE_CLOSE"));
 
     assertThat(response).isNotNull();
+    assertThat(response.initialMargin()).isEqualByComparingTo("42.00000000");
     verify(systemCloseOrderService).closeWhole(
         accountId,
         positionId,

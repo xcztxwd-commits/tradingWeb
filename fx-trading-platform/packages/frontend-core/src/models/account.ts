@@ -72,6 +72,7 @@ type PositionResponseOverrides = {
   realizedPnl: Amount
   fundingPnl?: Amount | null
   marginHeld: Amount
+  initialMargin?: Amount | null
   maintenanceMargin?: Amount | null
   maintenanceMarginRate?: Amount | null
   adlLevel?: number | null

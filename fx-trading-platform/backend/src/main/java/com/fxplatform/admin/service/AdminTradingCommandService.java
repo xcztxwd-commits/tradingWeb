@@ -193,6 +193,7 @@ public class AdminTradingCommandService {
         position.getRealizedPnl(),
         position.getFundingPnl(),
         position.getMarginHeld(),
+        position.getInitialMargin(),
         position.getMaintenanceMargin(),
         null,
         null,

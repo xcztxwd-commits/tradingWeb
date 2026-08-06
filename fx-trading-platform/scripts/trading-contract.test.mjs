@@ -145,6 +145,12 @@ describe('P0 trading OpenAPI contract', () => {
     }
   })
 
+  it('publishes independent perpetual initial and held margin fields', () => {
+    const positionResponse = schemaBody('PositionResponse')
+    assert.match(positionResponse, /initialMargin\?: number;/)
+    assert.match(positionResponse, /marginHeld\?: number;/)
+  })
+
   it('keeps the complete P0 enum vocabulary in generated request contracts', () => {
     for (const value of [
       'FX_MARGIN',

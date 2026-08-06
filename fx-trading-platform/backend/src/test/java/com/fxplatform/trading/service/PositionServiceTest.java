@@ -1383,7 +1383,8 @@ class PositionServiceTest {
     position.setSide(OrderSide.BUY);
     position.setLots(new BigDecimal("0.2"));
     position.setOpenPrice(new BigDecimal("50000"));
-    position.setMarginHeld(new BigDecimal("1000"));
+    position.setMarginHeld(new BigDecimal("1100"));
+    position.setInitialMargin(BigDecimal.ONE);
     position.setFundingPnl(new BigDecimal("20"));
     position.setLeverage(10);
     position.setNotional(new BigDecimal("1"));
@@ -1410,9 +1411,11 @@ class PositionServiceTest {
     assertThat(response.currentPrice()).isEqualByComparingTo("50490");
     assertThat(response.notional()).isEqualByComparingTo("10120.00000000");
     assertThat(response.floatingPnl()).isEqualByComparingTo("120.00000000");
-    assertThat(response.floatingPnlRatio()).isEqualByComparingTo("0.12000000");
+    assertThat(response.floatingPnlRatio()).isEqualByComparingTo("0.10909091");
+    assertThat(response.initialMargin()).isEqualByComparingTo("1000.00000000");
+    assertThat(response.marginHeld()).isEqualByComparingTo("1100");
     assertThat(response.maintenanceMargin()).isEqualByComparingTo("50.60000000");
-    assertThat(response.liquidationPrice()).isEqualByComparingTo("45148.31573655");
+    assertThat(response.liquidationPrice()).isEqualByComparingTo("44645.55052790");
   }
 
   @Test

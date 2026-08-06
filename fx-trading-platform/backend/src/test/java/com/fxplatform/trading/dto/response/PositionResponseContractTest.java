@@ -37,7 +37,8 @@ class PositionResponseContractTest {
         .containsEntry("positionMode", "com.fxplatform.trading.enums.PositionMode")
         .containsEntry("positionSide", "com.fxplatform.trading.enums.PositionSide")
         .containsEntry("version", Long.class.getName())
-        .containsEntry("marginMode", String.class.getName());
+        .containsEntry("marginMode", String.class.getName())
+        .containsEntry("initialMargin", "java.math.BigDecimal");
   }
 
   private static String[] recordComponentNames() {

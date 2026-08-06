@@ -4022,6 +4022,7 @@ export interface components {
             realizedPnl?: number;
             fundingPnl?: number;
             marginHeld?: number;
+            initialMargin?: number;
             maintenanceMargin?: number;
             maintenanceMarginRate?: number;
             /** Format: int32 */
