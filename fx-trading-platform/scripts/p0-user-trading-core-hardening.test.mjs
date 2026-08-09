@@ -179,6 +179,53 @@ test('PERP-04 runs BASE, QUOTE, and CONTRACTS as independent users at one fixed 
   }
 })
 
+test('PERP-04 checkpoints show the loaded account position count before capture', () => {
+  const journey = section(
+    'async function runPerpQuantityUnitJourney',
+    'async function runPerpWeightedEntryJourney'
+  )
+  const openedView = journey.indexOf('await showAccountOverviewPositionCount(page, 1)')
+  const openedCapture = journey.indexOf('const openedEvidence = await scope.capture(')
+  const reopenedTrade = journey.indexOf('await context.ui.openTradePanel(page, {', openedCapture)
+  const closePosition = journey.indexOf('await closePositionFromUi(scope, position)')
+  const closedView = journey.indexOf('await showAccountOverviewPositionCount(page, 0)')
+  const closedCapture = journey.indexOf('const closedEvidence = await scope.capture(')
+
+  assert(openedView >= 0 && openedView < openedCapture)
+  assert(reopenedTrade > openedCapture && reopenedTrade < closePosition)
+  assert(closedView > closePosition && closedView < closedCapture)
+  assert.match(
+    journey.slice(reopenedTrade, closePosition),
+    /product: 'perpetual',\s*symbol/
+  )
+  assert.doesNotMatch(
+    journey.slice(closedView),
+    /page\.navigate\(|context\.ui\.openTradePanel\(/
+  )
+
+  const helper = section(
+    'async function showAccountOverviewPositionCount',
+    'async function applyAuthorityMark'
+  )
+  assert.match(
+    helper,
+    /await page\.navigate\(`\$\{page\.p0Options\.webBaseUrl\}\/account\/overview`\)/
+  )
+  assert.match(helper, /window\.location\.pathname !== '\/account\/overview'/)
+  assert.match(helper, /getElementById\('account-page-title'\)/)
+  assert.match(helper, /\[aria-label="Account profile summary"\]/)
+  assert.match(helper, /\[data-state-variant="loading"\]/)
+  assert.match(helper, /Open positions/)
+  assert.match(helper, /startsWith\('UID '\)/)
+  assert.match(helper, /querySelector\(':scope > strong'\)/)
+  assert.match(helper, /String\(expected\)/)
+  assert.match(helper, /getBoundingClientRect\(\)/)
+  assert.match(
+    helper,
+    /`account overview open positions \$\{expectedOpenPositions\}`,\s*expectedOpenPositions/
+  )
+})
+
 test('PERP authority mark rejects a stale same-price snapshot from the previous subrun', () => {
   const helper = section(
     'async function applyAuthorityMark',

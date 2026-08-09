@@ -3533,6 +3533,7 @@ async function runPerpQuantityUnitJourney(scope, { fixedMark, subrunId }) {
     openingHold.tolerances.amount,
     `PERP-04 ${input.unit} initial margin`
   )
+  await showAccountOverviewPositionCount(page, 1)
   const openedEvidence = await scope.capture(
     `unit-${input.unit.toLowerCase()}-opened`,
     opened.snapshot
@@ -3557,6 +3558,10 @@ async function runPerpQuantityUnitJourney(scope, { fixedMark, subrunId }) {
     `PERP-04 ${input.unit} opening`
   )
   const beforeClose = opened.snapshot
+  await context.ui.openTradePanel(page, {
+    product: 'perpetual',
+    symbol
+  })
   await closePositionFromUi(scope, position)
   const closed = await waitForAccount(
     context,
@@ -3582,6 +3587,7 @@ async function runPerpQuantityUnitJourney(scope, { fixedMark, subrunId }) {
     closeOracle.tolerances.amount,
     `PERP-04 ${input.unit} close fee`
   )
+  await showAccountOverviewPositionCount(page, 0)
   const closedEvidence = await scope.capture(
     `unit-${input.unit.toLowerCase()}-closed`,
     closed.snapshot
@@ -7811,6 +7817,43 @@ function assertUuid(value, label) {
     value,
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     `${label} UUID`
+  )
+}
+
+async function showAccountOverviewPositionCount(page, expectedOpenPositions) {
+  assert(
+    Number.isInteger(expectedOpenPositions) && expectedOpenPositions >= 0,
+    'account overview expected open positions'
+  )
+  await page.navigate(`${page.p0Options.webBaseUrl}/account/overview`)
+  await page.waitForFunction(
+    (expected) => {
+      if (window.location.pathname !== '/account/overview') return false
+      if (document.querySelector('vite-error-overlay')) return false
+      const title = document.getElementById('account-page-title')
+      const root = document.querySelector('section[aria-labelledby="account-page-title"]')
+      if (!root || root.querySelector([
+        '[data-state-variant="loading"]',
+        '[data-state-variant="error"]',
+        '[data-state-variant="login"]'
+      ].join(', '))) return false
+      const summary = root.querySelector('[aria-label="Account profile summary"]')
+      const positionLabel = [...(summary?.querySelectorAll('span') ?? [])]
+        .find((element) => element.textContent?.trim() === 'Open positions')
+      const accountIdentity = summary?.querySelector('small')?.textContent?.trim()
+      const positionCount = positionLabel?.parentElement
+        ?.querySelector(':scope > strong')?.textContent?.trim()
+      const rect = summary?.getBoundingClientRect()
+      return title?.textContent?.trim() === 'Overview'
+        && accountIdentity?.startsWith('UID ')
+        && positionCount === String(expected)
+        && Number(rect?.width) > 0
+        && Number(rect?.height) > 0
+        && Number(rect?.bottom) > 0
+        && Number(rect?.top) < window.innerHeight
+    },
+    `account overview open positions ${expectedOpenPositions}`,
+    expectedOpenPositions
   )
 }
 
