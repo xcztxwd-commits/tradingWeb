@@ -454,6 +454,13 @@ describe('prototype auth and account center', () => {
     assert.match(styles, /\.wallet-sidebar/)
     assert.match(styles, /\.wallet-login-gate/)
     assert.match(styles, /@media \(max-width:\s*720px\)[\s\S]*\.wallet-hero-grid\s*{[\s\S]*grid-template-columns:\s*1fr/)
+    assert.match(
+      styles,
+      /@media \(min-width:\s*901px\) and \(max-width:\s*1199px\)[\s\S]*\[data-platform-view='pc'\] \.wallet-hero-grid\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/
+    )
+    assert.match(walletStyles, /\[data-platform-view='pc'\] \.wallet-risk-card\s*{[^}]*grid-column:\s*1\s*\/\s*-1/)
+    assert.match(walletStyles, /\[data-platform-view='pc'\] \.wallet-simulation-note\s*{[^}]*flex-direction:\s*column/)
+    assert.match(userPageStyles, /@media \(max-width:\s*1024px\)[\s\S]*\.user-page__metrics,[\s\S]*grid-template-columns:\s*var\(--user-form-columns,\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)\)/)
   })
 
   it('exposes backend account snapshot and asset-ledger contracts to the frontend', () => {

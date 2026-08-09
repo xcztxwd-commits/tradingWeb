@@ -281,6 +281,13 @@ describe('prototype-driven app shell and routes', () => {
     )
   })
 
+  it('reserves the fixed mobile navigation height outside normal route content', () => {
+    assert.match(
+      appShellStyles,
+      /\.root:not\(\.terminal\):not\(\.auth\)\s*\{[^}]*padding-bottom:\s*calc\(var\(--mobile-tabs-height\) \+ env\(safe-area-inset-bottom\)\)/
+    )
+  })
+
   it('defines translated home navigation labels for all configured locales', () => {
     assert.match(enLocale, /home:\s*'Home'/)
     assert.match(zhLocale, /home:\s*'首页'/)

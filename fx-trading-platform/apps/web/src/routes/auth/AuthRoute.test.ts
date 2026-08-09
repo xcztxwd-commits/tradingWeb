@@ -15,6 +15,7 @@ const webSrc = resolve(currentDir, '../..')
 const routeSource = readFileSync(join(currentDir, 'AuthRoute.tsx'), 'utf8')
 const controllerSource = readFileSync(join(currentDir, 'useAuthRouteController.ts'), 'utf8')
 const contentSource = readFileSync(join(webSrc, 'shared-widgets', 'auth', 'AuthPageContent.tsx'), 'utf8')
+const contentStyles = readFileSync(join(webSrc, 'shared-widgets', 'auth', 'AuthPageContent.module.css'), 'utf8')
 const viewSources = readPlatformViewSources()
 
 describe('auth route platform contract', () => {
@@ -72,6 +73,13 @@ describe('auth route platform contract', () => {
     assert.match(contentSource, /model\.setPassword/)
     assert.match(contentSource, /model\.setIdentifier/)
     assert.match(contentSource, /model\.confirmSupport\(\)/)
+  })
+
+  it('lets the email identifier use the complete registration field', () => {
+    assert.match(
+      contentStyles,
+      /\.phoneField\s*>\s*input:only-child\s*{[\s\S]*grid-column:\s*1\s*\/\s*-1/
+    )
   })
 })
 

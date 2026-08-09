@@ -46,6 +46,10 @@
     overflow: hidden;
   }
 
+  .root:not(.terminal):not(.auth) {
+    padding-bottom: calc(var(--mobile-tabs-height) + env(safe-area-inset-bottom));
+  }
+
   .terminal {
     height: auto;
     min-height: 100dvh;

@@ -34,6 +34,11 @@ describe('user page shared UI system', () => {
     assert.doesNotMatch(styles, /\.user-page__table\s*{\s*display:\s*none/)
   })
 
+  it('keeps wide PC tables inside a locally scrollable viewport', () => {
+    assert.match(pcCollection, /surfaceStyles\['user-page__table'\]/)
+    assert.match(styles, /\.user-page__table\s*\{[^}]*min-width:\s*0[^}]*overflow:\s*auto/)
+  })
+
   it('announces table sorting state and next sort direction', () => {
     assert.match(dataCollection, /useTranslation/)
     assert.match(dataCollection, /sortRows/)

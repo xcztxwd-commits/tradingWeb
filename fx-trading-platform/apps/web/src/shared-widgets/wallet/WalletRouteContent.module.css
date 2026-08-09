@@ -417,3 +417,18 @@
 [data-platform-view='mobile'] .wallet-account-grid {
   grid-template-columns: 1fr;
 }
+
+@media (min-width: 901px) and (max-width: 1199px) {
+  [data-platform-view='pc'] .wallet-hero-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  [data-platform-view='pc'] .wallet-risk-card {
+    grid-column: 1 / -1;
+  }
+
+  [data-platform-view='pc'] .wallet-simulation-note {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

@@ -76,9 +76,10 @@ describe('OKX-style order book panel', () => {
     assert.match(styles, /\.marketRow\s*{[\s\S]*height:\s*20px/)
   })
 
-  it('compresses mobile order book columns for a narrow side-by-side viewport', () => {
-    assert.match(styles, /@media\s*\(max-width:\s*760px\)\s*{[\s\S]*\.columnHeader,\s*\.marketRow\s*{[\s\S]*grid-template-columns:\s*minmax\(64px,\s*1fr\)\s*minmax\(54px,\s*0\.9fr\)/)
-    assert.match(styles, /@media\s*\(max-width:\s*760px\)\s*{[\s\S]*\.columnHeader span:nth-child\(3\),\s*\.marketRow span:nth-child\(3\)\s*{[\s\S]*display:\s*none/)
+  it('compresses order book columns when the panel itself is narrow', () => {
+    assert.match(styles, /\.panel\s*\{[^}]*container-type:\s*inline-size/)
+    assert.match(styles, /@container\s*\(max-width:\s*300px\)\s*{[\s\S]*\.columnHeader,\s*\.marketRow\s*{[\s\S]*grid-template-columns:\s*minmax\(64px,\s*1fr\)\s*minmax\(54px,\s*0\.9fr\)/)
+    assert.match(styles, /@container\s*\(max-width:\s*300px\)\s*{[\s\S]*\.columnHeader span:nth-child\(3\),\s*\.marketRow span:nth-child\(3\)\s*{[\s\S]*display:\s*none/)
   })
 
   it('keeps split mode centered without an order book scrollbar', () => {

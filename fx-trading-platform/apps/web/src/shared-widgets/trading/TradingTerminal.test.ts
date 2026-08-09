@@ -117,6 +117,12 @@ describe('trading terminal route and business continuity', () => {
     assert.match(marketSidebarStyles, /\[data-platform-view='mobile'\]\s+\.search input\s*\{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px/)
   })
 
+  it('compacts the PC watchlist by panel width before labels overlap', () => {
+    assert.match(marketSidebarStyles, /\.sidebar\s*\{[^}]*container-type:\s*inline-size/)
+    assert.match(marketSidebarStyles, /@container\s*\(max-width:\s*190px\)[\s\S]*\.priceCell\s*\{[^}]*display:\s*none/)
+    assert.match(marketSidebarStyles, /@container\s*\(max-width:\s*190px\)[\s\S]*\.symbolLine\s*\{[^}]*text-overflow:\s*ellipsis/)
+  })
+
   it('keeps guest watch mode non-blocking until a trade action asks for login', () => {
     assert.match(controllerSource, /loginPromptRequested/)
     assert.match(controllerSource, /pendingTradeOpen/)

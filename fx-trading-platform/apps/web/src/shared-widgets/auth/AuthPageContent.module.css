@@ -214,6 +214,10 @@
   min-width: 0;
 }
 
+.phoneField > input:only-child {
+  grid-column: 1 / -1;
+}
+
 .error,
 .supportNotice,
 .success {
