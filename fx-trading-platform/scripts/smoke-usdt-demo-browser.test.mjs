@@ -10,6 +10,7 @@ import {
   acceptNextNativeDialog,
   assertNewestFirstProtectionResize,
   assertNoRuntimeErrors,
+  captureCheckpoint,
   closeAllPositionsViaUi,
   createEvidencePage,
   openTradePanel,
@@ -214,6 +215,108 @@ describe('real USDT demo browser smoke contract', () => {
     for (const fragment of ['Page.captureScreenshot', 'screenshots', 'logs', '/trading', '/market/status', '/accounts']) {
       assert.match(text, new RegExp(escapeRegExp(fragment)))
     }
+  })
+
+  it('foregrounds and paints each checkpoint page before one surface screenshot', async (t) => {
+    const artifactRoot = mkdtempSync(join(tmpdir(), 'p0-checkpoint-surface-'))
+    t.after(() => rmSync(artifactRoot, { recursive: true, force: true }))
+    const calls = []
+    let foreground = false
+    let painted = false
+    let captureCount = 0
+    const page = {
+      assertEvidenceClean() {
+        calls.push('assertEvidenceClean')
+      },
+      async send(method, params) {
+        calls.push(method)
+        if (method === 'Page.bringToFront') {
+          foreground = true
+          return {}
+        }
+        assert.equal(method, 'Page.captureScreenshot')
+        captureCount += 1
+        assert.equal(foreground, true)
+        assert.equal(painted, true)
+        assert.deepEqual(params, {
+          format: 'png',
+          fromSurface: true,
+          captureBeyondViewport: false,
+          optimizeForSpeed: true
+        })
+        return { data: Buffer.from('foreground-checkpoint').toString('base64') }
+      },
+      async evaluate(callback) {
+        calls.push('paint')
+        const callbackSource = callback.toString()
+        assert.equal((callbackSource.match(/requestAnimationFrame/g) ?? []).length, 2)
+        assert.match(callbackSource, /setTimeout/)
+        painted = true
+      },
+      snapshotEvidence() {
+        return { networkEvidence: [], eventEvidence: [] }
+      }
+    }
+
+    const checkpoint = await captureCheckpoint(
+      { run: { artifactRoot } },
+      'opened',
+      { caseId: 'PERP-04', pages: [page] }
+    )
+
+    assert.deepEqual(calls, [
+      'assertEvidenceClean',
+      'Page.bringToFront',
+      'paint',
+      'Page.captureScreenshot'
+    ])
+    assert.equal(captureCount, 1)
+    assert.deepEqual(Object.keys(checkpoint.artifactHashes), ['PERP-04/opened.png'])
+  })
+
+  it('propagates a checkpoint screenshot timeout without retrying', async (t) => {
+    const artifactRoot = mkdtempSync(join(tmpdir(), 'p0-checkpoint-timeout-'))
+    t.after(() => rmSync(artifactRoot, { recursive: true, force: true }))
+    let captureCount = 0
+    const page = {
+      assertEvidenceClean() {},
+      async send(method) {
+        if (method === 'Page.bringToFront') return {}
+        assert.equal(method, 'Page.captureScreenshot')
+        captureCount += 1
+        throw new Error('CDP command Page.captureScreenshot timed out')
+      },
+      async evaluate() {},
+      snapshotEvidence() {
+        return { networkEvidence: [], eventEvidence: [] }
+      }
+    }
+
+    await assert.rejects(
+      captureCheckpoint(
+        { run: { artifactRoot } },
+        'opened',
+        { caseId: 'PERP-04', pages: [page] }
+      ),
+      /CDP command Page\.captureScreenshot timed out/
+    )
+    assert.equal(captureCount, 1)
+  })
+
+  it('routes generic and P0 screenshots through one foreground surface helper', () => {
+    const text = source()
+    const genericScreenshot = text.match(
+      /async function captureScreenshot\([\s\S]*?\r?\n\}\r?\n\r?\n(?=async function captureViewportScreenshot)/
+    )?.[0]
+    const checkpointScreenshot = text.match(
+      /export async function captureCheckpoint\([\s\S]*?\r?\n\}\r?\n\r?\nconst AUTHORITY_MOBILE_VIEWPORT/
+    )?.[0]
+
+    assert.ok(genericScreenshot)
+    assert.ok(checkpointScreenshot)
+    assert.match(genericScreenshot, /captureViewportScreenshot\(page\)/)
+    assert.match(checkpointScreenshot, /captureViewportScreenshot\(page\)/)
+    assert.equal((text.match(/page\.send\('Page\.captureScreenshot'/g) ?? []).length, 1)
   })
 
   it('preserves a case-specific checkpoint identity inside grouped profile execution', () => {

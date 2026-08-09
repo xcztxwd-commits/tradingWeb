@@ -9103,9 +9103,11 @@ test('multi-profile cases persist one canonical merged result after exact subrun
   const page = {
     assertEvidenceClean() {},
     async send(method) {
+      if (method === 'Page.bringToFront') return {}
       assert.equal(method, 'Page.captureScreenshot')
       return { data: Buffer.from(`checkpoint:${activeProfile}`).toString('base64') }
     },
+    async evaluate() {},
     snapshotEvidence() {
       return { networkEvidence: [], eventEvidence: [] }
     }

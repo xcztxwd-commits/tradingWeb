@@ -6393,10 +6393,31 @@ async function assertPageLayout(page, route) {
 async function captureScreenshot(page, mode, viewport, route) {
   const routeName = safeName(route.split('?')[0].replace(/^\//, '') || 'root')
   const path = join(screenshotsDir, `${mode.alias}-${viewport.name}-${routeName}.png`)
-  const image = await page.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
+  const image = await captureViewportScreenshot(page)
   await writeFile(path, Buffer.from(image.data, 'base64'))
   screenshots.push(path)
   return path
+}
+
+async function captureViewportScreenshot(page) {
+  await page.send('Page.bringToFront')
+  await page.evaluate(() => new Promise((resolveFrame) => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(fallback)
+      resolveFrame()
+    }
+    const fallback = setTimeout(finish, 500)
+    requestAnimationFrame(() => requestAnimationFrame(finish))
+  }))
+  return page.send('Page.captureScreenshot', {
+    format: 'png',
+    fromSurface: true,
+    captureBeyondViewport: false,
+    optimizeForSpeed: true
+  })
 }
 
 function browserRuntimeErrorMessage(error) {
@@ -7785,10 +7806,7 @@ export async function captureCheckpoint(context, name, scope = {}) {
     page.assertEvidenceClean(`${caseId}/${name}`)
     const suffix = index === 0 ? '' : `-${index + 1}`
     const filename = `${safeName(name)}${subrunSuffix}${suffix}.png`
-    const screenshot = await page.send('Page.captureScreenshot', {
-      format: 'png',
-      captureBeyondViewport: false
-    })
+    const screenshot = await captureViewportScreenshot(page)
     const screenshotBytes = Buffer.from(screenshot.data, 'base64')
     await writeFile(join(directory, filename), screenshotBytes)
     artifactHashes[`${safeName(caseId)}/${filename}`] = (
