@@ -216,6 +216,13 @@ describe('real USDT demo browser smoke contract', () => {
     }
   })
 
+  it('preserves a case-specific checkpoint identity inside grouped profile execution', () => {
+    assert.match(
+      source(),
+      /\{ \.\.\.scope, subrunIdentity: scope\.subrunIdentity \?\? subrunIdentity \}/
+    )
+  })
+
   it('covers the complete Spot, transfer, and Perpetual P0 journey', () => {
     const text = source()
     const fragments = [

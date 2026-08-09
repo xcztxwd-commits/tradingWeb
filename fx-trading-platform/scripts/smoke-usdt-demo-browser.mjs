@@ -14655,7 +14655,7 @@ export async function runP0Suite(options, dependencies) {
                           evidence,
                           checkpointContext,
                           name,
-                          { ...scope, subrunIdentity }
+                          { ...scope, subrunIdentity: scope.subrunIdentity ?? subrunIdentity }
                         )
                       },
                       writeCaseResultAtomic(_path, result) {
