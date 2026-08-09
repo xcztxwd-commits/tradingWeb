@@ -179,6 +179,16 @@ test('PERP-04 runs BASE, QUOTE, and CONTRACTS as independent users at one fixed 
   }
 })
 
+test('PERP authority mark rejects a stale same-price snapshot from the previous subrun', () => {
+  const helper = section(
+    'async function applyAuthorityMark',
+    'async function waitForMarket'
+  )
+
+  assert.match(helper, /candidate\.quote\?\.stale === false/)
+  assert.match(helper, /candidate\.reference\?\.stale === false/)
+})
+
 test('Perp financial helper proves every position risk field and aggregate account summary', () => {
   const helper = section(
     'function assertPerpPositionFinancials',

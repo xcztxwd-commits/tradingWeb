@@ -7854,6 +7854,8 @@ async function applyAuthorityMark(scope, symbol, target) {
       const mark = Number(candidate.reference?.mark ?? candidate.quote?.markPrice)
       return Number.isFinite(mark)
         && Math.abs(mark - Number(target)) <= minimumSpread
+        && candidate.quote?.stale === false
+        && candidate.reference?.stale === false
     }
   )
   return { bid, ask }

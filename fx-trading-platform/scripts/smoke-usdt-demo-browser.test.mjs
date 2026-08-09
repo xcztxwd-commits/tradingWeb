@@ -743,6 +743,19 @@ describe('real USDT demo browser smoke contract', () => {
     assert.doesNotMatch(submitSource, /await sleep\(50\)/)
   })
 
+  it('waits for exported P0 order inputs to reach React state before submitting', () => {
+    const text = source()
+    const submitSource = text.slice(
+      text.indexOf('export async function submitOrderViaUi'),
+      text.indexOf('export async function positionActionViaUi')
+    )
+
+    assert.match(
+      submitSource,
+      /input\.value === String\(value\)\s*&&\s*input\.defaultValue === String\(value\)/
+    )
+  })
+
   it('waits for transient market readiness before enabling reduce-only', () => {
     const text = source()
     const submitSource = text.slice(

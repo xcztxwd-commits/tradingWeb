@@ -7225,7 +7225,7 @@ export async function submitOrderViaUi(page, order) {
     const inputs = [...form.querySelectorAll('input[inputmode="decimal"]:not([disabled])')]
     const setValue = (input, value) => {
       if (value === undefined || value === null) return true
-      if (input.value === String(value)) return true
+      if (input.value === String(value) && input.defaultValue === String(value)) return true
       const setter = Object.getOwnPropertyDescriptor(
         HTMLInputElement.prototype,
         'value'
