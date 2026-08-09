@@ -2396,6 +2396,71 @@ test('zero-mutation fingerprint ignores the generated account summary observatio
   )
 })
 
+test('zero-mutation fingerprint ignores quote-driven perpetual valuations', () => {
+  const beforeSnapshot = authAccountSnapshot({
+    accountId: '11111111-1111-4111-8111-111111111111',
+    positions: [{
+      id: 'position-1',
+      symbol: 'BTCUSDT-PERP',
+      leverage: 50,
+      lots: 1.01,
+      openPrice: 64832.41031554,
+      markPrice: 64826.8,
+      currentPrice: 64825.7,
+      notional: 65475.068,
+      liquidationPrice: 15444.82254967,
+      floatingPnl: -5.6664187,
+      floatingPnlRatio: -0.00432678,
+      marginHeld: 1309.61468837,
+      initialMargin: 1309.61468837,
+      maintenanceMargin: 327.37534,
+      realizedPnl: 0,
+      version: 6
+    }]
+  })
+  Object.assign(beforeSnapshot.summary, {
+    equity: 49961.59321409,
+    freeMargin: 48651.97852572,
+    maintenanceMargin: 327.37534,
+    marginAvailable: 48651.97852572,
+    marginLevel: 3814.98418258,
+    openFloatingPnl: -5.6664187,
+    positionValue: 65475.068,
+    usedMargin: 1309.61468837
+  })
+  const afterSnapshot = structuredClone(beforeSnapshot)
+  Object.assign(afterSnapshot.positions[0], {
+    markPrice: 64828.5,
+    currentPrice: 64829.8,
+    notional: 65476.785,
+    liquidationPrice: 15445.01234567,
+    floatingPnl: -3.9494187,
+    floatingPnlRatio: -0.00301571,
+    maintenanceMargin: 327.383925
+  })
+  Object.assign(afterSnapshot.summary, {
+    equity: 49963.31021409,
+    freeMargin: 48653.69552572,
+    maintenanceMargin: 327.383925,
+    marginAvailable: 48653.69552572,
+    marginLevel: 3815.11528985,
+    openFloatingPnl: -3.9494187,
+    positionValue: 65476.785
+  })
+
+  assert.deepEqual(
+    p0CoreContracts.tradingStateFingerprint(afterSnapshot),
+    p0CoreContracts.tradingStateFingerprint(beforeSnapshot)
+  )
+
+  afterSnapshot.positions[0].marginHeld = 1300
+  assert.notDeepEqual(
+    p0CoreContracts.tradingStateFingerprint(afterSnapshot),
+    p0CoreContracts.tradingStateFingerprint(beforeSnapshot),
+    'held collateral is a business mutation'
+  )
+})
+
 test('AUTH-02 fails closed when a login cycle changes account continuity', async () => {
   const definition = P0_CASES.find(({ id }) => id === 'AUTH-02')
   const beforeSnapshot = authAccountSnapshot({

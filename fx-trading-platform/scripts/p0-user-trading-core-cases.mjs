@@ -8273,7 +8273,29 @@ async function probeDisabledOrderSubmission(page, order) {
 
 export function tradingStateFingerprint(snapshot) {
   const summary = { ...(snapshot.summary ?? {}) }
-  delete summary.lastSnapshotAt
+  for (const field of [
+    'lastSnapshotAt',
+    'equity',
+    'freeMargin',
+    'maintenanceMargin',
+    'marginAvailable',
+    'marginLevel',
+    'openFloatingPnl',
+    'positionValue'
+  ]) delete summary[field]
+  const positions = (snapshot.positions ?? []).map((position) => {
+    const stable = { ...position }
+    for (const field of [
+      'currentPrice',
+      'floatingPnl',
+      'floatingPnlRatio',
+      'liquidationPrice',
+      'maintenanceMargin',
+      'markPrice',
+      'notional'
+    ]) delete stable[field]
+    return stable
+  })
   const canonicalize = (value) => {
     if (Array.isArray(value)) {
       return value
@@ -8296,7 +8318,7 @@ export function tradingStateFingerprint(snapshot) {
     summary,
     orders: snapshot.orders ?? [],
     trades: snapshot.trades ?? [],
-    positions: snapshot.positions ?? [],
+    positions,
     positionHistory: snapshot.positionHistory ?? [],
     settings: snapshot.settings ?? {},
     transfers: snapshot.transfers ?? [],
