@@ -370,11 +370,11 @@ export function quantityFromUnit({ unit, quantity, authorityMark, rules }) {
     throw new TypeError('unit must be BASE, QUOTE, USDT_NOTIONAL or CONTRACTS')
   }
   if (baseQuantity.units <= 0n) throw new RangeError('quantity converts to zero')
-  if (rules.minQty !== undefined
+  if (rules.minQty != null
       && compare(baseQuantity, positive(rules.minQty, 'rules.minQty')) < 0) {
     throw new RangeError('quantity is below the symbol minimum')
   }
-  if (rules.minNotional !== undefined
+  if (rules.minNotional != null
       && compare(multiply(baseQuantity, mark), positive(rules.minNotional, 'rules.minNotional')) < 0) {
     throw new RangeError('notional is below the symbol minimum')
   }

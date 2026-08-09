@@ -116,6 +116,26 @@ test('financial oracle review: REST and DB money tolerance is half the 8-place u
   )
 })
 
+test('financial oracle review: nullable quantity minimums are absent constraints', () => {
+  const contractRules = {
+    ...BTC_RULES,
+    contractSize: '0.001',
+    contractMultiplier: '1'
+  }
+  assert.equal(financialOracles.quantityFromUnit({
+    unit: 'CONTRACTS',
+    quantity: '1',
+    authorityMark: '50000',
+    rules: { ...contractRules, minNotional: null }
+  }), '0.0010')
+  assert.equal(financialOracles.quantityFromUnit({
+    unit: 'CONTRACTS',
+    quantity: '1',
+    authorityMark: '50000',
+    rules: { ...contractRules, minQty: null }
+  }), '0.0010')
+})
+
 test('financial oracle review: BASE quantity rejects rather than floors a step mismatch', () => {
   assert.throws(
     () => financialOracles.quantityFromUnit({
