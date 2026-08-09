@@ -53,6 +53,8 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class TradingSettingsService {
 
+  private static final int MAX_STALE_MARKET_ATTEMPTS = 3;
+
   private final TradingAccountRepository accountRepository;
   private final SymbolRepository symbolRepository;
   private final AccountSymbolSettingRepository settingRepository;
@@ -144,7 +146,7 @@ public class TradingSettingsService {
         && request.expectedVersion() == preflightVersion;
 
     BusinessException staleFailure = null;
-    for (int attempt = 0; attempt < 2; attempt++) {
+    for (int attempt = 0; attempt < MAX_STALE_MARKET_ATTEMPTS; attempt++) {
       try {
         ExecutableMarketSnapshot market = resolveRequired
             ? resolvePerpetualMarket(canonicalSymbol)
@@ -163,7 +165,8 @@ public class TradingSettingsService {
             market,
             prepared));
       } catch (BusinessException exception) {
-        if (!ErrorCode.MARKET_DATA_STALE.equals(exception.getCode()) || attempt > 0) {
+        if (!ErrorCode.MARKET_DATA_STALE.equals(exception.getCode())
+            || attempt >= MAX_STALE_MARKET_ATTEMPTS - 1) {
           throw exception;
         }
         staleFailure = exception;

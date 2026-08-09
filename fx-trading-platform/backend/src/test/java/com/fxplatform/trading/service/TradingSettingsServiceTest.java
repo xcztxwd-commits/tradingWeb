@@ -367,13 +367,14 @@ class TradingSettingsServiceTest {
   }
 
   @Test
-  void staleLeverageMarkRetriesOutsideLocksAndCommitsOnlyTheSuccessfulAttempt() {
+  void repeatedStaleLeverageMarksRetryOutsideLocksAndCommitOnlyTheSuccessfulAttempt() {
     PositionEntity position = position(
         PositionSide.BOTH, OrderSide.BUY, MarginMode.CROSS,
         "0.2", "50000", "1000", "1000", 4L);
     LeverageFixture fixture = leverageFixture(
         MarginMode.CROSS, 20, "1000", "9000", List.of(position), List.of());
     doThrow(new BusinessException(ErrorCode.MARKET_DATA_STALE, "stale"))
+        .doThrow(new BusinessException(ErrorCode.MARKET_DATA_STALE, "stale again"))
         .doNothing()
         .when(fullFillCoordinator).requireFresh(
             org.mockito.ArgumentMatchers.any(ExecutableMarketSnapshot.class));
@@ -382,12 +383,13 @@ class TradingSettingsServiceTest {
         fixture.userId(), fixture.accountId(), "BTCUSDT-PERP",
         new UpdateSymbolSettingsRequest(20, null, null, 3L));
 
-    verify(marketBundleResolver, times(2)).resolvePerp(
+    verify(marketBundleResolver, times(3)).resolvePerp(
         org.mockito.ArgumentMatchers.eq("BTCUSDT-PERP"), org.mockito.ArgumentMatchers.any());
-    verify(accountRepository, times(2)).findByIdAndUserIdForUpdate(
+    verify(accountRepository, times(3)).findByIdAndUserIdForUpdate(
         fixture.accountId(), fixture.userId());
     verify(settingRepository, times(1)).updateIfVersion(
         fixture.accountId(), "BTCUSDT-PERP", 3L, 20, MarginMode.CROSS, QuantityUnit.BASE);
+    verify(accountRepository, times(1)).save(fixture.account());
     verify(positionRepository, times(1)).save(position);
     verify(ledgerService, times(1)).recordMarginRelease(
         fixture.account(), new BigDecimal("500.00000000"), position.getId(),
@@ -402,6 +404,38 @@ class TradingSettingsServiceTest {
         org.mockito.ArgumentMatchers.eq("BTCUSDT-PERP"), org.mockito.ArgumentMatchers.any());
     lockOrder.verify(accountRepository).findByIdAndUserIdForUpdate(
         fixture.accountId(), fixture.userId());
+    lockOrder.verify(marketBundleResolver).resolvePerp(
+        org.mockito.ArgumentMatchers.eq("BTCUSDT-PERP"), org.mockito.ArgumentMatchers.any());
+    lockOrder.verify(accountRepository).findByIdAndUserIdForUpdate(
+        fixture.accountId(), fixture.userId());
+  }
+
+  @Test
+  void repeatedStaleLeverageMarksFailClosedAfterTheBoundedAttemptsWithoutWrites() {
+    PositionEntity position = position(
+        PositionSide.BOTH, OrderSide.BUY, MarginMode.CROSS,
+        "0.2", "50000", "1000", "1000", 4L);
+    LeverageFixture fixture = leverageFixture(
+        MarginMode.CROSS, 20, "1000", "9000", List.of(position), List.of());
+    doThrow(new BusinessException(ErrorCode.MARKET_DATA_STALE, "stale"))
+        .doThrow(new BusinessException(ErrorCode.MARKET_DATA_STALE, "stale again"))
+        .doThrow(new BusinessException(ErrorCode.MARKET_DATA_STALE, "still stale"))
+        .when(fullFillCoordinator).requireFresh(
+            org.mockito.ArgumentMatchers.any(ExecutableMarketSnapshot.class));
+
+    assertCode(ErrorCode.MARKET_DATA_STALE, () -> service().updateSymbolSettings(
+        fixture.userId(), fixture.accountId(), "BTCUSDT-PERP",
+        new UpdateSymbolSettingsRequest(20, null, null, 3L)));
+
+    verify(marketBundleResolver, times(3)).resolvePerp(
+        org.mockito.ArgumentMatchers.eq("BTCUSDT-PERP"), org.mockito.ArgumentMatchers.any());
+    verify(accountRepository, times(3)).findByIdAndUserIdForUpdate(
+        fixture.accountId(), fixture.userId());
+    verify(settingRepository, never()).updateIfVersion(
+        fixture.accountId(), "BTCUSDT-PERP", 3L, 20, MarginMode.CROSS, QuantityUnit.BASE);
+    verify(accountRepository, never()).save(fixture.account());
+    verify(positionRepository, never()).save(position);
+    verifyNoLedgerWrites();
   }
 
   @Test
