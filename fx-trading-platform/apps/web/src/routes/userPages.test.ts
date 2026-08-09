@@ -460,6 +460,10 @@ describe('prototype auth and account center', () => {
     )
     assert.match(walletStyles, /\[data-platform-view='pc'\] \.wallet-risk-card\s*{[^}]*grid-column:\s*1\s*\/\s*-1/)
     assert.match(walletStyles, /\[data-platform-view='pc'\] \.wallet-simulation-note\s*{[^}]*flex-direction:\s*column/)
+    assert.match(
+      walletStyles,
+      /\.wallet-workbench__main\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/
+    )
     assert.match(userPageStyles, /@media \(max-width:\s*1024px\)[\s\S]*\.user-page__metrics,[\s\S]*grid-template-columns:\s*var\(--user-form-columns,\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)\)/)
   })
 

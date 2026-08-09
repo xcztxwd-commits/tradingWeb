@@ -1228,45 +1228,51 @@ async function assertMobileBottomActionClearance(page, route) {
         }
         const style = window.getComputedStyle(element)
         const rect = element.getBoundingClientRect()
-        const visibleInViewport = rect.bottom > 0 && rect.top < window.innerHeight
         const visibleText = (element.textContent ?? '').replace(/\s+/g, '').trim()
         const ariaText = (element.getAttribute('aria-label') ?? '').replace(/\s+/g, '').trim()
         if (visibleText && !/\p{L}/u.test(visibleText)) return false
         const labelText = ariaText || visibleText
         const hasReadableLabel = /\p{L}/u.test(labelText)
-        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width >= 4 && rect.height >= 4 && visibleInViewport && hasReadableLabel
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width >= 4 && rect.height >= 4 && hasReadableLabel
       })
       .map((element) => {
         const rect = element.getBoundingClientRect()
         return {
-          tagName: element.tagName.toLowerCase(),
-          text: (element.textContent ?? element.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
-          href: element instanceof HTMLAnchorElement ? element.getAttribute('href') : null,
-          rect: {
-            top: rect.top,
-            right: rect.right,
-            bottom: rect.bottom,
-            left: rect.left,
-            width: rect.width,
-            height: rect.height
-          },
+          element,
+          left: rect.left,
           documentTop: rect.top + window.scrollY + (main instanceof HTMLElement ? main.scrollTop : 0)
         }
       })
-      .sort((left, right) => left.documentTop - right.documentTop || left.rect.left - right.rect.left)
+      .sort((left, right) => left.documentTop - right.documentTop || left.left - right.left)
 
-    const lastAction = actions.at(-1)
-    if (!lastAction) {
+    const lastActionElement = actions.at(-1)?.element
+    if (!lastActionElement) {
       return { skipped: false, ok: false, reason: 'no key action found in main content' }
     }
 
-    const clearancePx = bottomRect.top - lastAction.rect.bottom
+    lastActionElement.scrollIntoView({ block: 'end' })
+    const lastActionRect = lastActionElement.getBoundingClientRect()
+    const currentBottomRect = bottomBar.getBoundingClientRect()
+    const lastAction = {
+      tagName: lastActionElement.tagName.toLowerCase(),
+      text: (lastActionElement.textContent ?? lastActionElement.getAttribute('aria-label') ?? '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      href: lastActionElement instanceof HTMLAnchorElement ? lastActionElement.getAttribute('href') : null,
+      rect: {
+        top: lastActionRect.top,
+        right: lastActionRect.right,
+        bottom: lastActionRect.bottom,
+        left: lastActionRect.left,
+        width: lastActionRect.width,
+        height: lastActionRect.height
+      }
+    }
+    const clearancePx = currentBottomRect.top - lastActionRect.bottom
     return {
       skipped: false,
       ok: clearancePx >= 4,
       clearancePx,
-      bottomBarTop: bottomRect.top,
-      bottomBarHeight: bottomRect.height,
+      bottomBarTop: currentBottomRect.top,
+      bottomBarHeight: currentBottomRect.height,
       lastAction
     }
   })

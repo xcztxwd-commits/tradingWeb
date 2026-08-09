@@ -134,6 +134,21 @@ describe('visual QA acceptance matrix', () => {
     assert.match(requiredCheck, /assert\(result\.ok,/u)
   })
 
+  it('finds an offscreen key action before scrolling it clear of mobile navigation', () => {
+    const bottomActionSource = source.slice(
+      source.indexOf('async function assertMobileBottomActionClearance'),
+      source.indexOf('function collectRuntimeErrors')
+    )
+    const candidateFilter = bottomActionSource.slice(
+      bottomActionSource.indexOf('const actions ='),
+      bottomActionSource.indexOf('const lastActionElement')
+    )
+
+    assert.doesNotMatch(candidateFilter, /visibleInViewport/u)
+    assert.match(bottomActionSource, /const lastActionElement = actions\.at\(-1\)\?\.element/u)
+    assert.match(bottomActionSource, /lastActionElement\.scrollIntoView\(\{ block: 'end' \}\)/u)
+  })
+
   it('does not invent a key-action requirement for read-only authenticated views', () => {
     for (const name of ['dashboard-auth', 'account-assets-auth', 'account-funding-auth', 'account-kyc-auth']) {
       const route = source.match(new RegExp(`\\{[^}]*name:\\s*['"]${name}['"][^}]*\\}`, 'u'))?.[0]
