@@ -279,6 +279,13 @@ describe('OKX-style trade panel density', () => {
     assert.match(orderSideSource, /t\('trading\.marginRequirement'/)
   })
 
+  it('disables authenticated order submission until trading is ready', () => {
+    assert.match(
+      orderSubmitButtonSource,
+      /const disabled = submitting \|\| Boolean\(disabledReason\) \|\| \(!canTrade && !loginRequired\)/
+    )
+  })
+
   it('shows login navigation instead of order submission when authentication is required', () => {
     assert.match(tradePanelSource, /loginRequired/)
     assert.match(tradePanelSource, /onLoginRequired/)
