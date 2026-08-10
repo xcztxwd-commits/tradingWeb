@@ -10021,9 +10021,85 @@ function observeLocalChildSpawn(child, {
   return ready
 }
 
+function assertProcessAbsentByProbe(pid, probeProcess, signal) {
+  throwIfP0Aborted(signal)
+  try {
+    probeProcess(pid, 0)
+  } catch (error) {
+    throwIfP0Aborted(signal)
+    if (error?.code === 'ESRCH') return null
+    throw new Error('P0_PROCESS_NATIVE_HANDLE_UNAVAILABLE_FOR_LIVE_PID', {
+      cause: error
+    })
+  }
+  throwIfP0Aborted(signal)
+  throw new Error('P0_PROCESS_NATIVE_HANDLE_UNAVAILABLE_FOR_LIVE_PID')
+}
+
+async function assertPosixProcessAbsent(pid, {
+  platform,
+  readProcessStat = readFile,
+  probeProcess = (targetPid, targetSignal) => process.kill(targetPid, targetSignal),
+  signal
+} = {}) {
+  throwIfP0Aborted(signal)
+  if (platform !== 'linux') {
+    return assertProcessAbsentByProbe(pid, probeProcess, signal)
+  }
+  let stat
+  try {
+    stat = await readProcessStat(`/proc/${pid}/stat`, {
+      encoding: 'utf8',
+      signal
+    })
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ESRCH') {
+      return assertProcessAbsentByProbe(pid, probeProcess, signal)
+    }
+    throw error
+  }
+  throwIfP0Aborted(signal)
+  const match = String(stat).match(/^(\d+)\s+\(.*\)\s+([A-Za-z])(?:\s|$)/s)
+  if (!match || Number(match[1]) !== pid) {
+    throw new Error('P0_PROCESS_STATE_UNKNOWN')
+  }
+  if (match[2].toUpperCase() === 'Z' || match[2].toUpperCase() === 'X') {
+    return null
+  }
+  throw new Error('P0_PROCESS_NATIVE_HANDLE_UNAVAILABLE_FOR_LIVE_PID')
+}
+
+export function createPosixAbsenceOnlyProcessHandle(pid, {
+  platform = P0_HOST_PLATFORM,
+  readProcessStat = readFile,
+  probeProcess = (targetPid, targetSignal) => process.kill(targetPid, targetSignal)
+} = {}) {
+  if (!Number.isSafeInteger(pid) || pid < 1) {
+    throw new Error('P0_PROCESS_PID_INVALID')
+  }
+  if (platform === 'win32') return null
+  return {
+    async inspectIdentity({ signal } = {}) {
+      return assertPosixProcessAbsent(pid, {
+        platform,
+        readProcessStat,
+        probeProcess,
+        signal
+      })
+    },
+    async terminateTree(resource, { signal } = {}) {
+      throwIfP0Aborted(signal)
+      throw new Error('P0_POSIX_ABSENCE_ONLY_HANDLE')
+    },
+    async close({ signal } = {}) {
+      throwIfP0Aborted(signal)
+    }
+  }
+}
+
 export function acquireLocalNativeProcessHandle(pid) {
   const child = localNativeProcessHandles.get(pid)
-  if (!child) return null
+  if (!child) return createPosixAbsenceOnlyProcessHandle(pid)
   return {
     async inspectIdentity({ signal } = {}) {
       throwIfP0Aborted(signal)

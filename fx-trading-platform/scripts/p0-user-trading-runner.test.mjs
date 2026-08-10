@@ -7491,6 +7491,217 @@ test('default managed backend registers native identity before readiness', async
   await handle.close()
 })
 
+test('POSIX absence-only handles prove ESRCH or terminal proc state and never terminate', async () => {
+  const readStates = []
+  const missing = smokeContracts.createPosixAbsenceOnlyProcessHandle(950001, {
+    platform: 'linux',
+    async readProcessStat(path) {
+      readStates.push(path)
+      const error = new Error('missing')
+      error.code = 'ENOENT'
+      throw error
+    },
+    probeProcess(pid, signal) {
+      assert.equal(pid, 950001)
+      assert.equal(signal, 0)
+      const error = new Error('absent')
+      error.code = 'ESRCH'
+      throw error
+    }
+  })
+  assert.ok(missing)
+  assert.equal(await missing.inspectIdentity(), null)
+  assert.deepEqual(readStates, ['/proc/950001/stat'])
+  await assert.rejects(
+    missing.terminateTree({ id: 'missing-process' }),
+    /P0_POSIX_ABSENCE_ONLY_HANDLE/
+  )
+
+  for (const [pid, state] of [[950002, 'Z'], [950003, 'X']]) {
+    let probes = 0
+    const exited = smokeContracts.createPosixAbsenceOnlyProcessHandle(pid, {
+      platform: 'linux',
+      async readProcessStat() {
+        return `${pid} (node worker) ${state} 1 2 3\n`
+      },
+      probeProcess() {
+        probes += 1
+      }
+    })
+    assert.equal(await exited.inspectIdentity(), null)
+    assert.equal(probes, 0)
+  }
+
+  const portableMissing = smokeContracts.createPosixAbsenceOnlyProcessHandle(950004, {
+    platform: 'darwin',
+    probeProcess() {
+      const error = new Error('absent')
+      error.code = 'ESRCH'
+      throw error
+    }
+  })
+  assert.equal(await portableMissing.inspectIdentity(), null)
+
+  let closes = 0
+  const cleanupHandle = {
+    ...missing,
+    async close() { closes += 1 }
+  }
+  const resource = {
+    type: 'process',
+    id: 'new-session-missing-process',
+    live: true,
+    state: 'STARTED',
+    pid: 950001,
+    processStartedAt: 'spawn:new-session-missing-process',
+    processFingerprint: `sha256:${'a'.repeat(64)}`
+  }
+  assert.deepEqual(await smokeContracts.terminateJournaledOwnedProcesses({
+    resources: [resource],
+    async acquireNativeProcessHandle() {
+      return cleanupHandle
+    }
+  }), { terminated: 0 })
+  assert.equal(closes, 1)
+  await assert.rejects(smokeContracts.terminateJournaledOwnedProcesses({
+    resources: [resource],
+    requireTreeProof: true,
+    async acquireNativeProcessHandle() {
+      return cleanupHandle
+    }
+  }), /P0_PROCESS_TREE_TERMINATION_UNVERIFIED/)
+  assert.equal(closes, 2)
+
+  let invalidReads = 0
+  for (const pid of [0, -1, 1.5, '950012']) {
+    assert.throws(() => smokeContracts.createPosixAbsenceOnlyProcessHandle(pid, {
+      platform: 'linux',
+      async readProcessStat() { invalidReads += 1 }
+    }), /P0_PROCESS_PID_INVALID/)
+  }
+  assert.equal(invalidReads, 0)
+})
+
+test('POSIX absence-only handles fail closed on live, ambiguous, and aborted probes', async () => {
+  for (const state of ['S', 'R']) {
+    const live = smokeContracts.createPosixAbsenceOnlyProcessHandle(950005, {
+      platform: 'linux',
+      async readProcessStat() {
+        return `950005 (node worker) ${state} 1 2 3\n`
+      }
+    })
+    await assert.rejects(
+      live.inspectIdentity(),
+      /P0_PROCESS_NATIVE_HANDLE_UNAVAILABLE_FOR_LIVE_PID/
+    )
+  }
+
+  const live = smokeContracts.createPosixAbsenceOnlyProcessHandle(950005, {
+    platform: 'linux',
+    async readProcessStat() {
+      return '950005 (node worker) S 1 2 3\n'
+    }
+  })
+  await assert.rejects(
+    live.terminateTree({ id: 'live-process' }),
+    /P0_POSIX_ABSENCE_ONLY_HANDLE/
+  )
+
+  for (const stat of [
+    'malformed\n',
+    '950007 (wrong pid) S 1 2 3\n'
+  ]) {
+    const ambiguous = smokeContracts.createPosixAbsenceOnlyProcessHandle(950006, {
+      platform: 'linux',
+      async readProcessStat() { return stat }
+    })
+    await assert.rejects(
+      ambiguous.inspectIdentity(),
+      /P0_PROCESS_STATE_UNKNOWN/
+    )
+  }
+
+  const hiddenButLive = smokeContracts.createPosixAbsenceOnlyProcessHandle(950008, {
+    platform: 'linux',
+    async readProcessStat() {
+      const error = new Error('hidden')
+      error.code = 'ENOENT'
+      throw error
+    },
+    probeProcess(pid, signal) {
+      assert.equal(pid, 950008)
+      assert.equal(signal, 0)
+    }
+  })
+  await assert.rejects(
+    hiddenButLive.inspectIdentity(),
+    /P0_PROCESS_NATIVE_HANDLE_UNAVAILABLE_FOR_LIVE_PID/
+  )
+
+  const hiddenWithoutPermission = smokeContracts.createPosixAbsenceOnlyProcessHandle(950009, {
+    platform: 'linux',
+    async readProcessStat() {
+      const error = new Error('hidden')
+      error.code = 'ENOENT'
+      throw error
+    },
+    probeProcess() {
+      const error = new Error('permission denied')
+      error.code = 'EPERM'
+      throw error
+    }
+  })
+  await assert.rejects(
+    hiddenWithoutPermission.inspectIdentity(),
+    /P0_PROCESS_NATIVE_HANDLE_UNAVAILABLE_FOR_LIVE_PID/
+  )
+
+  const controller = new AbortController()
+  controller.abort(new Error('P0_TEST_ABORTED'))
+  let reads = 0
+  let probes = 0
+  const aborted = smokeContracts.createPosixAbsenceOnlyProcessHandle(950010, {
+    platform: 'linux',
+    async readProcessStat() {
+      reads += 1
+      return '950010 (node) Z 1 2 3\n'
+    },
+    probeProcess() { probes += 1 }
+  })
+  await assert.rejects(
+    aborted.inspectIdentity({ signal: controller.signal }),
+    /P0_TEST_ABORTED/
+  )
+  await assert.rejects(
+    aborted.terminateTree({ id: 'aborted-process' }, { signal: controller.signal }),
+    /P0_TEST_ABORTED/
+  )
+  assert.equal(reads, 0)
+  assert.equal(probes, 0)
+})
+
+test('map-miss native handle selection uses immutable host platform and keeps Windows provider-only', () => {
+  let reads = 0
+  const windowsHandle = smokeContracts.createPosixAbsenceOnlyProcessHandle(950011, {
+    platform: 'win32',
+    async readProcessStat() {
+      reads += 1
+      return '950011 (node) Z 1 2 3\n'
+    }
+  })
+  assert.equal(windowsHandle, null)
+  assert.equal(reads, 0)
+
+  const oppositePlatform = process.platform === 'win32' ? 'linux' : 'win32'
+  const productionHandle = smokeContracts.acquireLocalNativeProcessHandle(950012, {
+    platform: oppositePlatform,
+    async readProcessStat() {
+      throw new Error('TEST_OVERRIDE_MUST_NOT_BE_USED')
+    }
+  })
+  assert.equal(productionHandle === null, process.platform === 'win32')
+})
+
 test('owned frontends launch Vite directly so the tracked child owns the listening port', () => {
   assert.equal(typeof smokeContracts.createP0FrontendProcessDescriptor, 'function')
   const platformRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
