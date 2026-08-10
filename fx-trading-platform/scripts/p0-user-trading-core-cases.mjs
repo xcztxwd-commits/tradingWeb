@@ -3481,7 +3481,8 @@ async function runPerpQuantityUnitJourney(scope, { fixedMark, subrunId }) {
   const capture = await context.ui.submitOrderViaUi(page, {
     side: 'BUY',
     orderType: 'MARKET',
-    amount: input.quantity
+    amount: input.quantity,
+    quantityUnit: input.unit
   })
   scope.addMutation(`perpetual-${input.unit.toLowerCase()}-open-via-ui`, capture)
   const opened = await waitForFilledMutation(scope, before, capture, symbol)

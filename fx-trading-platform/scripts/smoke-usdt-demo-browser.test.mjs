@@ -684,10 +684,12 @@ describe('real USDT demo browser smoke contract', () => {
       text.indexOf('export async function submitOrderViaUi'),
       text.indexOf('export async function positionActionViaUi')
     )
-
     assert.match(text, /const TOP_ORDER_CONFIRMATION_SELECTOR = /)
     assert.match(submitSource, /querySelectorAll\(confirmationSelector\)[\s\S]*:scope > dl/)
-    assert.match(submitSource, /'scoped order confirmation', TOP_ORDER_CONFIRMATION_SELECTOR/)
+    assert.match(
+      submitSource,
+      /await page\.waitForFunction\([\s\S]*querySelectorAll\(confirmationSelector\)[\s\S]*'scoped order confirmation', TOP_ORDER_CONFIRMATION_SELECTOR\)/
+    )
     assert.doesNotMatch(
       submitSource,
       /const dialog = panel\?\.querySelector\('section\[role="dialog"\]'\)/
@@ -864,6 +866,42 @@ describe('real USDT demo browser smoke contract', () => {
       submitSource,
       /input\.value === String\(value\)\s*&&\s*input\.defaultValue === String\(value\)/
     )
+  })
+
+  it('binds exported P0 order submission to the expected controlled quantity unit', () => {
+    const text = source()
+    const submitSource = text.slice(
+      text.indexOf('export async function submitOrderViaUi'),
+      text.indexOf('export async function positionActionViaUi')
+    )
+    const atomicClickIndex = submitSource.indexOf('const opened = await waitFor')
+    const atomicClickSource = submitSource.slice(
+      atomicClickIndex,
+      submitSource.indexOf('await page.waitForFunction', atomicClickIndex)
+    )
+    const inputReadySource = submitSource.slice(
+      submitSource.indexOf("'scoped order form inputs'", submitSource.indexOf('await waitFor')) - 3500,
+      submitSource.indexOf("'scoped order form inputs'")
+    )
+    const coreSource = readFileSync(join(scriptsDir, 'p0-user-trading-core-cases.mjs'), 'utf8')
+    const quantityJourney = coreSource.slice(
+      coreSource.indexOf('async function runPerpQuantityUnitJourney'),
+      coreSource.indexOf('async function runPerpWeightedEntryJourney')
+    )
+
+    assert.match(submitSource, /form\.getAttribute\('data-quantity-unit'\) !== String\(values\.quantityUnit\)/)
+    assert.match(submitSource, /quantityUnit:\s*order\.quantityUnit/)
+    assert.match(inputReadySource, /orderTypeReady/)
+    assert.match(inputReadySource, /formVisible/)
+    assert.match(inputReadySource, /if \(!form \|\| !formVisible \|\| !orderTypeReady\) return false/)
+    assert.match(atomicClickSource, /amountInput\?\.value === String\(values\.amount\)[\s\S]*amountInput\.defaultValue === String\(values\.amount\)/)
+    assert.match(atomicClickSource, /if \(!button \|\| button\.disabled \|\| !balanceReady \|\| !formVisible \|\| !orderTypeReady \|\| !amountReady \|\| !quantityUnitReady\) return false/)
+    assert.doesNotMatch(submitSource, /P0_ORDER_VALIDATION_REJECTED/)
+    assert.match(submitSource, /const submitCursor = page\.p0Evidence\.cursor/)
+    assert.match(submitSource, /P0_ORDER_CONFIRMATION_TIMEOUT/)
+    assert.match(submitSource, /orderTabSelected:[\s\S]*formVisible:[\s\S]*quantityUnit:[\s\S]*amountInputs:[\s\S]*submitButton:[\s\S]*notice:[\s\S]*topOverlayCount:[\s\S]*confirmationCandidateCount:/)
+    assert.match(submitSource, /request\.cursor > submitCursor[\s\S]*\/\\\/api\\\/trading\\\/orders\$\//)
+    assert.match(quantityJourney, /quantityUnit:\s*input\.unit/)
   })
 
   it('waits for transient market readiness before enabling reduce-only', () => {

@@ -7213,10 +7213,26 @@ export async function submitOrderViaUi(page, order) {
   }, panelSelector, side, orderType, { mobile: page.p0TradePanel.mobile })
   await waitFor(() => page.evaluate((selector, selectedSide, selectedType, values) => {
     const panel = document.querySelector(selector)
+    const visible = (element) => {
+      const rect = element?.getBoundingClientRect()
+      const style = element ? getComputedStyle(element) : null
+      return Boolean(rect && style && rect.width > 0 && rect.height > 0
+        && style.display !== 'none' && style.visibility !== 'hidden')
+    }
     const form = panel?.querySelector(
       `section[data-price-precision][class*="side--${selectedSide}"]`
     )
-    if (!form) return false
+    const tabIndex = selectedType === 'LIMIT' ? 0 : selectedType === 'MARKET' ? 1 : 2
+    const tabs = [...(panel?.querySelectorAll('[role="tablist"]') ?? [])]
+      .map((tablist) => [...tablist.querySelectorAll(':scope > [role="tab"]')].filter(visible))
+      .find((candidates) => candidates.length >= 3) ?? []
+    const formVisible = visible(form)
+    const orderTypeReady = tabs[tabIndex]?.getAttribute('aria-selected') === 'true'
+    if (!form || !formVisible || !orderTypeReady) return false
+    if (
+      values.quantityUnit !== undefined
+      && form.getAttribute('data-quantity-unit') !== String(values.quantityUnit)
+    ) return false
     const perpetualOptions = form.querySelector(
       'section[aria-label="Perpetual order options"]'
     )
@@ -7274,6 +7290,7 @@ export async function submitOrderViaUi(page, order) {
     price: order.price,
     triggerPrice: order.triggerPrice,
     amount: order.amount ?? order.quantity,
+    quantityUnit: order.quantityUnit,
     positionSide: order.positionSide,
     reduceOnly: order.reduceOnly
   }), 'scoped order form inputs', 15000)
@@ -7307,28 +7324,103 @@ export async function submitOrderViaUi(page, order) {
     return { loginRequired: true, requestRef: null }
   }
 
-  const opened = await waitFor(() => page.evaluate((selector, selectedSide) => {
+  const submitCursor = page.p0Evidence.cursor
+  const opened = await waitFor(() => page.evaluate((selector, selectedSide, selectedType, values) => {
     const panel = document.querySelector(selector)
+    const visible = (element) => {
+      const rect = element?.getBoundingClientRect()
+      const style = element ? getComputedStyle(element) : null
+      return Boolean(rect && style && rect.width > 0 && rect.height > 0
+        && style.display !== 'none' && style.visibility !== 'hidden')
+    }
     const form = panel?.querySelector(
       `section[data-price-precision][class*="side--${selectedSide}"]`
     )
+    const tabIndex = selectedType === 'LIMIT' ? 0 : selectedType === 'MARKET' ? 1 : 2
+    const tabs = [...(panel?.querySelectorAll('[role="tablist"]') ?? [])]
+      .map((tablist) => [...tablist.querySelectorAll(':scope > [role="tab"]')].filter(visible))
+      .find((candidates) => candidates.length >= 3) ?? []
     const button = form?.querySelector('[data-trading-action="submit-order"]')
+    const amountInput = [...(form?.querySelectorAll('input[inputmode="decimal"]:not([disabled])') ?? [])].at(-1)
     const balanceReady = [...(form?.querySelectorAll('strong') ?? [])]
       .some((value) => !value.textContent?.trim().startsWith('-'))
-    if (!button || button.disabled || !balanceReady) return false
+    const formVisible = visible(form)
+    const orderTypeReady = tabs[tabIndex]?.getAttribute('aria-selected') === 'true'
+    const amountReady = values.amount === undefined || values.amount === null || (
+      amountInput?.value === String(values.amount)
+      && amountInput.defaultValue === String(values.amount)
+    )
+    const quantityUnitReady = values.quantityUnit === undefined
+      || form?.getAttribute('data-quantity-unit') === String(values.quantityUnit)
+    if (!button || button.disabled || !balanceReady || !formVisible || !orderTypeReady || !amountReady || !quantityUnitReady) return false
     button.click()
     return true
-  }, panelSelector, side), 'scoped order submit action', 15000)
+  }, panelSelector, side, orderType, {
+    amount: order.amount ?? order.quantity,
+    quantityUnit: order.quantityUnit
+  }), 'scoped order submit action', 15000)
   assert(opened, 'real order confirmation must open from the scoped panel')
-  await page.waitForFunction((confirmationSelector) => {
-    const dialog = [...document.querySelectorAll(confirmationSelector)]
-      .find((candidate) => candidate.querySelector(':scope > dl'))
-    if (!dialog) return false
-    const rect = dialog.getBoundingClientRect()
-    const style = getComputedStyle(dialog)
-    return rect.width > 0 && rect.height > 0
-      && style.display !== 'none' && style.visibility !== 'hidden'
-  }, 'scoped order confirmation', TOP_ORDER_CONFIRMATION_SELECTOR)
+  try {
+    await page.waitForFunction((confirmationSelector) => {
+      const dialog = [...document.querySelectorAll(confirmationSelector)]
+        .find((candidate) => candidate.querySelector(':scope > dl'))
+      if (!dialog) return false
+      const rect = dialog.getBoundingClientRect()
+      const style = getComputedStyle(dialog)
+      return rect.width > 0 && rect.height > 0
+        && style.display !== 'none' && style.visibility !== 'hidden'
+    }, 'scoped order confirmation', TOP_ORDER_CONFIRMATION_SELECTOR)
+  } catch (error) {
+    let state
+    try {
+      state = await page.evaluate((selector, selectedSide, selectedType, confirmationSelector) => {
+        const panel = document.querySelector(selector)
+        const visible = (element) => {
+          const rect = element?.getBoundingClientRect()
+          const style = element ? getComputedStyle(element) : null
+          return Boolean(rect && style && rect.width > 0 && rect.height > 0
+            && style.display !== 'none' && style.visibility !== 'hidden')
+        }
+        const form = panel?.querySelector(
+          `section[data-price-precision][class*="side--${selectedSide}"]`
+        )
+        const tabIndex = selectedType === 'LIMIT' ? 0 : selectedType === 'MARKET' ? 1 : 2
+        const tabs = [...(panel?.querySelectorAll('[role="tablist"]') ?? [])]
+          .map((tablist) => [...tablist.querySelectorAll(':scope > [role="tab"]')].filter(visible))
+          .find((candidates) => candidates.length >= 3) ?? []
+        const button = form?.querySelector('[data-trading-action="submit-order"]')
+        return {
+          orderTabSelected: tabs[tabIndex]?.getAttribute('aria-selected') ?? null,
+          formVisible: visible(form),
+          quantityUnit: form?.getAttribute('data-quantity-unit') ?? null,
+          amountInputs: [...(form?.querySelectorAll('input[inputmode="decimal"]:not([disabled])') ?? [])]
+            .map((input) => ({ value: input.value, defaultValue: input.defaultValue })),
+          submitButton: button ? { disabled: button.disabled } : null,
+          notice: panel?.querySelector('[role="status"]')?.textContent?.trim() ?? null,
+          topOverlayCount: document.querySelectorAll('[data-overlay-top="true"]').length,
+          confirmationCandidateCount: document.querySelectorAll(confirmationSelector).length
+        }
+      }, panelSelector, side, orderType, TOP_ORDER_CONFIRMATION_SELECTOR)
+    } catch {
+      state = { diagnosticCaptureFailed: true }
+    }
+    const orderRequests = page.p0Evidence.requests
+      .filter((request) => (
+        request.cursor > submitCursor
+          && request.method === 'POST'
+          && /\/api\/trading\/orders$/.test(request.url)
+      ))
+      .map((request) => ({
+        status: request.response?.status ?? null,
+        loadingFinished: request.loadingFinished,
+        loadingFailure: Boolean(request.loadingFailure)
+      }))
+    throw new Error(
+      `P0_ORDER_CONFIRMATION_TIMEOUT: ${error instanceof Error ? error.message : String(error)}; `
+        + `browser state: ${JSON.stringify({ ...state, orderRequests })}`,
+      { cause: error }
+    )
+  }
   const capture = await withCapturedMutation(
     page,
     order.matcher ?? { method: 'POST', url: /\/api\/trading\/orders$/ },

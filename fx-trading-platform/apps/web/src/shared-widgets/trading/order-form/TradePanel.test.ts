@@ -157,6 +157,10 @@ describe('OKX-style trade panel density', () => {
     assert.doesNotMatch(orderSideSource, /form\.orderType === 'market' \?[\s\S]*<TpSlPanel/)
   })
 
+  it('exposes the controlled quantity unit on each scoped order form', () => {
+    assert.match(orderSideSource, /data-quantity-unit=\{form\.quantityUnit\}/)
+  })
+
   it('accepts clicked quote prices as limit price prefill signals', () => {
     assert.match(tradePanelSource, /pricePrefill/)
     assert.match(tradePanelSource, /fillLimitPrice/)

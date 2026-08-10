@@ -102,6 +102,7 @@ export function OrderFormSide({
       aria-label={t('trading.sideForm', { side: sideLabel })}
       data-price-precision={pricePrecision}
       data-quantity-precision={quantityPrecision}
+      data-quantity-unit={form.quantityUnit}
       data-min-amount={minOrderAmount}
     >
       {form.strategyType === 'trigger' || form.strategyType === 'oco' ? (
