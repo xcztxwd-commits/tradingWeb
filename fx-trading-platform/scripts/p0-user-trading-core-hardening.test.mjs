@@ -226,14 +226,57 @@ test('PERP-04 checkpoints show the loaded account position count before capture'
   )
 })
 
-test('PERP authority mark rejects a stale same-price snapshot from the previous subrun', () => {
+test('PERP authority mark waits for the exact controlled snapshot and reuses it', () => {
+  assert.equal(typeof coreContracts.isAuthorityMarketSnapshot, 'function')
+  const controlled = {
+    quote: {
+      bid: '64922.1',
+      ask: '64922.2',
+      mid: '64922.1500000000',
+      markPrice: '64922.1500000000',
+      stale: false
+    },
+    reference: { mark: '64922.1500000000', stale: false }
+  }
+  const wrongMark = {
+    quote: {
+      bid: '64922.1',
+      ask: '64922.2',
+      mid: '64922.1500000000',
+      markPrice: '64922.1499',
+      stale: false
+    },
+    reference: { mark: '64922.1499', stale: false }
+  }
+  const previous = {
+    quote: {
+      bid: '64922.0',
+      ask: '64922.3',
+      mid: '64922.1500000000',
+      markPrice: '64922.1500000000',
+      stale: false
+    },
+    reference: { mark: '64922.1500000000', stale: false }
+  }
+
+  assert.equal(coreContracts.isAuthorityMarketSnapshot(previous, '64922.1', '64922.2'), false)
+  assert.equal(coreContracts.isAuthorityMarketSnapshot(wrongMark, '64922.1', '64922.2'), false)
+  assert.equal(coreContracts.isAuthorityMarketSnapshot(controlled, '64922.1', '64922.2'), true)
+
   const helper = section(
     'async function applyAuthorityMark',
     'async function waitForMarket'
   )
 
-  assert.match(helper, /candidate\.quote\?\.stale === false/)
-  assert.match(helper, /candidate\.reference\?\.stale === false/)
+  assert.match(helper, /isAuthorityMarketSnapshot\(candidate, bid, ask\)/)
+  assert.match(helper, /return \{ bid, ask, market \}/)
+
+  const journey = section(
+    'async function runPerpQuantityUnitJourney',
+    'async function runPerpWeightedEntryJourney'
+  )
+  assert.match(journey, /const market = authority\.market/)
+  assert.doesNotMatch(journey, /const market = await context\.api\.snapshotMarket\(symbol\)/)
 })
 
 test('Perp financial helper proves every position risk field and aggregate account summary', () => {

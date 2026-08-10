@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -25,6 +26,7 @@ public class MarketTestControlService {
   private final RealtimeBackfillService backfillService;
   private final Clock clock;
   private final ConcurrentHashMap<String, OverrideState> overrides = new ConcurrentHashMap<>();
+  private final AtomicLong revision = new AtomicLong();
 
   @Autowired
   public MarketTestControlService(
@@ -57,7 +59,13 @@ public class MarketTestControlService {
         request.ask(),
         clock.instant().plus(ttl));
     overrides.put(symbol, state);
+    revision.incrementAndGet();
     return state.quote(clock.millis());
+  }
+
+  public long authorityRevision(String requestedSymbol) {
+    activeOverride(requestedSymbol);
+    return revision.get();
   }
 
   public Optional<QuoteResponse> overrideQuote(String symbol) {
@@ -113,6 +121,7 @@ public class MarketTestControlService {
   public void endOverride(String requestedSymbol) {
     String symbol = normalizeSymbol(requestedSymbol);
     if (overrides.remove(symbol) != null) {
+      revision.incrementAndGet();
       backfillService.backfill(symbol);
     }
   }
@@ -131,7 +140,9 @@ public class MarketTestControlService {
       return Optional.empty();
     }
     if (!state.expiresAt().isAfter(clock.instant())) {
-      overrides.remove(symbol, state);
+      if (overrides.remove(symbol, state)) {
+        revision.incrementAndGet();
+      }
       return Optional.empty();
     }
     return Optional.of(state);

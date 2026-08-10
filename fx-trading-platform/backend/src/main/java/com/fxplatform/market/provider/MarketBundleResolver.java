@@ -310,7 +310,10 @@ public class MarketBundleResolver {
             candidate.provider().getTimeoutMs(),
             candidate.provider().getConfigJson()))
         .toList();
-    return new BundleFlightKey(symbol, revisions);
+    long authorityRevision = testControlService == null
+        ? 0L
+        : testControlService.authorityRevision(symbol);
+    return new BundleFlightKey(symbol, revisions, authorityRevision);
   }
 
   private <T> T resolveSingleFlight(
@@ -363,7 +366,11 @@ public class MarketBundleResolver {
     return new CandleRequest("1m", to.minus(Duration.ofHours(1)), to);
   }
 
-  private record BundleFlightKey(String symbol, List<CandidateRevision> candidates) {
+  private record BundleFlightKey(
+      String symbol,
+      List<CandidateRevision> candidates,
+      long authorityRevision
+  ) {
   }
 
   private record CandidateRevision(

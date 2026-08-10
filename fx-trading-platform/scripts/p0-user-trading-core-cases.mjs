@@ -3447,7 +3447,7 @@ async function runPerpQuantityUnitJourney(scope, { fixedMark, subrunId }) {
     'PERP-04 public symbol rules must expose contractSize and contractMultiplier'
   )
   const authority = await applyAuthorityMark(scope, symbol, fixedMark)
-  const market = await context.api.snapshotMarket(symbol)
+  const market = authority.market
   const mark = String(market.reference?.mark ?? (
     (Number(authority.bid) + Number(authority.ask)) / 2
   ))
@@ -7860,15 +7860,15 @@ async function showAccountOverviewPositionCount(page, expectedOpenPositions) {
 
 async function applyAuthorityMark(scope, symbol, target) {
   assert(Number.isFinite(Number(target)) && Number(target) > 0)
-  const market = await scope.context.api.snapshotMarket(symbol)
-  const currentBid = Number(quoteDecimal(market, 'bid'))
-  const currentAsk = Number(quoteDecimal(market, 'ask'))
+  const currentMarket = await scope.context.api.snapshotMarket(symbol)
+  const currentBid = Number(quoteDecimal(currentMarket, 'bid'))
+  const currentAsk = Number(quoteDecimal(currentMarket, 'ask'))
   const minimumSpread = Math.max(
     currentAsk - currentBid,
-    Number(rulesFor(market).tickSize ?? rulesFor(market).priceTick ?? 0.1)
+    Number(rulesFor(currentMarket).tickSize ?? rulesFor(currentMarket).priceTick ?? 0.1)
   )
   const tick = String(
-    rulesFor(market).tickSize ?? rulesFor(market).priceTick ?? '0.1'
+    rulesFor(currentMarket).tickSize ?? rulesFor(currentMarket).priceTick ?? '0.1'
   )
   const decimals = (tick.split('.')[1] ?? '').length
   const bid = (Number(target) - minimumSpread / 2).toFixed(decimals)
@@ -7890,19 +7890,25 @@ async function applyAuthorityMark(scope, symbol, target) {
     bid,
     ask
   })
-  await waitForMarket(
+  const market = await waitForMarket(
     scope.context,
     symbol,
     `${scope.definition.id} authority mark ${target}`,
-    (candidate) => {
-      const mark = Number(candidate.reference?.mark ?? candidate.quote?.markPrice)
-      return Number.isFinite(mark)
-        && Math.abs(mark - Number(target)) <= minimumSpread
-        && candidate.quote?.stale === false
-        && candidate.reference?.stale === false
-    }
+    (candidate) => isAuthorityMarketSnapshot(candidate, bid, ask)
   )
-  return { bid, ask }
+  return { bid, ask, market }
+}
+
+export function isAuthorityMarketSnapshot(candidate, bid, ask) {
+  const mark = Number(candidate.reference?.mark ?? candidate.quote?.markPrice)
+  const midpoint = Number(candidate.quote?.mid)
+  return Number(candidate.quote?.bid) === Number(bid)
+    && Number(candidate.quote?.ask) === Number(ask)
+    && Number.isFinite(mark)
+    && Number.isFinite(midpoint)
+    && mark === midpoint
+    && candidate.quote?.stale === false
+    && candidate.reference?.stale === false
 }
 
 async function waitForMarket(context, symbol, description, predicate, timeoutMs = 30000) {

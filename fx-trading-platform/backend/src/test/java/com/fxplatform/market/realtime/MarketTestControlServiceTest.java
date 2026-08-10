@@ -70,6 +70,32 @@ class MarketTestControlServiceTest {
   }
 
   @Test
+  void authorityRevisionChangesOnSetReplaceClearAndExpiry() {
+    MarketTestControlProperties properties = enabledProperties();
+    MutableClock clock = new MutableClock(Instant.parse("2026-06-17T00:00:00Z"));
+    MarketTestControlService service = service(
+        properties, clock, Mockito.mock(RealtimeBackfillService.class));
+
+    long initial = service.authorityRevision("BTCUSDT-PERP");
+    service.startOverride(request("BTCUSDT-PERP", Duration.ofMinutes(1)));
+    long started = service.authorityRevision("BTCUSDT-PERP");
+    service.startOverride(request("BTCUSDT-PERP", Duration.ofMinutes(1)));
+    long replaced = service.authorityRevision("BTCUSDT-PERP");
+    service.endOverride("BTCUSDT-PERP");
+    long cleared = service.authorityRevision("BTCUSDT-PERP");
+    service.startOverride(request("BTCUSDT-PERP", Duration.ofSeconds(1)));
+    long expiring = service.authorityRevision("BTCUSDT-PERP");
+    clock.advance(Duration.ofSeconds(2));
+    long expired = service.authorityRevision("BTCUSDT-PERP");
+
+    assertThat(started).isGreaterThan(initial);
+    assertThat(replaced).isGreaterThan(started);
+    assertThat(cleared).isGreaterThan(replaced);
+    assertThat(expiring).isGreaterThan(cleared);
+    assertThat(expired).isGreaterThan(expiring);
+  }
+
+  @Test
   void configuredMaxTtlCannotRaiseFiveMinuteSafetyCap() {
     MarketTestControlProperties properties = enabledProperties();
     properties.setMaxTtl(Duration.ofHours(1));

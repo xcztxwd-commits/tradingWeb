@@ -249,6 +249,32 @@ class MarketBundleResolverTest {
   }
 
   @Test
+  void authorityRevisionDropsFreshDefaultPerpetualFlight() {
+    PerpetualMarketBundle bundle = completePerp(
+        "okx-swap", "BTC-USDT-SWAP", MarketSourceMode.PUBLIC_EXTERNAL, NOW.minusSeconds(1));
+    BundleAdapter adapter = BundleAdapter.perp("okx-swap", bundle);
+    ProviderResolution candidate = candidate(
+        "BTCUSDT-PERP", ProductType.LINEAR_PERP, "BTC-USDT-SWAP", adapter);
+    MarketTestControlService testControlService = mock(MarketTestControlService.class);
+    when(providerResolver.resolveCandidates("BTCUSDT-PERP", BUNDLE_CAPABILITIES))
+        .thenReturn(List.of(candidate));
+    when(testControlService.authorityRevision("BTCUSDT-PERP")).thenReturn(0L, 1L);
+    when(testControlService.applyPerpetualOverride(bundle)).thenReturn(bundle);
+    MarketBundleResolver authorityResolver = new MarketBundleResolver(
+        providerResolver,
+        new MarketBundleValidator(CLOCK),
+        tracker,
+        healthRecorder,
+        testControlService,
+        CLOCK);
+
+    assertThat(authorityResolver.resolveDefaultPerpetual("BTCUSDT-PERP")).isSameAs(bundle);
+    assertThat(authorityResolver.resolveDefaultPerpetual("BTCUSDT-PERP")).isSameAs(bundle);
+
+    assertThat(adapter.perpCalls).isEqualTo(2);
+  }
+
+  @Test
   void providerBindingChangeDoesNotReuseEarlierDefaultSpotFlight() throws Exception {
     SpotMarketBundle localBundle =
         completeSpot("local-spot", "BTCUSDT", NOW.minusSeconds(1));
