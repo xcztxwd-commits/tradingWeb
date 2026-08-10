@@ -7491,6 +7491,34 @@ test('default managed backend registers native identity before readiness', async
   await handle.close()
 })
 
+test('owned frontends launch Vite directly so the tracked child owns the listening port', () => {
+  assert.equal(typeof smokeContracts.createP0FrontendProcessDescriptor, 'function')
+  const platformRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+  const viteCli = join(platformRoot, 'node_modules', 'vite', 'bin', 'vite.js')
+  for (const [surface, port] of [['web', 5199], ['admin', 5200]]) {
+    const environment = { P0_TEST_SURFACE: surface }
+    assert.deepEqual(
+      smokeContracts.createP0FrontendProcessDescriptor(surface, environment),
+      {
+        label: `p0-frontend-${surface}`,
+        command: process.execPath,
+        args: [
+          viteCli,
+          '--host', '127.0.0.1',
+          '--port', String(port),
+          '--strictPort'
+        ],
+        cwd: join(platformRoot, 'apps', surface),
+        environment
+      }
+    )
+  }
+  assert.throws(
+    () => smokeContracts.createP0FrontendProcessDescriptor('unknown', {}),
+    /P0_FRONTEND_SURFACE_INVALID/
+  )
+})
+
 test('default cleanup preserves its independent bounded signal', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'p0-review1-s7-cleanup-signal-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))

@@ -11352,6 +11352,27 @@ export function startP0ManagedProcess(
   return child
 }
 
+export function createP0FrontendProcessDescriptor(surface, environment) {
+  const port = surface === 'web'
+    ? 5199
+    : surface === 'admin'
+      ? 5200
+      : null
+  if (port === null) throw new Error('P0_FRONTEND_SURFACE_INVALID')
+  return {
+    label: `p0-frontend-${surface}`,
+    command: process.execPath,
+    args: [
+      join(projectRoot, 'node_modules', 'vite', 'bin', 'vite.js'),
+      '--host', '127.0.0.1',
+      '--port', String(port),
+      '--strictPort'
+    ],
+    cwd: join(projectRoot, 'apps', surface),
+    environment
+  }
+}
+
 export function createLocalProcessManager(
   runCommand = runLocalCommand,
   {
@@ -11361,24 +11382,13 @@ export function createLocalProcessManager(
 ) {
   return {
     async startOwnedFrontend(surface, { environment, signal } = {}) {
-      const port = surface === 'web'
-        ? 5199
-        : surface === 'admin'
-          ? 5200
-          : null
-      if (port === null) throw new Error('P0_FRONTEND_SURFACE_INVALID')
+      const descriptor = createP0FrontendProcessDescriptor(surface, environment)
       const child = startP0ManagedProcess(
-        `p0-frontend-${surface}`,
-        process.platform === 'win32' ? 'npm.cmd' : 'npm',
-        [
-          '--workspace', `apps/${surface}`,
-          'run', 'dev', '--',
-          '--host', '127.0.0.1',
-          '--port', String(port),
-          '--strictPort'
-        ],
-        projectRoot,
-        environment,
+        descriptor.label,
+        descriptor.command,
+        descriptor.args,
+        descriptor.cwd,
+        descriptor.environment,
         signal
       )
       await child.p0SpawnReady

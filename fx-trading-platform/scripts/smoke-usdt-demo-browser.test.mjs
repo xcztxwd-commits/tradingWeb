@@ -1537,6 +1537,10 @@ describe('real USDT demo browser smoke contract', () => {
 
   it('owns Web and Admin once while profile switches stop only the active backend', () => {
     const text = source()
+    const frontendDescriptorSource = text.slice(
+      text.indexOf('export function createP0FrontendProcessDescriptor'),
+      text.indexOf('export function createLocalProcessManager')
+    )
     const processManagerSource = text.slice(
       text.indexOf('export function createLocalProcessManager'),
       text.indexOf('async function writeRedisRecoveryState')
@@ -1547,8 +1551,14 @@ describe('real USDT demo browser smoke contract', () => {
     )
 
     assert.match(processManagerSource, /startOwnedFrontend/)
-    assert.match(processManagerSource, /--workspace', `apps\/\$\{surface\}`/)
-    assert.match(processManagerSource, /'--strictPort'/)
+    assert.match(processManagerSource, /createP0FrontendProcessDescriptor\(surface, environment\)/)
+    assert.match(frontendDescriptorSource, /command: process\.execPath/)
+    assert.match(
+      frontendDescriptorSource,
+      /join\(projectRoot, 'node_modules', 'vite', 'bin', 'vite\.js'\)/
+    )
+    assert.match(frontendDescriptorSource, /cwd: join\(projectRoot, 'apps', surface\)/)
+    assert.match(frontendDescriptorSource, /'--strictPort'/)
     assert.match(defaultDependenciesSource, /ensureParentFrontends/)
     assert.match(defaultDependenciesSource, /id: `frontend:\$\{surface\}`/)
     assert.match(defaultDependenciesSource, /processManager\.waitForFrontend/)
