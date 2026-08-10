@@ -7217,7 +7217,7 @@ export async function submitOrderViaUi(page, order) {
       `section[data-price-precision][class*="side--${selectedSide}"]`
     )
     if (!form) return false
-    const perpetualOptions = panel.querySelector(
+    const perpetualOptions = form.querySelector(
       'section[aria-label="Perpetual order options"]'
     )
     if (values.positionSide !== undefined && values.positionSide !== 'BOTH') {

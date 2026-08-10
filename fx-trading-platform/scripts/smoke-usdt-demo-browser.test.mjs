@@ -1287,6 +1287,10 @@ describe('real USDT demo browser smoke contract', () => {
       text.indexOf('export async function setPerpetualSettingsViaUi'),
       text.indexOf('export async function followLoginPromptViaUi')
     )
+    const submitOrderSource = text.slice(
+      text.indexOf('export async function submitOrderViaUi'),
+      text.indexOf('export async function positionActionViaUi')
+    )
 
     for (const contract of [
       'Perpetual trading settings',
@@ -1308,6 +1312,14 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(sharedUiSource, /reduceOnly/)
     assert.match(sharedUiSource, /expectFailure/)
     assert.match(sharedUiSource, /page\.allowHttpError/)
+    assert.match(
+      submitOrderSource,
+      /const perpetualOptions = form\.querySelector\(/
+    )
+    assert.doesNotMatch(
+      submitOrderSource,
+      /const perpetualOptions = panel\.querySelector\(/
+    )
   })
 
   it('follows labelled Position action dialogs instead of the removed aria-label', () => {
