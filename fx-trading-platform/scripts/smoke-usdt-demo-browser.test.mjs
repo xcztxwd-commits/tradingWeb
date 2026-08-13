@@ -210,7 +210,7 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(providerHealthSource, /`\$\{mode\.id\} \$\{product\} higher-priority provider health`, 5000\)/)
   })
 
-  it('accepts a provider failure that explains a cached fallback quote before recovery', () => {
+  it('accepts a recent provider failure despite global health update races', () => {
     const quote = { asOf: '2026-08-13T11:22:37.479Z' }
     const provider = {
       healthStatus: 'UP',
@@ -222,7 +222,15 @@ describe('real USDT demo browser smoke contract', () => {
     assert.equal(providerFailureExplainsQuote(provider, quote, Date.parse('2026-08-13T11:22:31.000Z')), true)
     assert.equal(providerFailureExplainsQuote({
       ...provider,
+      lastSuccessAt: '2026-08-13T11:22:37.478Z'
+    }, { asOf: '2026-08-13T11:22:37.500Z' }, Date.parse('2026-08-13T11:22:31.000Z')), true)
+    assert.equal(providerFailureExplainsQuote({
+      ...provider,
       lastSuccessAt: '2026-08-13T11:22:37.470Z'
+    }, quote, Date.parse('2026-08-13T11:22:31.000Z')), true)
+    assert.equal(providerFailureExplainsQuote({
+      ...provider,
+      lastFailureAt: '2026-08-13T11:22:29.000Z'
     }, quote, Date.parse('2026-08-13T11:22:31.000Z')), false)
   })
 

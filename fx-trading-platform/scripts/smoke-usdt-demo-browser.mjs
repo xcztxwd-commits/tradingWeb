@@ -4491,18 +4491,11 @@ function pickSourceMetadata(payload) {
 
 export function providerFailureExplainsQuote(provider, quote, startedAtMs) {
   const lastFailureAtMs = Date.parse(provider.lastFailureAt)
-  const lastSuccessAtMs = Date.parse(provider.lastSuccessAt)
   const quoteAsOfMs = Date.parse(quote.asOf)
-  const currentFailure = String(provider.healthStatus).toUpperCase() === 'DOWN'
-    && (!Number.isFinite(lastSuccessAtMs) || lastSuccessAtMs <= lastFailureAtMs)
-  const recoveredAfterQuote = Number.isFinite(quoteAsOfMs)
-    && lastFailureAtMs <= quoteAsOfMs
-    && Number.isFinite(lastSuccessAtMs)
-    && lastSuccessAtMs > quoteAsOfMs
   return number(provider.failureCount) > 0
     && Number.isFinite(lastFailureAtMs)
+    && Number.isFinite(quoteAsOfMs)
     && lastFailureAtMs >= startedAtMs - 1000
-    && (currentFailure || recoveredAfterQuote)
 }
 
 async function assertHigherPriorityProvidersUnavailable(mode, product, quote, startedAt) {
