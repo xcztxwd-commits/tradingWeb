@@ -59,6 +59,17 @@ const BTC_RULES = Object.freeze({
   contractMultiplier: '1'
 })
 
+test('PERP-09 equity follows floating PnL while isolated margin moves', () => {
+  assert.equal(
+    p0CoreContracts.expectedEquityAfterMarginAdjustment(
+      '49999.61862082',
+      '-0.38137918',
+      '-0.38537918'
+    ),
+    49999.61462082
+  )
+})
+
 test('financial oracle: BigInt fixed-point uses explicit rounding and rule-derived grids', () => {
   assert.equal(typeof financialOracles.roundDecimal, 'function')
   assert.equal(financialOracles.roundDecimal('1.005', 2, 'HALF_UP'), '1.01')

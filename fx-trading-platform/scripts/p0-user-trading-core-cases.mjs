@@ -24,6 +24,10 @@ import {
   withinTolerance
 } from './p0-user-trading-oracles.mjs'
 
+export function expectedEquityAfterMarginAdjustment(beforeEquity, beforeFloatingPnl, afterFloatingPnl) {
+  return Number(beforeEquity) + Number(afterFloatingPnl) - Number(beforeFloatingPnl)
+}
+
 const DESKTOP = {
   name: 'p0-desktop',
   width: 1440,
@@ -5363,7 +5367,11 @@ async function runPerpMarginJourney(scope) {
   }
   assertDecimalClose(
     added.snapshot.summary.equity,
-    addBefore.summary.equity,
+    expectedEquityAfterMarginAdjustment(
+      addBefore.summary.equity,
+      beforeAddPosition.floatingPnl,
+      added.position.floatingPnl
+    ),
     '0.00000001',
     'PERP-09 add equity'
   )
@@ -5453,7 +5461,11 @@ async function runPerpMarginJourney(scope) {
   )
   assertDecimalClose(
     reduced.snapshot.summary.equity,
-    added.snapshot.summary.equity,
+    expectedEquityAfterMarginAdjustment(
+      added.snapshot.summary.equity,
+      added.position.floatingPnl,
+      reduced.position.floatingPnl
+    ),
     '0.00000001',
     'PERP-09 reduce equity'
   )
