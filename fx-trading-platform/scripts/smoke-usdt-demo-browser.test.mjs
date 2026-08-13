@@ -1409,6 +1409,10 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(walletSource, /button\.textContent\?\.trim\(\) === 'Transfer Spot \/ Perpetual'\s*&& !button\.disabled/)
     assert.match(positionSource, /await page\.waitForFunction\(\s*\(positionId, positionSide\)/)
     assert.match(positionSource, /let candidates = positionId\s*\?/)
+    assert.match(
+      positionSource,
+      /control\.value === String\(value\)\s*&&\s*control\.defaultValue === String\(value\)/
+    )
     assert.match(positionSource, /refreshed Position row/)
   })
 

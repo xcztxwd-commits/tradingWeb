@@ -7533,7 +7533,9 @@ export async function positionActionViaUi(page, options) {
     }
 
     const setValue = (control, value) => {
-      if (value === undefined || value === null || control.value === String(value)) {
+      if (value === undefined || value === null || (
+        control.value === String(value) && control.defaultValue === String(value)
+      )) {
         return true
       }
       const prototype = control instanceof HTMLSelectElement
