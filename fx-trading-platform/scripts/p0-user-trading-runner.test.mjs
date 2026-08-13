@@ -485,6 +485,16 @@ test('financial oracle: 30% partial close only realizes and releases the closed 
       amount: '0.000000005'
     }
   })
+  const roundingBoundary = financialOracles.partialCloseOracle({
+    side: 'LONG',
+    originalQuantity: '0.010',
+    oldMargin: '63.71887125',
+    entryPrice: '50000',
+    closeFillPrice: '55000',
+    rules: BTC_RULES
+  })
+  assert.equal(roundingBoundary.remainingMargin, '44.60320988')
+  assert.equal(roundingBoundary.releasedMargin, '19.11566137')
   assert.throws(
     () => financialOracles.partialCloseOracle({
       side: 'LONG',

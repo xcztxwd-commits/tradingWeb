@@ -787,8 +787,13 @@ export function partialCloseOracle({
   requireAligned(closed, step, '30% closed quantity must match the effective step')
   const remaining = subtract(original, closed)
   const oldMarginValue = nonNegative(oldMargin, 'oldMargin')
-  const releasedMargin = money(multiply(oldMarginValue, fraction))
-  const remainingMargin = money(subtract(oldMarginValue, releasedMargin))
+  const remainingMargin = divideFixed(
+    multiply(oldMarginValue, remaining),
+    original,
+    MONEY_SCALE,
+    'HALF_UP'
+  )
+  const releasedMargin = money(subtract(oldMarginValue, remainingMargin))
   const close = perpCloseOracle({
     side,
     quantity: normalized(closed),
