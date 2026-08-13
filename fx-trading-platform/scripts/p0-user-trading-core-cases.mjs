@@ -2444,7 +2444,11 @@ async function runPerpLifecycle(scope, options) {
     )
     assertDecimalClose(
       adjusted.snapshot.summary.equity,
-      beforeMargin.summary.equity,
+      expectedEquityAfterMarginAdjustment(
+        beforeMargin.summary.equity,
+        beforeMarginPosition.floatingPnl,
+        adjusted.position.floatingPnl
+      ),
       '0.00000001',
       `${definition.id} margin add equity`
     )
