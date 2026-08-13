@@ -4491,7 +4491,7 @@ function pickSourceMetadata(payload) {
 
 export function providerFailureExplainsQuote(provider, quote, startedAtMs) {
   const lastFailureAtMs = Date.parse(provider.lastFailureAt)
-  const quoteAsOfMs = Date.parse(quote.asOf)
+  const quoteAsOfMs = Date.parse(quote.asOf ?? quote.executedAt)
   return number(provider.failureCount) > 0
     && Number.isFinite(lastFailureAtMs)
     && Number.isFinite(quoteAsOfMs)

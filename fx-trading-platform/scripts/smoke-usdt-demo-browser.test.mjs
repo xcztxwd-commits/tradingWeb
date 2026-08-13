@@ -232,6 +232,10 @@ describe('real USDT demo browser smoke contract', () => {
       ...provider,
       lastFailureAt: '2026-08-13T11:22:29.000Z'
     }, quote, Date.parse('2026-08-13T11:22:31.000Z')), false)
+    assert.equal(providerFailureExplainsQuote({
+      ...provider,
+      lastFailureAt: '2026-08-13T11:22:37.476Z'
+    }, { executedAt: '2026-08-13T11:22:37.500Z' }, Date.parse('2026-08-13T11:22:31.000Z')), true)
   })
 
   it('captures Web and Admin desktop/mobile evidence for every mode', () => {
