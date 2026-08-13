@@ -7447,7 +7447,7 @@ export async function submitOrderViaUi(page, order) {
       return true
     }, TOP_ORDER_CONFIRMATION_SELECTOR)
   )
-  finishP0UiMutation(page, capture, 'order submission', order)
+  finishP0UiMutation(page, capture, `order submission ${page.p0TradePanel.route}`, order)
   await page.waitForFunction((selector, selectedSide) => {
     const form = document.querySelector(selector)?.querySelector(
       `section[data-price-precision][class*="side--${selectedSide}"]`
@@ -9408,9 +9408,13 @@ function p0PageBaseUrl(page, option, environmentKey, fallback) {
 }
 
 function assertP0MutationSucceeded(capture, label) {
+  const responseCode = capture.parsedResponse?.code
+  const failureCode = typeof responseCode === 'string' && /^[A-Z0-9_:-]{1,80}$/.test(responseCode)
+    ? ` (${responseCode})`
+    : ''
   assert(
     capture.status >= 200 && capture.status < 300,
-    `${label} browser mutation failed with HTTP ${capture.status}`
+    `${label} browser mutation failed with HTTP ${capture.status}${failureCode}`
   )
 }
 

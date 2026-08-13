@@ -80,6 +80,14 @@ describe('real USDT demo browser smoke contract', () => {
     assert.equal(boundedProcessLogs.length, 6)
   })
 
+  it('identifies failed order mutations without persisting response bodies', () => {
+    const text = source()
+
+    assert.match(text, /order submission \$\{page\.p0TradePanel\.route\}/)
+    assert.match(text, /\^\[A-Z0-9_:\-\]\{1,80\}\$/)
+    assert.match(text, /HTTP \$\{capture\.status\}\$\{failureCode\}/)
+  })
+
   it('drains managed process logs while PostgreSQL fixtures wait on locks', () => {
     const text = source()
     const helper = text.match(
