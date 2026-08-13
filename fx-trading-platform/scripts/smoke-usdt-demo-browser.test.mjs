@@ -1537,6 +1537,10 @@ describe('real USDT demo browser smoke contract', () => {
 
   it('owns Web and Admin once while profile switches stop only the active backend', () => {
     const text = source()
+    const canonicalFrontendSource = text.slice(
+      text.indexOf('async function ensureFrontendServer'),
+      text.indexOf('function startManagedProcess')
+    )
     const frontendDescriptorSource = text.slice(
       text.indexOf('export function createP0FrontendProcessDescriptor'),
       text.indexOf('export function createLocalProcessManager')
@@ -1550,6 +1554,8 @@ describe('real USDT demo browser smoke contract', () => {
       text.indexOf('export async function runP0Suite')
     )
 
+    assert.match(canonicalFrontendSource, /createP0FrontendProcessDescriptor\(surface, \{ VITE_API_BASE_URL: apiBaseUrl \}, baseUrl\)/)
+    assert.doesNotMatch(canonicalFrontendSource, /--workspace/)
     assert.match(processManagerSource, /startOwnedFrontend/)
     assert.match(processManagerSource, /createP0FrontendProcessDescriptor\(surface, environment\)/)
     assert.match(frontendDescriptorSource, /command: process\.execPath/)

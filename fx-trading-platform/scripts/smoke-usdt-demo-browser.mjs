@@ -419,8 +419,8 @@ export async function runCanonicalSmoke() {
 async function startRealServices() {
   await startDockerInfrastructure()
   await ensureBackendServer()
-  await ensureFrontendServer('web', webBaseUrl, '5199')
-  await ensureFrontendServer('admin', adminBaseUrl, '5200')
+  await ensureFrontendServer('web', webBaseUrl)
+  await ensureFrontendServer('admin', adminBaseUrl)
   return { startupCommands: STARTUP_COMMANDS, apiBaseUrl, webBaseUrl, adminBaseUrl }
 }
 
@@ -639,16 +639,18 @@ async function ensureBackendServer() {
   `)) > 0, 'backend connection to dedicated smoke database before any user write', 10000)
 }
 
-async function ensureFrontendServer(surface, baseUrl, fallbackPort) {
+async function ensureFrontendServer(surface, baseUrl) {
   if (await canFetch(baseUrl)) {
     throw new Error(`The smoke must own ${baseUrl}; an existing ${surface} server may target a different backend`)
   }
-  const command = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-  const url = new URL(baseUrl)
-  const child = startManagedProcess(surface, command, [
-    '--workspace', `apps/${surface}`, 'run', 'dev', '--',
-    '--host', url.hostname || '127.0.0.1', '--port', url.port || fallbackPort, '--strictPort'
-  ], projectRoot, { VITE_API_BASE_URL: apiBaseUrl })
+  const descriptor = createP0FrontendProcessDescriptor(surface, { VITE_API_BASE_URL: apiBaseUrl }, baseUrl)
+  const child = startManagedProcess(
+    descriptor.label,
+    descriptor.command,
+    descriptor.args,
+    descriptor.cwd,
+    descriptor.environment
+  )
   await waitFor(async () => {
     assertProcessRunning(child)
     return canFetch(baseUrl)
@@ -11428,20 +11430,21 @@ export function startP0ManagedProcess(
   return child
 }
 
-export function createP0FrontendProcessDescriptor(surface, environment) {
-  const port = surface === 'web'
+export function createP0FrontendProcessDescriptor(surface, environment, baseUrl) {
+  const defaultPort = surface === 'web'
     ? 5199
     : surface === 'admin'
       ? 5200
       : null
-  if (port === null) throw new Error('P0_FRONTEND_SURFACE_INVALID')
+  if (defaultPort === null) throw new Error('P0_FRONTEND_SURFACE_INVALID')
+  const url = baseUrl === undefined ? undefined : new URL(baseUrl)
   return {
     label: `p0-frontend-${surface}`,
     command: process.execPath,
     args: [
       join(projectRoot, 'node_modules', 'vite', 'bin', 'vite.js'),
-      '--host', '127.0.0.1',
-      '--port', String(port),
+      '--host', url?.hostname || '127.0.0.1',
+      '--port', url?.port || String(defaultPort),
       '--strictPort'
     ],
     cwd: join(projectRoot, 'apps', surface),
