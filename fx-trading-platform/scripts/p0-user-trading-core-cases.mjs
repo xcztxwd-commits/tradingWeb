@@ -7025,7 +7025,11 @@ function backendFullFillContractProof(context) {
     'backend-unit.json'
   )
   const gate = JSON.parse(readFileSync(gatePath, 'utf8'))
-  assert.equal(gate.id, 'backend-unit', 'PERP-12 backend unit gate identity')
+  assert.equal(
+    gate.id,
+    `sha256:${createHash('sha256').update('backend-unit').digest('hex')}`,
+    'PERP-12 backend unit gate identity'
+  )
   assert.equal(gate.status, 'PASS', 'PERP-12 backend unit gate')
 
   const className = 'com.fxplatform.execution.FullFillCoordinatorTest'

@@ -70,6 +70,19 @@ test('PERP-09 equity follows floating PnL while isolated margin moves', () => {
   )
 })
 
+test('persisted backend gate identity matches the PERP-12 proof contract', (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'p0-perp12-gate-'))
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  const path = join(directory, 'backend-unit.json')
+  writeCaseResultAtomic(path, { id: 'backend-unit', status: 'PASS', signal: null })
+  const gate = JSON.parse(readFileSync(path, 'utf8'))
+  assert.equal(
+    gate.id,
+    `sha256:${createHash('sha256').update('backend-unit').digest('hex')}`
+  )
+  assert.equal(gate.status, 'PASS')
+})
+
 test('financial oracle: BigInt fixed-point uses explicit rounding and rule-derived grids', () => {
   assert.equal(typeof financialOracles.roundDecimal, 'function')
   assert.equal(financialOracles.roundDecimal('1.005', 2, 'HALF_UP'), '1.01')
