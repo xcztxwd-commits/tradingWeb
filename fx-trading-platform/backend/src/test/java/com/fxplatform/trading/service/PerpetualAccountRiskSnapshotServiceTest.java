@@ -43,6 +43,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -103,6 +105,28 @@ class PerpetualAccountRiskSnapshotServiceTest {
         .containsExactly(btcLong.getId(), btcShort.getId(), eth.getId());
     verify(marketBundleResolver, never()).resolvePerp(eq(BTC), any(CandleRequest.class));
     verify(marketBundleResolver, times(1)).resolvePerp(eq(ETH), any(CandleRequest.class));
+  }
+
+  @Test
+  void prepareRequiredSymbolResolvesAllAccountSnapshotsTogether() {
+    UUID accountId = UUID.randomUUID();
+    PositionEntity btc = position(
+        accountId, UUID.randomUUID(), BTC, PositionSide.BOTH, MarginMode.CROSS,
+        OrderSide.BUY, "1", "100", "10", "0", 1L);
+    when(positionRepository.findOpenLinearPerpByAccountId(accountId)).thenReturn(List.of(btc));
+    stubSymbol(BTC);
+    stubSymbol(ETH);
+    CountDownLatch started = new CountDownLatch(2);
+    when(marketBundleResolver.resolvePerp(any(), any(CandleRequest.class))).thenAnswer(invocation -> {
+      started.countDown();
+      assertThat(started.await(1, TimeUnit.SECONDS)).isTrue();
+      String symbol = invocation.getArgument(0);
+      return bundle(symbol, BTC.equals(symbol) ? "110" : "210");
+    });
+
+    var prepared = service.prepareForTarget(accountId, ETH);
+
+    assertThat(prepared.snapshots()).containsOnlyKeys(BTC, ETH);
   }
 
   @Test

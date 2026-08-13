@@ -42,6 +42,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -116,6 +119,23 @@ public class PerpetualAccountRiskSnapshotService {
       UUID accountId,
       Map<String, ExecutableMarketSnapshot> providedSnapshots
   ) {
+    return prepare(accountId, providedSnapshots, null);
+  }
+
+  /** Resolves the requested symbol together with every open-position symbol. */
+  public PreparedAccountRisk prepareForTarget(UUID accountId, String requiredSymbol) {
+    String normalized = normalize(requiredSymbol);
+    if (normalized.isBlank()) {
+      throw unavailable("Perpetual account risk requires a symbol");
+    }
+    return prepare(accountId, Map.of(), normalized);
+  }
+
+  private PreparedAccountRisk prepare(
+      UUID accountId,
+      Map<String, ExecutableMarketSnapshot> providedSnapshots,
+      String requiredSymbol
+  ) {
     if (accountId == null) {
       throw unavailable("Perpetual account risk requires an account id");
     }
@@ -129,6 +149,12 @@ public class PerpetualAccountRiskSnapshotService {
         .map(PositionFingerprint::symbol)
         .collect(Collectors.toCollection(TreeSet::new));
     symbols.addAll(supplied.keySet());
+    if (requiredSymbol != null) {
+      symbols.add(requiredSymbol);
+    }
+    Map<String, ExecutableMarketSnapshot> snapshots = requiredSymbol == null
+        ? supplied
+        : resolveSnapshots(symbols);
 
     Map<String, PreparedSymbolRisk> preparedSymbols = new LinkedHashMap<>();
     for (String symbol : symbols) {
@@ -136,11 +162,9 @@ public class PerpetualAccountRiskSnapshotService {
           .orElseThrow(() -> unavailable("Linear Perpetual symbol configuration is unavailable"));
       BigDecimal maintenanceMarginRate = requireLinearConfiguration(configuration, symbol);
       int maxLeverage = currentMaxLeverage(configuration);
-      ExecutableMarketSnapshot snapshot = supplied.get(symbol);
+      ExecutableMarketSnapshot snapshot = snapshots.get(symbol);
       if (snapshot == null) {
-        Instant to = Instant.now();
-        CandleRequest candles = new CandleRequest("1m", to.minus(Duration.ofMinutes(30)), to);
-        snapshot = ExecutableMarketSnapshot.from(marketBundleResolver.resolvePerp(symbol, candles));
+        snapshot = resolveSnapshot(symbol);
       }
       if (snapshot == null) {
         throw unavailable("Linear Perpetual market snapshot is unavailable");
@@ -150,6 +174,37 @@ public class PerpetualAccountRiskSnapshotService {
           new PreparedSymbolRisk(symbol, snapshot, maintenanceMarginRate, maxLeverage));
     }
     return new PreparedAccountRisk(accountId, preparedSymbols, fingerprints);
+  }
+
+  private Map<String, ExecutableMarketSnapshot> resolveSnapshots(TreeSet<String> symbols) {
+    Map<String, CompletableFuture<ExecutableMarketSnapshot>> pending = new LinkedHashMap<>();
+    try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      for (String symbol : symbols) {
+        pending.put(symbol, CompletableFuture.supplyAsync(() -> resolveSnapshot(symbol), executor));
+      }
+      Map<String, ExecutableMarketSnapshot> resolved = new LinkedHashMap<>();
+      pending.forEach((symbol, future) -> resolved.put(symbol, awaitSnapshot(future)));
+      return resolved;
+    }
+  }
+
+  private ExecutableMarketSnapshot resolveSnapshot(String symbol) {
+    Instant to = Instant.now();
+    CandleRequest candles = new CandleRequest("1m", to.minus(Duration.ofMinutes(30)), to);
+    return ExecutableMarketSnapshot.from(marketBundleResolver.resolvePerp(symbol, candles));
+  }
+
+  private ExecutableMarketSnapshot awaitSnapshot(
+      CompletableFuture<ExecutableMarketSnapshot> future
+  ) {
+    try {
+      return future.join();
+    } catch (CompletionException exception) {
+      if (exception.getCause() instanceof RuntimeException cause) {
+        throw cause;
+      }
+      throw exception;
+    }
   }
 
   /** Pure locked-state projection. It performs no provider calls and no persistence writes. */

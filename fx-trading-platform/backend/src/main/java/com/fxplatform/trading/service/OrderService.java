@@ -1608,13 +1608,19 @@ public class OrderService {
     BusinessException lastStale = null;
     for (int attempt = 0; attempt < MAX_MARKET_ATTEMPTS; attempt++) {
       try {
-        ExecutableMarketSnapshot snapshot = resolveExecutableSnapshot(
-            identityCommand.symbol(), ProductType.LINEAR_PERP);
-        fullFillCoordinator.requireFresh(snapshot);
         PerpetualAccountRiskSnapshotService.PreparedAccountRisk preparedAccountRisk =
-            perpetualAccountRiskSnapshotService.prepare(
+            perpetualAccountRiskSnapshotService.prepareForTarget(
                 identityCommand.accountId(),
-                Map.of(identityCommand.symbol(), snapshot));
+                identityCommand.symbol());
+        PerpetualAccountRiskSnapshotService.PreparedSymbolRisk targetRisk =
+            preparedAccountRisk.symbols().get(identityCommand.symbol());
+        if (targetRisk == null) {
+          throw new BusinessException(
+              ErrorCode.MARKET_DATA_UNAVAILABLE,
+              "Target Perpetual risk snapshot was not prepared");
+        }
+        ExecutableMarketSnapshot snapshot = targetRisk.snapshot();
+        fullFillCoordinator.requireFresh(snapshot);
         QuantityConversionService.Conversion conversion = quantityConversionService.convertPerpetual(
             request.quantityUnit(),
             request.quantity(),
