@@ -151,6 +151,18 @@ test('PERP-12 proves every rejection and cites the exact fresh backend full-fill
   assert.match(proof, /errors="0"/)
 })
 
+test('BATCH-02 restores the disabled provider before reading the partial account state', () => {
+  const closeAll = section(
+    'async function runCloseAllJourney',
+    'async function runSpotValidationJourney'
+  )
+  const restore = closeAll.indexOf('await restoreBinding()')
+  const accountRead = closeAll.indexOf("'BATCH-02 partial close-all'")
+  assert.notEqual(restore, -1)
+  assert.notEqual(accountRead, -1)
+  assert.ok(restore < accountRead)
+})
+
 test('PERP-04 runs BASE, QUOTE, and CONTRACTS as independent users at one fixed mark', () => {
   const wrapper = section(
     'async function runPerpQuantityUnits',

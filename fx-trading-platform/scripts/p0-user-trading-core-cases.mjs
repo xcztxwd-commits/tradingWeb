@@ -6139,6 +6139,12 @@ async function runCloseAllJourney(scope) {
   ))
   assert.equal(failures.length, 1, 'BATCH-02 partial run failure count')
   assert.equal(successes.length, partial.positionIds.length - 1)
+  await restoreBinding()
+  scope.fixtureActions.push({
+    action: 'restore-provider-bindings',
+    symbol: 'SOLUSDT-PERP',
+    status: 'PASS'
+  })
   const partiallyClosed = await waitForAccount(
     scope.context,
     scope.page,
@@ -6159,12 +6165,6 @@ async function runCloseAllJourney(scope) {
     partial.positions.filter(({ id }) => id !== remaining.id),
     'BATCH-02 partial'
   )
-  await restoreBinding()
-  scope.fixtureActions.push({
-    action: 'restore-provider-bindings',
-    symbol: 'SOLUSDT-PERP',
-    status: 'PASS'
-  })
   const retry = await scope.context.ui.closeAllPositionsViaUi(scope.page)
   scope.addMutation('close-all-positions-retry-via-ui', retry)
   const retryResponse = parsedResponse(retry)?.data
