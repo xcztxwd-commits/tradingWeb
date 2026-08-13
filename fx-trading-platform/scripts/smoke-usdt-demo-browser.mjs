@@ -7534,7 +7534,8 @@ export async function positionActionViaUi(page, options) {
 
     const setValue = (control, value) => {
       if (value === undefined || value === null || (
-        control.value === String(value) && control.defaultValue === String(value)
+        control.value === String(value)
+          && (!(control instanceof HTMLInputElement) || control.defaultValue === String(value))
       )) {
         return true
       }

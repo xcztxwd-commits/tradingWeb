@@ -1411,7 +1411,7 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(positionSource, /let candidates = positionId\s*\?/)
     assert.match(
       positionSource,
-      /control\.value === String\(value\)\s*&&\s*control\.defaultValue === String\(value\)/
+      /control\.value === String\(value\)[\s\S]*!\(control instanceof HTMLInputElement\)[\s\S]*control\.defaultValue === String\(value\)/
     )
     assert.match(positionSource, /refreshed Position row/)
   })
