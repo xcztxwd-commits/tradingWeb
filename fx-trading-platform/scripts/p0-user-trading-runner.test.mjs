@@ -70,6 +70,17 @@ test('PERP-09 equity follows floating PnL while isolated margin moves', () => {
   )
 })
 
+test('PERP-09 waits on the exact margin response instead of a floating-point sum', () => {
+  assert.equal(73.3556 >= 63.3556 + 10, false)
+  assert.equal(
+    p0CoreContracts.positionMatchesMarginMutation(
+      { id: 'position-1', marginHeld: '73.35560000', version: 1 },
+      { positionId: 'position-1', positionMargin: '73.35560000', version: 1 }
+    ),
+    true
+  )
+})
+
 test('persisted backend gate identity matches the PERP-12 proof contract', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-perp12-gate-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))

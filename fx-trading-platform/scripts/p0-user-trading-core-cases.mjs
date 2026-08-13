@@ -28,6 +28,13 @@ export function expectedEquityAfterMarginAdjustment(beforeEquity, beforeFloating
   return Number(beforeEquity) + Number(afterFloatingPnl) - Number(beforeFloatingPnl)
 }
 
+export function positionMatchesMarginMutation(position, mutation) {
+  return Boolean(position && mutation
+    && position.id === mutation.positionId
+    && Number(position.version) >= Number(mutation.version)
+    && withinTolerance(String(position.marginHeld), String(mutation.positionMargin), '0.00000001'))
+}
+
 const DESKTOP = {
   name: 'p0-desktop',
   width: 1440,
@@ -2423,6 +2430,10 @@ async function runPerpLifecycle(scope, options) {
       marginAmount: '10'
     })
     scope.addMutation('isolated-margin-add-via-ui', marginCapture)
+    const marginResult = parsedResponse(marginCapture)?.data ?? parsedResponse(marginCapture)
+    assert.equal(marginResult?.positionId, currentPosition.id)
+    assert.equal(marginResult?.action, 'ADD')
+    assertDecimalClose(marginResult?.amount, '10', '0.00000001', `${definition.id} margin add response`)
     const adjusted = await waitForAccount(
       context,
       page,
@@ -2431,7 +2442,7 @@ async function runPerpLifecycle(scope, options) {
         const next = openPositions(candidate, symbol).find(({ id }) => (
           id === currentPosition.id
         ))
-        return next && Number(next.marginHeld) >= Number(currentPosition.marginHeld) + 10
+        return positionMatchesMarginMutation(next, marginResult)
           ? { snapshot: candidate, position: next }
           : false
       }
@@ -5323,13 +5334,17 @@ async function runPerpMarginJourney(scope) {
     marginAmount: '10'
   })
   scope.addMutation('isolated-margin-add-via-ui', add)
+  const addResult = parsedResponse(add)?.data ?? parsedResponse(add)
+  assert.equal(addResult?.positionId, position.id)
+  assert.equal(addResult?.action, 'ADD')
+  assertDecimalClose(addResult?.amount, '10', '0.00000001', 'PERP-09 add response')
   const added = await waitForAccount(
     context,
     page,
     'PERP-09 isolated margin add',
     (candidate) => {
       const current = openPositions(candidate, symbol).find(({ id }) => id === position.id)
-      return current && Number(current.marginHeld) >= Number(position.marginHeld) + 10
+      return positionMatchesMarginMutation(current, addResult)
         ? { snapshot: candidate, position: current }
         : false
     }
@@ -5446,13 +5461,17 @@ async function runPerpMarginJourney(scope) {
     marginAmount: '5'
   })
   scope.addMutation('isolated-margin-reduce-via-ui', reduce)
+  const reduceResult = parsedResponse(reduce)?.data ?? parsedResponse(reduce)
+  assert.equal(reduceResult?.positionId, position.id)
+  assert.equal(reduceResult?.action, 'REDUCE')
+  assertDecimalClose(reduceResult?.amount, '5', '0.00000001', 'PERP-09 reduce response')
   const reduced = await waitForAccount(
     context,
     page,
     'PERP-09 isolated margin reduce',
     (candidate) => {
       const current = openPositions(candidate, symbol).find(({ id }) => id === position.id)
-      return current && Number(current.marginHeld) <= Number(position.marginHeld) - 5
+      return positionMatchesMarginMutation(current, reduceResult)
         ? { snapshot: candidate, position: current }
         : false
     }
