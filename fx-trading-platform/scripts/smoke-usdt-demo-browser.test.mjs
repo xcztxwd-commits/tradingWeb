@@ -15,6 +15,7 @@ import {
   createEvidencePage,
   openTradePanel,
   positionActionViaUi,
+  providerFailureExplainsQuote,
   resetDemoViaUi,
   setPerpetualSettingsViaUi,
   submitOrderViaUi,
@@ -199,6 +200,22 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(providerHealthSource, /const unavailable = await waitFor\(async \(\) => \{/)
     assert.match(providerHealthSource, /const providers = await adminApi\('\/api\/admin\/market\/data-providers'\)/)
     assert.match(providerHealthSource, /`\$\{mode\.id\} \$\{product\} higher-priority provider health`, 5000\)/)
+  })
+
+  it('accepts a provider failure that explains a cached fallback quote before recovery', () => {
+    const quote = { asOf: '2026-08-13T11:22:37.479Z' }
+    const provider = {
+      healthStatus: 'UP',
+      failureCount: 5,
+      lastFailureAt: '2026-08-13T11:22:37.476Z',
+      lastSuccessAt: '2026-08-13T11:22:38.000Z'
+    }
+
+    assert.equal(providerFailureExplainsQuote(provider, quote, Date.parse('2026-08-13T11:22:31.000Z')), true)
+    assert.equal(providerFailureExplainsQuote({
+      ...provider,
+      lastSuccessAt: '2026-08-13T11:22:37.470Z'
+    }, quote, Date.parse('2026-08-13T11:22:31.000Z')), false)
   })
 
   it('captures Web and Admin desktop/mobile evidence for every mode', () => {

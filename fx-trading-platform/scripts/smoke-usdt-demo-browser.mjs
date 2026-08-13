@@ -4489,6 +4489,22 @@ function pickSourceMetadata(payload) {
   return Object.fromEntries(SOURCE_METADATA_FIELDS.map((field) => [field, payload[field]]))
 }
 
+export function providerFailureExplainsQuote(provider, quote, startedAtMs) {
+  const lastFailureAtMs = Date.parse(provider.lastFailureAt)
+  const lastSuccessAtMs = Date.parse(provider.lastSuccessAt)
+  const quoteAsOfMs = Date.parse(quote.asOf)
+  const currentFailure = String(provider.healthStatus).toUpperCase() === 'DOWN'
+    && (!Number.isFinite(lastSuccessAtMs) || lastSuccessAtMs <= lastFailureAtMs)
+  const recoveredAfterQuote = Number.isFinite(quoteAsOfMs)
+    && lastFailureAtMs <= quoteAsOfMs
+    && Number.isFinite(lastSuccessAtMs)
+    && lastSuccessAtMs > quoteAsOfMs
+  return number(provider.failureCount) > 0
+    && Number.isFinite(lastFailureAtMs)
+    && lastFailureAtMs >= startedAtMs - 1000
+    && (currentFailure || recoveredAfterQuote)
+}
+
 async function assertHigherPriorityProvidersUnavailable(mode, product, quote, startedAt) {
   const priorities = product === 'spot' ? mode.expectedSpot : mode.expectedPerp
   const actualIndex = priorities.indexOf(quote.providerCode)
@@ -4505,14 +4521,8 @@ async function assertHigherPriorityProvidersUnavailable(mode, product, quote, st
     return higherPriorityCodes.map((code) => {
       const provider = providers.find((candidate) => candidate.code === code)
       assert(provider, `${mode.id} ${product} missing health evidence for higher-priority provider ${code}`)
-      const lastFailureAtMs = Date.parse(provider.lastFailureAt)
-      const lastSuccessAtMs = Date.parse(provider.lastSuccessAt)
       assert(
-        String(provider.healthStatus).toUpperCase() === 'DOWN'
-          && number(provider.failureCount) > 0
-          && Number.isFinite(lastFailureAtMs)
-          && lastFailureAtMs >= startedAtMs - 1000
-          && (!Number.isFinite(lastSuccessAtMs) || lastSuccessAtMs <= lastFailureAtMs),
+        providerFailureExplainsQuote(provider, quote, startedAtMs),
         `${mode.id} ${product} selected ${quote.providerCode} without a current DOWN state and latest failure for higher-priority ${code}`
       )
       return {
