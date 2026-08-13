@@ -866,6 +866,10 @@ describe('real USDT demo browser smoke contract', () => {
       submitSource,
       /input\.value === String\(value\)\s*&&\s*input\.defaultValue === String\(value\)/
     )
+    assert.match(
+      submitSource,
+      /finishP0UiMutation[\s\S]*button && !button\.disabled[\s\S]*'scoped order submission settled'/
+    )
   })
 
   it('binds exported P0 order submission to the expected controlled quantity unit', () => {

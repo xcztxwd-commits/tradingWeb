@@ -7438,6 +7438,13 @@ export async function submitOrderViaUi(page, order) {
     }, TOP_ORDER_CONFIRMATION_SELECTOR)
   )
   finishP0UiMutation(page, capture, 'order submission', order)
+  await page.waitForFunction((selector, selectedSide) => {
+    const form = document.querySelector(selector)?.querySelector(
+      `section[data-price-precision][class*="side--${selectedSide}"]`
+    )
+    const button = form?.querySelector('[data-trading-action="submit-order"]')
+    return Boolean(button && !button.disabled)
+  }, 'scoped order submission settled', panelSelector, side)
   return capture
 }
 
