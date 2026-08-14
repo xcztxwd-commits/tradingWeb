@@ -1337,6 +1337,64 @@ describe('real USDT demo browser smoke contract', () => {
     }
   })
 
+  it('waits for the fresh wallet STOMP subscription before resetting Demo', async () => {
+    let freshSubscriptionReady = false
+    let evaluateCount = 0
+    const page = {
+      p0Options: { webBaseUrl: 'http://127.0.0.1:5199' },
+      p0Evidence: {
+        cursor: 0,
+        requests: [],
+        stompFrames: [{
+          direction: 'sent',
+          command: 'SUBSCRIBE',
+          destination: '/user/queue/trading-events'
+        }]
+      },
+      async navigate() {
+        setTimeout(() => {
+          freshSubscriptionReady = true
+          this.p0Evidence.stompFrames.push({
+            direction: 'sent',
+            command: 'SUBSCRIBE',
+            destination: '/user/queue/trading-events'
+          })
+        }, 20)
+      },
+      async waitForFunction() {},
+      async evaluate() {
+        assert.equal(
+          freshSubscriptionReady,
+          true,
+          'Demo reset must not start on the stale pre-navigation subscription'
+        )
+        evaluateCount += 1
+        if (evaluateCount === 1) return true
+        this.p0Evidence.cursor += 1
+        this.p0Evidence.requests.push({
+          cursor: this.p0Evidence.cursor,
+          requestId: 'demo-reset-request',
+          method: 'POST',
+          url: 'http://127.0.0.1:18086/api/accounts/account-1/demo-reset',
+          postData: '{}',
+          requestHeaders: {},
+          response: { status: 200, headers: {}, mimeType: 'application/json' },
+          loadingFinished: true,
+          loadingFailure: null
+        })
+        return true
+      },
+      async send(method) {
+        assert.equal(method, 'Network.getResponseBody')
+        return { body: '{"success":true}', base64Encoded: false }
+      }
+    }
+
+    const capture = await resetDemoViaUi(page)
+    assert.equal(capture.status, 200)
+    assert.equal(evaluateCount, 2)
+  })
+
   it('allows the owned backend to finish the bounded fresh-database migration', () => {
     const text = source()
     const processManagerSource = text.slice(

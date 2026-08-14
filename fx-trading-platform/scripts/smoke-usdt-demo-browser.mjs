@@ -7718,7 +7718,15 @@ export async function transferViaUi(page, options) {
 }
 
 export async function resetDemoViaUi(page, options = {}) {
+  const subscriptionCursor = page.p0Evidence.stompFrames.length
   await openWalletViaUi(page)
+  await waitFor(() => page.p0Evidence.stompFrames
+    .slice(subscriptionCursor)
+    .some(({ direction, command, destination }) => (
+      direction === 'sent'
+        && command === 'SUBSCRIBE'
+        && destination === '/user/queue/trading-events'
+    )), 'fresh wallet STOMP subscription', 15000)
   const opened = await page.evaluate(() => {
     const button = [...document.querySelectorAll('button')]
       .find((candidate) => (

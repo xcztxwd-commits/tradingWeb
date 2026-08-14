@@ -6788,10 +6788,6 @@ async function runDemoResetJourney(scope) {
   const resetBefore = await context.api.snapshotAccount(page)
   assert.equal(activeOrders(resetBefore).length, 0)
   assert.equal(openPositions(resetBefore).length, 0)
-  await context.events.waitForStompEvent(
-    page,
-    '/user/queue/trading-events'
-  )
   const resetEventCursor = context.events.snapshotFrames(page).length
   const readCashLedger = async () => {
     const response = await context.api.user(
