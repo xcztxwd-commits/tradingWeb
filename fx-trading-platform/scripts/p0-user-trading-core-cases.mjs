@@ -7086,8 +7086,11 @@ function assertDemoResetState(snapshot, db) {
   }
 }
 
-function completeResetStateFingerprint(snapshot, db, cashLedger) {
-  const serialized = JSON.stringify({ rest: snapshot, db, cashLedger })
+export function completeResetStateFingerprint(snapshot, db, cashLedger) {
+  const serialized = JSON.stringify(
+    { rest: snapshot, db, cashLedger },
+    (key, value) => key === 'lastSnapshotAt' ? undefined : value
+  )
   return {
     algorithm: 'SHA-256',
     digest: createHash('sha256').update(serialized).digest('hex'),

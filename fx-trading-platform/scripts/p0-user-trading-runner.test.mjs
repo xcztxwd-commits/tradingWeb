@@ -81,6 +81,32 @@ test('PERP-09 waits on the exact margin response instead of a floating-point sum
   )
 })
 
+test('LIFE-02 replay fingerprint ignores observation time but detects durable changes', () => {
+  const state = (lastSnapshotAt, balance = '50000', generation = 1) => {
+    const account = { id: 'account-1', balance, lastSnapshotAt }
+    return {
+      snapshot: {
+        accounts: [account],
+        activeDemoAccounts: [account],
+        account,
+        summary: { ...account }
+      },
+      db: { accountRow: { demo_generation: generation } },
+      cashLedger: [{ id: 'ledger-1' }]
+    }
+  }
+  const fingerprint = ({ snapshot, db, cashLedger }) => (
+    p0CoreContracts.completeResetStateFingerprint(snapshot, db, cashLedger)
+  )
+  const before = state('2026-08-14T08:51:49.000000Z')
+  assert.deepEqual(
+    fingerprint(state('2026-08-14T08:51:50.000000Z')),
+    fingerprint(before)
+  )
+  assert.notDeepEqual(fingerprint(state(before.snapshot.account.lastSnapshotAt, '49999')), fingerprint(before))
+  assert.notDeepEqual(fingerprint(state(before.snapshot.account.lastSnapshotAt, '50000', 2)), fingerprint(before))
+})
+
 test('persisted backend gate identity matches the PERP-12 proof contract', (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'p0-perp12-gate-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
