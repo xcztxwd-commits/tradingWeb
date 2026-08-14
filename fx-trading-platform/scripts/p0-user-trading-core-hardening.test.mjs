@@ -151,7 +151,7 @@ test('PERP-12 proves every rejection and cites the exact fresh backend full-fill
   assert.match(proof, /errors="0"/)
 })
 
-test('BATCH-02 scopes the disabled-provider failure before reading the partial account state', () => {
+test('BATCH-02 scopes the disabled-provider failure before reading the partial account state', async () => {
   const closeAll = section(
     'async function runCloseAllJourney',
     'async function runSpotValidationJourney'
@@ -164,16 +164,56 @@ test('BATCH-02 scopes the disabled-provider failure before reading the partial a
   assert.match(closeAll, /failures\[0\]\.errorCode,\s*'MARKET_PROVIDER_BINDING_NOT_FOUND'/)
   assert.match(closeAll, /const bindingFailureCursorStart = scope\.page\.p0Evidence\.cursor/)
   assert.match(closeAll, /const bindingFailureCursorEnd = scope\.page\.p0Evidence\.cursor/)
-  assert.match(closeAll, /request\.cursor > bindingFailureCursorStart/)
-  assert.match(closeAll, /request\.cursor <= bindingFailureCursorEnd/)
-  assert.match(closeAll, /request\.method === 'GET'/)
-  assert.match(closeAll, /request\.response\?\.status === 400/)
-  assert.match(closeAll, /expectedBindingFailureUrls\.has\(request\.url\)/)
-  assert.match(closeAll, /await waitFor\([\s\S]*request\.loadingFinished/)
-  assert.match(closeAll, /scope\.page\.send\(\s*'Network\.getResponseBody'/)
-  assert.match(closeAll, /bindingFailureResponse\?\.code\s*\?\?\s*bindingFailureResponse\?\.data\?\.code/)
-  assert.match(closeAll, /!== 'MARKET_PROVIDER_BINDING_NOT_FOUND'\) continue/)
-  assert.match(closeAll, /scope\.page\.allowHttpError\(\s*request\.requestId/)
+  assert.match(closeAll, /await allowExpectedBatchBindingErrors\(/)
+
+  const url = 'http://127.0.0.1:18086/api/market/quotes/SOLUSDT-PERP'
+  const expected = {
+    cursor: 2,
+    requestId: 'expected-binding-failure',
+    method: 'GET',
+    url,
+    response: { status: 400 },
+    loadingFinished: false,
+    loadingFailure: null
+  }
+  const wrongCode = {
+    ...expected,
+    cursor: 3,
+    requestId: 'wrong-code',
+    loadingFinished: true
+  }
+  const outsideWindow = {
+    ...expected,
+    cursor: 4,
+    requestId: 'outside-window',
+    loadingFinished: true
+  }
+  const allowed = []
+  const bodies = {
+    'expected-binding-failure': {
+      body: Buffer.from(JSON.stringify({
+        code: 'MARKET_PROVIDER_BINDING_NOT_FOUND'
+      })).toString('base64'),
+      base64Encoded: true
+    },
+    'wrong-code': {
+      body: JSON.stringify({ code: 'ACCOUNT_VALIDATION_FAILED' }),
+      base64Encoded: false
+    }
+  }
+  const page = {
+    p0Evidence: { requests: [expected, wrongCode, outsideWindow] },
+    async send(method, { requestId }) {
+      assert.equal(method, 'Network.getResponseBody')
+      return bodies[requestId]
+    },
+    allowHttpError(requestId) {
+      allowed.push(requestId)
+    }
+  }
+  queueMicrotask(() => { expected.loadingFinished = true })
+  await coreContracts.allowExpectedBatchBindingErrors(page, new Set([url]), 1, 3)
+  assert.deepEqual(allowed, ['expected-binding-failure'])
 })
 
 test('PERP-04 runs BASE, QUOTE, and CONTRACTS as independent users at one fixed mark', () => {

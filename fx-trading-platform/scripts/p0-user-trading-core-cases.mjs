@@ -6164,33 +6164,12 @@ async function runCloseAllJourney(scope) {
     `${apiBaseUrl}/api/accounts/${accountId}/summary`,
     `${apiBaseUrl}/api/trading/positions?accountId=${accountId}&page=0&size=100`
   ])
-  for (const request of scope.page.p0Evidence.requests) {
-    if (request.cursor > bindingFailureCursorStart
-      && request.cursor <= bindingFailureCursorEnd
-      && request.method === 'GET'
-      && request.response?.status === 400
-      && expectedBindingFailureUrls.has(request.url)) {
-      await waitFor(() => {
-        if (request.loadingFailure) {
-          throw new Error(`BATCH-02 disabled binding request failed: ${request.url}`)
-        }
-        return request.loadingFinished
-      }, `BATCH-02 disabled binding response ${request.requestId}`, 15000)
-      const body = await scope.page.send(
-        'Network.getResponseBody',
-        { requestId: request.requestId }
-      )
-      const text = body?.base64Encoded
-        ? Buffer.from(body.body ?? '', 'base64').toString('utf8')
-        : String(body?.body ?? '')
-      const bindingFailureResponse = JSON.parse(text)
-      if ((bindingFailureResponse?.code ?? bindingFailureResponse?.data?.code) !== 'MARKET_PROVIDER_BINDING_NOT_FOUND') continue
-      scope.page.allowHttpError(
-        request.requestId,
-        'BATCH-02 expected disabled SOL provider binding'
-      )
-    }
-  }
+  await allowExpectedBatchBindingErrors(
+    scope.page,
+    expectedBindingFailureUrls,
+    bindingFailureCursorStart,
+    bindingFailureCursorEnd
+  )
   const remaining = openPositions(partiallyClosed).at(0)
   assert.equal(remaining.symbol, 'SOLUSDT-PERP')
   const partialClosedEvidence = await scope.capture(
@@ -6261,6 +6240,40 @@ async function runCloseAllJourney(scope) {
     }
   })
   return { finalSnapshot: final, finalDb: finalEvidence.db }
+}
+
+export async function allowExpectedBatchBindingErrors(page, expectedUrls, start, end) {
+  for (const request of page.p0Evidence.requests) {
+    if (request.cursor > start
+      && request.cursor <= end
+      && request.method === 'GET'
+      && request.response?.status === 400
+      && expectedUrls.has(request.url)) {
+      const loadingDeadline = Date.now() + 15000
+      while (!request.loadingFinished) {
+        if (request.loadingFailure) {
+          throw new Error(`BATCH-02 disabled binding request failed: ${request.url}`)
+        }
+        if (Date.now() >= loadingDeadline) {
+          throw new Error(`Timed out waiting for BATCH-02 disabled binding response ${request.requestId}`)
+        }
+        await delay(100)
+      }
+      const body = await page.send(
+        'Network.getResponseBody',
+        { requestId: request.requestId }
+      )
+      const text = body?.base64Encoded
+        ? Buffer.from(body.body ?? '', 'base64').toString('utf8')
+        : String(body?.body ?? '')
+      const bindingFailureResponse = JSON.parse(text)
+      if ((bindingFailureResponse?.code ?? bindingFailureResponse?.data?.code) !== 'MARKET_PROVIDER_BINDING_NOT_FOUND') continue
+      page.allowHttpError(
+        request.requestId,
+        'BATCH-02 expected disabled SOL provider binding'
+      )
+    }
+  }
 }
 
 async function runSpotValidationJourney(scope) {
