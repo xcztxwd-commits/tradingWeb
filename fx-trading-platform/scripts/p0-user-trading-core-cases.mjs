@@ -6267,7 +6267,12 @@ export async function allowExpectedBatchBindingErrors(page, expectedUrls, start,
         ? Buffer.from(body.body ?? '', 'base64').toString('utf8')
         : String(body?.body ?? '')
       const bindingFailureResponse = JSON.parse(text)
-      if ((bindingFailureResponse?.code ?? bindingFailureResponse?.data?.code) !== 'MARKET_PROVIDER_BINDING_NOT_FOUND') continue
+      const code = bindingFailureResponse?.code ?? bindingFailureResponse?.data?.code
+      const message = bindingFailureResponse?.message ?? bindingFailureResponse?.data?.message
+      const expectedFailure = code === 'MARKET_PROVIDER_BINDING_NOT_FOUND'
+        || (code === 'MARKET_DATA_UNAVAILABLE'
+          && message === 'No complete fresh market bundle is available')
+      if (!expectedFailure) continue
       page.allowHttpError(
         request.requestId,
         'BATCH-02 expected disabled SOL provider binding'

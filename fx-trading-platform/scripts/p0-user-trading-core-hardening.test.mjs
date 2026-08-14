@@ -176,15 +176,21 @@ test('BATCH-02 scopes the disabled-provider failure before reading the partial a
     loadingFinished: false,
     loadingFailure: null
   }
-  const wrongCode = {
+  const directBindingFailure = {
     ...expected,
     cursor: 3,
-    requestId: 'wrong-code',
+    requestId: 'direct-binding-failure',
+    loadingFinished: true
+  }
+  const wrongMessage = {
+    ...expected,
+    cursor: 4,
+    requestId: 'wrong-message',
     loadingFinished: true
   }
   const outsideWindow = {
     ...expected,
-    cursor: 4,
+    cursor: 5,
     requestId: 'outside-window',
     loadingFinished: true
   }
@@ -192,17 +198,27 @@ test('BATCH-02 scopes the disabled-provider failure before reading the partial a
   const bodies = {
     'expected-binding-failure': {
       body: Buffer.from(JSON.stringify({
-        code: 'MARKET_PROVIDER_BINDING_NOT_FOUND'
+        code: 'MARKET_DATA_UNAVAILABLE',
+        message: 'No complete fresh market bundle is available'
       })).toString('base64'),
       base64Encoded: true
     },
-    'wrong-code': {
-      body: JSON.stringify({ code: 'ACCOUNT_VALIDATION_FAILED' }),
+    'direct-binding-failure': {
+      body: JSON.stringify({ code: 'MARKET_PROVIDER_BINDING_NOT_FOUND' }),
+      base64Encoded: false
+    },
+    'wrong-message': {
+      body: JSON.stringify({
+        code: 'MARKET_DATA_UNAVAILABLE',
+        message: 'Linear Perpetual account snapshot requires a positive authority mark'
+      }),
       base64Encoded: false
     }
   }
   const page = {
-    p0Evidence: { requests: [expected, wrongCode, outsideWindow] },
+    p0Evidence: {
+      requests: [expected, directBindingFailure, wrongMessage, outsideWindow]
+    },
     async send(method, { requestId }) {
       assert.equal(method, 'Network.getResponseBody')
       return bodies[requestId]
@@ -212,8 +228,8 @@ test('BATCH-02 scopes the disabled-provider failure before reading the partial a
     }
   }
   queueMicrotask(() => { expected.loadingFinished = true })
-  await coreContracts.allowExpectedBatchBindingErrors(page, new Set([url]), 1, 3)
-  assert.deepEqual(allowed, ['expected-binding-failure'])
+  await coreContracts.allowExpectedBatchBindingErrors(page, new Set([url]), 1, 4)
+  assert.deepEqual(allowed, ['expected-binding-failure', 'direct-binding-failure'])
 })
 
 test('PERP-04 runs BASE, QUOTE, and CONTRACTS as independent users at one fixed mark', () => {
