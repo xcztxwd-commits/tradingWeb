@@ -43,7 +43,7 @@ import * as financialOracles from './p0-user-trading-oracles.mjs'
 import * as smokeContracts from './smoke-usdt-demo-browser.mjs'
 import './p0-user-trading-advanced-cases.mjs'
 import * as p0CoreContracts from './p0-user-trading-core-cases.mjs'
-import './p0-user-trading-order-cases.mjs'
+import * as p0OrderContracts from './p0-user-trading-order-cases.mjs'
 
 const specPath = new URL(
   '../docs/superpowers/specs/2026-07-14-p0-user-trading-acceptance-test-design.md',
@@ -1958,14 +1958,18 @@ test('PERP-01/02 lifecycle closes financial, target-mark, and cash-ledger eviden
   assert.match(ledger, /assert\.equal\(matches\.length,\s*1/)
 })
 
-test('default P0 dispatch builds one context and injects the owned AUTH handlers', () => {
+test('default P0 dispatch builds one context and injects owned core and order handlers', () => {
   const smokePath = fileURLToPath(new URL('./smoke-usdt-demo-browser.mjs', import.meta.url))
   const smokeSource = readFileSync(smokePath, 'utf8')
+  const dependencies = smokeContracts.createDefaultP0Dependencies()
 
   assert.match(smokeSource, /createP0Context/)
   assert.match(smokeSource, /CASE_HANDLERS/)
   assert.match(smokeSource, /const p0Context = dependencies\.createP0Context/)
   assert.match(smokeSource, /dispatchCase\(definition, caseContext, handlers/)
+  assert.equal(dependencies.handlers.runAuth01, p0CoreContracts.runAuth01)
+  assert.equal(dependencies.handlers.runSpot04, p0OrderContracts.runSpot04)
+  assert.equal(dependencies.handlers.runSpot08, undefined)
 })
 
 test('default P0 market snapshots normalize numeric rules before fixed-point oracles', () => {

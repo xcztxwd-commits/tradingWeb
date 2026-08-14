@@ -37,7 +37,8 @@ import {
   createP0Context as buildP0Context,
   runCase
 } from './p0-user-trading-cases.mjs'
-import { CASE_HANDLERS } from './p0-user-trading-core-cases.mjs'
+import { CASE_HANDLERS as CORE_CASE_HANDLERS } from './p0-user-trading-core-cases.mjs'
+import { CASE_HANDLERS as ORDER_CASE_HANDLERS } from './p0-user-trading-order-cases.mjs'
 import {
   alignPriceToTick,
   effectiveQuantityStep,
@@ -64,6 +65,10 @@ const P0_DATABASE_PATTERN = /^fx_p0_user_e2e_[a-z0-9_]+$/
 const P0_WINDOWS_JOB_OBJECT_CAPABILITY = 'WINDOWS_JOB_OBJECT_V1'
 const P0_HOST_PLATFORM = process.platform
 const defaultP0DependencyInstances = new WeakSet()
+const DEFAULT_CASE_HANDLERS = Object.freeze({
+  ...CORE_CASE_HANDLERS,
+  ...ORDER_CASE_HANDLERS
+})
 let apiBaseUrl
 let webBaseUrl
 let adminBaseUrl
@@ -14373,7 +14378,7 @@ export function createDefaultP0Dependencies(runtime = {}) {
         signal
       })
     },
-    handlers: runtime.handlers ?? CASE_HANDLERS,
+    handlers: runtime.handlers ?? DEFAULT_CASE_HANDLERS,
     async writeReport(execution, prepared, { signal } = {}) {
       assertP0ProcessTreeCapability()
       throwIfP0Aborted(signal)
