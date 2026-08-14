@@ -70,13 +70,17 @@ describe('trading api endpoint contracts', () => {
     }
 
     try {
-      assert.equal((await cancelAllOrders({ accountId: 'acct_1', requestId: 'cancel_request' }, 'token_1')).requestId, 'request_1')
+      assert.equal((await cancelAllOrders({
+        accountId: 'acct_1',
+        requestId: 'cancel_request',
+        expectedOrderIds: ['order_1']
+      }, 'token_1')).requestId, 'request_1')
       assert.equal((await closeAllPositions({ accountId: 'acct_1', requestId: 'close_request' }, 'token_1')).requestId, 'request_2')
       assert.deepEqual(calls, [
         {
           path: '/api/trading/orders/cancel-all',
           method: 'POST',
-          body: '{"accountId":"acct_1","requestId":"cancel_request"}',
+          body: '{"accountId":"acct_1","requestId":"cancel_request","expectedOrderIds":["order_1"]}',
           authorization: 'Bearer token_1'
         },
         {

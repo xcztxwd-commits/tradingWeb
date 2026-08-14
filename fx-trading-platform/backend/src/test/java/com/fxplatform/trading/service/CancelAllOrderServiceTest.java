@@ -188,6 +188,44 @@ class CancelAllOrderServiceTest {
   }
 
   @Test
+  void cancelUserRejectsTheSameRequestIdWhenExpectedOrderIdsChange() {
+    OrderEntity pending = order(
+        ORDER_1, ProductType.CRYPTO_SPOT, MarginMode.CASH,
+        BigDecimal.ZERO, "USDT");
+    when(orderRepository.findActiveByAccountIdForUpdate(accountId))
+        .thenReturn(List.of(pending), List.of());
+    AtomicReference<String> fingerprintMaterial = new AtomicReference<>();
+    when(batchActionRequestService.beginCurrent(
+        eq(accountId), eq("CANCEL_ALL"), eq("cancel-fingerprint"), anyString(), any()))
+        .thenAnswer(invocation -> {
+          String material = invocation.getArgument(3);
+          if (!fingerprintMaterial.compareAndSet(null, material)
+              && !fingerprintMaterial.get().equals(material)) {
+            throw new BusinessException(
+                "BATCH_REQUEST_CONFLICT",
+                "Batch request fingerprint conflicts with the original request");
+          }
+          @SuppressWarnings("unchecked")
+          List<UUID> scope = invocation.getArgument(4);
+          return new BatchActionRequestService.Execution(
+              id(902), accountId, "CANCEL_ALL", "cancel-fingerprint", scope, null);
+        });
+
+    service().cancelUser(
+        userId, accountId, "cancel-fingerprint", List.of(ORDER_1));
+
+    assertThatThrownBy(() -> service().cancelUser(
+        userId, accountId, "cancel-fingerprint", List.of(ORDER_2)))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("BATCH_REQUEST_CONFLICT"));
+    verify(orderRepository, times(1)).save(pending);
+    verify(orderEventService, times(1)).record(
+        eq(ORDER_1), eq("ORDER_CANCELED"), any(), eq(OrderStatus.CANCELED),
+        eq(null), anyString());
+  }
+
+  @Test
   void accountScopeLocksInOrderAndReleasesEveryAuthorityHoldExactlyOnce() {
     OrderEntity spot = order(
         ORDER_1, ProductType.CRYPTO_SPOT, MarginMode.CASH,

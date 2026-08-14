@@ -6,6 +6,7 @@ import type {
   AccountTransferResponse,
   BatchActionRequest,
   BatchActionResponse,
+  CancelAllOrderRequest,
   ClosePositionRequest,
   CreateProtectionRequest,
   FundingSettlement,
@@ -40,7 +41,7 @@ export function createOcoOrder(payload: OcoOrderPayload, token?: string) {
   return apiPost<OcoOrderGroupResponse>('/api/trading/oco', payload, token)
 }
 
-export function cancelAllOrders(payload: BatchActionRequest, token: string) {
+export function cancelAllOrders(payload: CancelAllOrderRequest, token: string) {
   return apiPost<BatchActionResponse>('/api/trading/orders/cancel-all', payload, token)
 }
 

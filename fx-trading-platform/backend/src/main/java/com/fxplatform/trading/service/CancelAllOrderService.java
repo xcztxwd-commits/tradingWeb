@@ -108,15 +108,27 @@ public class CancelAllOrderService {
       UUID accountId,
       String requestId
   ) {
+    return cancelUser(userId, accountId, requestId, null);
+  }
+
+  @Transactional(propagation = Propagation.NOT_SUPPORTED)
+  public BatchActionResponse cancelUser(
+      UUID userId,
+      UUID accountId,
+      String requestId,
+      List<UUID> expectedOrderIds
+  ) {
     requireId(userId, "User id is required");
     requireId(accountId, "Account id is required");
     String normalizedRequestId = requireRequestId(requestId);
+    List<UUID> normalizedExpectedOrderIds = normalizeExpectedOrderIds(expectedOrderIds);
     return transactionExecutor.execute(() -> cancelLocked(
         userId,
         accountId,
         normalizedRequestId,
         CancellationScope.ALL,
-        null));
+        null,
+        normalizedExpectedOrderIds));
   }
 
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -128,6 +140,7 @@ public class CancelAllOrderService {
         accountId,
         normalizedRequestId,
         CancellationScope.ALL,
+        null,
         null));
   }
 
@@ -140,7 +153,8 @@ public class CancelAllOrderService {
         accountId,
         "liquidation-slot:" + positionId,
         CancellationScope.RISK_INCREASING_SLOT,
-        positionId));
+        positionId,
+        null));
   }
 
   /** Validation-only variant that joins the owning system-step transaction. */
@@ -153,7 +167,8 @@ public class CancelAllOrderService {
         accountId,
         "liquidation-slot:" + positionId,
         CancellationScope.RISK_INCREASING_SLOT,
-        positionId));
+        positionId,
+        null));
   }
 
   /** Cancels every active Perpetual order in one position slot after liquidation is confirmed. */
@@ -166,7 +181,8 @@ public class CancelAllOrderService {
         accountId,
         "liquidation-slot-drain:" + positionId,
         CancellationScope.ACTIVE_SLOT,
-        positionId));
+        positionId,
+        null));
   }
 
   /** Validation-only variant that joins the owning system-step transaction. */
@@ -179,7 +195,8 @@ public class CancelAllOrderService {
         accountId,
         "liquidation-slot-drain:" + positionId,
         CancellationScope.ACTIVE_SLOT,
-        positionId));
+        positionId,
+        null));
   }
 
   @Transactional(propagation = Propagation.NOT_SUPPORTED)
@@ -190,6 +207,7 @@ public class CancelAllOrderService {
         accountId,
         "liquidation-account:" + accountId,
         CancellationScope.ACTIVE_LINEAR_PERPETUAL,
+        null,
         null));
   }
 
@@ -202,6 +220,7 @@ public class CancelAllOrderService {
         accountId,
         "liquidation-account:" + accountId,
         CancellationScope.ACTIVE_LINEAR_PERPETUAL,
+        null,
         null));
   }
 
@@ -210,7 +229,8 @@ public class CancelAllOrderService {
       UUID accountId,
       String requestId,
       CancellationScope scope,
-      UUID positionId
+      UUID positionId,
+      List<UUID> expectedOrderIds
   ) {
     TradingAccountEntity account = userId == null
         ? accountRepository.findByIdForUpdate(accountId)
@@ -257,14 +277,31 @@ public class CancelAllOrderService {
     BatchActionRequestService.Execution batchExecution = null;
     if (scope == CancellationScope.ALL && batchActionRequestService != null) {
       String origin = userId == null ? "ADMIN_CLEANUP" : "USER";
+      List<UUID> requestScopeIds = expectedOrderIds == null
+          ? selected.stream().map(OrderEntity::getId).toList()
+          : expectedOrderIds;
+      String fingerprintMaterial = "origin=" + origin + "|reason=CANCEL_ALL";
+      if (expectedOrderIds != null) {
+        fingerprintMaterial += "|expectedOrderIds=" + expectedOrderIds.stream()
+            .map(UUID::toString)
+            .reduce((left, right) -> left + "," + right)
+            .orElse("");
+      }
       batchExecution = batchActionRequestService.beginCurrent(
           accountId,
           BatchActionRequestService.ACTION_CANCEL_ALL,
           requestId,
-          "origin=" + origin + "|reason=CANCEL_ALL",
-          selected.stream().map(OrderEntity::getId).toList());
+          fingerprintMaterial,
+          requestScopeIds);
       if (batchExecution.completedResponse() != null) {
         return batchExecution.completedResponse();
+      }
+      if (expectedOrderIds != null
+          && !Set.copyOf(expectedOrderIds).equals(
+              selected.stream().map(OrderEntity::getId).collect(java.util.stream.Collectors.toSet()))) {
+        throw new BusinessException(
+            "BATCH_REQUEST_CONFLICT",
+            "Expected cancel scope no longer matches the locked request scope");
       }
       Set<UUID> frozenIds = Set.copyOf(batchExecution.scopeIds());
       selected = selected.stream()
@@ -316,6 +353,21 @@ public class CancelAllOrderService {
       batchActionRequestService.completeCurrent(batchExecution, response);
     }
     return response;
+  }
+
+  private static List<UUID> normalizeExpectedOrderIds(List<UUID> expectedOrderIds) {
+    if (expectedOrderIds == null) {
+      return null;
+    }
+    if (expectedOrderIds.stream().anyMatch(Objects::isNull)
+        || new HashSet<>(expectedOrderIds).size() != expectedOrderIds.size()) {
+      throw new BusinessException(
+          "BATCH_REQUEST_CONFLICT",
+          "Expected cancel scope contains an invalid order id");
+    }
+    return expectedOrderIds.stream()
+        .sorted(Comparator.comparing(UUID::toString))
+        .toList();
   }
 
   private void releaseAuthorityHold(

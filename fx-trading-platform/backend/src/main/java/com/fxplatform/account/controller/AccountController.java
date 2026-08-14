@@ -131,7 +131,11 @@ public class AccountController {
       @PathVariable("id") UUID accountId,
       @Valid @RequestBody DemoResetRequest request
   ) {
-    return ApiResponse.success(accountService.resetDemo(principal.id(), accountId, request.requestId()));
+    return ApiResponse.success(accountService.resetDemo(
+        principal.id(),
+        accountId,
+        request.requestId(),
+        request.expectedDemoGeneration()));
   }
 
   /**

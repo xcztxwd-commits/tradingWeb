@@ -94,6 +94,7 @@ class LedgerServiceTest {
     AssetLedgerEntryEntity spotEntry = new AssetLedgerEntryEntity();
     spotEntry.setId(UUID.randomUUID());
     spotEntry.setAccountId(accountId);
+    spotEntry.setWalletType("SPOT");
     spotEntry.setAsset("USDT");
     spotEntry.setAmount(new BigDecimal("-5000.00000000"));
     spotEntry.setBalanceAfter(new BigDecimal("5000.00000000"));
@@ -114,6 +115,8 @@ class LedgerServiceTest {
 
     assertThat(entries).extracting(LedgerEntryResponse::entryType)
         .containsExactly("SPOT_BUY_QUOTE_OUT", "DEMO_DEPOSIT");
+    assertThat(entries).extracting(LedgerEntryResponse::walletType)
+        .containsExactly("SPOT", "USDT_PERP");
     assertThat(entries.getFirst().currency()).isEqualTo("USDT");
     assertThat(entries.getFirst().referenceId()).isEqualTo(orderId);
   }

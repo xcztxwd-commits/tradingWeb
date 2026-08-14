@@ -4047,6 +4047,13 @@ export interface components {
             /** Format: uuid */
             requestId: string;
         };
+        CancelAllOrderRequest: {
+            /** Format: uuid */
+            accountId: string;
+            /** Format: uuid */
+            requestId: string;
+            expectedOrderIds: string[];
+        };
         ApiResponseBatchActionResponse: {
             success?: boolean;
             code?: string;
@@ -5086,6 +5093,8 @@ export interface components {
         DemoResetRequest: {
             /** Format: uuid */
             requestId: string;
+            /** Format: int64 */
+            expectedDemoGeneration: number;
         };
         AssetConversionRequest: {
             fromWalletType: string;
@@ -5134,6 +5143,8 @@ export interface components {
             maintenanceMargin?: number;
             positionValue?: number;
             marginAvailable?: number;
+            /** Format: int64 */
+            demoGeneration?: number;
             /** Format: date-time */
             lastSnapshotAt?: string;
             warning?: string;
@@ -5726,6 +5737,7 @@ export interface components {
             entryType?: string;
             amount?: number;
             balanceAfter?: number;
+            walletType?: string;
             currency?: string;
             referenceType?: string;
             /** Format: uuid */
@@ -9954,7 +9966,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["BatchActionRequest"];
+                "application/json": components["schemas"]["CancelAllOrderRequest"];
             };
         };
         responses: {

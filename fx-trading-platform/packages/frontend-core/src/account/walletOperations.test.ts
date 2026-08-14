@@ -47,7 +47,12 @@ describe('wallet operations', () => {
     const calls: unknown[] = []
     let refreshes = 0
     await runWalletReset(
-      { accountId: 'account-1', token: 'token', requestId: 'reset-request' },
+      {
+        accountId: 'account-1',
+        token: 'token',
+        requestId: 'reset-request',
+        expectedDemoGeneration: 7
+      },
       {
         resetDemoAccount: async (accountId, payload, token) => {
           calls.push({ accountId, payload, token })
@@ -59,7 +64,7 @@ describe('wallet operations', () => {
 
     assert.deepEqual(calls, [{
       accountId: 'account-1',
-      payload: { requestId: 'reset-request' },
+      payload: { requestId: 'reset-request', expectedDemoGeneration: 7 },
       token: 'token'
     }])
     assert.equal(refreshes, 1)

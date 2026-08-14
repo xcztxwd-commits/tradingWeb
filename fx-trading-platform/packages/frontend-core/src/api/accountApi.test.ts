@@ -48,7 +48,10 @@ describe('account api endpoint contracts', () => {
       )
       await (resetDemoAccount as Function)(
         'account-1',
-        { requestId: '22222222-2222-4222-8222-222222222222' },
+        {
+          requestId: '22222222-2222-4222-8222-222222222222',
+          expectedDemoGeneration: 7
+        },
         'token-1'
       )
 
@@ -63,7 +66,10 @@ describe('account api endpoint contracts', () => {
         },
         {
           path: '/api/accounts/account-1/demo-reset',
-          body: { requestId: '22222222-2222-4222-8222-222222222222' }
+          body: {
+            requestId: '22222222-2222-4222-8222-222222222222',
+            expectedDemoGeneration: 7
+          }
         }
       ])
     } finally {

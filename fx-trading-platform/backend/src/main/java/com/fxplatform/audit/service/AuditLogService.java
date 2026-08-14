@@ -1,7 +1,10 @@
 package com.fxplatform.audit.service;
 
+import cn.hutool.json.JSONUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fxplatform.audit.entity.AuditLogEntity;
 import com.fxplatform.audit.repository.AuditLogRepository;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -45,6 +48,26 @@ public class AuditLogService {
       auditLogRepository.save(log);
     } else {
       auditLogRepository.insertRequestLogIfAbsent(log);
+    }
+  }
+
+  public Optional<Long> findDemoResetGeneration(UUID accountId, UUID requestId) {
+    if (accountId == null || requestId == null) {
+      return Optional.empty();
+    }
+    AuditLogEntity log = auditLogRepository.selectOne(
+        new LambdaQueryWrapper<AuditLogEntity>()
+            .eq(AuditLogEntity::getAction, "DEMO_RESET")
+            .eq(AuditLogEntity::getTargetType, "TRADING_ACCOUNT")
+            .eq(AuditLogEntity::getTargetId, accountId.toString())
+            .eq(AuditLogEntity::getRequestId, requestId.toString()));
+    if (log == null || log.getDetails() == null) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.ofNullable(JSONUtil.parseObj(log.getDetails()).getLong("generation"));
+    } catch (RuntimeException ignored) {
+      return Optional.empty();
     }
   }
 }

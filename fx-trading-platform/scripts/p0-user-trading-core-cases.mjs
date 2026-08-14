@@ -42,6 +42,76 @@ const DESKTOP = {
   mobile: false
 }
 
+export function isPublicProviderFailureEvidence(providers, failure) {
+  const providerList = Array.isArray(providers) ? providers : [providers]
+  if (!failure || typeof failure !== 'object' || !providerList.includes(failure.provider)) {
+    return false
+  }
+  if (failure.asOf !== null && failure.asOf !== undefined
+    && !Number.isFinite(Date.parse(failure.asOf))) {
+    return false
+  }
+  if (failure.code === 'FUNDING_INGESTION_TIMEOUT') {
+    return failure.status === 'TIMEOUT'
+      && failure.asOf === null
+      && Number.isFinite(Date.parse(failure.configuredAt))
+      && Number.isSafeInteger(failure.timeoutMs)
+      && failure.timeoutMs > 0
+      && Array.isArray(failure.binding)
+      && failure.binding.some((binding) => (
+        binding?.providerCode === failure.provider && binding.enabled === true
+      ))
+      && failure.fixedFallback?.status === 'PASS'
+      && failure.fixedFallback?.provider === 'fixed'
+      && failure.fixedFallback?.sourceMode === 'LOCAL_SIMULATED'
+      && typeof failure.fixedFallback?.settlementId === 'string'
+      && failure.fixedFallback.settlementId.length > 0
+  }
+  if (failure.code === 'FALLBACK_SELECTED') {
+    return Number.isInteger(failure.status)
+      && failure.status >= 200
+      && failure.status < 300
+  }
+  if (failure.code === 'NETWORK_FAILURE') {
+    return failure.status === 'NETWORK_FAILURE'
+      || (Number.isInteger(failure.status) && failure.status >= 500)
+  }
+  return ['MARKET_DATA_STALE', 'MARKET_DATA_UNAVAILABLE', 'MARKET_PROVIDER_BINDING_NOT_FOUND']
+    .includes(failure.code)
+    && Number.isInteger(failure.status)
+    && failure.status >= 400
+    && failure.status < 600
+}
+
+export class P0PublicProviderUnavailableError extends Error {
+  constructor(provider, failures) {
+    const providers = (Array.isArray(provider) ? provider : [provider])
+      .map((value) => typeof value === 'string' ? value.trim() : '')
+    assert(
+      providers.length > 0
+        && providers.every((value) => value.length > 0)
+        && new Set(providers).size === providers.length,
+      'blocked provider is required'
+    )
+    assert(
+      Array.isArray(failures)
+        && failures.length > 0
+        && failures.every((failure) => isPublicProviderFailureEvidence(providers, failure))
+        && providers.every((value) => failures.some(({ provider: failed }) => failed === value)),
+      'public-provider BLOCKED requires concrete failure evidence'
+    )
+    const providerLabel = providers.join(',')
+    super(`Public market provider ${providerLabel} is unavailable`)
+    this.name = 'P0PublicProviderUnavailableError'
+    this.reasonCode = 'PUBLIC_PROVIDER_UNAVAILABLE'
+    this.blockerEvidence = {
+      kind: 'PUBLIC_PROVIDER_UNAVAILABLE',
+      provider: providerLabel,
+      failures: structuredClone(failures)
+    }
+  }
+}
+
 export async function runAuth01(context, definition, details = {}) {
   return runAuthCase(context, definition, details, async (startedAt) => {
     const credentials = context.userFactory('AUTH-01')
@@ -517,6 +587,7 @@ export async function runSingleUserCoreCase(context, definition, details, execut
         context,
         definition,
         details,
+        browser,
         page,
         database,
         before: beforeSnapshot,
@@ -569,10 +640,10 @@ export async function runSingleUserCoreCase(context, definition, details, execut
           )
           fixtureRestores.push({ evidence, restore, restored: false })
         },
-        async capture(name, snapshot, evidence = {}) {
+        async capture(name, snapshot, evidence = {}, pages = [page]) {
           const current = snapshot ?? await context.api.snapshotAccount(page)
           const db = await context.db.snapshotTradingRows(current.account.id)
-          const captured = await checkpoint(context, definition, name, [page], {
+          const captured = await checkpoint(context, definition, name, pages, {
             apiEvidence: [safeAccountEvidence(current)],
             dbEvidence: [db],
             ...evidence
@@ -616,6 +687,35 @@ export async function runSingleUserCoreCase(context, definition, details, execut
       }, details)
     } catch (error) {
       caseFailure = error
+      if (error instanceof P0PublicProviderUnavailableError && scope) {
+        const finalSnapshot = await context.api.snapshotAccount(page)
+        const finalDb = await context.db.snapshotTradingRows(finalSnapshot.account.id)
+        assertCoreCleanup(definition.id, finalSnapshot, finalDb)
+        const final = await checkpoint(context, definition, 'blocked-final', [page], {
+          apiEvidence: [safeAccountEvidence(finalSnapshot)],
+          dbEvidence: [finalDb]
+        })
+        scope.checkpoints.push(final)
+        scope.apiEvidence.push(safeAccountEvidence(finalSnapshot))
+        scope.dbEvidence.push(finalDb)
+        scope.snapshots['blocked-final'] = safeAccountEvidence(finalSnapshot)
+        scope.snapshots.final = safeAccountEvidence(finalSnapshot)
+        scope.contractProbes.push(error.blockerEvidence)
+        error.p0BlockedEvidence = {
+          cleanupVerified: true,
+          database: scope.database,
+          user: { accountId: scope.before.account.id },
+          userActions: scope.userActions,
+          fixtureActions: scope.fixtureActions,
+          checkpoints: scope.checkpoints,
+          contractProbes: scope.contractProbes,
+          replayProbes: scope.replayProbes,
+          oracleEvidence: scope.oracleEvidence,
+          snapshots: scope.snapshots,
+          apiEvidence: scope.apiEvidence,
+          dbEvidence: scope.dbEvidence
+        }
+      }
       throw error
     } finally {
       const failures = []
@@ -652,6 +752,16 @@ async function runCoreCase(context, definition, details, execute) {
   try {
     return await execute(startedAt)
   } catch (error) {
+    if (error instanceof P0PublicProviderUnavailableError
+      && error.p0BlockedEvidence?.cleanupVerified === true) {
+      return persistBlocked(
+        context,
+        definition,
+        startedAt,
+        error,
+        details
+      )
+    }
     const failedAt = new Date().toISOString()
     const terminal = terminalFields(
       definition,
@@ -683,6 +793,66 @@ async function runCoreCase(context, definition, details, execute) {
     persistResult(context, definition.id, result)
     throw error
   }
+}
+
+function persistBlocked(context, definition, startedAt, error, details) {
+  const finishedAt = new Date().toISOString()
+  const evidence = error.p0BlockedEvidence ?? {}
+  const checkpoints = evidence.checkpoints ?? []
+  const artifactHashes = Object.assign(
+    {},
+    ...checkpoints.map((checkpoint) => checkpoint.artifactHashes ?? {})
+  )
+  const blocker = {
+    status: 'BLOCKED',
+    reason: error.message,
+    reasonCode: error.reasonCode
+  }
+  const terminal = terminalFields(
+    definition,
+    'BLOCKED',
+    startedAt,
+    finishedAt,
+    details,
+    artifactHashes
+  )
+  const finalCheckpoint = checkpoints.at(-1)
+  const result = {
+    ...terminal,
+    subruns: terminal.subruns.map((subrun) => ({
+      ...subrun,
+      failureOrBlocker: blocker
+    })),
+    commit: context.run.commit,
+    database: evidence.database,
+    user: evidence.user,
+    profile: definition.requiredSubruns[0]?.profile,
+    viewport: definition.requiredSubruns[0]?.viewport,
+    startedAt,
+    finishedAt,
+    preconditions: [],
+    userActions: evidence.userActions ?? [],
+    fixtureActions: evidence.fixtureActions ?? [],
+    contractProbes: evidence.contractProbes ?? [error.blockerEvidence],
+    replayProbes: evidence.replayProbes ?? [],
+    checkpoints: checkpoints.map(({ name, uiEvidence }) => ({ name, uiEvidence })),
+    uiEvidence: checkpoints.flatMap(({ uiEvidence }) => uiEvidence ?? []),
+    networkEvidence: finalCheckpoint?.networkEvidence ?? [],
+    apiEvidence: evidence.apiEvidence ?? [],
+    dbEvidence: evidence.dbEvidence ?? [],
+    eventEvidence: finalCheckpoint?.eventEvidence ?? [],
+    financialCalculation: {
+      status: 'BLOCKED',
+      reasonCode: error.reasonCode
+    },
+    oracleEvidence: evidence.oracleEvidence ?? [],
+    snapshots: evidence.snapshots ?? {},
+    consoleErrors: [],
+    cleanup: { status: 'PASS' },
+    failureOrBlocker: blocker
+  }
+  persistResult(context, definition.id, result)
+  return result
 }
 
 async function runAuthCase(context, definition, details, execute) {

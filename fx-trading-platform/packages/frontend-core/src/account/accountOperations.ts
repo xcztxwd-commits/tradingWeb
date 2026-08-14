@@ -360,6 +360,7 @@ type WalletResetInput = {
   accountId: string
   token: string
   requestId: string
+  expectedDemoGeneration: number
 }
 
 type WalletResetDependencies = {
@@ -368,7 +369,10 @@ type WalletResetDependencies = {
 }
 
 export async function runWalletReset(input: WalletResetInput, dependencies: WalletResetDependencies) {
-  const payload: DemoResetRequest = { requestId: input.requestId }
+  const payload: DemoResetRequest = {
+    requestId: input.requestId,
+    expectedDemoGeneration: input.expectedDemoGeneration
+  }
   const response = await dependencies.resetDemoAccount(input.accountId, payload, input.token)
   await dependencies.refresh()
   return response

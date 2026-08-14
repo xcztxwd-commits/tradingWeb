@@ -50,8 +50,8 @@ test('pending Spot journeys prove UI requests, holds, REST/DB/STOMP and cleanup'
   assert.match(source, /Number\(modified\.order\.version\) > Number\(pending\.order\.version\)/u)
   assert.match(source, /liquidityRole,\s*'MAKER'/u)
   assert.match(source, /triggerPriceType,\s*'LAST_PRICE'/u)
-  assert.match(source, /feeAsset,\s*'BTC'/u)
   assert.match(source, /feeAsset,\s*'USDT'/u)
+  assert.doesNotMatch(source, /feeAsset,\s*'BTC'/u)
 })
 
 test('Perp LIMIT and STOP journeys prove full fills, no mutation and financial ledgers', () => {

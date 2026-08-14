@@ -120,10 +120,19 @@ public class AccountService {
   }
 
   public DemoResetResponse resetDemo(UUID userId, UUID accountId, UUID requestId) {
+    return resetDemo(userId, accountId, requestId, null);
+  }
+
+  public DemoResetResponse resetDemo(
+      UUID userId,
+      UUID accountId,
+      UUID requestId,
+      Long expectedDemoGeneration
+  ) {
     if (demoAccountLifecycleService == null) {
       throw new BusinessException("DEMO_ACCOUNT_LIFECYCLE_UNAVAILABLE", "Demo account lifecycle is unavailable");
     }
-    return demoAccountLifecycleService.reset(userId, accountId, requestId);
+    return demoAccountLifecycleService.reset(userId, accountId, requestId, expectedDemoGeneration);
   }
 
   public List<AccountTransferResponse> transferHistory(UUID userId, UUID accountId) {
@@ -213,6 +222,7 @@ public class AccountService {
         snapshot.maintenanceMargin(),
         snapshot.positionValue(),
         snapshot.marginAvailable(),
+        account.getDemoGeneration(),
         snapshot.lastSnapshotAt(),
         snapshot.warning());
   }

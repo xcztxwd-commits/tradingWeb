@@ -3,6 +3,7 @@ package com.fxplatform.trading.controller;
 import com.fxplatform.common.response.ApiResponse;
 import com.fxplatform.common.security.UserPrincipal;
 import com.fxplatform.trading.dto.request.BatchActionRequest;
+import com.fxplatform.trading.dto.request.CancelAllOrderRequest;
 import com.fxplatform.trading.dto.request.CreateOrderRequest;
 import com.fxplatform.trading.dto.request.CreateOcoOrderRequest;
 import com.fxplatform.trading.dto.request.AdjustPositionMarginRequest;
@@ -153,12 +154,13 @@ public class TradingController {
   @PostMapping("/orders/cancel-all")
   public ApiResponse<BatchActionResponse> cancelAllOrders(
       @AuthenticationPrincipal UserPrincipal principal,
-      @Valid @RequestBody BatchActionRequest request
+      @Valid @RequestBody CancelAllOrderRequest request
   ) {
     return ApiResponse.success(cancelAllOrderService.cancelUser(
         principal.id(),
         request.accountId(),
-        request.requestId().toString()));
+        request.requestId().toString(),
+        request.expectedOrderIds()));
   }
 
   @PatchMapping("/orders/{id}")

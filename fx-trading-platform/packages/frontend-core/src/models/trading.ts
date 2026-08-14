@@ -65,6 +65,7 @@ export type AccountSummary = {
   maintenanceMargin?: Amount | null
   positionValue?: Amount | null
   marginAvailable?: Amount | null
+  demoGeneration?: number | null
   lastSnapshotAt?: string | null
   warning?: string | null
 }

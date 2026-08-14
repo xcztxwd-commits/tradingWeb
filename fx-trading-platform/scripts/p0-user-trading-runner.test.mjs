@@ -43,7 +43,10 @@ import * as financialOracles from './p0-user-trading-oracles.mjs'
 import * as smokeContracts from './smoke-usdt-demo-browser.mjs'
 import './p0-user-trading-advanced-cases.mjs'
 import * as p0CoreContracts from './p0-user-trading-core-cases.mjs'
+import * as p0FundingLiquidationContracts from './p0-user-trading-funding-liquidation-cases.mjs'
+import * as p0OrderAdvancedContracts from './p0-user-trading-order-advanced-cases.mjs'
 import * as p0OrderContracts from './p0-user-trading-order-cases.mjs'
+import * as p0SourceResilienceUiContracts from './p0-user-trading-source-resilience-ui-cases.mjs'
 
 const specPath = new URL(
   '../docs/superpowers/specs/2026-07-14-p0-user-trading-acceptance-test-design.md',
@@ -1958,7 +1961,7 @@ test('PERP-01/02 lifecycle closes financial, target-mark, and cash-ledger eviden
   assert.match(ledger, /assert\.equal\(matches\.length,\s*1/)
 })
 
-test('default P0 dispatch builds one context and injects owned core and order handlers', () => {
+test('default P0 dispatch resolves all 60 owned case handlers', () => {
   const smokePath = fileURLToPath(new URL('./smoke-usdt-demo-browser.mjs', import.meta.url))
   const smokeSource = readFileSync(smokePath, 'utf8')
   const dependencies = smokeContracts.createDefaultP0Dependencies()
@@ -1969,7 +1972,17 @@ test('default P0 dispatch builds one context and injects owned core and order ha
   assert.match(smokeSource, /dispatchCase\(definition, caseContext, handlers/)
   assert.equal(dependencies.handlers.runAuth01, p0CoreContracts.runAuth01)
   assert.equal(dependencies.handlers.runSpot04, p0OrderContracts.runSpot04)
-  assert.equal(dependencies.handlers.runSpot08, undefined)
+  assert.equal(dependencies.handlers.runSpot08, p0OrderAdvancedContracts.runSpot08)
+  assert.equal(dependencies.handlers.runFund01, p0FundingLiquidationContracts.runFund01)
+  assert.equal(dependencies.handlers.runSource01, p0SourceResilienceUiContracts.runSource01)
+  assert.equal(Object.keys(dependencies.handlers).length, P0_CASES.length)
+  for (const definition of P0_CASES) {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      dependencies.handlers,
+      definition.handlerId
+    )
+    assert.equal(typeof descriptor?.value, 'function', definition.id)
+  }
 })
 
 test('default P0 market snapshots normalize numeric rules before fixed-point oracles', () => {

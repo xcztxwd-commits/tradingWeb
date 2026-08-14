@@ -318,6 +318,41 @@ class DemoAccountLifecycleServiceTest {
   }
 
   @Test
+  void resetRejectsTheSameRequestIdWhenExpectedGenerationChanges() {
+    ResetFixture fixture = resetFixture();
+    fixture.account().setDemoGeneration(2L);
+    LedgerEntryEntity existing = new LedgerEntryEntity();
+    existing.setEntryType(LedgerEntryType.DEMO_RESET);
+    existing.setReferenceId(fixture.requestId());
+    when(ledgerService.findDemoReset(fixture.account().getId(), fixture.requestId()))
+        .thenReturn(Optional.of(existing));
+    when(auditLogService.findDemoResetGeneration(
+        fixture.account().getId(), fixture.requestId()))
+        .thenReturn(Optional.of(2L));
+
+    var replay = service.reset(
+        fixture.account().getUserId(),
+        fixture.account().getId(),
+        fixture.requestId(),
+        1L);
+    assertThat(replay.replayed()).isTrue();
+
+    assertThatThrownBy(() -> service.reset(
+        fixture.account().getUserId(),
+        fixture.account().getId(),
+        fixture.requestId(),
+        2L))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getCode()).isEqualTo("IDEMPOTENCY_CONFLICT"));
+
+    assertThat(fixture.account().getDemoGeneration()).isEqualTo(2L);
+    verify(accountRepository, never()).save(any());
+    verify(ledgerService, never()).recordDemoReset(any(), any(), any());
+    verifyNoInteractions(eventPublisher);
+  }
+
+  @Test
   void resetRepairsMissingCanonicalSymbolSettingsWithoutInsertingExistingRows() {
     ResetFixture fixture = resetFixture();
     List<String> existingSymbols = List.of(

@@ -67,6 +67,7 @@ export type PositionResponse = BackendSchema<'PositionResponse'>
 export type AdjustPositionMarginRequest = BackendSchema<'AdjustPositionMarginRequest'>
 export type AdjustPositionMarginResponse = BackendSchema<'AdjustPositionMarginResponse'>
 export type BatchActionRequest = BackendSchema<'BatchActionRequest'>
+export type CancelAllOrderRequest = BackendSchema<'CancelAllOrderRequest'>
 export type BatchActionResponse = BackendSchema<'BatchActionResponse'>
 export type TradingSettingsResponse = BackendSchema<'TradingSettingsResponse'>
 export type UpdatePositionModeRequest = BackendSchema<'UpdatePositionModeRequest'>

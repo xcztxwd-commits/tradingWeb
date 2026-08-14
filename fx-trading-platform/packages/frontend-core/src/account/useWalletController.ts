@@ -19,6 +19,7 @@ export function useWalletController() {
   const [transferPending, setTransferPending] = useState(false)
   const [transferError, setTransferError] = useState<CoreMessage | null>(null)
   const [resetRequestId, setResetRequestId] = useState('')
+  const [resetExpectedDemoGeneration, setResetExpectedDemoGeneration] = useState<number | null>(null)
   const [resetPending, setResetPending] = useState(false)
   const [resetError, setResetError] = useState<CoreMessage | null>(null)
   const [notice, setNotice] = useState<CoreMessage | null>(null)
@@ -87,9 +88,15 @@ export function useWalletController() {
 
   const beginReset = useCallback(() => {
     setResetRequestId(globalThis.crypto.randomUUID())
+    const generation = accountData.account?.demoGeneration
+    setResetExpectedDemoGeneration(
+      typeof generation === 'number' && Number.isSafeInteger(generation) && generation >= 0
+        ? generation
+        : null
+    )
     setResetError(null)
     setNotice(null)
-  }, [])
+  }, [accountData.account?.demoGeneration])
 
   const submitReset = useCallback(async () => {
     if (!accountData.token || !accountData.accountId || resetInFlight.current) return undefined
@@ -98,8 +105,16 @@ export function useWalletController() {
     setResetError(null)
     setNotice(null)
     try {
+      if (resetExpectedDemoGeneration === null) {
+        throw new Error('Demo account generation is unavailable')
+      }
       const response = await runWalletReset(
-        { token: accountData.token, accountId: accountData.accountId, requestId: resetRequestId },
+        {
+          token: accountData.token,
+          accountId: accountData.accountId,
+          requestId: resetRequestId,
+          expectedDemoGeneration: resetExpectedDemoGeneration
+        },
         {
           resetDemoAccount: defaultWalletMutationDependencies.resetDemoAccount,
           refresh: accountData.refreshAccountData
@@ -115,7 +130,13 @@ export function useWalletController() {
       resetInFlight.current = false
       setResetPending(false)
     }
-  }, [accountData.accountId, accountData.refreshAccountData, accountData.token, resetRequestId])
+  }, [
+    accountData.accountId,
+    accountData.refreshAccountData,
+    accountData.token,
+    resetExpectedDemoGeneration,
+    resetRequestId
+  ])
 
   return {
     ...accountData,
@@ -125,6 +146,7 @@ export function useWalletController() {
     transferPending,
     transferError,
     resetRequestId,
+    resetExpectedDemoGeneration,
     resetPending,
     resetError,
     notice,

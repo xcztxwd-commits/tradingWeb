@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useState } from 'react'
 
 import {
-  cancelAllTradingOrders,
   closeAllTradingPositions,
   mutateTradingPosition,
+  runCancelAllTradingOrders,
   runTradingBatchAction,
   submitTradingOco,
   submitTradingOrder,
@@ -28,6 +28,16 @@ type Options = {
 
 const backendSessionFallback = 'Backend session connection failed. Try again later.'
 const loginRequiredFallback = 'Log in before placing an order.'
+const activeOrderStatuses = new Set([
+  'RECEIVED',
+  'VALIDATING',
+  'ACCEPTED',
+  'PENDING_ACTIVATION',
+  'PENDING',
+  'WORKING',
+  'PARTIALLY_FILLED',
+  'CANCEL_PENDING'
+])
 
 export type TradingSessionMode = 'loading' | 'ready' | 'login-required' | 'error'
 
@@ -192,13 +202,16 @@ export function useTradingSession({ refreshMs = 15_000 }: Options = {}) {
 
   const submitCancelAllOrders = useCallback(async () => {
     if (!token || !accountId) throw new Error('Trading account is not ready')
-    return runTradingBatchAction(
+    const expectedOrderIds = accountData.orders
+      .filter(({ status }) => activeOrderStatuses.has(status))
+      .map(({ id }) => id)
+    return runCancelAllTradingOrders(
       accountId,
       token,
-      cancelAllTradingOrders,
+      expectedOrderIds,
       () => refreshAccountData(token, accountId)
     )
-  }, [accountId, refreshAccountData, token])
+  }, [accountData.orders, accountId, refreshAccountData, token])
 
   const submitCloseAllPositions = useCallback(async () => {
     if (!token || !accountId) throw new Error('Trading account is not ready')

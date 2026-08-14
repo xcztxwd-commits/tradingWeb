@@ -402,6 +402,7 @@ describe('real USDT demo browser smoke contract', () => {
       'STOP_LOSS',
       'newest-first',
       '/orders/cancel-all',
+      'expectedOrderIds',
       '/positions/close-all',
       'funding positive',
       'funding negative',
@@ -409,7 +410,8 @@ describe('real USDT demo browser smoke contract', () => {
       'Cross liquidation',
       'shortfall',
       '/force-cleanup',
-      '/demo-reset'
+      '/demo-reset',
+      'expectedDemoGeneration'
     ]
 
     for (const fragment of fragments) {

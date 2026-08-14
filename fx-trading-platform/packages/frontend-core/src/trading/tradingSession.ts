@@ -25,6 +25,7 @@ import type {
   AdjustPositionMarginRequest,
   BatchActionRequest,
   BatchActionResponse,
+  CancelAllOrderRequest,
   ClosePositionRequest,
   CreateProtectionRequest
 } from '@fx-platform/shared-types'
@@ -67,7 +68,7 @@ export async function submitTradingOco(payload: OcoOrderPayload, token?: string 
   return createOcoOrder(payload, token)
 }
 
-export function cancelAllTradingOrders(payload: BatchActionRequest, token: string) {
+export function cancelAllTradingOrders(payload: CancelAllOrderRequest, token: string) {
   return cancelAllOrders(payload, token)
 }
 
@@ -86,6 +87,24 @@ export async function runTradingBatchAction<T = BatchActionResponse>(
   const payload = { accountId, requestId: globalThis.crypto.randomUUID() }
   try {
     return await action(payload, token)
+  } finally {
+    await refresh().catch(() => undefined)
+  }
+}
+
+export async function runCancelAllTradingOrders(
+  accountId: string,
+  token: string,
+  expectedOrderIds: string[],
+  refresh: () => Promise<unknown>
+) {
+  const payload: CancelAllOrderRequest = {
+    accountId,
+    requestId: globalThis.crypto.randomUUID(),
+    expectedOrderIds: [...expectedOrderIds].sort()
+  }
+  try {
+    return await cancelAllTradingOrders(payload, token)
   } finally {
     await refresh().catch(() => undefined)
   }

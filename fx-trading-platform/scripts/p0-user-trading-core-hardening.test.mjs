@@ -10,6 +10,95 @@ const source = readFileSync(
   'utf8'
 )
 
+function coreCaseContext(options = {}) {
+  let persisted
+  let closed = 0
+  const captures = []
+  const wallet = {
+    walletType: 'PERPETUAL',
+    asset: 'USDT',
+    total: '100',
+    available: '100',
+    locked: '0'
+  }
+  const openPosition = options.openPosition
+    ? {
+        id: '00000000-0000-4000-8000-000000000002',
+        symbol: 'BTCUSDT-PERP',
+        status: 'OPEN',
+        marginMode: 'CROSS',
+        marginHeld: '1'
+      }
+    : null
+  const snapshot = {
+    account: { id: '00000000-0000-4000-8000-000000000001', accountType: 'DEMO', status: 'ACTIVE' },
+    wallets: [wallet],
+    positions: openPosition ? [openPosition] : [],
+    orders: [],
+    trades: [],
+    summary: { balance: '100', equity: '100', usedMargin: '0', freeMargin: '100' },
+    settings: {},
+    fundingSettlements: []
+  }
+  const database = {
+    database: 'p0_blocked_test',
+    openPositions: openPosition ? 1 : 0,
+    orderRows: [],
+    positionRows: openPosition
+      ? [{ id: openPosition.id, status: 'OPEN', margin_held: '1' }]
+      : [],
+    walletRows: [{ ...wallet }],
+    accountRow: {
+      balance: '100',
+      equity: '100',
+      used_margin: '0',
+      free_margin: '100'
+    }
+  }
+  return {
+    context: {
+      run: { commit: 'blocked-test', artifactRoot: 'C:\\p0-test' },
+      userFactory: () => ({ email: 'blocked@example.test', password: 'Password123!' }),
+      ui: {
+        async launchBrowser() {
+          return { async close() { closed += 1 } }
+        },
+        async createEvidencePage() {
+          return {
+            assertEvidenceClean() {},
+            async close() {
+              if (options.pageCloseError) throw new Error('test page close failed')
+              closed += 1
+            }
+          }
+        },
+        async registerViaUi() { return { requestRef: 'register-request' } }
+      },
+      api: { async snapshotAccount() { return structuredClone(snapshot) } },
+      db: {
+        async assertDedicatedDatabase() { return 'p0_blocked_test' },
+        async snapshotTradingRows() { return structuredClone(database) }
+      },
+      evidence: {
+        async captureCheckpoint(_context, name, scope) {
+          captures.push({ name, pages: scope.pages.length })
+          return {
+            name,
+            uiEvidence: [],
+            networkEvidence: [],
+            eventEvidence: [],
+            artifactHashes: {}
+          }
+        },
+        writeCaseResultAtomic(_path, result) { persisted = result }
+      }
+    },
+    persisted: () => persisted,
+    closed: () => closed,
+    captures: () => captures
+  }
+}
+
 function section(start, end) {
   const from = source.indexOf(start)
   const to = source.indexOf(end, from + start.length)
@@ -42,6 +131,184 @@ test('Spot wallet delta treats a missing pre-mutation asset wallet as zero', () 
     coreContracts.findPreMutationWalletOrZero({ wallets: [existing] }, 'SPOT', 'BTC'),
     existing
   )
+})
+
+test('core cases persist only evidenced public-provider outages as BLOCKED', async () => {
+  assert.equal(typeof coreContracts.P0PublicProviderUnavailableError, 'function')
+  assert.throws(
+    () => new coreContracts.P0PublicProviderUnavailableError('binance-usdm', [
+      { status: 503, code: 'MARKET_DATA_UNAVAILABLE' }
+    ]),
+    /concrete failure evidence/
+  )
+  assert.throws(
+    () => new coreContracts.P0PublicProviderUnavailableError('binance-usdm', [{
+      provider: 'binance-usdm',
+      status: 503,
+      code: 'SOMETHING_WENT_WRONG',
+      asOf: null
+    }]),
+    /concrete failure evidence/
+  )
+  assert.throws(
+    () => new coreContracts.P0PublicProviderUnavailableError('binance-usdm', [{
+      provider: 'binance-usdm',
+      status: 'TIMEOUT',
+      code: 'FUNDING_INGESTION_TIMEOUT',
+      asOf: null,
+      configuredAt: '2026-08-14T00:00:00.000Z',
+      timeoutMs: 45000,
+      binding: [{ providerCode: 'binance-usdm', enabled: true }]
+    }]),
+    /concrete failure evidence/
+  )
+  assert.doesNotThrow(
+    () => new coreContracts.P0PublicProviderUnavailableError(
+      ['binance-usdm', 'okx-swap'],
+      [{
+        provider: 'binance-usdm',
+        status: 'TIMEOUT',
+        code: 'FUNDING_INGESTION_TIMEOUT',
+        asOf: null,
+        configuredAt: '2026-08-14T00:00:00.000Z',
+        timeoutMs: 45000,
+        binding: [{ providerCode: 'binance-usdm', enabled: true }],
+        fixedFallback: {
+          status: 'PASS',
+          provider: 'fixed',
+          sourceMode: 'LOCAL_SIMULATED',
+          settlementId: '00000000-0000-4000-8000-000000000003'
+        }
+      }, {
+        provider: 'okx-swap',
+        status: 'TIMEOUT',
+        code: 'FUNDING_INGESTION_TIMEOUT',
+        asOf: null,
+        configuredAt: '2026-08-14T00:00:01.000Z',
+        timeoutMs: 45000,
+        binding: [{ providerCode: 'okx-swap', enabled: true }],
+        fixedFallback: {
+          status: 'PASS',
+          provider: 'fixed',
+          sourceMode: 'LOCAL_SIMULATED',
+          settlementId: '00000000-0000-4000-8000-000000000003'
+        }
+      }]
+    )
+  )
+  assert.doesNotThrow(
+    () => new coreContracts.P0PublicProviderUnavailableError('binance-usdm', [{
+      provider: 'binance-usdm',
+      status: 200,
+      code: 'FALLBACK_SELECTED',
+      asOf: '2026-08-14T00:00:00.000Z'
+    }])
+  )
+  const definition = {
+    id: 'SOURCE-01',
+    requiredSubruns: [{ id: 'desktop-binance', profile: 'UI_CORE', viewport: 'desktop' }]
+  }
+  const blocked = coreCaseContext()
+  const result = await coreContracts.runSingleUserCoreCase(
+    blocked.context,
+    definition,
+    {},
+    async () => {
+      throw new coreContracts.P0PublicProviderUnavailableError('binance-usdm', [
+        {
+          provider: 'binance-usdm',
+          status: 503,
+          code: 'MARKET_DATA_UNAVAILABLE',
+          asOf: null
+        }
+      ])
+    }
+  )
+  assert.equal(result.status, 'BLOCKED')
+  assert.equal(result.cleanup.status, 'PASS')
+  assert.equal(result.failureOrBlocker.reasonCode, 'PUBLIC_PROVIDER_UNAVAILABLE')
+  assert.equal(result.subruns[0].status, 'BLOCKED')
+  assert.equal(result.subruns[0].failureOrBlocker.reasonCode, 'PUBLIC_PROVIDER_UNAVAILABLE')
+  assert.deepEqual(result.contractProbes, [{
+    kind: 'PUBLIC_PROVIDER_UNAVAILABLE',
+    provider: 'binance-usdm',
+    failures: [{
+      provider: 'binance-usdm',
+      status: 503,
+      code: 'MARKET_DATA_UNAVAILABLE',
+      asOf: null
+    }]
+  }])
+  assert.equal(blocked.persisted().status, 'BLOCKED')
+  assert.equal(blocked.closed(), 2)
+  assert.equal(result.checkpoints.at(-1).name, 'blocked-final')
+  assert.equal(blocked.captures().at(-1).name, 'blocked-final')
+
+  const failed = coreCaseContext()
+  await assert.rejects(
+    coreContracts.runSingleUserCoreCase(
+      failed.context,
+      definition,
+      {},
+      async () => { throw new Error('ordinary assertion failed') }
+    ),
+    /ordinary assertion failed/
+  )
+  assert.equal(failed.persisted().status, 'FAIL')
+
+  const dirty = coreCaseContext({ openPosition: true })
+  await assert.rejects(
+    coreContracts.runSingleUserCoreCase(
+      dirty.context,
+      definition,
+      {},
+      async () => {
+        throw new coreContracts.P0PublicProviderUnavailableError('binance-usdm', [{
+          provider: 'binance-usdm',
+          status: 'NETWORK_FAILURE',
+          code: 'NETWORK_FAILURE',
+          asOf: null
+        }])
+      }
+    ),
+    /zero open positions/
+  )
+  assert.equal(dirty.persisted().status, 'FAIL')
+
+  const cleanupFailed = coreCaseContext({ pageCloseError: true })
+  await assert.rejects(
+    coreContracts.runSingleUserCoreCase(
+      cleanupFailed.context,
+      definition,
+      {},
+      async () => {
+        throw new coreContracts.P0PublicProviderUnavailableError('binance-usdm', [{
+          provider: 'binance-usdm',
+          status: 'NETWORK_FAILURE',
+          code: 'NETWORK_FAILURE',
+          asOf: null
+        }])
+      }
+    ),
+    /P0_CORE_CASE_CLEANUP_FAILED/
+  )
+  assert.equal(cleanupFailed.persisted().status, 'FAIL')
+})
+
+test('core case capture accepts an explicit same-browser page list', async () => {
+  const state = coreCaseContext()
+  await coreContracts.runSingleUserCoreCase(
+    state.context,
+    {
+      id: 'FUND-04',
+      requiredSubruns: [{ id: 'desktop-race', profile: 'ORDER_TRIGGER', viewport: 'desktop' }]
+    },
+    {},
+    async (scope) => {
+      await scope.capture('two-tabs', null, {}, [scope.page, { sameBrowserPeer: true }])
+    }
+  )
+  assert.equal(state.captures().find(({ name }) => name === 'two-tabs')?.pages, 2)
 })
 
 test('SPOT-01/03 bind every fill to fresh pricing, fee, wallet, and position evidence', () => {

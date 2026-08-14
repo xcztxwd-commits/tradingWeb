@@ -143,13 +143,13 @@ class AccountControllerWalletTest {
     UUID userId = UUID.randomUUID();
     UUID accountId = UUID.randomUUID();
     UUID requestId = UUID.randomUUID();
-    DemoResetRequest request = new DemoResetRequest(requestId);
+    DemoResetRequest request = new DemoResetRequest(requestId, 7L);
     DemoResetResponse expected = new DemoResetResponse(
         accountId, requestId, 2L, new BigDecimal("50000.00000000"),
         new BigDecimal("50000.00000000"), new BigDecimal("50000.00000000"),
         Instant.now(), false);
     AccountService accountService = org.mockito.Mockito.mock(AccountService.class);
-    when(accountService.resetDemo(userId, accountId, requestId)).thenReturn(expected);
+    when(accountService.resetDemo(userId, accountId, requestId, 7L)).thenReturn(expected);
     AccountController controller = new AccountController(accountService);
 
     var response = controller.resetDemo(

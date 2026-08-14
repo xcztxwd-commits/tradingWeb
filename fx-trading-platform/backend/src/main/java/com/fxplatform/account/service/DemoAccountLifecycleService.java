@@ -145,12 +145,25 @@ public class DemoAccountLifecycleService {
 
   @Transactional
   public DemoResetResponse reset(UUID userId, UUID accountId, UUID requestId) {
+    return reset(userId, accountId, requestId, null);
+  }
+
+  @Transactional
+  public DemoResetResponse reset(
+      UUID userId,
+      UUID accountId,
+      UUID requestId,
+      Long expectedDemoGeneration
+  ) {
     if (requestId == null) {
       throw new BusinessException(ErrorCode.DEMO_RESET_BLOCKED, "Reset requestId is required");
     }
+    if (expectedDemoGeneration != null && expectedDemoGeneration < 0L) {
+      throw new BusinessException("IDEMPOTENCY_CONFLICT", "Expected Demo generation is invalid");
+    }
     TradingAccountEntity account = accountRepository.findByIdAndUserIdForUpdate(accountId, userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
-    return resetLocked(userId, account, requestId, null);
+    return resetLocked(userId, account, requestId, expectedDemoGeneration, null);
   }
 
   @Transactional
@@ -171,13 +184,14 @@ public class DemoAccountLifecycleService {
     }
     TradingAccountEntity account = accountRepository.findByIdForUpdate(accountId)
         .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "Account not found"));
-    return resetLocked(actorUserId, account, requestId, reason.trim());
+    return resetLocked(actorUserId, account, requestId, null, reason.trim());
   }
 
   private DemoResetResponse resetLocked(
       UUID auditActorUserId,
       TradingAccountEntity account,
       UUID requestId,
+      Long expectedDemoGeneration,
       String adminReason
   ) {
     UUID accountId = account.getId();
@@ -190,8 +204,25 @@ public class DemoAccountLifecycleService {
     var activeOrders = orderRepository.findActiveByAccountIdForUpdate(accountId);
     var replay = ledgerService.findDemoReset(accountId, requestId);
     if (replay.isPresent()) {
+      if (expectedDemoGeneration != null) {
+        long completedGeneration = auditLogService.findDemoResetGeneration(accountId, requestId)
+            .orElseThrow(() -> new BusinessException(
+                "IDEMPOTENCY_RECEIPT_INVALID",
+                "Completed Demo reset is missing its generation receipt"));
+        if (expectedDemoGeneration.longValue() != completedGeneration - 1L) {
+          throw new BusinessException(
+              "IDEMPOTENCY_CONFLICT",
+              "Reset requestId was already used with a different Demo generation");
+        }
+      }
       return resetResponse(account, currentSpotAvailable(wallets), requestId, true,
           replay.orElseThrow().getCreatedAt());
+    }
+    if (expectedDemoGeneration != null
+        && expectedDemoGeneration.longValue() != value(account.getDemoGeneration())) {
+      throw new BusinessException(
+          "IDEMPOTENCY_CONFLICT",
+          "Expected Demo generation no longer matches the account");
     }
     if (!openPerpPositions.isEmpty() || !activeOrders.isEmpty()) {
       throw new BusinessException(

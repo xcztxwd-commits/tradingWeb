@@ -38,7 +38,10 @@ import {
   runCase
 } from './p0-user-trading-cases.mjs'
 import { CASE_HANDLERS as CORE_CASE_HANDLERS } from './p0-user-trading-core-cases.mjs'
+import { CASE_HANDLERS as FUNDING_LIQUIDATION_CASE_HANDLERS } from './p0-user-trading-funding-liquidation-cases.mjs'
+import { CASE_HANDLERS as ORDER_ADVANCED_CASE_HANDLERS } from './p0-user-trading-order-advanced-cases.mjs'
 import { CASE_HANDLERS as ORDER_CASE_HANDLERS } from './p0-user-trading-order-cases.mjs'
+import { CASE_HANDLERS as SOURCE_RESILIENCE_UI_CASE_HANDLERS } from './p0-user-trading-source-resilience-ui-cases.mjs'
 import {
   alignPriceToTick,
   effectiveQuantityStep,
@@ -67,7 +70,10 @@ const P0_HOST_PLATFORM = process.platform
 const defaultP0DependencyInstances = new WeakSet()
 const DEFAULT_CASE_HANDLERS = Object.freeze({
   ...CORE_CASE_HANDLERS,
-  ...ORDER_CASE_HANDLERS
+  ...ORDER_CASE_HANDLERS,
+  ...ORDER_ADVANCED_CASE_HANDLERS,
+  ...FUNDING_LIQUIDATION_CASE_HANDLERS,
+  ...SOURCE_RESILIENCE_UI_CASE_HANDLERS
 })
 let apiBaseUrl
 let webBaseUrl
@@ -4945,9 +4951,7 @@ async function runProtectionAndFundingJourney() {
     number(resizedPosition.lots)
   )
 
-  const protectionCancel = await api('/api/trading/orders/cancel-all', {
-    method: 'POST', token: userToken, body: { accountId, requestId: randomUUID() }
-  })
+  const protectionCancel = await cancelAllUserOrders(randomUUID())
   assertBatchItemsSucceeded(protectionCancel.items, 'cancel remaining protection orders')
   const activeProtectionIds = new Set(created.map((order) => order.id))
   const protectionOrdersAfterCancel = await orders({ symbol: PERP_SYMBOL, size: 200 })
@@ -4996,9 +5000,7 @@ async function runProtectionAndFundingJourney() {
   const negativeFunding = selectedRate.rate < 0 ? selectedFunding : fallbackFunding
   assert(positiveFunding.rate.rate > 0, 'funding positive settlement must use a positive real rate')
   assert(negativeFunding.rate.rate < 0, 'funding negative settlement must use a negative real rate')
-  const cancelAll = await api('/api/trading/orders/cancel-all', {
-    method: 'POST', token: userToken, body: { accountId, requestId: randomUUID() }
-  })
+  const cancelAll = await cancelAllUserOrders(randomUUID())
   const closeAll = await api('/api/trading/positions/close-all', {
     method: 'POST', token: userToken, body: { accountId, requestId: randomUUID() }
   })
@@ -5618,8 +5620,15 @@ async function runResetLifecycleJourney() {
     symbol: PERP_SYMBOL, side: 'BUY', orderType: 'MARKET', quantity: '0.001', quantityUnit: 'BASE', leverage: 10,
     positionSide: 'BOTH', marginMode: 'CROSS'
   })
+  const resetAccount = (await api('/api/accounts', { token: userToken }))
+    .find(({ id }) => id === accountId)
+  assert(resetAccount, 'active Demo account is required before reset')
   await expectApiError(`/api/accounts/${accountId}/demo-reset`, {
-    method: 'POST', token: userToken, body: { requestId: randomUUID() }
+    method: 'POST', token: userToken,
+    body: {
+      requestId: randomUUID(),
+      expectedDemoGeneration: resetAccount.demoGeneration
+    }
   }, ['DEMO_RESET_BLOCKED', 'ACTIVE_TRADING_STATE'])
   const cleanup = await adminApi(`/api/admin/accounts/${accountId}/force-cleanup`, {
     method: 'POST',
@@ -9671,15 +9680,23 @@ async function updateSymbolSettings(symbol, values) {
 }
 
 async function cancelAndCloseAll(label) {
-  const cancel = await api('/api/trading/orders/cancel-all', {
-    method: 'POST', token: userToken, body: { accountId, requestId: stableRequestId(`${label}-cancel`) }
-  })
+  const cancel = await cancelAllUserOrders(stableRequestId(`${label}-cancel`))
   const close = await api('/api/trading/positions/close-all', {
     method: 'POST', token: userToken, body: { accountId, requestId: stableRequestId(`${label}-close`) }
   })
   assertBatchItemsSucceeded(cancel.items, `${label} cancel-all`)
   assertBatchItemsSucceeded(close.items, `${label} close-all`)
   return { cancel, close }
+}
+
+async function cancelAllUserOrders(requestId) {
+  const expectedOrderIds = (await orders({ size: 1000 }))
+    .filter(({ status }) => !TERMINAL_ORDER_STATUSES.has(status))
+    .map(({ id }) => id)
+    .sort()
+  return api('/api/trading/orders/cancel-all', {
+    method: 'POST', token: userToken, body: { accountId, requestId, expectedOrderIds }
+  })
 }
 
 function assertBatchItemsSucceeded(items, label) {

@@ -22,6 +22,7 @@ public record AccountResponse(
     BigDecimal maintenanceMargin,
     BigDecimal positionValue,
     BigDecimal marginAvailable,
+    Long demoGeneration,
     Instant lastSnapshotAt,
     String warning
 ) {

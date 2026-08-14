@@ -309,6 +309,32 @@ describe('trading session submit mode', () => {
     assert.equal(refreshes, 2)
   })
 
+  it('freezes a sorted observed order scope into each cancel-all request', async () => {
+    const { runCancelAllTradingOrders } = await import('./tradingSession.ts')
+    const calls: unknown[] = []
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({
+        success: true,
+        data: { accountId: 'acct_1', requestId: 'request_1', items: [] }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+
+    try {
+      await runCancelAllTradingOrders(
+        'acct_1', 'token_1', ['order-2', 'order-1'], async () => undefined)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+
+    assert.deepEqual(calls, [{
+      accountId: 'acct_1',
+      requestId: (calls[0] as { requestId: string }).requestId,
+      expectedOrderIds: ['order-1', 'order-2']
+    }])
+  })
+
   it('refreshes account truth in finally when a batch action fails', async () => {
     const { runTradingBatchAction } = await import('./tradingSession.ts')
     let apiCalls = 0
@@ -336,7 +362,7 @@ describe('trading session submit mode', () => {
 
     assert.match(hookSource, /cancelAllOrders: submitCancelAllOrders/)
     assert.match(hookSource, /closeAllPositions: submitCloseAllPositions/)
-    assert.match(hookSource, /runTradingBatchAction\(\s*accountId,\s*token,\s*cancelAllTradingOrders/)
+    assert.match(hookSource, /runCancelAllTradingOrders\(\s*accountId,\s*token,\s*expectedOrderIds/)
     assert.match(hookSource, /runTradingBatchAction\(\s*accountId,\s*token,\s*closeAllTradingPositions/)
   })
 
