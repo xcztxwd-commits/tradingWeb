@@ -6702,6 +6702,7 @@ export async function createEvidencePage(browserInstance, options = {}) {
       requestHeaders: request.headers ?? {},
       idempotencyKey: extractP0IdempotencyKey(request),
       response: null,
+      responseCursor: null,
       responseBody: undefined,
       loadingFinished: false,
       loadingFailure: null
@@ -6712,7 +6713,7 @@ export async function createEvidencePage(browserInstance, options = {}) {
   listen('Network.responseReceived', ({ requestId, response = {} }) => {
     const record = evidence.byRequestId.get(requestId)
     if (!record) return
-    advance()
+    record.responseCursor = advance()
     record.response = {
       status: response.status,
       mimeType: response.mimeType,

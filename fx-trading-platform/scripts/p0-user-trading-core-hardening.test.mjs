@@ -168,7 +168,8 @@ test('BATCH-02 scopes the disabled-provider failure before reading the partial a
 
   const url = 'http://127.0.0.1:18086/api/market/quotes/SOLUSDT-PERP'
   const expected = {
-    cursor: 2,
+    cursor: 1,
+    responseCursor: 3,
     requestId: 'expected-binding-failure',
     method: 'GET',
     url,
@@ -179,19 +180,43 @@ test('BATCH-02 scopes the disabled-provider failure before reading the partial a
   const directBindingFailure = {
     ...expected,
     cursor: 3,
+    responseCursor: 4,
     requestId: 'direct-binding-failure',
+    loadingFinished: true
+  }
+  const completedBeforeWindow = {
+    ...expected,
+    cursor: 0,
+    responseCursor: 1,
+    requestId: 'completed-before-window',
+    loadingFinished: true
+  }
+  const requestAtWindowEnd = {
+    ...expected,
+    cursor: 4,
+    responseCursor: 5,
+    requestId: 'request-at-window-end',
     loadingFinished: true
   }
   const wrongMessage = {
     ...expected,
-    cursor: 4,
+    cursor: 3,
+    responseCursor: 4,
     requestId: 'wrong-message',
     loadingFinished: true
   }
   const outsideWindow = {
     ...expected,
     cursor: 5,
+    responseCursor: 6,
     requestId: 'outside-window',
+    loadingFinished: true
+  }
+  const missingResponseCursor = {
+    ...expected,
+    cursor: 3,
+    responseCursor: null,
+    requestId: 'missing-response-cursor',
     loadingFinished: true
   }
   const allowed = []
@@ -207,6 +232,14 @@ test('BATCH-02 scopes the disabled-provider failure before reading the partial a
       body: JSON.stringify({ code: 'MARKET_PROVIDER_BINDING_NOT_FOUND' }),
       base64Encoded: false
     },
+    'request-at-window-end': {
+      body: JSON.stringify({ code: 'MARKET_PROVIDER_BINDING_NOT_FOUND' }),
+      base64Encoded: false
+    },
+    'missing-response-cursor': {
+      body: JSON.stringify({ code: 'MARKET_PROVIDER_BINDING_NOT_FOUND' }),
+      base64Encoded: false
+    },
     'wrong-message': {
       body: JSON.stringify({
         code: 'MARKET_DATA_UNAVAILABLE',
@@ -217,7 +250,14 @@ test('BATCH-02 scopes the disabled-provider failure before reading the partial a
   }
   const page = {
     p0Evidence: {
-      requests: [expected, directBindingFailure, wrongMessage, outsideWindow]
+      requests: [
+        completedBeforeWindow,
+        expected,
+        directBindingFailure,
+        requestAtWindowEnd,
+        outsideWindow,
+        missingResponseCursor
+      ]
     },
     async send(method, { requestId }) {
       assert.equal(method, 'Network.getResponseBody')
@@ -228,8 +268,26 @@ test('BATCH-02 scopes the disabled-provider failure before reading the partial a
     }
   }
   queueMicrotask(() => { expected.loadingFinished = true })
-  await coreContracts.allowExpectedBatchBindingErrors(page, new Set([url]), 1, 4)
-  assert.deepEqual(allowed, ['expected-binding-failure', 'direct-binding-failure'])
+  await coreContracts.allowExpectedBatchBindingErrors(page, new Set([url]), 2, 4)
+  assert.deepEqual(allowed, [
+    'expected-binding-failure',
+    'direct-binding-failure',
+    'request-at-window-end'
+  ])
+
+  const wrongMessagePage = {
+    ...page,
+    p0Evidence: { requests: [wrongMessage] }
+  }
+  await assert.rejects(
+    coreContracts.allowExpectedBatchBindingErrors(
+      wrongMessagePage,
+      new Set([url]),
+      2,
+      4
+    ),
+    /unexpected disabled binding response/
+  )
 })
 
 test('PERP-04 runs BASE, QUOTE, and CONTRACTS as independent users at one fixed mark', () => {

@@ -1517,6 +1517,11 @@ describe('real USDT demo browser smoke contract', () => {
       }
     )
 
+    assert.ok(
+      page.p0Evidence.requests[0].responseCursor
+        > page.p0Evidence.requests[0].cursor
+    )
+
     assert.throws(
       () => page.assertEvidenceClean('AUTH-02 unexpected 401'),
       /unexplained HTTP 401/

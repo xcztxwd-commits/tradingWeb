@@ -6244,8 +6244,9 @@ async function runCloseAllJourney(scope) {
 
 export async function allowExpectedBatchBindingErrors(page, expectedUrls, start, end) {
   for (const request of page.p0Evidence.requests) {
-    if (request.cursor > start
-      && request.cursor <= end
+    if (request.cursor <= end
+      && Number.isInteger(request.responseCursor)
+      && request.responseCursor > start
       && request.method === 'GET'
       && request.response?.status === 400
       && expectedUrls.has(request.url)) {
@@ -6272,7 +6273,11 @@ export async function allowExpectedBatchBindingErrors(page, expectedUrls, start,
       const expectedFailure = code === 'MARKET_PROVIDER_BINDING_NOT_FOUND'
         || (code === 'MARKET_DATA_UNAVAILABLE'
           && message === 'No complete fresh market bundle is available')
-      if (!expectedFailure) continue
+      if (!expectedFailure) {
+        throw new Error(
+          `BATCH-02 unexpected disabled binding response ${request.url}: ${String(code)} ${String(message)}`
+        )
+      }
       page.allowHttpError(
         request.requestId,
         'BATCH-02 expected disabled SOL provider binding'
