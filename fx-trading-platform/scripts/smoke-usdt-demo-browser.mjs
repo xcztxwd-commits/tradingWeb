@@ -4839,6 +4839,8 @@ async function runProtectionAndFundingJourney() {
   await cancelAndCloseAll('protection-funding-baseline')
   const selectedFundingSource = await prepareSelectedFundingRate()
   await applySourceMode(SOURCE_MODES.find((mode) => mode.id === 'LOCAL_SIMULATED'))
+  await snapshotFundingConfig(PERP_SYMBOL)
+  await isolatePreparedFundingRate(PERP_SYMBOL, selectedFundingSource.rate)
   await updatePositionMode('ONE_WAY')
   await updateSymbolSettings(PERP_SYMBOL, { leverage: 10, marginMode: 'CROSS', quantityUnit: 'BASE' })
   await assertNoForeignOpenPositions(PERP_SYMBOL, 'funding selected-source settlement')
@@ -5002,7 +5004,7 @@ async function runProtectionAndFundingJourney() {
   assert((await openPositions()).every((position) => position.productType !== 'LINEAR_PERP'), 'close-all must leave no open Perpetual position')
   assert((await orders({ size: 500 })).every((order) => TERMINAL_ORDER_STATUSES.has(order.status)), 'cancel-all/close-all must leave no active order')
   await restoreFundingConfig(FALLBACK_FUNDING_SYMBOL)
-  if (selectedFundingSource.externalUnavailable) await restoreFundingConfig(PERP_SYMBOL)
+  await restoreFundingConfig(PERP_SYMBOL)
   return {
     protections: created.map((order) => order.id),
     triggered: triggered.id,
@@ -5172,7 +5174,6 @@ async function prepareSelectedFundingRate() {
     )
     assert(fixedConfig.actualSource === 'FIXED', 'selected funding fallback must expose actualSource=FIXED')
     assert(fixedConfig.sourceMode === 'LOCAL_SIMULATED', 'selected funding fallback must expose LOCAL_SIMULATED')
-    await isolatePreparedFundingRate(PERP_SYMBOL, rate)
     return { rate, externalUnavailable: true }
   }
 }

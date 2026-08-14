@@ -1068,6 +1068,10 @@ describe('real USDT demo browser smoke contract', () => {
 
   it('binds scheduler funding to fresh provider rows across current/history source failover and exactly one target-position settlement', () => {
     const text = source()
+    const selectedJourney = text.slice(
+      text.indexOf('async function runProtectionAndFundingJourney'),
+      text.indexOf('async function waitForDirectionalPerpMark')
+    )
 
     assert.match(text, /const expectedProviders = \['binance-usdm', 'okx-swap'\]/)
     assert.match(text, /created_at >= to_timestamp/)
@@ -1086,6 +1090,13 @@ describe('real USDT demo browser smoke contract', () => {
     assert.match(text, /next_funding_time/)
     assert.match(text, /minimumNextFundingLeadMs/)
     assert.match(text, /isolatePreparedFundingRate/)
+    const localMode = selectedJourney.indexOf("await applySourceMode(SOURCE_MODES.find((mode) => mode.id === 'LOCAL_SIMULATED'))")
+    const snapshotConfig = selectedJourney.indexOf('await snapshotFundingConfig(PERP_SYMBOL)')
+    const isolateRate = selectedJourney.indexOf('await isolatePreparedFundingRate(PERP_SYMBOL, selectedFundingSource.rate)')
+    const openPosition = selectedJourney.indexOf("await createOrder('protection parent position'")
+    assert(localMode >= 0 && localMode < snapshotConfig && snapshotConfig < isolateRate && isolateRate < openPosition)
+    assert.match(selectedJourney, /\n  await restoreFundingConfig\(PERP_SYMBOL\)/)
+    assert.doesNotMatch(selectedJourney, /if \(selectedFundingSource\.externalUnavailable\) await restoreFundingConfig/)
     assert.match(text, /fixedFundingIntervalMinutes: 525600/)
     assert.match(text, /DELETE FROM trading\.funding_rates[\s\S]*id <>/)
     assert.ok(
