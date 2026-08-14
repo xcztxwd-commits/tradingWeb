@@ -151,7 +151,7 @@ test('PERP-12 proves every rejection and cites the exact fresh backend full-fill
   assert.match(proof, /errors="0"/)
 })
 
-test('BATCH-02 restores the disabled provider before reading the partial account state', () => {
+test('BATCH-02 scopes the disabled-provider failure before reading the partial account state', () => {
   const closeAll = section(
     'async function runCloseAllJourney',
     'async function runSpotValidationJourney'
@@ -161,6 +161,19 @@ test('BATCH-02 restores the disabled provider before reading the partial account
   assert.notEqual(restore, -1)
   assert.notEqual(accountRead, -1)
   assert.ok(restore < accountRead)
+  assert.match(closeAll, /failures\[0\]\.errorCode,\s*'MARKET_PROVIDER_BINDING_NOT_FOUND'/)
+  assert.match(closeAll, /const bindingFailureCursorStart = scope\.page\.p0Evidence\.cursor/)
+  assert.match(closeAll, /const bindingFailureCursorEnd = scope\.page\.p0Evidence\.cursor/)
+  assert.match(closeAll, /request\.cursor > bindingFailureCursorStart/)
+  assert.match(closeAll, /request\.cursor <= bindingFailureCursorEnd/)
+  assert.match(closeAll, /request\.method === 'GET'/)
+  assert.match(closeAll, /request\.response\?\.status === 400/)
+  assert.match(closeAll, /expectedBindingFailureUrls\.has\(request\.url\)/)
+  assert.match(closeAll, /await waitFor\([\s\S]*request\.loadingFinished/)
+  assert.match(closeAll, /scope\.page\.send\(\s*'Network\.getResponseBody'/)
+  assert.match(closeAll, /bindingFailureResponse\?\.code\s*\?\?\s*bindingFailureResponse\?\.data\?\.code/)
+  assert.match(closeAll, /!== 'MARKET_PROVIDER_BINDING_NOT_FOUND'\) continue/)
+  assert.match(closeAll, /scope\.page\.allowHttpError\(\s*request\.requestId/)
 })
 
 test('PERP-04 runs BASE, QUOTE, and CONTRACTS as independent users at one fixed mark', () => {

@@ -6107,6 +6107,7 @@ async function runCloseAllJourney(scope) {
 
   const partial = await openBatchPositions(scope, 'partial')
   const adminPage = await scope.getAdminPage()
+  const bindingFailureCursorStart = scope.page.p0Evidence.cursor
   const bindingFixture = await scope.context.fixtures.providerBindings(adminPage, {
     symbol: 'SOLUSDT-PERP',
     enabledProviders: []
@@ -6138,8 +6139,10 @@ async function runCloseAllJourney(scope) {
     Boolean(orderId) && !errorCode
   ))
   assert.equal(failures.length, 1, 'BATCH-02 partial run failure count')
+  assert.equal(failures[0].errorCode, 'MARKET_PROVIDER_BINDING_NOT_FOUND')
   assert.equal(successes.length, partial.positionIds.length - 1)
   await restoreBinding()
+  const bindingFailureCursorEnd = scope.page.p0Evidence.cursor
   scope.fixtureActions.push({
     action: 'restore-provider-bindings',
     symbol: 'SOLUSDT-PERP',
@@ -6151,6 +6154,43 @@ async function runCloseAllJourney(scope) {
     'BATCH-02 partial close-all',
     (candidate) => openPositions(candidate).length === 1 && candidate
   )
+  const accountId = partial.snapshot.account.id
+  const apiBaseUrl = scope.page.p0Options.apiBaseUrl
+  const expectedBindingFailureUrls = new Set([
+    `${apiBaseUrl}/api/market/quotes/SOLUSDT-PERP`,
+    `${apiBaseUrl}/api/market/order-book/SOLUSDT-PERP`,
+    `${apiBaseUrl}/api/market/trades/SOLUSDT-PERP?limit=40`,
+    `${apiBaseUrl}/api/market/perpetuals/SOLUSDT-PERP/reference`,
+    `${apiBaseUrl}/api/accounts/${accountId}/summary`,
+    `${apiBaseUrl}/api/trading/positions?accountId=${accountId}&page=0&size=100`
+  ])
+  for (const request of scope.page.p0Evidence.requests) {
+    if (request.cursor > bindingFailureCursorStart
+      && request.cursor <= bindingFailureCursorEnd
+      && request.method === 'GET'
+      && request.response?.status === 400
+      && expectedBindingFailureUrls.has(request.url)) {
+      await waitFor(() => {
+        if (request.loadingFailure) {
+          throw new Error(`BATCH-02 disabled binding request failed: ${request.url}`)
+        }
+        return request.loadingFinished
+      }, `BATCH-02 disabled binding response ${request.requestId}`, 15000)
+      const body = await scope.page.send(
+        'Network.getResponseBody',
+        { requestId: request.requestId }
+      )
+      const text = body?.base64Encoded
+        ? Buffer.from(body.body ?? '', 'base64').toString('utf8')
+        : String(body?.body ?? '')
+      const bindingFailureResponse = JSON.parse(text)
+      if ((bindingFailureResponse?.code ?? bindingFailureResponse?.data?.code) !== 'MARKET_PROVIDER_BINDING_NOT_FOUND') continue
+      scope.page.allowHttpError(
+        request.requestId,
+        'BATCH-02 expected disabled SOL provider binding'
+      )
+    }
+  }
   const remaining = openPositions(partiallyClosed).at(0)
   assert.equal(remaining.symbol, 'SOLUSDT-PERP')
   const partialClosedEvidence = await scope.capture(
