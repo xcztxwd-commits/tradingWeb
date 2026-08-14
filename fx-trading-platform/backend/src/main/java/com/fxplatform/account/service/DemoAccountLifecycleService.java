@@ -27,6 +27,7 @@ import com.fxplatform.wallet.enums.WalletType;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -208,7 +209,7 @@ public class DemoAccountLifecycleService {
     account.setLeverage(10);
     account.setPositionMode(PositionMode.ONE_WAY);
     account.setDemoGeneration(Math.max(0L, value(account.getDemoGeneration())) + 1L);
-    Instant resetAt = Instant.now();
+    Instant resetAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
     account.setResetAt(resetAt);
 
     WalletBalanceEntity spotUsdt = resetWallets(accountId, requestId, wallets);

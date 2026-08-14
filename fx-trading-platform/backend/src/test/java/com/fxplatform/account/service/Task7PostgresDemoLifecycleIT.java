@@ -209,6 +209,7 @@ class Task7PostgresDemoLifecycleIT {
 
     assertThat(reset.demoGeneration()).isEqualTo(2L);
     assertThat(replay.replayed()).isTrue();
+    assertThat(replay.resetAt()).isEqualTo(reset.resetAt());
     assertThat(decimal("SELECT balance FROM core.trading_accounts WHERE id = ?", fixture.accountId()))
         .isEqualByComparingTo("50000.00000000");
     assertThat(decimal("""
