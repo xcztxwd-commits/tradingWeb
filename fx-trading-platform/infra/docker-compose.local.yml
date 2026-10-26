@@ -1,0 +1,112 @@
+name: tradingweb-local
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: fx_platform
+      POSTGRES_USER: fx_platform
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env.local}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fx_platform -d fx_platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.local}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    image: tradingweb-backend:local
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.local
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      DATABASE_URL: jdbc:postgresql://postgres:5432/fx_platform
+      DATABASE_USERNAME: fx_platform
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env.local}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.local}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.local}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?Set CONFIG_ENCRYPTION_KEY in .env.local}
+      ADMIN_BOOTSTRAP_ENABLED: "true"
+      ADMIN_BOOTSTRAP_EMAIL: ${ADMIN_BOOTSTRAP_EMAIL:?Set ADMIN_BOOTSTRAP_EMAIL in .env.local}
+      ADMIN_BOOTSTRAP_PASSWORD: ${ADMIN_BOOTSTRAP_PASSWORD:?Set ADMIN_BOOTSTRAP_PASSWORD in .env.local}
+      EXECUTION_MODE: demo
+      MARKET_TEST_DATA_ENABLED: "true"
+      MARKET_REALTIME_ENABLED: "false"
+      ENGAGEMENT_ASSET_LOCAL_ROOT: /app/var/engagement-assets
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - engagement-assets:/app/var/engagement-assets
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  web:
+    image: tradingweb-web:local
+    build:
+      context: ../..
+      dockerfile: fx-trading-platform/infra/Dockerfile.frontend
+      target: web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5180:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  admin:
+    image: tradingweb-admin:local
+    build:
+      context: ../..
+      dockerfile: fx-trading-platform/infra/Dockerfile.frontend
+      target: admin
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5181:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:
+  engagement-assets:

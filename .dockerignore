@@ -1,0 +1,12 @@
+.git
+**/node_modules
+**/target
+**/dist
+**/.env*
+**/playwright-report
+**/test-results
+fx-trading-platform/backend
+fx-trading-platform/docs
+fx-trading-platform/var
+docs/**
+!docs/package.json
