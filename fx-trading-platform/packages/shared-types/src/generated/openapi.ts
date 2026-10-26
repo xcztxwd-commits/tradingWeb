@@ -1156,22 +1156,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/market/test-control/overrides": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["override"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/admin/market/symbols": {
         parameters: {
             query?: never;
@@ -2932,22 +2916,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/market/test-control/overrides/{symbol}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete: operations["endOverride"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4047,13 +4015,6 @@ export interface components {
             /** Format: uuid */
             requestId: string;
         };
-        CancelAllOrderRequest: {
-            /** Format: uuid */
-            accountId: string;
-            /** Format: uuid */
-            requestId: string;
-            expectedOrderIds: string[];
-        };
         ApiResponseBatchActionResponse: {
             success?: boolean;
             code?: string;
@@ -4126,6 +4087,13 @@ export interface components {
             activationPrice?: number;
             trailingDelta?: number;
             trailingRate?: number;
+        };
+        CancelAllOrderRequest: {
+            /** Format: uuid */
+            accountId: string;
+            /** Format: uuid */
+            requestId: string;
+            expectedOrderIds: string[];
         };
         CreateOcoOrderRequest: {
             /** Format: uuid */
@@ -4678,45 +4646,6 @@ export interface components {
         AdminKycApplicationReviewRequest: {
             status: string;
             reason: string;
-        };
-        MarketTestControlRequest: {
-            symbol?: string;
-            bid?: number;
-            ask?: number;
-            ttl?: string;
-        };
-        ApiResponseQuoteResponse: {
-            success?: boolean;
-            code?: string;
-            message?: string;
-            data?: components["schemas"]["QuoteResponse"];
-            /** Format: date-time */
-            timestamp?: string;
-        };
-        QuoteResponse: {
-            type?: string;
-            symbol?: string;
-            bid?: number;
-            ask?: number;
-            mid?: number;
-            markPrice?: number;
-            spread?: number;
-            source?: string;
-            /** Format: int64 */
-            timestamp?: number;
-            changePercent?: number;
-            high24h?: number;
-            low24h?: number;
-            volume24h?: number;
-            /** @enum {string} */
-            sourceMode?: "PUBLIC_EXTERNAL" | "LOCAL_SIMULATED";
-            providerCode?: string;
-            providerSymbol?: string;
-            /** Format: date-time */
-            asOf?: string;
-            /** Format: date-time */
-            expiresAt?: string;
-            stale?: boolean;
         };
         AdminPriceAdjustmentRequest: {
             mode: string;
@@ -5621,6 +5550,39 @@ export interface components {
             data?: {
                 [key: string]: components["schemas"]["QuoteResponse"];
             };
+            /** Format: date-time */
+            timestamp?: string;
+        };
+        QuoteResponse: {
+            type?: string;
+            symbol?: string;
+            bid?: number;
+            ask?: number;
+            mid?: number;
+            markPrice?: number;
+            spread?: number;
+            source?: string;
+            /** Format: int64 */
+            timestamp?: number;
+            changePercent?: number;
+            high24h?: number;
+            low24h?: number;
+            volume24h?: number;
+            /** @enum {string} */
+            sourceMode?: "PUBLIC_EXTERNAL" | "LOCAL_SIMULATED";
+            providerCode?: string;
+            providerSymbol?: string;
+            /** Format: date-time */
+            asOf?: string;
+            /** Format: date-time */
+            expiresAt?: string;
+            stale?: boolean;
+        };
+        ApiResponseQuoteResponse: {
+            success?: boolean;
+            code?: string;
+            message?: string;
+            data?: components["schemas"]["QuoteResponse"];
             /** Format: date-time */
             timestamp?: string;
         };
@@ -12928,66 +12890,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseAdminKycApplicationResponse"];
-                };
-            };
-            /** @description Business rule violation */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Execution service unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-        };
-    };
-    override: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MarketTestControlRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseQuoteResponse"];
                 };
             };
             /** @description Business rule violation */
@@ -20493,64 +20395,6 @@ export interface operations {
                 };
                 content: {
                     "*/*": components["schemas"]["ApiResponseListAssetLedgerEntryResponse"];
-                };
-            };
-            /** @description Business rule violation */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Forbidden */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Internal Server Error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-            /** @description Execution service unavailable */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
-                };
-            };
-        };
-    };
-    endOverride: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                symbol: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "*/*": components["schemas"]["ApiResponseVoid"];
                 };
             };
             /** @description Business rule violation */
